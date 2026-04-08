@@ -15,7 +15,12 @@ import type { Match, MatchDetail } from '../data/mockData';
 import { getMatchDetail } from '../data/mockData';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Tab = 'resumen' | 'alineaciones' | 'estadisticas' | 'h2h';
+// Tab keys match Figma: live → 'envivo'; finished → 'resumen'; scheduled → 'previa'
+type Tab = 'envivo' | 'resumen' | 'previa' | 'alineacion' | 'estadisticas' | 'tabla';
+
+// Colors per Figma: home=blue, away=orange
+const HOME_COLOR = '#3b82f6';  // blue-500
+const AWAY_COLOR = '#f97316';  // orange-500
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 function TeamBadgeLarge({ name, logo }: { name: string; logo: string }) {
@@ -189,6 +194,7 @@ const AlineacionesTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
               <View key={p.id} style={alin.playerDot}>
                 <View style={[
                   alin.dotCircle,
+                  side === 'away' && alin.dotAway,
                   p.isCaptain && alin.dotCaptain,
                   p.isSubstituted && alin.dotSubstituted,
                   p.yellowCard && alin.dotYellow,
@@ -370,18 +376,36 @@ export const MatchDetailScreen: React.FC<{
   visible: boolean;
   onClose: () => void;
 }> = ({ match, visible, onClose }) => {
-  const [activeTab, setActiveTab] = useState<Tab>('resumen');
+  const isLive      = match.status === 'live';
+  const isFinished  = match.status === 'finished';
+  const isScheduled = match.status === 'scheduled';
+
+  const defaultTab: Tab = isLive ? 'envivo' : isFinished ? 'resumen' : 'previa';
+  const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
   const detail = getMatchDetail(match.id);
 
-  const isLive     = match.status === 'live';
-  const isFinished = match.status === 'finished';
-
-  const TABS: { key: Tab; label: string }[] = [
-    { key: 'resumen',      label: 'Resumen' },
-    { key: 'alineaciones', label: 'Alineaciones' },
-    { key: 'estadisticas', label: 'Estadísticas' },
-    { key: 'h2h',          label: 'H2H' },
-  ];
+  // Tabs per Figma: live → En vivo/Estadísticas/Alineación/Tabla
+  //                 finished → Resumen/Estadísticas/Alineación/Tabla
+  //                 scheduled → Previa/Alineación/Tabla/Noticias
+  const TABS: { key: Tab; label: string }[] = isLive
+    ? [
+        { key: 'envivo',       label: 'En vivo' },
+        { key: 'estadisticas', label: 'Estadísticas' },
+        { key: 'alineacion',   label: 'Alineación' },
+        { key: 'tabla',        label: 'Tabla' },
+      ]
+    : isFinished
+    ? [
+        { key: 'resumen',      label: 'Resumen' },
+        { key: 'estadisticas', label: 'Estadísticas' },
+        { key: 'alineacion',   label: 'Alineación' },
+        { key: 'tabla',        label: 'Tabla' },
+      ]
+    : [
+        { key: 'previa',       label: 'Previa' },
+        { key: 'alineacion',   label: 'Alineación' },
+        { key: 'tabla',        label: 'Tabla' },
+      ];
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -461,10 +485,12 @@ export const MatchDetailScreen: React.FC<{
             </View>
           ) : (
             <>
-              {activeTab === 'resumen'      && <ResumenTab      match={match} detail={detail} />}
-              {activeTab === 'alineaciones' && <AlineacionesTab match={match} detail={detail} />}
+              {(activeTab === 'resumen' || activeTab === 'envivo' || activeTab === 'previa') && (
+                <ResumenTab match={match} detail={detail} />
+              )}
+              {activeTab === 'alineacion'   && <AlineacionesTab match={match} detail={detail} />}
               {activeTab === 'estadisticas' && <EstadisticasTab match={match} detail={detail} />}
-              {activeTab === 'h2h'          && <H2HTab          match={match} detail={detail} />}
+              {activeTab === 'tabla'        && <H2HTab          match={match} detail={detail} />}
             </>
           )}
           <View style={{ height: 40 }} />
@@ -589,13 +615,14 @@ const alin = StyleSheet.create({
   playerDot: { alignItems: 'center', width: 52, gap: 2 },
   dotCircle: {
     width: 34, height: 34, borderRadius: 17,
-    backgroundColor: colors.accent + 'CC',
+    backgroundColor: HOME_COLOR + 'CC',  // blue per Figma
     alignItems: 'center', justifyContent: 'center',
   },
   dotCaptain:    { borderWidth: 2, borderColor: '#FFD700' },
   dotSubstituted:{ opacity: 0.55 },
   dotYellow:     { borderWidth: 2, borderColor: '#FFD700' },
   dotRed:        { backgroundColor: colors.live + 'CC' },
+  dotAway:       { backgroundColor: AWAY_COLOR + 'CC' },
   dotNumber:     { fontSize: 11, fontWeight: '800', color: '#0D0D0D' },
   dotGoal:       { fontSize: 10, position: 'absolute', top: -4, right: 2 },
   dotName: {
@@ -632,25 +659,25 @@ const stats = StyleSheet.create({
     padding: 14, gap: 8, marginBottom: 4,
   },
   possLabel: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, width: 36, textAlign: 'center' },
-  possHome:  { fontSize: 18, fontWeight: '800', color: colors.accent, width: 40, textAlign: 'center' },
-  possAway:  { fontSize: 18, fontWeight: '800', color: colors.upcoming, width: 40, textAlign: 'center' },
+  possHome:  { fontSize: 18, fontWeight: '800', color: HOME_COLOR, width: 40, textAlign: 'center' },
+  possAway:  { fontSize: 18, fontWeight: '800', color: AWAY_COLOR, width: 40, textAlign: 'center' },
   possBar:   { flex: 1, height: 8, borderRadius: 4, flexDirection: 'row', overflow: 'hidden', backgroundColor: colors.surface },
-  possHome_: { backgroundColor: colors.accent, borderRadius: 4 },
-  possAway_: { backgroundColor: colors.upcoming, borderRadius: 4 },
+  possHome_: { backgroundColor: HOME_COLOR, borderRadius: 4 },
+  possAway_: { backgroundColor: AWAY_COLOR, borderRadius: 4 },
   statRow: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 14, paddingVertical: 10,
     borderBottomWidth: 1, borderBottomColor: colors.border,
   },
-  statValHome: { fontSize: 13, fontWeight: '700', color: colors.accent, width: 38, textAlign: 'right' },
-  statValAway: { fontSize: 13, fontWeight: '700', color: colors.upcoming, width: 38, textAlign: 'left' },
+  statValHome: { fontSize: 13, fontWeight: '700', color: HOME_COLOR, width: 38, textAlign: 'right' },
+  statValAway: { fontSize: 13, fontWeight: '700', color: AWAY_COLOR, width: 38, textAlign: 'left' },
   statBarsWrap: { flex: 1, gap: 2 },
   statLabel: { fontSize: 11, color: colors.textSecondary, textAlign: 'center', fontWeight: '500' },
   statBars: { flexDirection: 'row', height: 6, gap: 3 },
   barHome: { flex: 1, flexDirection: 'row', borderRadius: 3, overflow: 'hidden', justifyContent: 'flex-end' },
   barAway: { flex: 1, flexDirection: 'row', borderRadius: 3, overflow: 'hidden', justifyContent: 'flex-start' },
-  barFillHome: { backgroundColor: colors.accent, borderRadius: 3 },
-  barFillAway: { backgroundColor: colors.upcoming, borderRadius: 3 },
+  barFillHome: { backgroundColor: HOME_COLOR, borderRadius: 3 },
+  barFillAway: { backgroundColor: AWAY_COLOR, borderRadius: 3 },
 });
 
 // ── H2H styles ────────────────────────────────────────────────────────────────
@@ -711,7 +738,7 @@ const styles = StyleSheet.create({
   },
   scoreCol: { alignItems: 'center', gap: 6, paddingHorizontal: 8 },
   scoreText: { fontSize: 36, fontWeight: '800', color: colors.textPrimary, letterSpacing: -1 },
-  scoreTextLive: { color: colors.accent },
+  scoreTextLive: { color: colors.textPrimary },  // white even when live (per Figma)
   scheduleTime:  { fontSize: 28, fontWeight: '700', color: colors.textSecondary },
   statusLabel:   { fontSize: 11, color: colors.textTertiary, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase' },
   livePill: {

@@ -1,46 +1,54 @@
+// Color tokens extracted from Figma Make export
+// /Users/marcosanchez/Downloads/2026 Analistas APP/src/styles/theme.css
+// and component files (bg-[#0f1117], bg-[#1a1d2e], bg-[#13151f])
+
 export const colors = {
-  // Backgrounds
-  bg: '#0D0D0D',
-  surface: '#1A1A1A',
-  surfaceElevated: '#222222',
-  card: '#1E1E1E',
+  // Backgrounds — navy/dark blue palette (from Figma)
+  bg:              '#0f1117',  // main background
+  surface:         '#13151f',  // headers, elevated sections
+  surfaceElevated: '#1e2030',  // modals, popovers
+  card:            '#1a1d2e',  // cards, rows
 
   // Borders
-  border: '#2A2A2A',
-  borderLight: '#333333',
+  border:      'rgba(255,255,255,0.08)',  // gray-800/60 equiv
+  borderLight: 'rgba(255,255,255,0.05)',  // gray-800/40 equiv
 
-  // Accent
-  accent: '#00E096',
-  accentDim: '#00E09620',
+  // Accent (blue — selected state, today, active)
+  accent:    '#3b82f6',   // blue-500
+  accentDim: 'rgba(59,130,246,0.15)',
 
   // Status
-  live: '#FF453A',
-  liveDim: '#FF453A20',
-  finished: '#636366',
-  upcoming: '#30B0C7',
+  live:    '#ef4444',   // red-500
+  liveDim: 'rgba(239,68,68,0.12)',
+  finished: '#6b7280',  // gray-500
+  upcoming: '#60a5fa',  // blue-400
 
   // Text
-  textPrimary: '#FFFFFF',
-  textSecondary: '#8E8E93',
-  textTertiary: '#48484A',
-  textAccent: '#00E096',
+  textPrimary:   '#ffffff',
+  textSecondary: '#d1d5db',  // gray-300
+  textTertiary:  '#6b7280',  // gray-500
+  textAccent:    '#3b82f6',
 
   // Tab bar
-  tabActive: '#FFFFFF',
-  tabInactive: '#636366',
-  tabBg: '#111111',
+  tabActive:   '#ffffff',
+  tabInactive: '#6b7280',
+  tabBg:       '#0f1117',
 
   // Top bar
-  topBarBg: '#0D0D0D',
-  dateNavBg: '#1A1A1A',
-  dateNavActive: '#FFFFFF',
-  dateNavInactive: '#636366',
+  topBarBg:        '#0f1117',
+  dateNavBg:       '#13151f',
+  dateNavActive:   '#ffffff',
+  dateNavInactive: '#6b7280',
 
-  // Tabs filter
-  tabFilterActiveBg: '#FFFFFF',
-  tabFilterActiveText: '#0D0D0D',
-  tabFilterInactiveText: '#8E8E93',
+  // Filter tabs
+  tabFilterActiveBg:    '#ffffff',
+  tabFilterActiveText:  '#0f1117',
+  tabFilterInactiveText:'#6b7280',
 
   // League header
-  leagueHeaderBg: '#131313',
+  leagueHeaderBg: '#13151f',
+
+  // Emerald — "Hoy" / streak / special
+  emerald:    '#10b981',   // emerald-500
+  emeraldDim: 'rgba(16,185,129,0.12)',
 };

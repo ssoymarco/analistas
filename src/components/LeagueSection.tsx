@@ -6,7 +6,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { colors } from '../theme/colors';
-import { League, Match } from '../data/mockData';
+import type { League, Match } from '../data/mockData';
 import { MatchCard } from './MatchCard';
 
 interface LeagueSectionProps {
