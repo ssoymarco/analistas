@@ -10,10 +10,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { colors } from '../theme/colors';
-import { mockLeagues, generateDates, Match, MatchStatus } from '../data/mockData';
+import { mockLeagues, generateDates } from '../data/mockData';
+import type { Match, MatchStatus } from '../data/mockData';
 import { DateNavigator } from '../components/DateNavigator';
 import { FilterTabs, FilterTab } from '../components/FilterTabs';
 import { LeagueSection } from '../components/LeagueSection';
+import { MatchDetailScreen } from './MatchDetailScreen';
 
 const DATES = generateDates();
 const TODAY_INDEX = 3; // index 0..6, today is in the middle at index 3
@@ -37,6 +39,7 @@ const SearchIcon = () => (
 export const PartidosScreen: React.FC = () => {
   const [selectedDateIndex, setSelectedDateIndex] = useState(TODAY_INDEX);
   const [activeTab, setActiveTab] = useState<FilterTab>('todos');
+  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
 
   const liveCount = useMemo(
     () =>
@@ -51,7 +54,7 @@ export const PartidosScreen: React.FC = () => {
     if (activeTab === 'todos') return null;
     if (activeTab === 'vivo') return 'live';
     if (activeTab === 'finalizados') return 'finished';
-    if (activeTab === 'proximos') return 'upcoming';
+    if (activeTab === 'proximos') return 'scheduled';
     return null;
   }, [activeTab]);
 
@@ -66,8 +69,7 @@ export const PartidosScreen: React.FC = () => {
   }, [filterStatus]);
 
   const handleMatchPress = (match: Match) => {
-    // Navigate to match detail — implement later
-    console.log('Match pressed:', match.id);
+    setSelectedMatch(match);
   };
 
   return (
@@ -126,6 +128,14 @@ export const PartidosScreen: React.FC = () => {
         )}
         <View style={styles.bottomPad} />
       </ScrollView>
+
+      {selectedMatch && (
+        <MatchDetailScreen
+          match={selectedMatch}
+          visible={!!selectedMatch}
+          onClose={() => setSelectedMatch(null)}
+        />
+      )}
     </SafeAreaView>
   );
 };

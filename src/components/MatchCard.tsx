@@ -7,14 +7,14 @@ import {
   Animated,
 } from 'react-native';
 import { colors } from '../theme/colors';
-import { Match } from '../data/mockData';
+import type { Match } from '../data/mockData';
 
 interface MatchCardProps {
   match: Match;
   onPress?: (match: Match) => void;
 }
 
-const TeamInitials = ({ name }: { name: string }) => {
+const TeamBadge = ({ name }: { name: string }) => {
   const initials = name
     .split(' ')
     .map((w) => w[0])
@@ -22,7 +22,6 @@ const TeamInitials = ({ name }: { name: string }) => {
     .slice(0, 2)
     .toUpperCase();
 
-  // Generate a consistent color from team name
   const hue = name.charCodeAt(0) * 37 % 360;
   const bgColor = `hsl(${hue}, 60%, 25%)`;
   const textColor = `hsl(${hue}, 80%, 75%)`;
@@ -48,17 +47,13 @@ const LivePulse = () => {
     return () => anim.stop();
   }, [opacity]);
 
-  return (
-    <Animated.View style={[styles.liveDot, { opacity }]} />
-  );
+  return <Animated.View style={[styles.liveDot, { opacity }]} />;
 };
 
 export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
-  const isLive = match.status === 'live';
+  const isLive     = match.status === 'live';
   const isFinished = match.status === 'finished';
-  const isUpcoming = match.status === 'upcoming';
-
-  const hasScore = match.homeScore !== null && match.awayScore !== null;
+  const isScheduled = match.status === 'scheduled';
 
   return (
     <TouchableOpacity
@@ -68,12 +63,12 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
     >
       {/* Home team */}
       <View style={styles.teamRow}>
-        <TeamInitials name={match.homeTeam} />
-        <Text style={styles.teamName} numberOfLines={1}>
-          {match.homeTeam}
+        <TeamBadge name={match.homeTeam.name} />
+        <Text style={[styles.teamName, isFinished && match.homeScore > match.awayScore && styles.teamNameWinner]} numberOfLines={1}>
+          {match.homeTeam.name}
         </Text>
         <Text style={[styles.score, isLive && styles.scoreLive]}>
-          {hasScore ? match.homeScore : '-'}
+          {isScheduled ? '' : match.homeScore}
         </Text>
       </View>
 
@@ -82,12 +77,12 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
 
       {/* Away team */}
       <View style={styles.teamRow}>
-        <TeamInitials name={match.awayTeam} />
-        <Text style={styles.teamName} numberOfLines={1}>
-          {match.awayTeam}
+        <TeamBadge name={match.awayTeam.name} />
+        <Text style={[styles.teamName, isFinished && match.awayScore > match.homeScore && styles.teamNameWinner]} numberOfLines={1}>
+          {match.awayTeam.name}
         </Text>
         <Text style={[styles.score, isLive && styles.scoreLive]}>
-          {hasScore ? match.awayScore : '-'}
+          {isScheduled ? '' : match.awayScore}
         </Text>
       </View>
 
@@ -96,15 +91,11 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
         {isLive && (
           <View style={styles.liveContainer}>
             <LivePulse />
-            <Text style={styles.liveMinute}>{match.minute}'</Text>
+            <Text style={styles.liveMinute}>{match.minute ?? match.time}</Text>
           </View>
         )}
-        {isFinished && (
-          <Text style={styles.finishedText}>FT</Text>
-        )}
-        {isUpcoming && (
-          <Text style={styles.upcomingText}>{match.time}</Text>
-        )}
+        {isFinished && <Text style={styles.finishedText}>FT</Text>}
+        {isScheduled && <Text style={styles.upcomingText}>{match.time}</Text>}
       </View>
     </TouchableOpacity>
   );
@@ -141,6 +132,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: colors.textPrimary,
     letterSpacing: -0.1,
+  },
+  teamNameWinner: {
+    fontWeight: '700',
   },
   score: {
     fontSize: 16,
@@ -192,5 +186,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: colors.textSecondary,
+    textAlign: 'center',
   },
 });

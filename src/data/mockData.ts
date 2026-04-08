@@ -3,9 +3,44 @@
 // When connecting SportMonks, update src/services/sportsApi.ts — no component
 // changes should be required as long as the returned types stay the same.
 
-import type { Match, League, NewsArticle } from './types';
+import type { Match as MatchType, League as LeagueType, NewsArticle, MatchStatus, MatchDetail } from './types';
 
-export const leagues: League[] = [
+// ── Re-exports for UI components ──────────────────────────────────────────────
+export type { Match, MatchStatus, MatchDetail } from './types';
+
+// ── DateNavigator type ────────────────────────────────────────────────────────
+export interface DateItem {
+  label: string;   // 'Hoy' or day-of-month number
+  dayName: string; // 'Lun', 'Mar', etc.
+  date: string;    // ISO 'YYYY-MM-DD'
+}
+
+// ── League with grouped matches (UI type) ─────────────────────────────────────
+export interface League extends LeagueType {
+  matches: MatchType[];
+}
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+export function generateDates(): DateItem[] {
+  const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const today = new Date();
+  const result: DateItem[] = [];
+  for (let i = -3; i <= 3; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    result.push({
+      date: d.toISOString().split('T')[0],
+      dayName: DAY_NAMES[d.getDay()],
+      label: i === 0 ? 'Hoy' : String(d.getDate()),
+    });
+  }
+  return result;
+}
+
+// Internal base leagues (no matches)
+type BaseLeague = LeagueType;
+
+export const leagues: BaseLeague[] = [
   { id: 'premier-league',   name: 'Premier League', country: 'England', logo: '🇬🇧' },
   { id: 'la-liga',          name: 'La Liga',         country: 'Spain',   logo: '🇪🇸' },
   { id: 'bundesliga',       name: 'Bundesliga',      country: 'Germany', logo: '🇩🇪' },
@@ -269,3 +304,134 @@ export const news: NewsArticle[] = [
     category: 'La Liga', sections: ['para-ti', 'siguiendo', 'ultimas'],
   },
 ];
+
+// ── Leagues with matches grouped (used by PartidosScreen) ─────────────────────
+export const mockLeagues: League[] = leagues
+  .map((league) => ({
+    ...league,
+    matches: matches.filter((m) => m.leagueId === league.id),
+  }))
+  .filter((l) => l.matches.length > 0);
+
+// ── Match detail mock data ────────────────────────────────────────────────────
+export const mockMatchDetails: Record<string, MatchDetail> = {
+  '1': {
+    matchId: '1',
+    venue: { name: 'Etihad Stadium', city: 'Manchester', capacity: 53400, attendance: 52800, surface: 'grass' },
+    referee: { name: 'Michael Oliver', nationality: 'England', flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+    weather: { temp: 12, description: 'Nublado', icon: '☁️', wind: 18, humidity: 72 },
+    events: [
+      { id: 'e1', minute: 23, type: 'goal', team: 'home', player: 'Haaland', relatedPlayer: 'De Bruyne', xG: 0.82 },
+      { id: 'e2', minute: 38, type: 'yellow', team: 'away', player: 'Salah' },
+      { id: 'e3', minute: 41, type: 'goal', team: 'away', player: 'Núñez', relatedPlayer: 'Alexander-Arnold', xG: 0.61 },
+      { id: 'e4', minute: 45, addedTime: 2, type: 'goal', team: 'away', player: 'Salah', xG: 0.74 },
+      { id: 'e5', minute: 56, type: 'yellow', team: 'home', player: 'Rodri' },
+      { id: 'e6', minute: 63, type: 'sub', team: 'home', player: 'Bernardo Silva', relatedPlayer: 'Doku' },
+      { id: 'e7', minute: 71, type: 'goal', team: 'home', player: 'Foden', xG: 0.55 },
+      { id: 'e8', minute: 75, type: 'var', team: 'home', player: 'Haaland', description: 'Gol anulado por fuera de juego' },
+    ],
+    statistics: [
+      {
+        category: 'Posesión y pases',
+        stats: [
+          { label: 'Posesión', home: 58, away: 42, unit: '%', type: 'percentage' },
+          { label: 'Pases', home: 524, away: 381 },
+          { label: 'Precisión de pase', home: 89, away: 83, unit: '%', type: 'percentage' },
+        ],
+      },
+      {
+        category: 'Ataque',
+        stats: [
+          { label: 'Tiros', home: 14, away: 9 },
+          { label: 'Tiros a puerta', home: 6, away: 5 },
+          { label: 'xG', home: 2.11, away: 1.82 },
+          { label: 'Ocasiones claras', home: 4, away: 3 },
+        ],
+      },
+      {
+        category: 'Duelos',
+        stats: [
+          { label: 'Córners', home: 7, away: 4 },
+          { label: 'Faltas', home: 11, away: 14 },
+          { label: 'Fueras de juego', home: 3, away: 1 },
+          { label: 'Tarjetas amarillas', home: 1, away: 1 },
+        ],
+      },
+    ],
+    homeLineup: {
+      formation: '4-3-3',
+      coach: 'Pep Guardiola',
+      coachNationality: '🇪🇸',
+      starters: [
+        { id: 'p1', name: 'Ederson',          shortName: 'Ederson',    number: 31, position: 'Portero',   positionShort: 'POR', x: 50, y: 5 },
+        { id: 'p2', name: 'Kyle Walker',       shortName: 'Walker',     number: 2,  position: 'Lateral D', positionShort: 'LD',  x: 85, y: 22 },
+        { id: 'p3', name: 'Rúben Dias',        shortName: 'Dias',       number: 3,  position: 'Central',   positionShort: 'CB',  x: 65, y: 22 },
+        { id: 'p4', name: 'Manuel Akanji',     shortName: 'Akanji',     number: 25, position: 'Central',   positionShort: 'CB',  x: 35, y: 22 },
+        { id: 'p5', name: 'Josko Gvardiol',    shortName: 'Gvardiol',   number: 24, position: 'Lateral I', positionShort: 'LI',  x: 15, y: 22 },
+        { id: 'p6', name: 'Rodri',             shortName: 'Rodri',      number: 16, position: 'Mediocent', positionShort: 'MC',  x: 50, y: 42, yellowCard: true },
+        { id: 'p7', name: 'Kevin De Bruyne',   shortName: 'De Bruyne',  number: 17, position: 'Mediocent', positionShort: 'MC',  x: 30, y: 42 },
+        { id: 'p8', name: 'Phil Foden',        shortName: 'Foden',      number: 47, position: 'Mediocamp', positionShort: 'MC',  x: 70, y: 42, goals: 1 },
+        { id: 'p9', name: 'Bernardo Silva',    shortName: 'B.Silva',    number: 20, position: 'Extremo D', positionShort: 'ED',  x: 82, y: 62, isSubstituted: true, substituteMinute: 63 },
+        { id: 'p10', name: 'Erling Haaland',   shortName: 'Haaland',    number: 9,  position: 'Delantero', positionShort: 'DC',  x: 50, y: 68, goals: 1, isCaptain: true },
+        { id: 'p11', name: 'Jeremy Doku',      shortName: 'Doku',       number: 11, position: 'Extremo I', positionShort: 'EI',  x: 18, y: 62 },
+      ],
+      bench: [
+        { id: 'b1', name: 'Stefan Ortega',     shortName: 'Ortega',     number: 18, position: 'Portero',   positionShort: 'POR', x: 0, y: 0 },
+        { id: 'b2', name: 'Matheus Nunes',     shortName: 'M.Nunes',    number: 27, position: 'Centrocent', positionShort: 'MC', x: 0, y: 0 },
+        { id: 'b3', name: 'Oscar Bobb',        shortName: 'Bobb',       number: 52, position: 'Extremo',   positionShort: 'EX',  x: 0, y: 0 },
+        { id: 'b4', name: 'Savinho',           shortName: 'Savinho',    number: 26, position: 'Extremo',   positionShort: 'EX',  x: 0, y: 0 },
+      ],
+    },
+    awayLineup: {
+      formation: '4-3-3',
+      coach: 'Arne Slot',
+      coachNationality: '🇳🇱',
+      starters: [
+        { id: 'ap1', name: 'Alisson',             shortName: 'Alisson',    number: 1,  position: 'Portero',   positionShort: 'POR', x: 50, y: 5 },
+        { id: 'ap2', name: 'Trent Alexander-Arnold', shortName: 'TAA',     number: 66, position: 'Lateral D', positionShort: 'LD',  x: 85, y: 22 },
+        { id: 'ap3', name: 'Virgil van Dijk',      shortName: 'Van Dijk',  number: 4,  position: 'Central',   positionShort: 'CB',  x: 65, y: 22, isCaptain: true },
+        { id: 'ap4', name: 'Ibrahima Konaté',      shortName: 'Konaté',    number: 5,  position: 'Central',   positionShort: 'CB',  x: 35, y: 22 },
+        { id: 'ap5', name: 'Andy Robertson',       shortName: 'Robertson', number: 26, position: 'Lateral I', positionShort: 'LI',  x: 15, y: 22 },
+        { id: 'ap6', name: 'Alexis Mac Allister',  shortName: 'Mac Allister', number: 10, position: 'Mediocent', positionShort: 'MC', x: 50, y: 42 },
+        { id: 'ap7', name: 'Dominik Szoboszlai',   shortName: 'Szoboszlai', number: 8, position: 'Mediocent', positionShort: 'MC',  x: 30, y: 42 },
+        { id: 'ap8', name: 'Ryan Gravenberch',     shortName: 'Gravenberch', number: 38, position: 'Mediocent', positionShort: 'MC', x: 70, y: 42 },
+        { id: 'ap9', name: 'Mohamed Salah',        shortName: 'Salah',     number: 11, position: 'Extremo D', positionShort: 'ED',  x: 82, y: 62, goals: 1, yellowCard: true },
+        { id: 'ap10', name: 'Darwin Núñez',        shortName: 'Núñez',     number: 9,  position: 'Delantero', positionShort: 'DC',  x: 50, y: 68, goals: 1 },
+        { id: 'ap11', name: 'Luis Díaz',           shortName: 'Díaz',      number: 7,  position: 'Extremo I', positionShort: 'EI',  x: 18, y: 62 },
+      ],
+      bench: [
+        { id: 'ab1', name: 'Caoimhín Kelleher',   shortName: 'Kelleher',  number: 62, position: 'Portero',   positionShort: 'POR', x: 0, y: 0 },
+        { id: 'ab2', name: 'Harvey Elliott',       shortName: 'Elliott',   number: 19, position: 'Centrocent', positionShort: 'MC', x: 0, y: 0 },
+        { id: 'ab3', name: 'Diogo Jota',           shortName: 'Jota',      number: 20, position: 'Delantero', positionShort: 'DC',  x: 0, y: 0 },
+      ],
+    },
+    homePlayerRatings: [],
+    awayPlayerRatings: [],
+    odds: [],
+    h2h: {
+      homeTeam: 'Manchester City',
+      awayTeam: 'Liverpool',
+      results: [
+        { date: '2025-11-23', homeScore: 1, awayScore: 2, competition: 'Premier League', venue: 'Anfield' },
+        { date: '2025-04-05', homeScore: 4, awayScore: 1, competition: 'Premier League', venue: 'Etihad' },
+        { date: '2025-03-16', homeScore: 1, awayScore: 1, competition: 'FA Cup', venue: 'Wembley' },
+        { date: '2024-11-25', homeScore: 0, awayScore: 2, competition: 'Premier League', venue: 'Anfield' },
+        { date: '2024-04-10', homeScore: 1, awayScore: 1, competition: 'Premier League', venue: 'Etihad' },
+        { date: '2023-10-28', homeScore: 1, awayScore: 0, competition: 'Premier League', venue: 'Etihad' },
+      ],
+    },
+    missingPlayers: {
+      home: [
+        { name: 'Jack Grealish', reason: 'injury', detail: 'Desgarro muscular' },
+        { name: 'John Stones', reason: 'injury', detail: 'Problema en el tobillo' },
+      ],
+      away: [
+        { name: 'Curtis Jones', reason: 'suspension', detail: 'Acumulación de tarjetas' },
+      ],
+    },
+  },
+};
+
+export function getMatchDetail(id: string): MatchDetail | undefined {
+  return mockMatchDetails[id];
+}
