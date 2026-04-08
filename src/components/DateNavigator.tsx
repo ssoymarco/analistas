@@ -1,11 +1,5 @@
 import React, { useRef } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-} from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
 import { DateItem } from '../data/mockData';
 
@@ -24,18 +18,16 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
 
   const handleSelect = (index: number) => {
     onSelectDate(index);
-    // Scroll to center the selected date
-    scrollRef.current?.scrollTo({ x: (index - 2) * 60, animated: true });
+    scrollRef.current?.scrollTo({ x: Math.max(0, (index - 2) * 100), animated: true });
   };
 
   return (
-    <View style={styles.wrapper}>
+    <View style={s.wrapper}>
       <ScrollView
         ref={scrollRef}
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.container}
-        initialScrollIndex={0}
+        contentContainerStyle={s.container}
       >
         {dates.map((item, index) => {
           const isSelected = index === selectedIndex;
@@ -43,84 +35,113 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           return (
             <TouchableOpacity
               key={index}
-              style={[styles.dateItem, isSelected && styles.dateItemSelected]}
+              style={[s.dateItem, isSelected && s.dateItemSelected]}
               onPress={() => handleSelect(index)}
               activeOpacity={0.7}
             >
-              <Text
-                style={[
-                  styles.dayName,
-                  isSelected ? styles.textSelected : styles.textInactive,
-                ]}
-              >
-                {item.dayName}
+              <Text style={[s.dateLabel, isSelected && s.dateLabelSelected]}>
+                {item.dayName}{isToday ? '' : `, ${item.date.slice(8)}`}
               </Text>
-              <Text
-                style={[
-                  styles.dayNumber,
-                  isSelected ? styles.textSelected : styles.textInactive,
-                  isToday && !isSelected && styles.textToday,
-                ]}
-              >
+              <Text style={[
+                s.dayLabel,
+                isSelected && s.dayLabelSelected,
+                isToday && !isSelected && s.dayLabelToday,
+              ]}>
                 {item.label}
               </Text>
-              {isSelected && <View style={styles.activeDot} />}
+              {isSelected && (
+                <Text style={s.matchCount}>21 partidos</Text>
+              )}
+              {isSelected && <View style={s.indicator} />}
             </TouchableOpacity>
           );
         })}
       </ScrollView>
+
+      {/* Calendar icon */}
+      <TouchableOpacity style={s.calBtn} activeOpacity={0.7}>
+        <View style={s.calIcon}>
+          <View style={s.calTop} />
+          <View style={s.calBody} />
+        </View>
+      </TouchableOpacity>
     </View>
   );
 };
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   wrapper: {
+    flexDirection: 'row',
     backgroundColor: colors.bg,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   container: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 4,
+    paddingHorizontal: 8,
+    gap: 0,
+    alignItems: 'flex-end',
   },
   dateItem: {
     alignItems: 'center',
     justifyContent: 'center',
-    width: 52,
-    height: 56,
-    borderRadius: 12,
-    marginHorizontal: 3,
-    gap: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minWidth: 80,
   },
   dateItemSelected: {
-    backgroundColor: colors.surfaceElevated,
+    borderBottomWidth: 2,
+    borderBottomColor: colors.emerald,
   },
-  dayName: {
+  dateLabel: {
     fontSize: 10,
+    color: colors.textTertiary,
     fontWeight: '500',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
   },
-  dayNumber: {
-    fontSize: 16,
+  dateLabelSelected: {
+    color: colors.textSecondary,
+  },
+  dayLabel: {
+    fontSize: 15,
     fontWeight: '700',
-    letterSpacing: -0.3,
+    color: colors.textTertiary,
+    marginTop: 1,
   },
-  textSelected: {
+  dayLabelSelected: {
     color: colors.textPrimary,
   },
-  textInactive: {
-    color: colors.textTertiary,
+  dayLabelToday: {
+    color: colors.emerald,
   },
-  textToday: {
-    color: colors.accent,
-  },
-  activeDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.accent,
+  matchCount: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: colors.emerald,
     marginTop: 2,
+  },
+  indicator: {
+    width: 0,
+    height: 0,
+  },
+  calBtn: {
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderLeftWidth: 1,
+    borderLeftColor: colors.border,
+  },
+  calIcon: { width: 18, height: 18, alignItems: 'center' },
+  calTop: {
+    width: 14,
+    height: 4,
+    borderRadius: 1,
+    backgroundColor: colors.textTertiary,
+  },
+  calBody: {
+    width: 14,
+    height: 10,
+    borderRadius: 2,
+    borderWidth: 1.5,
+    borderColor: colors.textTertiary,
+    marginTop: 1,
   },
 });

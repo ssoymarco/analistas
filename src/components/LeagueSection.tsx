@@ -1,10 +1,5 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-} from 'react-native';
+import React from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
 import type { League, Match } from '../data/mockData';
 import { MatchCard } from './MatchCard';
@@ -14,112 +9,83 @@ interface LeagueSectionProps {
   onMatchPress?: (match: Match) => void;
 }
 
-const ChevronIcon = ({ expanded }: { expanded: boolean }) => (
-  <View style={[styles.chevron, expanded && styles.chevronExpanded]}>
-    <View style={styles.chevronLine1} />
-    <View style={styles.chevronLine2} />
+const LEAGUE_FLAGS: Record<string, string> = {
+  'premier-league':   '🇬🇧',
+  'la-liga':          '🇪🇸',
+  'liga-mx':          '🇲🇽',
+  'serie-a':          '🇮🇹',
+  'ligue-1':          '🇫🇷',
+  'bundesliga':       '🇩🇪',
+  'brasileirao':      '🇧🇷',
+  'champions-league': '🏆',
+};
+
+// Chevron ">" icon
+const ChevronRight = () => (
+  <View style={s.chevron}>
+    <View style={s.chevronLine1} />
+    <View style={s.chevronLine2} />
   </View>
 );
 
-const FlagEmoji: Record<string, string> = {
-  Inglaterra: '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
-  España: '🇪🇸',
-  México: '🇲🇽',
-  Europa: '🇪🇺',
-};
-
-export const LeagueSection: React.FC<LeagueSectionProps> = ({
-  league,
-  onMatchPress,
-}) => {
-  const [expanded, setExpanded] = useState(true);
-
-  const liveMatches = league.matches.filter((m) => m.status === 'live').length;
-  const flag = FlagEmoji[league.country] ?? '🏆';
+export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPress }) => {
+  const hasLive = league.matches.some(m => m.status === 'live');
+  const flag = LEAGUE_FLAGS[league.id] ?? '🏆';
 
   return (
-    <View style={styles.section}>
-      {/* League Header */}
-      <TouchableOpacity
-        style={styles.header}
-        onPress={() => setExpanded((prev) => !prev)}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.flag}>{flag}</Text>
-        <View style={styles.headerInfo}>
-          <Text style={styles.leagueName}>{league.name}</Text>
-          <Text style={styles.countryName}>{league.country}</Text>
-        </View>
-        {liveMatches > 0 && (
-          <View style={styles.liveBadge}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveBadgeText}>{liveMatches} en vivo</Text>
+    <View style={s.card}>
+      {/* Header */}
+      <TouchableOpacity style={s.header} activeOpacity={0.7}>
+        <Text style={s.flag}>{flag}</Text>
+        <Text style={s.leagueName}>{league.name}</Text>
+        {hasLive && (
+          <View style={s.liveBadge}>
+            <View style={s.liveDot} />
+            <Text style={s.liveText}>EN VIVO</Text>
           </View>
         )}
-        <ChevronIcon expanded={expanded} />
+        <View style={{ flex: 1 }} />
+        <ChevronRight />
       </TouchableOpacity>
 
       {/* Matches */}
-      {expanded && (
-        <View style={styles.matchesList}>
-          {league.matches.map((match, index) => (
-            <View key={match.id}>
-              <MatchCard match={match} onPress={onMatchPress} />
-              {index < league.matches.length - 1 && (
-                <View style={styles.matchDivider} />
-              )}
-            </View>
-          ))}
-        </View>
-      )}
+      {league.matches.map((match) => (
+        <MatchCard key={match.id} match={match} onPress={onMatchPress} />
+      ))}
     </View>
   );
 };
 
-const styles = StyleSheet.create({
-  section: {
+const s = StyleSheet.create({
+  card: {
+    marginHorizontal: 16,
     marginBottom: 8,
-    overflow: 'hidden',
     borderRadius: 12,
-    marginHorizontal: 12,
+    overflow: 'hidden',
     backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: colors.leagueHeaderBg,
-    gap: 10,
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  flag: {
-    fontSize: 20,
-  },
-  headerInfo: {
-    flex: 1,
-    gap: 1,
-  },
+  flag: { fontSize: 16 },
   leagueName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    letterSpacing: -0.2,
-  },
-  countryName: {
-    fontSize: 11,
+    fontSize: 12,
+    fontWeight: '600',
     color: colors.textSecondary,
-    fontWeight: '400',
+    letterSpacing: -0.1,
   },
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.liveDim,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
     gap: 4,
+    marginLeft: 4,
   },
   liveDot: {
     width: 5,
@@ -127,40 +93,32 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: colors.live,
   },
-  liveBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
+  liveText: {
+    fontSize: 9,
+    fontWeight: '800',
     color: colors.live,
+    letterSpacing: 0.8,
   },
   chevron: {
-    width: 16,
-    height: 16,
+    width: 14,
+    height: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chevronExpanded: {
-    transform: [{ rotate: '180deg' }],
-  },
   chevronLine1: {
     position: 'absolute',
-    width: 7,
+    width: 6,
     height: 1.5,
-    backgroundColor: colors.textSecondary,
+    backgroundColor: colors.textTertiary,
     borderRadius: 1,
-    transform: [{ rotate: '-45deg' }, { translateX: -2 }],
+    transform: [{ rotate: '45deg' }, { translateY: -2 }],
   },
   chevronLine2: {
     position: 'absolute',
-    width: 7,
+    width: 6,
     height: 1.5,
-    backgroundColor: colors.textSecondary,
+    backgroundColor: colors.textTertiary,
     borderRadius: 1,
-    transform: [{ rotate: '45deg' }, { translateX: 2 }],
-  },
-  matchesList: {},
-  matchDivider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginHorizontal: 16,
+    transform: [{ rotate: '-45deg' }, { translateY: 2 }],
   },
 });
