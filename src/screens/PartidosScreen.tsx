@@ -1,16 +1,17 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { generateDates, getLeaguesForDate, getMatchesForDate } from '../data/mockData';
-import type { Match, MatchStatus } from '../data/mockData';
+import { generateDates } from '../data/mockData';
+import type { Match, MatchStatus } from '../data/types';
 import { DateNavigator } from '../components/DateNavigator';
 import { FilterTabs, FilterTab } from '../components/FilterTabs';
 import { LeagueSection } from '../components/LeagueSection';
 import { CalendarPicker } from '../components/CalendarPicker';
 import { MatchDetailScreen } from './MatchDetailScreen';
+import { useFixtures } from '../hooks/useFixtures';
 
 const DATES = generateDates();
 const TODAY_INDEX = 3;
@@ -41,7 +42,9 @@ export const PartidosScreen: React.FC = () => {
 
   const selectedDate = DATES[selectedDateIndex]?.date ?? DATES[TODAY_INDEX].date;
 
-  const allMatches = useMemo(() => getMatchesForDate(selectedDate), [selectedDate]);
+  // ── Real data via hook ──────────────────────────────────────────────────────
+  const { matches: allMatches, leagues: allLeagues, loading, refreshing, refresh } = useFixtures(selectedDate);
+
   const totalCount    = allMatches.length;
   const liveCount     = useMemo(() => allMatches.filter(m => m.status === 'live').length, [allMatches]);
   const finishedCount = useMemo(() => allMatches.filter(m => m.status === 'finished').length, [allMatches]);
@@ -55,12 +58,11 @@ export const PartidosScreen: React.FC = () => {
   }, [activeTab]);
 
   const filteredLeagues = useMemo(() => {
-    const dateLeagues = getLeaguesForDate(selectedDate);
-    if (!filterStatus) return dateLeagues;
-    return dateLeagues
+    if (!filterStatus) return allLeagues;
+    return allLeagues
       .map(league => ({ ...league, matches: league.matches.filter(m => m.status === filterStatus) }))
       .filter(league => league.matches.length > 0);
-  }, [filterStatus, selectedDate]);
+  }, [filterStatus, allLeagues]);
 
   const showBackToToday = Math.abs(selectedDateIndex - TODAY_INDEX) >= 2;
 
@@ -137,8 +139,20 @@ export const PartidosScreen: React.FC = () => {
       <DateNavigator dates={DATES} selectedIndex={selectedDateIndex} onSelectDate={setSelectedDateIndex} onCalendarPress={() => setShowCalendar(true)} />
       <FilterTabs activeTab={activeTab} onTabChange={setActiveTab} liveCounts={liveCount} totalCount={totalCount} finishedCount={finishedCount} />
 
-      <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={{ paddingTop: 8 }} showsVerticalScrollIndicator={false}>
-        {filteredLeagues.length === 0 ? (
+      <ScrollView
+        style={{ flex: 1, backgroundColor: c.bg }}
+        contentContainerStyle={{ paddingTop: 8 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.emerald} />
+        }
+      >
+        {loading ? (
+          <View style={{ alignItems: 'center', paddingTop: 80, gap: 10 }}>
+            <ActivityIndicator size="large" color={c.emerald} />
+            <Text style={{ fontSize: 14, color: c.textSecondary, marginTop: 8 }}>Cargando partidos...</Text>
+          </View>
+        ) : filteredLeagues.length === 0 ? (
           <View style={{ alignItems: 'center', paddingTop: 80, gap: 10 }}>
             <Text style={{ fontSize: 48 }}>⚽</Text>
             <Text style={{ fontSize: 18, fontWeight: '700', color: c.textPrimary }}>Sin partidos</Text>
