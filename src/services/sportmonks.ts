@@ -2,8 +2,20 @@
 // Direct HTTP calls to SportMonks. No app-type mapping here — that lives in
 // sportsApi.ts. This file only deals with SM response shapes.
 
+import { Platform } from 'react-native';
+
 const API_TOKEN = 'fJSTWbE3MXoQFM8cOTbZcoEomEMx9xJEh9F77IGS7RKjs2wGHd0vQDNanYIN';
 const BASE_URL = 'https://api.sportmonks.com/v3/football';
+
+// On web, browsers block cross-origin requests (no CORS headers from SM).
+// We route through a lightweight CORS proxy. On native (iOS/Android), go direct.
+const IS_WEB = Platform.OS === 'web';
+const CORS_PROXY = 'https://corsproxy.io/?';
+
+/** Wrap the final URL with a CORS proxy when running on web */
+function proxyUrl(url: string): string {
+  return IS_WEB ? `${CORS_PROXY}${encodeURIComponent(url)}` : url;
+}
 
 // ── SM Response Wrapper ──────────────────────────────────────────────────────
 
@@ -363,7 +375,8 @@ async function fetchApi<T>(
   params: Record<string, string> = {},
 ): Promise<T> {
   const qs = buildQueryString({ api_token: API_TOKEN, ...params });
-  const url = `${BASE_URL}/${endpoint}?${qs}`;
+  const rawUrl = `${BASE_URL}/${endpoint}?${qs}`;
+  const url = proxyUrl(rawUrl);
 
   const response = await fetch(url);
 
@@ -389,7 +402,8 @@ async function fetchAllPages<T>(
 
   while (hasMore) {
     const qs = buildQueryString({ api_token: API_TOKEN, page: String(page), ...params });
-    const url = `${BASE_URL}/${endpoint}?${qs}`;
+    const rawUrl = `${BASE_URL}/${endpoint}?${qs}`;
+    const url = proxyUrl(rawUrl);
 
     const response = await fetch(url);
     if (!response.ok) {
