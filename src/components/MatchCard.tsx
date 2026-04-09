@@ -2,12 +2,28 @@ import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
+  Image,
   TouchableOpacity,
   StyleSheet,
   Animated,
 } from 'react-native';
 import { useThemeColors } from '../theme/useTheme';
 import type { Match } from '../data/mockData';
+
+/** Renders a team logo — Image if URL, Text if emoji/short string */
+const TeamLogo = ({ logo, size = 24 }: { logo: string; size?: number }) => {
+  const isUrl = logo.startsWith('http');
+  if (isUrl) {
+    return (
+      <Image
+        source={{ uri: logo }}
+        style={{ width: size, height: size, borderRadius: size / 2 }}
+        resizeMode="contain"
+      />
+    );
+  }
+  return <Text style={{ fontSize: size - 4 }}>{logo}</Text>;
+};
 
 interface MatchCardProps {
   match: Match;
@@ -33,7 +49,7 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
       <View style={s.row}>
         {/* Home team (left) */}
         <View style={s.teamLeft}>
-          <Text style={s.teamLogo}>{match.homeTeam.logo}</Text>
+          <TeamLogo logo={match.homeTeam.logo} />
           <Text
             style={[s.teamName, { color: c.textPrimary }, homeWon && s.teamNameBold]}
             numberOfLines={1}
@@ -71,7 +87,7 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
           >
             {match.awayTeam.name}
           </Text>
-          <Text style={s.teamLogo}>{match.awayTeam.logo}</Text>
+          <TeamLogo logo={match.awayTeam.logo} />
         </View>
 
         {/* Bell */}
