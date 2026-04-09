@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { colors } from '../theme/colors';
+import { useThemeColors } from '../theme/useTheme';
+import { useDarkMode } from '../contexts/DarkModeContext';
 import { PartidosScreen } from '../screens/PartidosScreen';
 import { FavoritosScreen } from '../screens/FavoritosScreen';
 import { NoticiasScreen } from '../screens/NoticiasScreen';
 import { PerfilScreen } from '../screens/PerfilScreen';
+import type { ColorPalette } from '../theme/colors';
 
 export type RootTabParamList = {
   Partidos: undefined;
@@ -17,135 +19,134 @@ export type RootTabParamList = {
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
-// SVG-like icons using View primitives
-const BallIcon = ({ color }: { color: string }) => (
-  <View style={[tabIconStyles.ball, { borderColor: color }]}>
-    <View style={[tabIconStyles.ballLine1, { backgroundColor: color }]} />
-    <View style={[tabIconStyles.ballLine2, { backgroundColor: color }]} />
+// ── Partidos icon — Scoreboard/match display ─────────────────────────────────
+const PartidosIcon = ({ color }: { color: string }) => (
+  <View style={iconS.partidosWrap}>
+    <View style={[iconS.partidosPanel, { borderColor: color }]}>
+      <View style={[iconS.partidosPanelLine, { backgroundColor: color, width: 6 }]} />
+      <View style={[iconS.partidosPanelLine, { backgroundColor: color, width: 4 }]} />
+    </View>
+    <View style={[iconS.partidosDivider, { backgroundColor: color }]} />
+    <View style={[iconS.partidosPanel, { borderColor: color }]}>
+      <View style={[iconS.partidosPanelLine, { backgroundColor: color, width: 6 }]} />
+      <View style={[iconS.partidosPanelLine, { backgroundColor: color, width: 4 }]} />
+    </View>
+    <View style={iconS.partidosDot} />
   </View>
 );
 
-const StarIcon = ({ color, filled }: { color: string; filled?: boolean }) => (
-  <View style={tabIconStyles.starWrap}>
-    <Text style={[tabIconStyles.starText, { color }]}>{filled ? '★' : '☆'}</Text>
+// ── Favoritos icon — Star outline ────────────────────────────────────────────
+const FavoritosIcon = ({ color, focused }: { color: string; focused?: boolean }) => (
+  <View style={iconS.favWrap}>
+    <Text style={[iconS.favStar, { color }]}>{focused ? '★' : '☆'}</Text>
   </View>
 );
 
-const NewsIcon = ({ color }: { color: string }) => (
-  <View style={tabIconStyles.newsWrap}>
-    <View style={[tabIconStyles.newsLine, { backgroundColor: color, width: 18 }]} />
-    <View style={[tabIconStyles.newsLine, { backgroundColor: color, width: 14 }]} />
-    <View style={[tabIconStyles.newsLine, { backgroundColor: color, width: 16 }]} />
+// ── Noticias icon — Newspaper/document ───────────────────────────────────────
+const NoticiasIcon = ({ color }: { color: string }) => (
+  <View style={[iconS.noticiasWrap, { borderColor: color }]}>
+    <View style={[iconS.noticiasTopBar, { backgroundColor: color }]} />
+    <View style={iconS.noticiasLines}>
+      <View style={[iconS.noticiasLine, { backgroundColor: color, width: 12 }]} />
+      <View style={[iconS.noticiasLine, { backgroundColor: color, width: 9 }]} />
+      <View style={[iconS.noticiasLine, { backgroundColor: color, width: 11 }]} />
+    </View>
   </View>
 );
 
-const PersonIcon = ({ color }: { color: string }) => (
-  <View style={tabIconStyles.personWrap}>
-    <View style={[tabIconStyles.personHead, { borderColor: color }]} />
-    <View style={[tabIconStyles.personBody, { borderColor: color }]} />
+// ── Perfil icon — Person silhouette ──────────────────────────────────────────
+const PerfilIcon = ({ color }: { color: string }) => (
+  <View style={iconS.perfilWrap}>
+    <View style={[iconS.perfilHead, { backgroundColor: color }]} />
+    <View style={[iconS.perfilBody, { backgroundColor: color }]} />
   </View>
 );
 
-const tabIconStyles = StyleSheet.create({
-  ball: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
+const iconS = StyleSheet.create({
+  partidosWrap: {
+    width: 26, height: 22, flexDirection: 'row',
+    alignItems: 'center', justifyContent: 'center', gap: 1, position: 'relative',
   },
-  ballLine1: {
-    position: 'absolute',
-    width: 2,
-    height: 22,
-    borderRadius: 1,
-    transform: [{ rotate: '40deg' }],
+  partidosPanel: {
+    width: 10, height: 18, borderRadius: 3, borderWidth: 1.8,
+    justifyContent: 'center', alignItems: 'center', gap: 2,
   },
-  ballLine2: {
-    position: 'absolute',
-    width: 2,
-    height: 22,
-    borderRadius: 1,
-    transform: [{ rotate: '-40deg' }],
+  partidosPanelLine: { height: 1.5, borderRadius: 1, opacity: 0.6 },
+  partidosDivider: { width: 1.5, height: 10, borderRadius: 1, opacity: 0.4 },
+  partidosDot: {
+    position: 'absolute', top: -1, right: -2,
+    width: 6, height: 6, borderRadius: 3, backgroundColor: '#ef4444',
   },
-  starWrap: {
-    width: 24,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  starText: {
-    fontSize: 20,
-    lineHeight: 24,
-  },
-  newsWrap: {
-    width: 22,
-    height: 20,
-    justifyContent: 'center',
-    gap: 4,
-  },
-  newsLine: {
-    height: 2.5,
-    borderRadius: 1.5,
-  },
-  personWrap: {
-    width: 22,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  personHead: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    borderWidth: 2,
-    marginBottom: 2,
-  },
-  personBody: {
-    width: 18,
-    height: 10,
-    borderRadius: 9,
-    borderWidth: 2,
+  favWrap: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  favStar: { fontSize: 22, lineHeight: 24 },
+  noticiasWrap: { width: 20, height: 20, borderRadius: 4, borderWidth: 1.8, overflow: 'hidden' },
+  noticiasTopBar: { height: 4, width: '100%', opacity: 0.3 },
+  noticiasLines: { flex: 1, justifyContent: 'center', gap: 2.5, paddingHorizontal: 2, paddingTop: 1 },
+  noticiasLine: { height: 1.5, borderRadius: 1, opacity: 0.6 },
+  perfilWrap: { width: 22, height: 24, alignItems: 'center', justifyContent: 'flex-end' },
+  perfilHead: { width: 10, height: 10, borderRadius: 5, marginBottom: 2 },
+  perfilBody: {
+    width: 18, height: 9,
+    borderTopLeftRadius: 9, borderTopRightRadius: 9,
+    borderBottomLeftRadius: 2, borderBottomRightRadius: 2,
   },
 });
 
 const TAB_ICONS: Record<string, (color: string, focused: boolean) => React.ReactNode> = {
-  Partidos: (color) => <BallIcon color={color} />,
-  Favoritos: (color, focused) => <StarIcon color={color} filled={focused} />,
-  Noticias: (color) => <NewsIcon color={color} />,
-  Perfil: (color) => <PersonIcon color={color} />,
+  Partidos: (color) => <PartidosIcon color={color} />,
+  Favoritos: (color, focused) => <FavoritosIcon color={color} focused={focused} />,
+  Noticias: (color) => <NoticiasIcon color={color} />,
+  Perfil: (color) => <PerfilIcon color={color} />,
 };
 
-const navigationTheme = {
-  dark: true,
-  colors: {
-    primary: colors.accent,
-    background: colors.bg,
-    card: colors.tabBg,
-    text: colors.textPrimary,
-    border: colors.border,
-    notification: colors.live,
-  },
-  fonts: {
-    regular: { fontFamily: 'System', fontWeight: '400' as const },
-    medium: { fontFamily: 'System', fontWeight: '500' as const },
-    bold: { fontFamily: 'System', fontWeight: '700' as const },
-    heavy: { fontFamily: 'System', fontWeight: '800' as const },
-  },
-};
+function makeNavTheme(c: ColorPalette, isDark: boolean) {
+  return {
+    dark: isDark,
+    colors: {
+      primary: c.accent,
+      background: c.bg,
+      card: c.tabBg,
+      text: c.textPrimary,
+      border: c.border,
+      notification: c.live,
+    },
+    fonts: {
+      regular: { fontFamily: 'System', fontWeight: '400' as const },
+      medium: { fontFamily: 'System', fontWeight: '500' as const },
+      bold: { fontFamily: 'System', fontWeight: '700' as const },
+      heavy: { fontFamily: 'System', fontWeight: '800' as const },
+    },
+  };
+}
 
 export const AppNavigator: React.FC = () => {
+  const c = useThemeColors();
+  const { isDark } = useDarkMode();
+  const navTheme = useMemo(() => makeNavTheme(c, isDark), [c, isDark]);
+
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer theme={navTheme}>
       <Tab.Navigator
         screenOptions={({ route }) => ({
           headerShown: false,
-          tabBarStyle: styles.tabBar,
-          tabBarActiveTintColor: colors.tabActive,
-          tabBarInactiveTintColor: colors.tabInactive,
-          tabBarLabelStyle: styles.tabLabel,
+          tabBarStyle: {
+            backgroundColor: c.tabBg,
+            borderTopColor: c.border,
+            borderTopWidth: 1,
+            height: Platform.OS === 'ios' ? 80 : 64,
+            paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+            paddingTop: 8,
+            elevation: 0,
+            shadowOpacity: 0,
+          },
+          tabBarActiveTintColor: c.tabActive,
+          tabBarInactiveTintColor: c.tabInactive,
+          tabBarLabelStyle: {
+            fontSize: 10,
+            fontWeight: '600' as const,
+            letterSpacing: 0.2,
+            marginTop: 2,
+          },
           tabBarIcon: ({ color, focused }) =>
             TAB_ICONS[route.name]?.(color, focused) ?? null,
         })}
@@ -158,22 +159,3 @@ export const AppNavigator: React.FC = () => {
     </NavigationContainer>
   );
 };
-
-const styles = StyleSheet.create({
-  tabBar: {
-    backgroundColor: colors.tabBg,
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    height: Platform.OS === 'ios' ? 80 : 64,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
-    paddingTop: 8,
-    elevation: 0,
-    shadowOpacity: 0,
-  },
-  tabLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 0.2,
-    marginTop: 2,
-  },
-});

@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { colors } from '../theme/colors';
+import { useThemeColors } from '../theme/useTheme';
 import type { League, Match } from '../data/mockData';
 import { MatchCard } from './MatchCard';
 
@@ -20,28 +20,29 @@ const LEAGUE_FLAGS: Record<string, string> = {
   'champions-league': '🏆',
 };
 
-// Chevron ">" icon
-const ChevronRight = () => (
-  <View style={s.chevron}>
-    <View style={s.chevronLine1} />
-    <View style={s.chevronLine2} />
-  </View>
-);
-
 export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPress }) => {
+  const c = useThemeColors();
   const hasLive = league.matches.some(m => m.status === 'live');
   const flag = LEAGUE_FLAGS[league.id] ?? '🏆';
 
+  // Chevron ">" icon
+  const ChevronRight = () => (
+    <View style={s.chevron}>
+      <View style={[s.chevronLine1, { backgroundColor: c.textTertiary }]} />
+      <View style={[s.chevronLine2, { backgroundColor: c.textTertiary }]} />
+    </View>
+  );
+
   return (
-    <View style={s.card}>
+    <View style={[s.card, { backgroundColor: c.card }]}>
       {/* Header */}
-      <TouchableOpacity style={s.header} activeOpacity={0.7}>
+      <TouchableOpacity style={[s.header, { backgroundColor: c.surface, borderBottomColor: c.border }]} activeOpacity={0.7}>
         <Text style={s.flag}>{flag}</Text>
-        <Text style={s.leagueName}>{league.name}</Text>
+        <Text style={[s.leagueName, { color: c.textSecondary }]}>{league.name}</Text>
         {hasLive && (
           <View style={s.liveBadge}>
-            <View style={s.liveDot} />
-            <Text style={s.liveText}>EN VIVO</Text>
+            <View style={[s.liveDot, { backgroundColor: c.live }]} />
+            <Text style={[s.liveText, { color: c.live }]}>EN VIVO</Text>
           </View>
         )}
         <View style={{ flex: 1 }} />
@@ -62,7 +63,6 @@ const s = StyleSheet.create({
     marginBottom: 8,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: colors.card,
   },
   header: {
     flexDirection: 'row',
@@ -70,15 +70,12 @@ const s = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   flag: { fontSize: 16 },
   leagueName: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.textSecondary,
     letterSpacing: -0.1,
   },
   liveBadge: {
@@ -91,12 +88,10 @@ const s = StyleSheet.create({
     width: 5,
     height: 5,
     borderRadius: 3,
-    backgroundColor: colors.live,
   },
   liveText: {
     fontSize: 9,
     fontWeight: '800',
-    color: colors.live,
     letterSpacing: 0.8,
   },
   chevron: {
@@ -109,7 +104,6 @@ const s = StyleSheet.create({
     position: 'absolute',
     width: 6,
     height: 1.5,
-    backgroundColor: colors.textTertiary,
     borderRadius: 1,
     transform: [{ rotate: '45deg' }, { translateY: -2 }],
   },
@@ -117,7 +111,6 @@ const s = StyleSheet.create({
     position: 'absolute',
     width: 6,
     height: 1.5,
-    backgroundColor: colors.textTertiary,
     borderRadius: 1,
     transform: [{ rotate: '-45deg' }, { translateY: 2 }],
   },

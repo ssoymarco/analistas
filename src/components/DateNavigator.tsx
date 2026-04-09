@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
-import { colors } from '../theme/colors';
+import { useThemeColors } from '../theme/useTheme';
 import { DateItem, matchCountForDate } from '../data/mockData';
 
 interface DateNavigatorProps {
@@ -17,6 +17,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
   onCalendarPress,
 }) => {
   const scrollRef = useRef<ScrollView>(null);
+  const c = useThemeColors();
 
   const handleSelect = (index: number) => {
     onSelectDate(index);
@@ -24,7 +25,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
   };
 
   return (
-    <View style={s.wrapper}>
+    <View style={[s.wrapper, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -37,22 +38,23 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           return (
             <TouchableOpacity
               key={index}
-              style={[s.dateItem, isSelected && s.dateItemSelected]}
+              style={[s.dateItem, isSelected && [s.dateItemSelected, { borderBottomColor: c.emerald }]]}
               onPress={() => handleSelect(index)}
               activeOpacity={0.7}
             >
-              <Text style={[s.dateLabel, isSelected && s.dateLabelSelected]}>
+              <Text style={[s.dateLabel, { color: c.textTertiary }, isSelected && { color: c.textSecondary }]}>
                 {item.dayName}{isToday ? '' : `, ${item.date.slice(8)}`}
               </Text>
               <Text style={[
                 s.dayLabel,
-                isSelected && s.dayLabelSelected,
-                isToday && !isSelected && s.dayLabelToday,
+                { color: c.textTertiary },
+                isSelected && { color: c.textPrimary },
+                isToday && !isSelected && { color: c.emerald },
               ]}>
                 {item.label}
               </Text>
               {isSelected && (
-                <Text style={s.matchCount}>{matchCountForDate(item.date)} partidos</Text>
+                <Text style={[s.matchCount, { color: c.emerald }]}>{matchCountForDate(item.date)} partidos</Text>
               )}
               {isSelected && <View style={s.indicator} />}
             </TouchableOpacity>
@@ -61,10 +63,10 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
       </ScrollView>
 
       {/* Calendar icon */}
-      <TouchableOpacity style={s.calBtn} activeOpacity={0.7} onPress={onCalendarPress}>
+      <TouchableOpacity style={[s.calBtn, { borderLeftColor: c.border }]} activeOpacity={0.7} onPress={onCalendarPress}>
         <View style={s.calIcon}>
-          <View style={s.calTop} />
-          <View style={s.calBody} />
+          <View style={[s.calTop, { backgroundColor: c.textTertiary }]} />
+          <View style={[s.calBody, { borderColor: c.textTertiary }]} />
         </View>
       </TouchableOpacity>
     </View>
@@ -74,9 +76,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
 const s = StyleSheet.create({
   wrapper: {
     flexDirection: 'row',
-    backgroundColor: colors.bg,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   container: {
     paddingHorizontal: 8,
@@ -92,32 +92,19 @@ const s = StyleSheet.create({
   },
   dateItemSelected: {
     borderBottomWidth: 2,
-    borderBottomColor: colors.emerald,
   },
   dateLabel: {
     fontSize: 10,
-    color: colors.textTertiary,
     fontWeight: '500',
-  },
-  dateLabelSelected: {
-    color: colors.textSecondary,
   },
   dayLabel: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.textTertiary,
     marginTop: 1,
-  },
-  dayLabelSelected: {
-    color: colors.textPrimary,
-  },
-  dayLabelToday: {
-    color: colors.emerald,
   },
   matchCount: {
     fontSize: 9,
     fontWeight: '600',
-    color: colors.emerald,
     marginTop: 2,
   },
   indicator: {
@@ -129,21 +116,18 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderLeftWidth: 1,
-    borderLeftColor: colors.border,
   },
   calIcon: { width: 18, height: 18, alignItems: 'center' },
   calTop: {
     width: 14,
     height: 4,
     borderRadius: 1,
-    backgroundColor: colors.textTertiary,
   },
   calBody: {
     width: 14,
     height: 10,
     borderRadius: 2,
     borderWidth: 1.5,
-    borderColor: colors.textTertiary,
     marginTop: 1,
   },
 });

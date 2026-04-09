@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
-import { colors } from '../theme/colors';
+import { useThemeColors } from '../theme/useTheme';
 
 export type FilterTab = 'todos' | 'vivo' | 'finalizados' | 'proximos';
 
@@ -26,6 +26,8 @@ export const FilterTabs: React.FC<FilterTabsProps> = ({
   totalCount = 0,
   finishedCount = 0,
 }) => {
+  const c = useThemeColors();
+
   const getCount = (key: FilterTab): number | null => {
     if (key === 'todos' && totalCount > 0) return totalCount;
     if (key === 'vivo' && liveCounts > 0) return liveCounts;
@@ -34,7 +36,7 @@ export const FilterTabs: React.FC<FilterTabsProps> = ({
   };
 
   return (
-    <View style={s.wrapper}>
+    <View style={[s.wrapper, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -47,16 +49,16 @@ export const FilterTabs: React.FC<FilterTabsProps> = ({
           return (
             <TouchableOpacity
               key={tab.key}
-              style={[s.tab, isActive && s.tabActive]}
+              style={[s.tab, isActive && { backgroundColor: c.surface }]}
               onPress={() => onTabChange(tab.key)}
               activeOpacity={0.7}
             >
               <Text style={s.emoji}>{tab.emoji}</Text>
-              <Text style={[s.label, isActive && s.labelActive]}>{tab.label}</Text>
+              <Text style={[s.label, { color: c.textTertiary }, isActive && { color: c.textPrimary }]}>{tab.label}</Text>
               {count != null && (
-                <View style={[s.badge, isLive && s.badgeLive]}>
-                  {isLive && <View style={s.liveDot} />}
-                  <Text style={[s.badgeText, isLive && s.badgeTextLive]}>{count}</Text>
+                <View style={[s.badge, { backgroundColor: c.surface }, isLive && { backgroundColor: c.liveDim }]}>
+                  {isLive && <View style={[s.liveDot, { backgroundColor: c.live }]} />}
+                  <Text style={[s.badgeText, { color: c.textSecondary }, isLive && { color: c.live }]}>{count}</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -69,9 +71,7 @@ export const FilterTabs: React.FC<FilterTabsProps> = ({
 
 const s = StyleSheet.create({
   wrapper: {
-    backgroundColor: colors.bg,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   container: {
     paddingHorizontal: 12,
@@ -86,42 +86,26 @@ const s = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 10,
   },
-  tabActive: {
-    backgroundColor: colors.surface,
-  },
   emoji: { fontSize: 12 },
   label: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.textTertiary,
-  },
-  labelActive: {
-    color: colors.textPrimary,
   },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: colors.surface,
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
-  },
-  badgeLive: {
-    backgroundColor: colors.liveDim,
   },
   liveDot: {
     width: 5,
     height: 5,
     borderRadius: 3,
-    backgroundColor: colors.live,
   },
   badgeText: {
     fontSize: 10,
     fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  badgeTextLive: {
-    color: colors.live,
   },
 });

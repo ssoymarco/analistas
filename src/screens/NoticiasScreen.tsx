@@ -5,7 +5,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { colors } from '../theme/colors';
+import { useThemeColors } from '../theme/useTheme';
+import { useDarkMode } from '../contexts/DarkModeContext';
 import { news } from '../data/mockData';
 import type { NewsArticle } from '../data/types';
 
@@ -46,11 +47,11 @@ function LeagueBadge({ category }: { category: string }) {
 }
 
 // ── Hero card (featured article) ──────────────────────────────────────────────
-function HeroCard({ article, onPress }: { article: NewsArticle; onPress: () => void }) {
+function HeroCard({ article, onPress, c }: { article: NewsArticle; onPress: () => void; c: ReturnType<typeof useThemeColors> }) {
   const isRecent = (article.timeAgo ?? 999) <= 90;
   return (
     <TouchableOpacity
-      style={styles.heroCard}
+      style={[styles.heroCard, { backgroundColor: c.card }]}
       onPress={onPress}
       activeOpacity={0.9}
     >
@@ -70,15 +71,15 @@ function HeroCard({ article, onPress }: { article: NewsArticle; onPress: () => v
             </View>
           )}
         </View>
-        <Text style={styles.heroTitle} numberOfLines={2}>{article.title}</Text>
-        <Text style={styles.heroSummary} numberOfLines={1}>{article.summary}</Text>
+        <Text style={[styles.heroTitle, { color: c.textPrimary }]} numberOfLines={2}>{article.title}</Text>
+        <Text style={[styles.heroSummary, { color: c.textSecondary }]} numberOfLines={1}>{article.summary}</Text>
         <View style={styles.heroFooter}>
-          <View style={styles.sourceAvatar}>
-            <Text style={styles.sourceAvatarText}>{article.source.charAt(0)}</Text>
+          <View style={[styles.sourceAvatar, { backgroundColor: c.borderLight }]}>
+            <Text style={[styles.sourceAvatarText, { color: c.textPrimary }]}>{article.source.charAt(0)}</Text>
           </View>
-          <Text style={styles.heroSource}>{article.source}</Text>
-          <Text style={styles.heroDot}>·</Text>
-          <Text style={styles.heroTime}>{article.time}</Text>
+          <Text style={[styles.heroSource, { color: c.textSecondary }]}>{article.source}</Text>
+          <Text style={[styles.heroDot, { color: c.textTertiary }]}>·</Text>
+          <Text style={[styles.heroTime, { color: c.textTertiary }]}>{article.time}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -86,19 +87,19 @@ function HeroCard({ article, onPress }: { article: NewsArticle; onPress: () => v
 }
 
 // ── Story card (horizontal scroll) ───────────────────────────────────────────
-function StoryCard({ article, onPress }: { article: NewsArticle; onPress: () => void }) {
+function StoryCard({ article, onPress, c }: { article: NewsArticle; onPress: () => void; c: ReturnType<typeof useThemeColors> }) {
   return (
-    <TouchableOpacity style={styles.storyCard} onPress={onPress} activeOpacity={0.85}>
+    <TouchableOpacity style={[styles.storyCard, { backgroundColor: c.card, borderColor: c.border }]} onPress={onPress} activeOpacity={0.85}>
       <View style={[styles.storyImage, { backgroundColor: leagueColor(article.category) + '33' }]}>
         <Text style={styles.storyImageEmoji}>⚽</Text>
       </View>
       <View style={styles.storyBody}>
         <LeagueBadge category={article.category} />
-        <Text style={styles.storyTitle} numberOfLines={2}>{article.title}</Text>
+        <Text style={[styles.storyTitle, { color: c.textPrimary }]} numberOfLines={2}>{article.title}</Text>
         <View style={styles.storyFooter}>
-          <Text style={styles.storySource}>{article.source}</Text>
-          <Text style={styles.storyDot}>·</Text>
-          <Text style={styles.storyTime}>{article.time}</Text>
+          <Text style={[styles.storySource, { color: c.textSecondary }]}>{article.source}</Text>
+          <Text style={[styles.storyDot, { color: c.textTertiary }]}>·</Text>
+          <Text style={[styles.storyTime, { color: c.textTertiary }]}>{article.time}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -106,43 +107,45 @@ function StoryCard({ article, onPress }: { article: NewsArticle; onPress: () => 
 }
 
 // ── Article row (list) ────────────────────────────────────────────────────────
-function ArticleRow({ article, onPress }: { article: NewsArticle; onPress: () => void }) {
+function ArticleRow({ article, onPress, c }: { article: NewsArticle; onPress: () => void; c: ReturnType<typeof useThemeColors> }) {
   const isRecent = (article.timeAgo ?? 999) <= 60;
   return (
-    <TouchableOpacity style={styles.articleRow} onPress={onPress} activeOpacity={0.75}>
+    <TouchableOpacity style={[styles.articleRow, { borderBottomColor: c.border }]} onPress={onPress} activeOpacity={0.75}>
       {/* Thumbnail */}
       <View style={[styles.thumbnail, { backgroundColor: leagueColor(article.category) + '33' }]}>
         <Text style={styles.thumbnailEmoji}>⚽</Text>
-        {isRecent && <View style={styles.liveIndicator} />}
+        {isRecent && <View style={[styles.liveIndicator, { backgroundColor: c.live }]} />}
       </View>
       {/* Text */}
       <View style={styles.articleText}>
         <LeagueBadge category={article.category} />
-        <Text style={styles.articleTitle} numberOfLines={2}>{article.title}</Text>
+        <Text style={[styles.articleTitle, { color: c.textPrimary }]} numberOfLines={2}>{article.title}</Text>
         <View style={styles.articleMeta}>
-          <Text style={styles.articleSource}>{article.source}</Text>
-          <Text style={styles.articleDot}>·</Text>
-          <Text style={styles.articleTime}>{article.time}</Text>
+          <Text style={[styles.articleSource, { color: c.textSecondary }]}>{article.source}</Text>
+          <Text style={[styles.articleDot, { color: c.textTertiary }]}>·</Text>
+          <Text style={[styles.articleTime, { color: c.textTertiary }]}>{article.time}</Text>
         </View>
       </View>
-      <Text style={styles.articleChevron}>›</Text>
+      <Text style={[styles.articleChevron, { color: c.textTertiary }]}>›</Text>
     </TouchableOpacity>
   );
 }
 
 // ── Section label ─────────────────────────────────────────────────────────────
-function SectionLabel({ label, emoji }: { label: string; emoji?: string }) {
+function SectionLabel({ label, emoji, c }: { label: string; emoji?: string; c: ReturnType<typeof useThemeColors> }) {
   return (
     <View style={styles.sectionLabel}>
       {emoji && <Text style={styles.sectionEmoji}>{emoji}</Text>}
-      <Text style={styles.sectionText}>{label}</Text>
-      <View style={styles.sectionLine} />
+      <Text style={[styles.sectionText, { color: c.textTertiary }]}>{label}</Text>
+      <View style={[styles.sectionLine, { backgroundColor: c.border }]} />
     </View>
   );
 }
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 export const NoticiasScreen: React.FC = () => {
+  const c = useThemeColors();
+  const { isDark } = useDarkMode();
   const [activeTab, setActiveTab] = useState<Tab>('para-ti');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
@@ -172,29 +175,29 @@ export const NoticiasScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <StatusBar style="light" />
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: c.bg }]} edges={['top']}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
 
       {/* Header */}
       <View style={styles.header}>
         {showSearch ? (
-          <View style={styles.searchBar}>
+          <View style={[styles.searchBar, { backgroundColor: c.surface, borderColor: c.border }]}>
             <Text style={styles.searchIcon}>🔍</Text>
             <TextInput
-              style={styles.searchInput}
+              style={[styles.searchInput, { color: c.textPrimary }]}
               placeholder="Buscar noticias..."
-              placeholderTextColor={colors.textTertiary}
+              placeholderTextColor={c.textTertiary}
               value={searchQuery}
               onChangeText={setSearchQuery}
               autoFocus
             />
             <TouchableOpacity onPress={() => { setShowSearch(false); setSearchQuery(''); }}>
-              <Text style={styles.searchClose}>✕</Text>
+              <Text style={[styles.searchClose, { color: c.textSecondary }]}>✕</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <>
-            <Text style={styles.title}>Noticias</Text>
+            <Text style={[styles.title, { color: c.textPrimary }]}>Noticias</Text>
             <TouchableOpacity onPress={() => setShowSearch(true)} style={styles.headerIcon}>
               <Text style={styles.headerIconText}>🔍</Text>
             </TouchableOpacity>
@@ -209,12 +212,16 @@ export const NoticiasScreen: React.FC = () => {
           return (
             <TouchableOpacity
               key={tab.id}
-              style={[styles.tab, active && styles.tabActive]}
+              style={[
+                styles.tab,
+                { backgroundColor: c.surface, borderColor: c.border },
+                active && { backgroundColor: c.textPrimary, borderColor: c.textPrimary },
+              ]}
               onPress={() => setActiveTab(tab.id)}
               activeOpacity={0.7}
             >
               <Text style={styles.tabEmoji}>{tab.emoji}</Text>
-              <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
+              <Text style={[styles.tabLabel, { color: c.textSecondary }, active && { color: c.bg }]}>
                 {tab.label}
               </Text>
             </TouchableOpacity>
@@ -230,29 +237,29 @@ export const NoticiasScreen: React.FC = () => {
         {filtered.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>📰</Text>
-            <Text style={styles.emptyTitle}>Sin noticias</Text>
-            <Text style={styles.emptySubtitle}>Prueba con otra búsqueda</Text>
+            <Text style={[styles.emptyTitle, { color: c.textPrimary }]}>Sin noticias</Text>
+            <Text style={[styles.emptySubtitle, { color: c.textSecondary }]}>Prueba con otra búsqueda</Text>
           </View>
         ) : (
           <>
             {/* Hero */}
             {hero && (
               <View style={styles.section}>
-                <HeroCard article={hero} onPress={() => handlePress(hero)} />
+                <HeroCard article={hero} onPress={() => handlePress(hero)} c={c} />
               </View>
             )}
 
             {/* Stories horizontal scroll */}
             {stories.length > 0 && (
               <View style={styles.section}>
-                <SectionLabel label="MÁS NOTICIAS" emoji="📌" />
+                <SectionLabel label="MÁS NOTICIAS" emoji="📌" c={c} />
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.storiesScroll}
                 >
                   {stories.map(a => (
-                    <StoryCard key={a.id} article={a} onPress={() => handlePress(a)} />
+                    <StoryCard key={a.id} article={a} onPress={() => handlePress(a)} c={c} />
                   ))}
                 </ScrollView>
               </View>
@@ -260,10 +267,10 @@ export const NoticiasScreen: React.FC = () => {
 
             {/* Article list */}
             {rest.length > 0 && (
-              <View style={[styles.section, styles.articleList]}>
-                <SectionLabel label="TODAS LAS NOTICIAS" emoji="📋" />
+              <View style={[styles.section, styles.articleList, { backgroundColor: c.card, borderColor: c.border }]}>
+                <SectionLabel label="TODAS LAS NOTICIAS" emoji="📋" c={c} />
                 {rest.map(a => (
-                  <ArticleRow key={a.id} article={a} onPress={() => handlePress(a)} />
+                  <ArticleRow key={a.id} article={a} onPress={() => handlePress(a)} c={c} />
                 ))}
               </View>
             )}
@@ -277,7 +284,7 @@ export const NoticiasScreen: React.FC = () => {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.bg },
+  safeArea: { flex: 1 },
 
   // Header
   header: {
@@ -285,19 +292,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingTop: 4, paddingBottom: 10,
   },
   title: {
-    fontSize: 28, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.8,
+    fontSize: 28, fontWeight: '800', letterSpacing: -0.8,
   },
   headerIcon: { padding: 6 },
   headerIconText: { fontSize: 20 },
   searchBar: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.surface,
     borderRadius: 12, paddingHorizontal: 12, height: 40,
-    borderWidth: 1, borderColor: colors.border,
+    borderWidth: 1,
   },
   searchIcon: { fontSize: 14, marginRight: 8 },
-  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 14 },
-  searchClose: { fontSize: 14, color: colors.textSecondary, paddingLeft: 8 },
+  searchInput: { flex: 1, fontSize: 14 },
+  searchClose: { fontSize: 14, paddingLeft: 8 },
 
   // Tabs
   tabBar: {
@@ -306,14 +312,10 @@ const styles = StyleSheet.create({
   tab: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-  },
-  tabActive: {
-    backgroundColor: colors.textPrimary, borderColor: colors.textPrimary,
+    borderWidth: 1,
   },
   tabEmoji: { fontSize: 12 },
-  tabLabel: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-  tabLabelActive: { color: colors.bg },
+  tabLabel: { fontSize: 13, fontWeight: '600' },
 
   // Scroll
   scroll: { flex: 1 },
@@ -323,7 +325,6 @@ const styles = StyleSheet.create({
   // Hero card
   heroCard: {
     marginHorizontal: 16, borderRadius: 20, overflow: 'hidden',
-    backgroundColor: colors.card,
   },
   heroImage: {
     height: 220, width: '100%', alignItems: 'center', justifyContent: 'center',
@@ -332,26 +333,25 @@ const styles = StyleSheet.create({
   heroGradient: {
     position: 'absolute', bottom: 0, left: 0, right: 0, height: 160,
     backgroundColor: 'transparent',
-    // simulate gradient with a semi-transparent overlay
   },
   heroContent: { padding: 16, paddingTop: 12 },
   heroMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   heroTitle: {
-    fontSize: 18, fontWeight: '800', color: colors.textPrimary,
+    fontSize: 18, fontWeight: '800',
     letterSpacing: -0.3, lineHeight: 24, marginBottom: 6,
   },
   heroSummary: {
-    fontSize: 13, color: colors.textSecondary, lineHeight: 18, marginBottom: 10,
+    fontSize: 13, lineHeight: 18, marginBottom: 10,
   },
   heroFooter: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   sourceAvatar: {
     width: 20, height: 20, borderRadius: 10,
-    backgroundColor: colors.borderLight, alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
   },
-  sourceAvatarText: { fontSize: 9, fontWeight: '800', color: colors.textPrimary },
-  heroSource: { fontSize: 11, fontWeight: '600', color: colors.textSecondary },
-  heroDot: { fontSize: 10, color: colors.textTertiary },
-  heroTime: { fontSize: 11, color: colors.textTertiary },
+  sourceAvatarText: { fontSize: 9, fontWeight: '800' },
+  heroSource: { fontSize: 11, fontWeight: '600' },
+  heroDot: { fontSize: 10 },
+  heroTime: { fontSize: 11 },
 
   // Breaking pill
   breakingPill: {
@@ -374,17 +374,16 @@ const styles = StyleSheet.create({
   },
   sectionEmoji: { fontSize: 13 },
   sectionText: {
-    fontSize: 10, fontWeight: '700', color: colors.textTertiary,
+    fontSize: 10, fontWeight: '700',
     letterSpacing: 1, textTransform: 'uppercase',
   },
-  sectionLine: { flex: 1, height: 1, backgroundColor: colors.border },
+  sectionLine: { flex: 1, height: 1 },
 
   // Story cards
   storiesScroll: { paddingHorizontal: 16, gap: 12 },
   storyCard: {
-    width: 180, backgroundColor: colors.card,
-    borderRadius: 16, overflow: 'hidden',
-    borderWidth: 1, borderColor: colors.border,
+    width: 180, borderRadius: 16, overflow: 'hidden',
+    borderWidth: 1,
   },
   storyImage: {
     height: 100, alignItems: 'center', justifyContent: 'center',
@@ -392,23 +391,22 @@ const styles = StyleSheet.create({
   storyImageEmoji: { fontSize: 32 },
   storyBody: { padding: 10, gap: 6 },
   storyTitle: {
-    fontSize: 13, fontWeight: '700', color: colors.textPrimary, lineHeight: 18,
+    fontSize: 13, fontWeight: '700', lineHeight: 18,
   },
   storyFooter: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  storySource: { fontSize: 10, fontWeight: '600', color: colors.textSecondary },
-  storyDot: { fontSize: 9, color: colors.textTertiary },
-  storyTime: { fontSize: 10, color: colors.textTertiary },
+  storySource: { fontSize: 10, fontWeight: '600' },
+  storyDot: { fontSize: 9 },
+  storyTime: { fontSize: 10 },
 
   // Article rows
   articleList: {
-    backgroundColor: colors.card, marginHorizontal: 16,
-    borderRadius: 16, overflow: 'hidden',
-    borderWidth: 1, borderColor: colors.border,
+    marginHorizontal: 16, borderRadius: 16, overflow: 'hidden',
+    borderWidth: 1,
   },
   articleRow: {
     flexDirection: 'row', alignItems: 'center',
     padding: 12, gap: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+    borderBottomWidth: 1,
   },
   thumbnail: {
     width: 80, height: 64, borderRadius: 10,
@@ -417,17 +415,17 @@ const styles = StyleSheet.create({
   thumbnailEmoji: { fontSize: 24 },
   liveIndicator: {
     position: 'absolute', top: 6, left: 6,
-    width: 8, height: 8, borderRadius: 4, backgroundColor: colors.live,
+    width: 8, height: 8, borderRadius: 4,
   },
   articleText: { flex: 1, gap: 5 },
   articleTitle: {
-    fontSize: 13, fontWeight: '650' as any, color: colors.textPrimary, lineHeight: 18,
+    fontSize: 13, fontWeight: '650' as any, lineHeight: 18,
   },
   articleMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  articleSource: { fontSize: 10, fontWeight: '600', color: colors.textSecondary },
-  articleDot: { fontSize: 9, color: colors.textTertiary },
-  articleTime: { fontSize: 10, color: colors.textTertiary },
-  articleChevron: { fontSize: 20, color: colors.textTertiary },
+  articleSource: { fontSize: 10, fontWeight: '600' },
+  articleDot: { fontSize: 9 },
+  articleTime: { fontSize: 10 },
+  articleChevron: { fontSize: 20 },
 
   // Empty state
   emptyState: {
@@ -435,6 +433,6 @@ const styles = StyleSheet.create({
     paddingTop: 80, gap: 12,
   },
   emptyIcon: { fontSize: 48 },
-  emptyTitle: { fontSize: 18, fontWeight: '700', color: colors.textPrimary },
-  emptySubtitle: { fontSize: 14, color: colors.textSecondary },
+  emptyTitle: { fontSize: 18, fontWeight: '700' },
+  emptySubtitle: { fontSize: 14 },
 });

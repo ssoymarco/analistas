@@ -5,7 +5,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { colors } from '../theme/colors';
+import { useThemeColors } from '../theme/useTheme';
+import { useDarkMode } from '../contexts/DarkModeContext';
 import { useOnboarding } from '../contexts/OnboardingContext';
 
 // ── Data ──────────────────────────────────────────────────────────────────────
@@ -85,28 +86,10 @@ const TABS: { id: Tab; label: string; emoji: string }[] = [
   { id: 'jugadores',  label: 'Jugadores',  emoji: '⚽' },
 ];
 
-// ── Item row ──────────────────────────────────────────────────────────────────
-function ItemRow({
-  item, selected, onToggle,
-}: { item: FavItem; selected: boolean; onToggle: () => void }) {
-  return (
-    <TouchableOpacity style={styles.itemRow} onPress={onToggle} activeOpacity={0.7}>
-      <View style={styles.itemEmoji}>
-        <Text style={styles.itemEmojiText}>{item.emoji}</Text>
-      </View>
-      <View style={styles.itemInfo}>
-        <Text style={styles.itemName}>{item.name}</Text>
-        <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
-      </View>
-      <View style={[styles.toggle, selected && styles.toggleSelected]}>
-        {selected && <Text style={styles.toggleCheck}>✓</Text>}
-      </View>
-    </TouchableOpacity>
-  );
-}
-
 // ── Main screen ───────────────────────────────────────────────────────────────
 export const FavoritosScreen: React.FC = () => {
+  const c = useThemeColors();
+  const { isDark } = useDarkMode();
   const [activeTab, setActiveTab] = useState<Tab>('equipos');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -130,16 +113,36 @@ export const FavoritosScreen: React.FC = () => {
 
   const selectedCount = selected.length;
 
+  // ── Item row (inline to access c) ──
+  const ItemRow = ({ item, isSelected, onToggleItem }: { item: FavItem; isSelected: boolean; onToggleItem: () => void }) => (
+    <TouchableOpacity
+      style={[styles.itemRow, { borderBottomColor: c.border }]}
+      onPress={onToggleItem}
+      activeOpacity={0.7}
+    >
+      <View style={[styles.itemEmoji, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <Text style={styles.itemEmojiText}>{item.emoji}</Text>
+      </View>
+      <View style={styles.itemInfo}>
+        <Text style={[styles.itemName, { color: c.textPrimary }]}>{item.name}</Text>
+        <Text style={[styles.itemSubtitle, { color: c.textSecondary }]}>{item.subtitle}</Text>
+      </View>
+      <View style={[styles.toggle, { borderColor: c.border }, isSelected && { backgroundColor: c.accent, borderColor: c.accent }]}>
+        {isSelected && <Text style={[styles.toggleCheck, { color: c.bg }]}>✓</Text>}
+      </View>
+    </TouchableOpacity>
+  );
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <StatusBar style="light" />
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: c.bg }]} edges={['top']}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
 
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>Favoritos</Text>
+          <Text style={[styles.title, { color: c.textPrimary }]}>Favoritos</Text>
           {selectedCount > 0 && (
-            <Text style={styles.subtitle}>{selectedCount} seleccionado{selectedCount !== 1 ? 's' : ''}</Text>
+            <Text style={[styles.subtitle, { color: c.accent }]}>{selectedCount} seleccionado{selectedCount !== 1 ? 's' : ''}</Text>
           )}
         </View>
       </View>
@@ -151,12 +154,16 @@ export const FavoritosScreen: React.FC = () => {
           return (
             <TouchableOpacity
               key={tab.id}
-              style={[styles.tab, active && styles.tabActive]}
+              style={[
+                styles.tab,
+                { backgroundColor: c.surface, borderColor: c.border },
+                active && { backgroundColor: c.textPrimary, borderColor: c.textPrimary },
+              ]}
               onPress={() => { setActiveTab(tab.id); setSearchQuery(''); }}
               activeOpacity={0.7}
             >
               <Text style={styles.tabEmoji}>{tab.emoji}</Text>
-              <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>{tab.label}</Text>
+              <Text style={[styles.tabLabel, { color: c.textSecondary }, active && { color: c.bg }]}>{tab.label}</Text>
             </TouchableOpacity>
           );
         })}
@@ -164,18 +171,18 @@ export const FavoritosScreen: React.FC = () => {
 
       {/* Search */}
       <View style={styles.searchContainer}>
-        <View style={styles.searchBar}>
+        <View style={[styles.searchBar, { backgroundColor: c.surface, borderColor: c.border }]}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: c.textPrimary }]}
             placeholder={`Buscar ${activeTab}...`}
-            placeholderTextColor={colors.textTertiary}
+            placeholderTextColor={c.textTertiary}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Text style={styles.searchClear}>✕</Text>
+              <Text style={[styles.searchClear, { color: c.textSecondary }]}>✕</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -195,13 +202,13 @@ export const FavoritosScreen: React.FC = () => {
             return (
               <TouchableOpacity
                 key={id}
-                style={styles.chip}
+                style={[styles.chip, { backgroundColor: c.accentDim, borderColor: c.accent + '44' }]}
                 onPress={() => onToggle(id)}
                 activeOpacity={0.8}
               >
                 <Text style={styles.chipEmoji}>{item.emoji}</Text>
-                <Text style={styles.chipName}>{item.name}</Text>
-                <Text style={styles.chipRemove}>✕</Text>
+                <Text style={[styles.chipName, { color: c.accent }]}>{item.name}</Text>
+                <Text style={[styles.chipRemove, { color: c.accent }]}>✕</Text>
               </TouchableOpacity>
             );
           })}
@@ -215,8 +222,8 @@ export const FavoritosScreen: React.FC = () => {
         renderItem={({ item }) => (
           <ItemRow
             item={item}
-            selected={selected.includes(item.id)}
-            onToggle={() => onToggle(item.id)}
+            isSelected={selected.includes(item.id)}
+            onToggleItem={() => onToggle(item.id)}
           />
         )}
         contentContainerStyle={styles.listContent}
@@ -224,7 +231,7 @@ export const FavoritosScreen: React.FC = () => {
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>🔍</Text>
-            <Text style={styles.emptyText}>Sin resultados</Text>
+            <Text style={[styles.emptyText, { color: c.textSecondary }]}>Sin resultados</Text>
           </View>
         }
       />
@@ -234,73 +241,66 @@ export const FavoritosScreen: React.FC = () => {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.bg },
+  safeArea: { flex: 1 },
 
   header: {
     paddingHorizontal: 16, paddingTop: 4, paddingBottom: 10,
   },
-  title: { fontSize: 28, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.8 },
-  subtitle: { fontSize: 13, color: colors.accent, fontWeight: '600', marginTop: 2 },
+  title: { fontSize: 28, fontWeight: '800', letterSpacing: -0.8 },
+  subtitle: { fontSize: 13, fontWeight: '600', marginTop: 2 },
 
   tabBar: { flexDirection: 'row', paddingHorizontal: 16, gap: 8, paddingBottom: 12 },
   tab: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flex: 1,
-    justifyContent: 'center',
+    borderWidth: 1, flex: 1, justifyContent: 'center',
   },
-  tabActive: { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary },
   tabEmoji: { fontSize: 13 },
-  tabLabel: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-  tabLabelActive: { color: colors.bg },
+  tabLabel: { fontSize: 13, fontWeight: '600' },
 
   searchContainer: { paddingHorizontal: 16, marginBottom: 8 },
   searchBar: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.surface, borderRadius: 12,
-    paddingHorizontal: 12, height: 42,
-    borderWidth: 1, borderColor: colors.border,
+    borderRadius: 12, paddingHorizontal: 12, height: 42,
+    borderWidth: 1,
   },
   searchIcon: { fontSize: 14, marginRight: 8 },
-  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 14 },
-  searchClear: { fontSize: 13, color: colors.textSecondary, paddingLeft: 8 },
+  searchInput: { flex: 1, fontSize: 14 },
+  searchClear: { fontSize: 13, paddingLeft: 8 },
 
   chipsScroll: { maxHeight: 44, marginBottom: 8 },
   chipsContent: { paddingHorizontal: 16, gap: 8 },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: colors.accentDim, borderRadius: 20,
-    paddingHorizontal: 10, paddingVertical: 6,
-    borderWidth: 1, borderColor: colors.accent + '44',
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6,
+    borderWidth: 1,
   },
   chipEmoji: { fontSize: 13 },
-  chipName: { fontSize: 12, fontWeight: '600', color: colors.accent },
-  chipRemove: { fontSize: 10, color: colors.accent, fontWeight: '700' },
+  chipName: { fontSize: 12, fontWeight: '600' },
+  chipRemove: { fontSize: 10, fontWeight: '700' },
 
   listContent: { paddingHorizontal: 16, paddingBottom: 24 },
   itemRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 11, gap: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+    borderBottomWidth: 1,
   },
   itemEmoji: {
     width: 42, height: 42, borderRadius: 12,
-    backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: colors.border,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1,
   },
   itemEmojiText: { fontSize: 20 },
   itemInfo: { flex: 1 },
-  itemName: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
-  itemSubtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  itemName: { fontSize: 15, fontWeight: '600' },
+  itemSubtitle: { fontSize: 12, marginTop: 2 },
   toggle: {
     width: 26, height: 26, borderRadius: 13,
-    borderWidth: 2, borderColor: colors.border,
-    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, alignItems: 'center', justifyContent: 'center',
   },
-  toggleSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
-  toggleCheck: { fontSize: 13, color: colors.bg, fontWeight: '800' },
+  toggleCheck: { fontSize: 13, fontWeight: '800' },
 
   emptyState: { paddingTop: 60, alignItems: 'center', gap: 10 },
   emptyIcon: { fontSize: 36 },
-  emptyText: { fontSize: 15, color: colors.textSecondary },
+  emptyText: { fontSize: 15 },
 });

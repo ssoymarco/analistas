@@ -6,7 +6,7 @@ import {
   StyleSheet,
   Animated,
 } from 'react-native';
-import { colors } from '../theme/colors';
+import { useThemeColors } from '../theme/useTheme';
 import type { Match } from '../data/mockData';
 
 interface MatchCardProps {
@@ -14,7 +14,77 @@ interface MatchCardProps {
   onPress?: (match: Match) => void;
 }
 
-const LivePulse = () => {
+export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
+  const c = useThemeColors();
+
+  const isLive      = match.status === 'live';
+  const isFinished  = match.status === 'finished';
+  const isScheduled = match.status === 'scheduled';
+
+  const homeWon = isFinished && match.homeScore > match.awayScore;
+  const awayWon = isFinished && match.awayScore > match.homeScore;
+
+  return (
+    <TouchableOpacity
+      style={[s.card, { backgroundColor: c.card, borderBottomColor: c.border }]}
+      onPress={() => onPress?.(match)}
+      activeOpacity={0.7}
+    >
+      <View style={s.row}>
+        {/* Home team (left) */}
+        <View style={s.teamLeft}>
+          <Text style={s.teamLogo}>{match.homeTeam.logo}</Text>
+          <Text
+            style={[s.teamName, { color: c.textPrimary }, homeWon && s.teamNameBold]}
+            numberOfLines={1}
+          >
+            {match.homeTeam.name}
+          </Text>
+        </View>
+
+        {/* Score / Time (center) */}
+        <View style={s.center}>
+          {isScheduled ? (
+            <View style={[s.timePill, { backgroundColor: c.surface }]}>
+              <Text style={[s.timePillText, { color: c.textSecondary }]}>{match.time}</Text>
+            </View>
+          ) : (
+            <View style={s.scoreRow}>
+              <Text style={[s.scoreNum, { color: c.textPrimary }, (!homeWon && !isLive) && { color: c.textTertiary }]}>
+                {match.homeScore}
+              </Text>
+              <Text style={[s.scoreDash, { color: c.textTertiary }]}>—</Text>
+              <Text style={[s.scoreNum, { color: c.textPrimary }, (!awayWon && !isLive) && { color: c.textTertiary }]}>
+                {match.awayScore}
+              </Text>
+            </View>
+          )}
+          {isLive && <Text style={s.liveMin}>{match.time}</Text>}
+          {isFinished && <Text style={[s.ftLabel, { color: c.textTertiary }]}>Final</Text>}
+        </View>
+
+        {/* Away team (right) */}
+        <View style={s.teamRight}>
+          <Text
+            style={[s.teamName, s.teamNameRight, { color: c.textPrimary }, awayWon && s.teamNameBold]}
+            numberOfLines={1}
+          >
+            {match.awayTeam.name}
+          </Text>
+          <Text style={s.teamLogo}>{match.awayTeam.logo}</Text>
+        </View>
+
+        {/* Bell */}
+        <TouchableOpacity style={s.bellBtn} activeOpacity={0.7}>
+          <BellIcon muted={match.isFavorite} c={c} />
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+// Live pulse dot
+const LivePulse = ({ color }: { color: string }) => {
   const opacity = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const anim = Animated.loop(
@@ -26,86 +96,24 @@ const LivePulse = () => {
     anim.start();
     return () => anim.stop();
   }, [opacity]);
-  return <Animated.View style={[s.liveDot, { opacity }]} />;
+  return <Animated.View style={[s.liveDot, { backgroundColor: color, opacity }]} />;
 };
 
 // Bell icon drawn with View primitives
-const BellIcon = ({ muted }: { muted?: boolean }) => (
+const BellIcon = ({ muted, c }: { muted?: boolean; c: ReturnType<typeof useThemeColors> }) => (
   <View style={[s.bellWrap, muted && s.bellWrapMuted]}>
-    <View style={s.bellBody} />
-    <View style={s.bellClapper} />
+    <View style={[s.bellBody, { borderColor: c.textTertiary }]} />
+    <View style={[s.bellClapper, { backgroundColor: c.textTertiary }]} />
     {muted && <View style={s.bellSlash} />}
   </View>
 );
 
-export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
-  const isLive      = match.status === 'live';
-  const isFinished  = match.status === 'finished';
-  const isScheduled = match.status === 'scheduled';
-
-  const homeWon = isFinished && match.homeScore > match.awayScore;
-  const awayWon = isFinished && match.awayScore > match.homeScore;
-
-  return (
-    <TouchableOpacity style={s.card} onPress={() => onPress?.(match)} activeOpacity={0.7}>
-      <View style={s.row}>
-        {/* ── Home team (left) ── */}
-        <View style={s.teamLeft}>
-          <Text style={s.teamLogo}>{match.homeTeam.logo}</Text>
-          <Text
-            style={[s.teamName, homeWon && s.teamNameBold]}
-            numberOfLines={1}
-          >
-            {match.homeTeam.name}
-          </Text>
-        </View>
-
-        {/* ── Score / Time (center) ── */}
-        <View style={s.center}>
-          {isScheduled ? (
-            <View style={s.timePill}>
-              <Text style={s.timePillText}>{match.time}</Text>
-            </View>
-          ) : (
-            <View style={s.scoreRow}>
-              <Text style={[s.scoreNum, homeWon && s.scoreWin, (!homeWon && !isLive) && s.scoreDim]}>
-                {match.homeScore}
-              </Text>
-              <Text style={s.scoreDash}>—</Text>
-              <Text style={[s.scoreNum, awayWon && s.scoreWin, (!awayWon && !isLive) && s.scoreDim]}>
-                {match.awayScore}
-              </Text>
-            </View>
-          )}
-          {isLive && <Text style={s.liveMin}>{match.time}</Text>}
-          {isFinished && <Text style={s.ftLabel}>Final</Text>}
-        </View>
-
-        {/* ── Away team (right) ── */}
-        <View style={s.teamRight}>
-          <Text
-            style={[s.teamName, s.teamNameRight, awayWon && s.teamNameBold]}
-            numberOfLines={1}
-          >
-            {match.awayTeam.name}
-          </Text>
-          <Text style={s.teamLogo}>{match.awayTeam.logo}</Text>
-        </View>
-
-        {/* ── Bell ── */}
-        <TouchableOpacity style={s.bellBtn} activeOpacity={0.7}>
-          <BellIcon muted={match.isFavorite} />
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
-};
+// We need useThemeColors import for the type
+import type { ColorPalette } from '../theme/colors';
 
 const s = StyleSheet.create({
   card: {
-    backgroundColor: colors.card,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   row: {
     flexDirection: 'row',
@@ -135,7 +143,6 @@ const s = StyleSheet.create({
   teamName: {
     fontSize: 13,
     fontWeight: '500',
-    color: colors.textPrimary,
     flexShrink: 1,
   },
   teamNameRight: { textAlign: 'right' },
@@ -155,13 +162,9 @@ const s = StyleSheet.create({
   scoreNum: {
     fontSize: 19,
     fontWeight: '800',
-    color: colors.textPrimary,
   },
-  scoreWin: { color: colors.textPrimary },
-  scoreDim: { color: colors.textTertiary },
   scoreDash: {
     fontSize: 13,
-    color: colors.textTertiary,
   },
   liveMin: {
     fontSize: 10,
@@ -171,13 +174,11 @@ const s = StyleSheet.create({
   },
   ftLabel: {
     fontSize: 10,
-    color: colors.textTertiary,
     marginTop: 2,
   },
 
   // Time pill (scheduled)
   timePill: {
-    backgroundColor: colors.surface,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -185,7 +186,6 @@ const s = StyleSheet.create({
   timePillText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textSecondary,
   },
 
   // Bell
@@ -204,7 +204,6 @@ const s = StyleSheet.create({
     height: 9,
     borderRadius: 5,
     borderWidth: 1.5,
-    borderColor: colors.textTertiary,
     borderBottomWidth: 0,
     marginTop: 2,
   },
@@ -212,7 +211,6 @@ const s = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.textTertiary,
     marginTop: -1,
   },
   bellSlash: {
@@ -229,6 +227,5 @@ const s = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: colors.live,
   },
 });

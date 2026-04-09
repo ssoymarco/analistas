@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
-import { colors } from '../theme/colors';
+import { useThemeColors } from '../theme/useTheme';
 import { matchCountForDate } from '../data/mockData';
 
 interface CalendarPickerProps {
@@ -24,6 +24,8 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
   onClose,
   onGoToday,
 }) => {
+  const c = useThemeColors();
+
   const selParts = selectedDate.split('-').map(Number);
   const [viewYear, setViewYear] = useState(selParts[0]);
   const [viewMonth, setViewMonth] = useState(selParts[1] - 1);
@@ -66,26 +68,26 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={s.container}>
+        <TouchableOpacity activeOpacity={1} style={[s.container, { backgroundColor: c.card }]}>
           {/* Month navigation */}
           <View style={s.monthRow}>
             <TouchableOpacity onPress={prevMonth} style={s.navBtn}>
               <View style={s.chevronLeft}>
-                <View style={s.chevLine1} />
-                <View style={s.chevLine2} />
+                <View style={[s.chevLine1, { backgroundColor: c.textSecondary }]} />
+                <View style={[s.chevLine2, { backgroundColor: c.textSecondary }]} />
               </View>
             </TouchableOpacity>
-            <Text style={s.monthLabel}>{monthName.charAt(0).toUpperCase() + monthName.slice(1)}</Text>
+            <Text style={[s.monthLabel, { color: c.textPrimary }]}>{monthName.charAt(0).toUpperCase() + monthName.slice(1)}</Text>
             <TouchableOpacity onPress={nextMonth} style={s.navBtn}>
               <View style={s.chevronRight}>
-                <View style={s.chevLine1R} />
-                <View style={s.chevLine2R} />
+                <View style={[s.chevLine1R, { backgroundColor: c.textSecondary }]} />
+                <View style={[s.chevLine2R, { backgroundColor: c.textSecondary }]} />
               </View>
             </TouchableOpacity>
             <TouchableOpacity onPress={onClose} style={s.closeBtn}>
               <View style={s.closeX}>
-                <View style={s.closeLine1} />
-                <View style={s.closeLine2} />
+                <View style={[s.closeLine1, { backgroundColor: c.textSecondary }]} />
+                <View style={[s.closeLine2, { backgroundColor: c.textSecondary }]} />
               </View>
             </TouchableOpacity>
           </View>
@@ -94,7 +96,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
           <View style={s.quickRow}>
             {!isSelectedToday && (
               <TouchableOpacity style={s.quickBtnHoy} onPress={onGoToday}>
-                <Text style={s.quickBtnHoyText}>↩ Hoy</Text>
+                <Text style={[s.quickBtnHoyText, { color: c.emerald }]}>↩ Hoy</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -103,7 +105,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
           <View style={s.dayHeaderRow}>
             {DAY_HEADERS.map(d => (
               <View key={d} style={s.dayHeaderCell}>
-                <Text style={s.dayHeaderText}>{d}</Text>
+                <Text style={[s.dayHeaderText, { color: c.textTertiary }]}>{d}</Text>
               </View>
             ))}
           </View>
@@ -133,6 +135,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
                 >
                   <Text style={[
                     s.dayText,
+                    { color: c.textSecondary },
                     isSelected && s.dayTextSelected,
                     isToday && !isSelected && s.dayTextToday,
                   ]}>
@@ -145,7 +148,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
                           key={di}
                           style={[
                             s.matchDot,
-                            isSelected ? s.matchDotSelected : (mCount >= 5 ? s.matchDotMany : s.matchDotNormal),
+                            isSelected ? s.matchDotSelected : (mCount >= 5 ? { backgroundColor: c.emerald } : s.matchDotNormal),
                           ]}
                         />
                       ))}
@@ -169,7 +172,6 @@ const s = StyleSheet.create({
     paddingTop: 120,
   },
   container: {
-    backgroundColor: colors.card,
     marginHorizontal: 16,
     borderRadius: 16,
     paddingBottom: 16,
@@ -194,7 +196,6 @@ const s = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
     fontWeight: '600',
-    color: colors.textPrimary,
   },
   closeBtn: {
     width: 32,
@@ -207,30 +208,30 @@ const s = StyleSheet.create({
   // Chevrons
   chevronLeft: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   chevLine1: {
-    position: 'absolute', width: 6, height: 1.5, backgroundColor: colors.textSecondary,
+    position: 'absolute', width: 6, height: 1.5,
     borderRadius: 1, transform: [{ rotate: '-45deg' }, { translateY: -2 }],
   },
   chevLine2: {
-    position: 'absolute', width: 6, height: 1.5, backgroundColor: colors.textSecondary,
+    position: 'absolute', width: 6, height: 1.5,
     borderRadius: 1, transform: [{ rotate: '45deg' }, { translateY: 2 }],
   },
   chevronRight: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   chevLine1R: {
-    position: 'absolute', width: 6, height: 1.5, backgroundColor: colors.textSecondary,
+    position: 'absolute', width: 6, height: 1.5,
     borderRadius: 1, transform: [{ rotate: '45deg' }, { translateY: -2 }],
   },
   chevLine2R: {
-    position: 'absolute', width: 6, height: 1.5, backgroundColor: colors.textSecondary,
+    position: 'absolute', width: 6, height: 1.5,
     borderRadius: 1, transform: [{ rotate: '-45deg' }, { translateY: 2 }],
   },
   // Close X
   closeX: { width: 14, height: 14, alignItems: 'center', justifyContent: 'center' },
   closeLine1: {
-    position: 'absolute', width: 14, height: 1.5, backgroundColor: colors.textSecondary,
+    position: 'absolute', width: 14, height: 1.5,
     borderRadius: 1, transform: [{ rotate: '45deg' }],
   },
   closeLine2: {
-    position: 'absolute', width: 14, height: 1.5, backgroundColor: colors.textSecondary,
+    position: 'absolute', width: 14, height: 1.5,
     borderRadius: 1, transform: [{ rotate: '-45deg' }],
   },
   // Quick actions
@@ -252,7 +253,6 @@ const s = StyleSheet.create({
   quickBtnHoyText: {
     fontSize: 11,
     fontWeight: '600',
-    color: colors.emerald,
   },
   // Day headers
   dayHeaderRow: {
@@ -268,7 +268,6 @@ const s = StyleSheet.create({
   dayHeaderText: {
     fontSize: 10,
     fontWeight: '700',
-    color: colors.textTertiary,
   },
   // Grid
   grid: {
@@ -297,7 +296,6 @@ const s = StyleSheet.create({
   dayText: {
     fontSize: 12,
     fontWeight: '500',
-    color: colors.textSecondary,
   },
   dayTextSelected: {
     color: '#ffffff',
@@ -321,9 +319,6 @@ const s = StyleSheet.create({
   },
   matchDotNormal: {
     backgroundColor: '#60a5fa',
-  },
-  matchDotMany: {
-    backgroundColor: colors.emerald,
   },
   matchDotSelected: {
     backgroundColor: 'rgba(255,255,255,0.7)',
