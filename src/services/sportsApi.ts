@@ -372,56 +372,67 @@ function mapStandingToLeagueStanding(sg: SMStandingGroup): LeagueStanding {
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Fetch all fixtures for a given date. Falls back to mock on error.
+ * Fetch all fixtures for a given date.
+ * Merges real SportMonks data with mock data so the user always sees
+ * both real leagues and the demo leagues side by side.
  */
 export async function getFixturesByDate(date: string): Promise<Match[]> {
+  // Always start with mock matches for this date
+  const mockResults = mockGetMatchesForDate(date);
+
   try {
     const fixtures = await fetchFixturesByDate(date, LEAGUE_IDS);
-    if (fixtures.length === 0) {
-      // No real fixtures for this date — fall back to mock
-      return mockGetMatchesForDate(date);
-    }
-    return fixtures.map(mapFixtureToMatch);
+    if (fixtures.length === 0) return mockResults;
+    const realMatches = fixtures.map(mapFixtureToMatch);
+    // Real leagues on top, then mock leagues
+    return [...realMatches, ...mockResults];
   } catch (err) {
-    console.warn('[sportsApi] getFixturesByDate failed, using mock:', err);
-    return mockGetMatchesForDate(date);
+    console.warn('[sportsApi] getFixturesByDate failed, using mock only:', err);
+    return mockResults;
   }
 }
 
 /**
  * Fetch fixtures grouped by league for a given date.
+ * Merges real SportMonks leagues with mock leagues.
  */
 export interface LeagueWithMatches extends League {
   matches: Match[];
 }
 
 export async function getLeaguesByDate(date: string): Promise<LeagueWithMatches[]> {
+  // Always include mock leagues
+  const mockLeagueResults = mockGetLeaguesForDate(date);
+
   try {
     const fixtures = await fetchFixturesByDate(date, LEAGUE_IDS);
-    if (fixtures.length === 0) {
-      return mockGetLeaguesForDate(date);
-    }
+    if (fixtures.length === 0) return mockLeagueResults;
 
     const matches = fixtures.map(mapFixtureToMatch);
-    // Group by leagueId
+    // Group real fixtures by league
+    const realLeagues: LeagueWithMatches[] = [];
     const leagueMap = new Map<string, LeagueWithMatches>();
     for (const m of matches) {
       if (!leagueMap.has(m.leagueId)) {
         const config = getLeagueConfig(Number(m.leagueId));
-        leagueMap.set(m.leagueId, {
+        const lw: LeagueWithMatches = {
           id: m.leagueId,
           name: m.league,
           country: config?.country ?? '',
           logo: config?.flag ?? '⚽',
           matches: [],
-        });
+        };
+        leagueMap.set(m.leagueId, lw);
+        realLeagues.push(lw);
       }
       leagueMap.get(m.leagueId)!.matches.push(m);
     }
-    return Array.from(leagueMap.values());
+
+    // Real leagues first, then mock leagues
+    return [...realLeagues, ...mockLeagueResults];
   } catch (err) {
-    console.warn('[sportsApi] getLeaguesByDate failed, using mock:', err);
-    return mockGetLeaguesForDate(date);
+    console.warn('[sportsApi] getLeaguesByDate failed, using mock only:', err);
+    return mockLeagueResults;
   }
 }
 

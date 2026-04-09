@@ -344,6 +344,17 @@ export const SM_STATE_IDS = {
 // ── Generic Fetch Helper ─────────────────────────────────────────────────────
 
 /**
+ * Build a query string WITHOUT encoding special chars that SportMonks
+ * needs as literals (semicolons in `include`, colons/commas in `filters`).
+ * URLSearchParams would encode them as %3B / %3A / %2C, which SM rejects.
+ */
+function buildQueryString(params: Record<string, string>): string {
+  return Object.entries(params)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${v}`)
+    .join('&');
+}
+
+/**
  * Generic fetch wrapper for SportMonks API.
  * Handles auth, pagination traversal, and error handling.
  */
@@ -351,11 +362,8 @@ async function fetchApi<T>(
   endpoint: string,
   params: Record<string, string> = {},
 ): Promise<T> {
-  const queryParams = new URLSearchParams({
-    api_token: API_TOKEN,
-    ...params,
-  });
-  const url = `${BASE_URL}/${endpoint}?${queryParams.toString()}`;
+  const qs = buildQueryString({ api_token: API_TOKEN, ...params });
+  const url = `${BASE_URL}/${endpoint}?${qs}`;
 
   const response = await fetch(url);
 
@@ -380,12 +388,8 @@ async function fetchAllPages<T>(
   let hasMore = true;
 
   while (hasMore) {
-    const queryParams = new URLSearchParams({
-      api_token: API_TOKEN,
-      page: String(page),
-      ...params,
-    });
-    const url = `${BASE_URL}/${endpoint}?${queryParams.toString()}`;
+    const qs = buildQueryString({ api_token: API_TOKEN, page: String(page), ...params });
+    const url = `${BASE_URL}/${endpoint}?${qs}`;
 
     const response = await fetch(url);
     if (!response.ok) {
