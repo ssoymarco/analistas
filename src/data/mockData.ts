@@ -51,7 +51,7 @@ export const leagues: BaseLeague[] = [
   { id: 'champions-league', name: 'Champions League',country: 'Europe',  logo: '⭐' },
 ];
 
-export const matches: Match[] = [
+export const matches: MatchType[] = [
   // ── Premier League ────────────────────────────────────────────────────────
   {
     id: '1',
@@ -434,4 +434,145 @@ export const mockMatchDetails: Record<string, MatchDetail> = {
 
 export function getMatchDetail(id: string): MatchDetail | undefined {
   return mockMatchDetails[id];
+}
+
+// ── Procedural match generation for other dates ──────────────────────────────
+
+const TEAM_POOL = [
+  // Premier League
+  { name: 'Manchester City', logo: '🔵', league: 'Premier League', leagueId: 'premier-league' },
+  { name: 'Liverpool', logo: '🔴', league: 'Premier League', leagueId: 'premier-league' },
+  { name: 'Arsenal', logo: '🔴', league: 'Premier League', leagueId: 'premier-league' },
+  { name: 'Chelsea', logo: '🔵', league: 'Premier League', leagueId: 'premier-league' },
+  { name: 'Tottenham', logo: '⚪', league: 'Premier League', leagueId: 'premier-league' },
+  { name: 'Newcastle', logo: '⚫', league: 'Premier League', leagueId: 'premier-league' },
+  { name: 'Man United', logo: '🔴', league: 'Premier League', leagueId: 'premier-league' },
+  { name: 'Aston Villa', logo: '🟣', league: 'Premier League', leagueId: 'premier-league' },
+  // La Liga
+  { name: 'Real Madrid', logo: '⚪', league: 'La Liga', leagueId: 'la-liga' },
+  { name: 'Barcelona', logo: '🔵', league: 'La Liga', leagueId: 'la-liga' },
+  { name: 'Atletico Madrid', logo: '🔴', league: 'La Liga', leagueId: 'la-liga' },
+  { name: 'Sevilla', logo: '⚪', league: 'La Liga', leagueId: 'la-liga' },
+  { name: 'Real Sociedad', logo: '🔵', league: 'La Liga', leagueId: 'la-liga' },
+  { name: 'Villarreal', logo: '🟡', league: 'La Liga', leagueId: 'la-liga' },
+  // Liga MX
+  { name: 'América', logo: '🦅', league: 'Liga MX', leagueId: 'liga-mx' },
+  { name: 'Chivas', logo: '🐐', league: 'Liga MX', leagueId: 'liga-mx' },
+  { name: 'Tigres', logo: '🐯', league: 'Liga MX', leagueId: 'liga-mx' },
+  { name: 'Cruz Azul', logo: '🔵', league: 'Liga MX', leagueId: 'liga-mx' },
+  { name: 'Monterrey', logo: '⚫', league: 'Liga MX', leagueId: 'liga-mx' },
+  { name: 'Pumas UNAM', logo: '🐱', league: 'Liga MX', leagueId: 'liga-mx' },
+  // Serie A
+  { name: 'Inter Milan', logo: '🔵', league: 'Serie A', leagueId: 'serie-a' },
+  { name: 'AC Milan', logo: '🔴', league: 'Serie A', leagueId: 'serie-a' },
+  { name: 'Juventus', logo: '⚪', league: 'Serie A', leagueId: 'serie-a' },
+  { name: 'Napoli', logo: '🔵', league: 'Serie A', leagueId: 'serie-a' },
+  // Ligue 1
+  { name: 'PSG', logo: '🔵', league: 'Ligue 1', leagueId: 'ligue-1' },
+  { name: 'Marseille', logo: '⚪', league: 'Ligue 1', leagueId: 'ligue-1' },
+  { name: 'Monaco', logo: '🔴', league: 'Ligue 1', leagueId: 'ligue-1' },
+  { name: 'Lyon', logo: '🔴', league: 'Ligue 1', leagueId: 'ligue-1' },
+  // Brasileirão
+  { name: 'Flamengo', logo: '🔴', league: 'Brasileirão', leagueId: 'brasileirao' },
+  { name: 'Palmeiras', logo: '🟢', league: 'Brasileirão', leagueId: 'brasileirao' },
+  { name: 'Corinthians', logo: '⚫', league: 'Brasileirão', leagueId: 'brasileirao' },
+  { name: 'Santos', logo: '⚪', league: 'Brasileirão', leagueId: 'brasileirao' },
+];
+
+const TIMES = ['12:30','14:00','15:00','16:30','17:00','18:00','18:30','19:00','19:45','20:00','20:45','21:00'];
+
+function dateHash(key: string): number {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) {
+    h = ((h << 5) - h + key.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+function seededShuffle<T>(arr: T[], seed: number): T[] {
+  const copy = [...arr];
+  let s = seed;
+  for (let i = copy.length - 1; i > 0; i--) {
+    s = (s * 16807 + 1) % 2147483647;
+    const j = s % (i + 1);
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function mkMatch(
+  id: string, hn: string, hl: string, an: string, al: string,
+  hs: number, as_: number, status: 'finished' | 'scheduled' | 'live',
+  time: string, league: string, leagueId: string, date: string,
+  fav = false, minute?: number,
+): MatchType {
+  return {
+    id, date, league, leagueId, status, time,
+    homeScore: hs, awayScore: as_, isFavorite: fav,
+    homeTeam: { id: `h${id}`, name: hn, shortName: hn.slice(0, 3).toUpperCase(), logo: hl },
+    awayTeam: { id: `a${id}`, name: an, shortName: an.slice(0, 3).toUpperCase(), logo: al },
+    ...(minute ? { minute } : {}),
+  };
+}
+
+function generateMatchesForDate(dateStr: string): MatchType[] {
+  const h = dateHash(dateStr);
+  const count = 3 + (h % 4); // 3–6 matches
+  const shuffled = seededShuffle(TEAM_POOL, h);
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  const isPast = dateStr < todayStr;
+  const results: MatchType[] = [];
+
+  for (let i = 0; i < count && i * 2 + 1 < shuffled.length; i++) {
+    const home = shuffled[i * 2];
+    const away = shuffled[i * 2 + 1];
+    const s = (h * (i + 1) * 16807 + 1) % 2147483647;
+    const hs = isPast ? s % 4 : 0;
+    const as_ = isPast ? (s >> 4) % 4 : 0;
+    const timeIdx = (h + i * 7) % TIMES.length;
+    results.push(mkMatch(
+      `gen-${dateStr}-${i}`,
+      home.name, home.logo,
+      away.name, away.logo,
+      hs, as_,
+      isPast ? 'finished' : 'scheduled',
+      isPast ? 'FT' : TIMES[timeIdx],
+      home.league, home.leagueId,
+      dateStr,
+      i === 0 && (h % 5 === 0),
+    ));
+  }
+  return results;
+}
+
+// Cache for generated matches
+const matchCache = new Map<string, MatchType[]>();
+
+// The date that has our hardcoded "today" matches
+const TODAY_DATE = new Date().toISOString().split('T')[0];
+
+/** Get all matches for a given date string (YYYY-MM-DD) */
+export function getMatchesForDate(dateStr: string): MatchType[] {
+  if (dateStr === TODAY_DATE) return matches;
+  if (!matchCache.has(dateStr)) {
+    matchCache.set(dateStr, generateMatchesForDate(dateStr));
+  }
+  return matchCache.get(dateStr)!;
+}
+
+/** Get leagues grouped with their matches for a given date */
+export function getLeaguesForDate(dateStr: string): League[] {
+  const dateMatches = getMatchesForDate(dateStr);
+  return leagues
+    .map((league) => ({
+      ...league,
+      matches: dateMatches.filter((m) => m.leagueId === league.id),
+    }))
+    .filter((l) => l.matches.length > 0);
+}
+
+/** Count matches for a given date */
+export function matchCountForDate(dateStr: string): number {
+  return getMatchesForDate(dateStr).length;
 }

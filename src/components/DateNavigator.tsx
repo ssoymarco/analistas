@@ -1,18 +1,20 @@
 import React, { useRef } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
-import { DateItem } from '../data/mockData';
+import { DateItem, matchCountForDate } from '../data/mockData';
 
 interface DateNavigatorProps {
   dates: DateItem[];
   selectedIndex: number;
   onSelectDate: (index: number) => void;
+  onCalendarPress?: () => void;
 }
 
 export const DateNavigator: React.FC<DateNavigatorProps> = ({
   dates,
   selectedIndex,
   onSelectDate,
+  onCalendarPress,
 }) => {
   const scrollRef = useRef<ScrollView>(null);
 
@@ -50,7 +52,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
                 {item.label}
               </Text>
               {isSelected && (
-                <Text style={s.matchCount}>21 partidos</Text>
+                <Text style={s.matchCount}>{matchCountForDate(item.date)} partidos</Text>
               )}
               {isSelected && <View style={s.indicator} />}
             </TouchableOpacity>
@@ -59,7 +61,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
       </ScrollView>
 
       {/* Calendar icon */}
-      <TouchableOpacity style={s.calBtn} activeOpacity={0.7}>
+      <TouchableOpacity style={s.calBtn} activeOpacity={0.7} onPress={onCalendarPress}>
         <View style={s.calIcon}>
           <View style={s.calTop} />
           <View style={s.calBody} />
