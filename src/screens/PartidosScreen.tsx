@@ -13,7 +13,7 @@ import { FilterTabs, FilterTab } from '../components/FilterTabs';
 import { LeagueSection } from '../components/LeagueSection';
 import { CalendarPicker } from '../components/CalendarPicker';
 import { useFixtures } from '../hooks/useFixtures';
-import type { RootStackParamList } from '../navigation/AppNavigator';
+import type { PartidosStackParamList } from '../navigation/AppNavigator';
 
 const DATES = generateDates();
 const TODAY_INDEX = 3;
@@ -37,7 +37,7 @@ const SearchIcon = ({ color }: { color: string }) => (
 export const PartidosScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const [selectedDateIndex, setSelectedDateIndex] = useState(TODAY_INDEX);
   const [activeTab, setActiveTab] = useState<FilterTab>('todos');
   const [showCalendar, setShowCalendar] = useState(false);

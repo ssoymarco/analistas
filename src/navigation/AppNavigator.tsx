@@ -13,10 +13,14 @@ import { MatchDetailScreen } from '../screens/MatchDetailScreen';
 import type { ColorPalette } from '../theme/colors';
 import type { Match } from '../data/types';
 
-// ── Navigation param lists ────────────────────────────────────────────────────
+// ── Param lists ───────────────────────────────────────────────────────────────
 
-export type RootStackParamList = {
-  MainTabs: undefined;
+/**
+ * Stack nested inside the Partidos tab.
+ * MatchDetail lives here so the bottom tab bar stays visible.
+ */
+export type PartidosStackParamList = {
+  PartidosHome: undefined;
   MatchDetail: { match: Match };
 };
 
@@ -27,8 +31,32 @@ export type RootTabParamList = {
   Perfil: undefined;
 };
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
-const Tab   = createBottomTabNavigator<RootTabParamList>();
+// Keep for backward compat (MatchDetailScreen imports this)
+export type RootStackParamList = PartidosStackParamList;
+
+const PartidosStack = createNativeStackNavigator<PartidosStackParamList>();
+const Tab           = createBottomTabNavigator<RootTabParamList>();
+
+// ── Partidos nested stack ─────────────────────────────────────────────────────
+// Nesting the stack INSIDE the tab means the tab bar stays rendered
+// when MatchDetail is on screen.
+
+function PartidosNavigator() {
+  return (
+    <PartidosStack.Navigator screenOptions={{ headerShown: false }}>
+      <PartidosStack.Screen name="PartidosHome" component={PartidosScreen} />
+      <PartidosStack.Screen
+        name="MatchDetail"
+        component={MatchDetailScreen}
+        options={{
+          animation: 'slide_from_right',
+          gestureEnabled: true,
+          gestureDirection: 'horizontal',
+        }}
+      />
+    </PartidosStack.Navigator>
+  );
+}
 
 // ── Tab icons ─────────────────────────────────────────────────────────────────
 
@@ -138,7 +166,12 @@ function MainTabs() {
           TAB_ICONS[route.name]?.(color, focused) ?? null,
       })}
     >
-      <Tab.Screen name="Partidos"  component={PartidosScreen} />
+      {/* Partidos tab uses its own nested stack so MatchDetail keeps the tab bar */}
+      <Tab.Screen
+        name="Partidos"
+        component={PartidosNavigator}
+        options={{ tabBarLabel: 'Partidos' }}
+      />
       <Tab.Screen name="Favoritos" component={FavoritosScreen} />
       <Tab.Screen name="Noticias"  component={NoticiasScreen} />
       <Tab.Screen name="Perfil"    component={PerfilScreen} />
@@ -168,7 +201,7 @@ function makeNavTheme(c: ColorPalette, isDark: boolean) {
   };
 }
 
-// ── Root stack navigator ──────────────────────────────────────────────────────
+// ── Root navigator ────────────────────────────────────────────────────────────
 
 export const AppNavigator: React.FC = () => {
   const c = useThemeColors();
@@ -177,20 +210,7 @@ export const AppNavigator: React.FC = () => {
 
   return (
     <NavigationContainer theme={navTheme}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {/* Main tab navigator */}
-        <Stack.Screen name="MainTabs" component={MainTabs} />
-        {/* Match detail — slides in from right, swipe back enabled */}
-        <Stack.Screen
-          name="MatchDetail"
-          component={MatchDetailScreen}
-          options={{
-            animation: 'slide_from_right',
-            gestureEnabled: true,
-            gestureDirection: 'horizontal',
-          }}
-        />
-      </Stack.Navigator>
+      <MainTabs />
     </NavigationContainer>
   );
 };
