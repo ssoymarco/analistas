@@ -2,13 +2,23 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { PartidosScreen } from '../screens/PartidosScreen';
 import { FavoritosScreen } from '../screens/FavoritosScreen';
 import { NoticiasScreen } from '../screens/NoticiasScreen';
 import { PerfilScreen } from '../screens/PerfilScreen';
+import { MatchDetailScreen } from '../screens/MatchDetailScreen';
 import type { ColorPalette } from '../theme/colors';
+import type { Match } from '../data/types';
+
+// ── Navigation param lists ────────────────────────────────────────────────────
+
+export type RootStackParamList = {
+  MainTabs: undefined;
+  MatchDetail: { match: Match };
+};
 
 export type RootTabParamList = {
   Partidos: undefined;
@@ -17,9 +27,11 @@ export type RootTabParamList = {
   Perfil: undefined;
 };
 
-const Tab = createBottomTabNavigator<RootTabParamList>();
+const Stack = createNativeStackNavigator<RootStackParamList>();
+const Tab   = createBottomTabNavigator<RootTabParamList>();
 
-// ── Partidos icon — Scoreboard/match display ─────────────────────────────────
+// ── Tab icons ─────────────────────────────────────────────────────────────────
+
 const PartidosIcon = ({ color }: { color: string }) => (
   <View style={iconS.partidosWrap}>
     <View style={[iconS.partidosPanel, { borderColor: color }]}>
@@ -35,14 +47,12 @@ const PartidosIcon = ({ color }: { color: string }) => (
   </View>
 );
 
-// ── Favoritos icon — Star outline ────────────────────────────────────────────
 const FavoritosIcon = ({ color, focused }: { color: string; focused?: boolean }) => (
   <View style={iconS.favWrap}>
     <Text style={[iconS.favStar, { color }]}>{focused ? '★' : '☆'}</Text>
   </View>
 );
 
-// ── Noticias icon — Newspaper/document ───────────────────────────────────────
 const NoticiasIcon = ({ color }: { color: string }) => (
   <View style={[iconS.noticiasWrap, { borderColor: color }]}>
     <View style={[iconS.noticiasTopBar, { backgroundColor: color }]} />
@@ -54,7 +64,6 @@ const NoticiasIcon = ({ color }: { color: string }) => (
   </View>
 );
 
-// ── Perfil icon — Person silhouette ──────────────────────────────────────────
 const PerfilIcon = ({ color }: { color: string }) => (
   <View style={iconS.perfilWrap}>
     <View style={[iconS.perfilHead, { backgroundColor: color }]} />
@@ -72,17 +81,17 @@ const iconS = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', gap: 2,
   },
   partidosPanelLine: { height: 1.5, borderRadius: 1, opacity: 0.6 },
-  partidosDivider: { width: 1.5, height: 10, borderRadius: 1, opacity: 0.4 },
+  partidosDivider:   { width: 1.5, height: 10, borderRadius: 1, opacity: 0.4 },
   partidosDot: {
     position: 'absolute', top: -1, right: -2,
     width: 6, height: 6, borderRadius: 3, backgroundColor: '#ef4444',
   },
-  favWrap: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
-  favStar: { fontSize: 22, lineHeight: 24 },
+  favWrap:     { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  favStar:     { fontSize: 22, lineHeight: 24 },
   noticiasWrap: { width: 20, height: 20, borderRadius: 4, borderWidth: 1.8, overflow: 'hidden' },
   noticiasTopBar: { height: 4, width: '100%', opacity: 0.3 },
   noticiasLines: { flex: 1, justifyContent: 'center', gap: 2.5, paddingHorizontal: 2, paddingTop: 1 },
-  noticiasLine: { height: 1.5, borderRadius: 1, opacity: 0.6 },
+  noticiasLine:  { height: 1.5, borderRadius: 1, opacity: 0.6 },
   perfilWrap: { width: 22, height: 24, alignItems: 'center', justifyContent: 'flex-end' },
   perfilHead: { width: 10, height: 10, borderRadius: 5, marginBottom: 2 },
   perfilBody: {
@@ -92,32 +101,74 @@ const iconS = StyleSheet.create({
   },
 });
 
+// ── Bottom tab navigator ──────────────────────────────────────────────────────
+
 const TAB_ICONS: Record<string, (color: string, focused: boolean) => React.ReactNode> = {
-  Partidos: (color) => <PartidosIcon color={color} />,
+  Partidos:  (color)          => <PartidosIcon color={color} />,
   Favoritos: (color, focused) => <FavoritosIcon color={color} focused={focused} />,
-  Noticias: (color) => <NoticiasIcon color={color} />,
-  Perfil: (color) => <PerfilIcon color={color} />,
+  Noticias:  (color)          => <NoticiasIcon color={color} />,
+  Perfil:    (color)          => <PerfilIcon color={color} />,
 };
+
+function MainTabs() {
+  const c = useThemeColors();
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: c.tabBg,
+          borderTopColor: c.border,
+          borderTopWidth: 1,
+          height: Platform.OS === 'ios' ? 80 : 64,
+          paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+          paddingTop: 8,
+          elevation: 0,
+          shadowOpacity: 0,
+        },
+        tabBarActiveTintColor:   c.tabActive,
+        tabBarInactiveTintColor: c.tabInactive,
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: '600' as const,
+          letterSpacing: 0.2,
+          marginTop: 2,
+        },
+        tabBarIcon: ({ color, focused }) =>
+          TAB_ICONS[route.name]?.(color, focused) ?? null,
+      })}
+    >
+      <Tab.Screen name="Partidos"  component={PartidosScreen} />
+      <Tab.Screen name="Favoritos" component={FavoritosScreen} />
+      <Tab.Screen name="Noticias"  component={NoticiasScreen} />
+      <Tab.Screen name="Perfil"    component={PerfilScreen} />
+    </Tab.Navigator>
+  );
+}
+
+// ── Nav theme ─────────────────────────────────────────────────────────────────
 
 function makeNavTheme(c: ColorPalette, isDark: boolean) {
   return {
     dark: isDark,
     colors: {
-      primary: c.accent,
-      background: c.bg,
-      card: c.tabBg,
-      text: c.textPrimary,
-      border: c.border,
+      primary:      c.accent,
+      background:   c.bg,
+      card:         c.tabBg,
+      text:         c.textPrimary,
+      border:       c.border,
       notification: c.live,
     },
     fonts: {
       regular: { fontFamily: 'System', fontWeight: '400' as const },
-      medium: { fontFamily: 'System', fontWeight: '500' as const },
-      bold: { fontFamily: 'System', fontWeight: '700' as const },
-      heavy: { fontFamily: 'System', fontWeight: '800' as const },
+      medium:  { fontFamily: 'System', fontWeight: '500' as const },
+      bold:    { fontFamily: 'System', fontWeight: '700' as const },
+      heavy:   { fontFamily: 'System', fontWeight: '800' as const },
     },
   };
 }
+
+// ── Root stack navigator ──────────────────────────────────────────────────────
 
 export const AppNavigator: React.FC = () => {
   const c = useThemeColors();
@@ -126,36 +177,20 @@ export const AppNavigator: React.FC = () => {
 
   return (
     <NavigationContainer theme={navTheme}>
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          headerShown: false,
-          tabBarStyle: {
-            backgroundColor: c.tabBg,
-            borderTopColor: c.border,
-            borderTopWidth: 1,
-            height: Platform.OS === 'ios' ? 80 : 64,
-            paddingBottom: Platform.OS === 'ios' ? 24 : 8,
-            paddingTop: 8,
-            elevation: 0,
-            shadowOpacity: 0,
-          },
-          tabBarActiveTintColor: c.tabActive,
-          tabBarInactiveTintColor: c.tabInactive,
-          tabBarLabelStyle: {
-            fontSize: 10,
-            fontWeight: '600' as const,
-            letterSpacing: 0.2,
-            marginTop: 2,
-          },
-          tabBarIcon: ({ color, focused }) =>
-            TAB_ICONS[route.name]?.(color, focused) ?? null,
-        })}
-      >
-        <Tab.Screen name="Partidos" component={PartidosScreen} />
-        <Tab.Screen name="Favoritos" component={FavoritosScreen} />
-        <Tab.Screen name="Noticias" component={NoticiasScreen} />
-        <Tab.Screen name="Perfil" component={PerfilScreen} />
-      </Tab.Navigator>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {/* Main tab navigator */}
+        <Stack.Screen name="MainTabs" component={MainTabs} />
+        {/* Match detail — slides in from right, swipe back enabled */}
+        <Stack.Screen
+          name="MatchDetail"
+          component={MatchDetailScreen}
+          options={{
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+            gestureDirection: 'horizontal',
+          }}
+        />
+      </Stack.Navigator>
     </NavigationContainer>
   );
 };

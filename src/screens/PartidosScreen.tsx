@@ -2,6 +2,8 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { generateDates } from '../data/mockData';
@@ -10,8 +12,8 @@ import { DateNavigator } from '../components/DateNavigator';
 import { FilterTabs, FilterTab } from '../components/FilterTabs';
 import { LeagueSection } from '../components/LeagueSection';
 import { CalendarPicker } from '../components/CalendarPicker';
-import { MatchDetailScreen } from './MatchDetailScreen';
 import { useFixtures } from '../hooks/useFixtures';
+import type { RootStackParamList } from '../navigation/AppNavigator';
 
 const DATES = generateDates();
 const TODAY_INDEX = 3;
@@ -35,9 +37,9 @@ const SearchIcon = ({ color }: { color: string }) => (
 export const PartidosScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [selectedDateIndex, setSelectedDateIndex] = useState(TODAY_INDEX);
   const [activeTab, setActiveTab] = useState<FilterTab>('todos');
-  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [showCalendar, setShowCalendar] = useState(false);
 
   const selectedDate = DATES[selectedDateIndex]?.date ?? DATES[TODAY_INDEX].date;
@@ -160,7 +162,7 @@ export const PartidosScreen: React.FC = () => {
           </View>
         ) : (
           filteredLeagues.map(league => (
-            <LeagueSection key={league.id} league={league} onMatchPress={m => setSelectedMatch(m)} />
+            <LeagueSection key={league.id} league={league} onMatchPress={m => navigation.navigate('MatchDetail', { match: m })} />
           ))
         )}
         <View style={{ height: 80 }} />
@@ -177,7 +179,6 @@ export const PartidosScreen: React.FC = () => {
       )}
 
       <CalendarPicker visible={showCalendar} selectedDate={selectedDate} onSelectDate={handleCalendarSelect} onClose={() => setShowCalendar(false)} onGoToday={() => { handleGoToday(); setShowCalendar(false); }} />
-      {selectedMatch && <MatchDetailScreen match={selectedMatch} visible={!!selectedMatch} onClose={() => setSelectedMatch(null)} />}
     </SafeAreaView>
   );
 };
