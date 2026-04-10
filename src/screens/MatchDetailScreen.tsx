@@ -196,7 +196,11 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
         {isLive && (
           <View style={scr.livePill}>
             <View style={scr.liveDot} />
-            <Text style={scr.livePillText}>EN VIVO · {match.minute ?? match.time}'</Text>
+            <Text style={scr.livePillText}>
+              {match.stateLabel === 'HT'
+                ? 'DESCANSO'
+                : `EN VIVO · ${match.stateLabel ? `${match.stateLabel} · ` : ''}${match.minute ?? match.time}'`}
+            </Text>
           </View>
         )}
 
@@ -226,6 +230,12 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                   <Text style={[scr.scoreDash, { color: c.textTertiary }]}>–</Text>
                   <Text style={[scr.score, { color: c.textPrimary }]}>{match.awayScore}</Text>
                 </View>
+                {/* Half-time score */}
+                {match.homeScoreHT !== undefined && match.awayScoreHT !== undefined && (
+                  <Text style={[scr.htLabel, { color: c.textTertiary }]}>
+                    {'(MT: '}{match.homeScoreHT} – {match.awayScoreHT}{')'}
+                  </Text>
+                )}
                 {isFinished && (
                   <Text style={[scr.finishedLabel, { color: c.textTertiary }]}>Finalizado</Text>
                 )}
@@ -335,7 +345,8 @@ const scr = StyleSheet.create({
   scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   score: { fontSize: 44, fontWeight: '900', lineHeight: 50 },
   scoreDash: { fontSize: 28, fontWeight: '300', lineHeight: 50 },
-  finishedLabel: { fontSize: 11, fontWeight: '500' },
+  htLabel: { fontSize: 11, fontWeight: '500', marginTop: 2 },
+  finishedLabel: { fontSize: 11, fontWeight: '500', marginTop: 2 },
 
   // Tabs
   tabBarWrap: { borderBottomWidth: 1 },

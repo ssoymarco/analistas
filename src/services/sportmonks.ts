@@ -308,13 +308,31 @@ export interface SMSquadPlayer {
 }
 
 // ── Known Stat Type IDs ──────────────────────────────────────────────────────
+// Full list of SM stat type IDs we map to Spanish labels in sportsApi.ts
 
 export const SM_STAT_TYPES = {
-  BALL_POSSESSION: 45,
-  SHOTS_TOTAL: 34,
-  SHOTS_ON_TARGET: 52,
-  EXPECTED_GOALS: 1605,
-  CORNERS: 84,
+  // Attack
+  BALL_POSSESSION:      45,
+  SHOTS_TOTAL:          34,
+  SHOTS_ON_TARGET:      52,
+  SHOTS_OFF_TARGET:     53,
+  SHOTS_BLOCKED:       548,
+  SHOTS_INSIDE_BOX:     76,
+  SHOTS_OUTSIDE_BOX:    77,
+  EXPECTED_GOALS:     1605,
+  ATTACKS:             583,
+  DANGEROUS_ATTACKS:   584,
+  // Passes
+  PASSES_TOTAL:         54,
+  PASSES_ACCURACY:      55,
+  // Defence
+  CORNERS:              84,
+  OFFSIDES:             60,
+  SAVES:                86,
+  // Discipline
+  FOULS:                56,
+  YELLOW_CARDS:         57,
+  RED_CARDS:            58,
 } as const;
 
 // ── Known Event Type IDs ─────────────────────────────────────────────────────
@@ -439,10 +457,10 @@ export async function fetchFixturesByDate(date: string, leagueIds?: string): Pro
   return fetchAllPages<SMFixture>(`fixtures/date/${date}`, params);
 }
 
-/** GET /fixtures/{id}?include=participants;scores;events;statistics;lineups;venue;league */
+/** GET /fixtures/{id} with full detail — includes player sub-data for lineups */
 export async function fetchFixtureById(id: number): Promise<SMFixture> {
   return fetchApi<SMFixture>(`fixtures/${id}`, {
-    include: 'participants;scores;events;statistics;lineups;venue;league',
+    include: 'participants;scores;events;statistics;lineups.player;venue;league',
   });
 }
 

@@ -78,20 +78,41 @@ function mapStateToStatus(stateId: number): MatchStatus {
   return 'scheduled';
 }
 
+/** Human-readable state label for the live indicator (e.g. "1T", "HT", "2T", "ET", "PEN") */
+function mapStateLabel(stateId: number): string | undefined {
+  switch (stateId) {
+    case SM_STATE_IDS.FIRST_HALF:    return '1T';
+    case SM_STATE_IDS.HALF_TIME:     return 'HT';
+    case SM_STATE_IDS.SECOND_HALF:   return '2T';
+    case SM_STATE_IDS.EXTRA_TIME:    return 'ET';
+    case SM_STATE_IDS.PENALTIES:     return 'PEN';
+    case SM_STATE_IDS.BREAK:         return 'HT';
+    default: return undefined;
+  }
+}
+
 // ── Score Helpers ───────────────────────────────────────────────────────────
 
 function getGoals(scores: SMScore[] | undefined, location: 'home' | 'away'): number {
   if (!scores || scores.length === 0) return 0;
-  // Look for the "CURRENT" score first (works for live + finished)
+  // "CURRENT" works for live + finished
   const current = scores.find(
     s => s.description === 'CURRENT' && s.score.participant === location,
   );
   if (current) return current.score.goals;
-  // Fallback: look for 2ND_HALF or FT
+  // Fallback: 2ND_HALF or FT
   const ft = scores.find(
     s => (s.description === '2ND_HALF' || s.description === 'FT') && s.score.participant === location,
   );
   return ft?.score.goals ?? 0;
+}
+
+function getHalfTimeGoals(scores: SMScore[] | undefined, location: 'home' | 'away'): number | undefined {
+  if (!scores || scores.length === 0) return undefined;
+  const ht = scores.find(
+    s => s.description === '1ST_HALF' && s.score.participant === location,
+  );
+  return ht !== undefined ? ht.score.goals : undefined;
 }
 
 // ── Time Display ────────────────────────────────────────────────────────────
@@ -165,19 +186,27 @@ function mapFixtureToMatch(fixture: SMFixture): Match {
   const leagueConfig = getLeagueConfig(fixture.league_id);
   const dateStr = fixture.starting_at.split(' ')[0]; // "YYYY-MM-DD"
 
+  const homeScoreHT = getHalfTimeGoals(fixture.scores, 'home');
+  const awayScoreHT = getHalfTimeGoals(fixture.scores, 'away');
+
   return {
     id: String(fixture.id),
     homeTeam: mapParticipantToTeam(home),
     awayTeam: mapParticipantToTeam(away),
     homeScore: getGoals(fixture.scores, 'home'),
     awayScore: getGoals(fixture.scores, 'away'),
+    homeScoreHT,
+    awayScoreHT,
     status,
     time: getTimeDisplay(fixture),
     minute: getLiveMinute(fixture),
+    stateLabel: mapStateLabel(fixture.state_id),
     league: fixture.league?.name ?? leagueConfig?.name ?? 'Unknown',
     leagueId: String(fixture.league_id),
     date: dateStr,
     isFavorite: false,
+    startingAtUtc: fixture.starting_at,
+    seasonId: fixture.season_id,
   };
 }
 
@@ -219,80 +248,239 @@ function mapEvents(events: SMEvent[] | undefined, fixture: SMFixture): MatchEven
 // ── Statistics Mapper ───────────────────────────────────────────────────────
 
 const STAT_TYPE_NAMES: Record<number, string> = {
-  [SM_STAT_TYPES.BALL_POSSESSION]: 'Posesión',
-  [SM_STAT_TYPES.SHOTS_TOTAL]: 'Tiros',
-  [SM_STAT_TYPES.SHOTS_ON_TARGET]: 'Tiros a puerta',
-  [SM_STAT_TYPES.EXPECTED_GOALS]: 'xG',
-  [SM_STAT_TYPES.CORNERS]: 'Córners',
+  // Ataque
+  [SM_STAT_TYPES.BALL_POSSESSION]:    'Posesión',
+  [SM_STAT_TYPES.SHOTS_TOTAL]:        'Tiros totales',
+  [SM_STAT_TYPES.SHOTS_ON_TARGET]:    'Tiros a puerta',
+  [SM_STAT_TYPES.SHOTS_OFF_TARGET]:   'Tiros fuera',
+  [SM_STAT_TYPES.SHOTS_BLOCKED]:      'Tiros bloqueados',
+  [SM_STAT_TYPES.SHOTS_INSIDE_BOX]:   'Tiros dentro área',
+  [SM_STAT_TYPES.SHOTS_OUTSIDE_BOX]:  'Tiros fuera área',
+  [SM_STAT_TYPES.EXPECTED_GOALS]:     'xG',
+  [SM_STAT_TYPES.ATTACKS]:            'Ataques',
+  [SM_STAT_TYPES.DANGEROUS_ATTACKS]:  'Ataques peligrosos',
+  // Pases
+  [SM_STAT_TYPES.PASSES_TOTAL]:       'Pases totales',
+  [SM_STAT_TYPES.PASSES_ACCURACY]:    'Precisión de pases',
+  // Defensa
+  [SM_STAT_TYPES.CORNERS]:            'Córners',
+  [SM_STAT_TYPES.OFFSIDES]:           'Fueras de juego',
+  [SM_STAT_TYPES.SAVES]:              'Paradas',
+  // Disciplina
+  [SM_STAT_TYPES.FOULS]:              'Faltas',
+  [SM_STAT_TYPES.YELLOW_CARDS]:       'Tarjetas amarillas',
+  [SM_STAT_TYPES.RED_CARDS]:          'Tarjetas rojas',
 };
+
+// Which stat IDs are percentages (displayed with % suffix)
+const PERCENTAGE_STAT_IDS = new Set<number>([
+  SM_STAT_TYPES.BALL_POSSESSION,
+  SM_STAT_TYPES.PASSES_ACCURACY,
+]);
+
+// Category groupings — order matters for display
+const STAT_CATEGORIES: { name: string; typeIds: number[] }[] = [
+  {
+    name: 'Ataque',
+    typeIds: [
+      SM_STAT_TYPES.BALL_POSSESSION,
+      SM_STAT_TYPES.SHOTS_TOTAL,
+      SM_STAT_TYPES.SHOTS_ON_TARGET,
+      SM_STAT_TYPES.SHOTS_OFF_TARGET,
+      SM_STAT_TYPES.SHOTS_BLOCKED,
+      SM_STAT_TYPES.SHOTS_INSIDE_BOX,
+      SM_STAT_TYPES.SHOTS_OUTSIDE_BOX,
+      SM_STAT_TYPES.EXPECTED_GOALS,
+      SM_STAT_TYPES.ATTACKS,
+      SM_STAT_TYPES.DANGEROUS_ATTACKS,
+    ],
+  },
+  {
+    name: 'Pases',
+    typeIds: [
+      SM_STAT_TYPES.PASSES_TOTAL,
+      SM_STAT_TYPES.PASSES_ACCURACY,
+    ],
+  },
+  {
+    name: 'Defensa',
+    typeIds: [
+      SM_STAT_TYPES.CORNERS,
+      SM_STAT_TYPES.OFFSIDES,
+      SM_STAT_TYPES.SAVES,
+    ],
+  },
+  {
+    name: 'Disciplina',
+    typeIds: [
+      SM_STAT_TYPES.FOULS,
+      SM_STAT_TYPES.YELLOW_CARDS,
+      SM_STAT_TYPES.RED_CARDS,
+    ],
+  },
+];
 
 function mapStatistics(stats: SMStatistic[] | undefined, fixture: SMFixture): MatchStatCategory[] {
   if (!stats || stats.length === 0) return [];
 
   const home = getParticipant(fixture, 'home');
-  // Group stats by type_id, pairing home/away
-  const grouped = new Map<number, { home: number; away: number }>();
 
+  // Collect all stats into a map keyed by type_id
+  const grouped = new Map<number, { home: number; away: number }>();
   for (const s of stats) {
-    const val = typeof s.data.value === 'number' ? s.data.value : parseFloat(String(s.data.value)) || 0;
+    const raw = s.data.value;
+    const val = typeof raw === 'number' ? raw : parseFloat(String(raw)) || 0;
     const isHome = s.participant_id === home?.id;
-    if (!grouped.has(s.type_id)) {
-      grouped.set(s.type_id, { home: 0, away: 0 });
-    }
+    if (!grouped.has(s.type_id)) grouped.set(s.type_id, { home: 0, away: 0 });
     const entry = grouped.get(s.type_id)!;
-    if (isHome) entry.home = val;
-    else entry.away = val;
+    if (isHome) entry.home = val; else entry.away = val;
   }
 
-  const statItems = Array.from(grouped.entries())
-    .filter(([typeId]) => STAT_TYPE_NAMES[typeId]) // only known types
-    .map(([typeId, vals]) => ({
-      label: STAT_TYPE_NAMES[typeId],
-      home: vals.home,
-      away: vals.away,
-      unit: typeId === SM_STAT_TYPES.BALL_POSSESSION ? '%' : undefined,
-      type: typeId === SM_STAT_TYPES.BALL_POSSESSION ? 'percentage' as const : 'number' as const,
-    }));
+  // Build categories — only include categories that have at least one stat
+  const result: MatchStatCategory[] = [];
+  for (const cat of STAT_CATEGORIES) {
+    const items = cat.typeIds
+      .filter(id => grouped.has(id))
+      .map(id => {
+        const vals = grouped.get(id)!;
+        const isPct = PERCENTAGE_STAT_IDS.has(id);
+        return {
+          label: STAT_TYPE_NAMES[id],
+          home: vals.home,
+          away: vals.away,
+          unit: isPct ? '%' : undefined,
+          type: isPct ? 'percentage' as const : 'number' as const,
+        };
+      });
+    if (items.length > 0) result.push({ category: cat.name, stats: items });
+  }
 
-  if (statItems.length === 0) return [];
-  return [{ category: 'Estadísticas', stats: statItems }];
+  return result;
 }
 
 // ── Lineup Mapper ───────────────────────────────────────────────────────────
 
-function mapLineup(entries: SMLineupEntry[] | undefined, teamId: number): MatchLineup {
-  const empty: MatchLineup = { formation: '4-4-2', starters: [], bench: [], coach: '', coachNationality: '' };
+function mapLineup(
+  entries: SMLineupEntry[] | undefined,
+  teamId: number,
+  events?: SMEvent[],
+): MatchLineup {
+  const empty: MatchLineup = { formation: '?', starters: [], bench: [], coach: '', coachNationality: '' };
   if (!entries) return empty;
 
   const teamEntries = entries.filter(e => e.team_id === teamId);
   const starters = teamEntries.filter(e => e.type_id === 11);
-  const bench = teamEntries.filter(e => e.type_id === 12);
+  const bench    = teamEntries.filter(e => e.type_id === 12);
 
-  // Derive formation from starters' formation_field
-  const positions = starters.map(s => s.formation_field).filter(Boolean);
-  const formationRows = new Map<string, number>();
-  for (const pos of positions) {
-    if (!pos) continue;
-    const row = pos.split(':')[0];
-    formationRows.set(row, (formationRows.get(row) || 0) + 1);
+  // ── Parse formation rows from formation_field ("row:col") ──────────────
+  const rowMap = new Map<number, SMLineupEntry[]>();
+  for (const e of starters) {
+    if (!e.formation_field) continue;
+    const row = parseInt(e.formation_field.split(':')[0]);
+    if (!isNaN(row)) {
+      if (!rowMap.has(row)) rowMap.set(row, []);
+      rowMap.get(row)!.push(e);
+    }
   }
-  const formation = Array.from(formationRows.values()).slice(1).join('-') || '4-4-2'; // skip GK row
+  const sortedRows = Array.from(rowMap.entries()).sort(([a], [b]) => a - b);
 
-  const mapPlayer = (e: SMLineupEntry, idx: number): LineupPlayer => ({
-    id: String(e.player_id),
-    name: e.player_name,
-    shortName: e.player_name.split(' ').pop() || e.player_name,
-    number: e.jersey_number,
-    position: positionName(e.position_id),
-    positionShort: positionShort(e.position_id),
-    x: 50,
-    y: idx * (100 / Math.max(starters.length, 1)),
-  });
+  // Formation string: skip row 1 (GK)
+  const formation = sortedRows.length > 1
+    ? sortedRows.slice(1).map(([, es]) => es.length).join('-')
+    : '?';
+
+  // ── Position map (player_id → {row, col, rowSize, x, y}) ───────────────
+  const posMap = new Map<number, { row: number; col: number; rowSize: number; x: number; y: number }>();
+  const maxRow = sortedRows.length > 0 ? sortedRows[sortedRows.length - 1][0] : 1;
+
+  for (const [row, rowEntries] of sortedRows) {
+    const sorted = [...rowEntries].sort((a, b) => {
+      const ca = parseInt(a.formation_field?.split(':')[1] ?? '1');
+      const cb = parseInt(b.formation_field?.split(':')[1] ?? '1');
+      return ca - cb;
+    });
+    sorted.forEach((e, i) => {
+      const colX = (i + 1) / (sorted.length + 1) * 100;
+      const rowY = (row / maxRow) * 100;
+      posMap.set(e.player_id, { row, col: i + 1, rowSize: sorted.length, x: colX, y: rowY });
+    });
+  }
+
+  // ── Card & substitution cross-referencing from events ──────────────────
+  // Build a map: player_id → card/sub flags
+  const cardMap = new Map<number, {
+    yellowCard: boolean;
+    redCard: boolean;
+    isSubstituted: boolean;
+    substituteMinute?: number;
+    goals: number;
+  }>();
+
+  if (events) {
+    for (const ev of events) {
+      // Goals (both scored by and assists — we track scorer here)
+      if (ev.type_id === SM_EVENT_TYPES.GOAL ||
+          ev.type_id === SM_EVENT_TYPES.PENALTY_GOAL ||
+          ev.type_id === SM_EVENT_TYPES.OWN_GOAL) {
+        const entry = cardMap.get(ev.player_id) ?? { yellowCard: false, redCard: false, isSubstituted: false, goals: 0 };
+        entry.goals = (entry.goals ?? 0) + 1;
+        cardMap.set(ev.player_id, entry);
+      }
+      // Yellow card
+      if (ev.type_id === SM_EVENT_TYPES.YELLOW_CARD) {
+        const entry = cardMap.get(ev.player_id) ?? { yellowCard: false, redCard: false, isSubstituted: false, goals: 0 };
+        entry.yellowCard = true;
+        cardMap.set(ev.player_id, entry);
+      }
+      // Second yellow or straight red
+      if (ev.type_id === SM_EVENT_TYPES.SECOND_YELLOW || ev.type_id === SM_EVENT_TYPES.RED_CARD) {
+        const entry = cardMap.get(ev.player_id) ?? { yellowCard: false, redCard: false, isSubstituted: false, goals: 0 };
+        entry.redCard = true;
+        cardMap.set(ev.player_id, entry);
+      }
+      // Substitution — related_player_id is the player going OFF
+      if (ev.type_id === SM_EVENT_TYPES.SUBSTITUTION && ev.related_player_id) {
+        const entry = cardMap.get(ev.related_player_id) ?? { yellowCard: false, redCard: false, isSubstituted: false, goals: 0 };
+        entry.isSubstituted = true;
+        entry.substituteMinute = ev.minute;
+        cardMap.set(ev.related_player_id, entry);
+      }
+    }
+  }
+
+  const shortName = (name: string) => {
+    const parts = name.trim().split(' ');
+    return parts.length > 1 ? parts[parts.length - 1] : name;
+  };
+
+  const mapPlayer = (e: SMLineupEntry, idx: number): LineupPlayer => {
+    const pos   = posMap.get(e.player_id);
+    const cards = cardMap.get(e.player_id);
+    return {
+      id: String(e.player_id),
+      name: e.player_name,
+      shortName: shortName(e.player?.display_name || e.player_name),
+      number: e.jersey_number,
+      position: positionName(e.position_id),
+      positionShort: positionShort(e.position_id),
+      x: pos?.x ?? 50,
+      y: pos?.y ?? (idx / Math.max(starters.length, 1)) * 100,
+      formationRow: pos?.row,
+      formationCol: pos?.col,
+      formationRowSize: pos?.rowSize,
+      imageUrl: e.player?.image_path ?? undefined,
+      yellowCard: cards?.yellowCard,
+      redCard: cards?.redCard,
+      isSubstituted: cards?.isSubstituted,
+      substituteMinute: cards?.substituteMinute,
+      goals: cards?.goals ?? 0,
+    };
+  };
 
   return {
     formation,
     starters: starters.map(mapPlayer),
-    bench: bench.map(mapPlayer),
+    bench: bench.map((e, i) => mapPlayer(e, i)),
     coach: '',
     coachNationality: '',
   };
@@ -338,15 +526,15 @@ function mapStandingToLeagueStanding(sg: SMStandingGroup): LeagueStanding {
 
   // Standing detail type IDs (common SM mappings)
   const findDetail = (typeId: number) => details.find(d => d.type_id === typeId)?.value ?? 0;
-  // Common type_ids: 129=W, 130=D, 131=L, 179=played, 187=GF, 188=GA, 189=GD
-  // These may vary — we try several known mappings
-  const played = findDetail(129) + findDetail(130) + findDetail(131) || findDetail(179);
-  const won = findDetail(129) || findDetail(130); // fallback
+  // SM standing detail type_ids: 129=W, 130=D, 131=L, 179=GP, 187=GF, 188=GA, 189=GD
+  const won   = findDetail(129);
   const drawn = findDetail(130);
-  const lost = findDetail(131);
+  const lost  = findDetail(131);
+  // Played: prefer explicit GP stat, fallback to W+D+L
+  const played = findDetail(179) || (won + drawn + lost);
   const gf = findDetail(187);
   const ga = findDetail(188);
-  const gd = findDetail(189) || gf - ga;
+  const gd = findDetail(189) || (gf - ga);
 
   return {
     position: sg.position,
@@ -465,8 +653,8 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
       venue: mapVenue(fixture.venue),
       events: mapEvents(fixture.events, fixture),
       statistics: mapStatistics(fixture.statistics, fixture),
-      homeLineup: mapLineup(fixture.lineups, homeTeam?.id ?? 0),
-      awayLineup: mapLineup(fixture.lineups, awayTeam?.id ?? 0),
+      homeLineup: mapLineup(fixture.lineups, homeTeam?.id ?? 0, fixture.events),
+      awayLineup: mapLineup(fixture.lineups, awayTeam?.id ?? 0, fixture.events),
     };
 
     return { match, detail };

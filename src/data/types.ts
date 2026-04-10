@@ -19,12 +19,17 @@ export interface Match {
   homeScore: number;
   awayScore: number;
   status: MatchStatus;
-  time: string;       // display time: "20:00", "45'", "FT"
-  minute?: number;    // live minute
-  league: string;     // display name
+  time: string;           // display time: "20:00", "45'", "FT"
+  minute?: number;        // live minute
+  league: string;         // display name
   leagueId: string;
-  date: string;       // ISO "YYYY-MM-DD"
+  date: string;           // ISO "YYYY-MM-DD"
   isFavorite?: boolean;
+  startingAtUtc?: string; // raw SM "YYYY-MM-DD HH:MM:SS" UTC — used for countdown
+  seasonId?: number;      // SM season ID — used for standings tab
+  homeScoreHT?: number;   // half-time score (home)
+  awayScoreHT?: number;   // half-time score (away)
+  stateLabel?: string;    // "1T" | "HT" | "2T" | "ET" | "PEN" — live state
 }
 
 export interface LeagueStanding {
@@ -221,8 +226,11 @@ export interface LineupPlayer {
   number: number;
   position: string;
   positionShort: string;
-  x: number; // 0–100 percentage on pitch
-  y: number;
+  x: number; // 0–100 percentage on pitch width
+  y: number; // 0–100 percentage on pitch height (0 = own goal, 50 = midfield)
+  formationRow?: number;  // SM row number (1=GK, 2=def, etc.)
+  formationCol?: number;  // column index within row
+  formationRowSize?: number; // total players in this row
   rating?: number;
   isCaptain?: boolean;
   isSubstituted?: boolean;
@@ -231,6 +239,9 @@ export interface LineupPlayer {
   redCard?: boolean;
   goals?: number;
   assists?: number;
+  nationality?: string;
+  nationalityFlag?: string;
+  imageUrl?: string;
 }
 
 export interface MatchLineup {
