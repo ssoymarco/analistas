@@ -1,7 +1,7 @@
 // ── Team Detail Screen ────────────────────────────────────────────────────────
-// Full team profile: collapsible header, 4 tabs (Resumen, Plantilla, Partidos, Tabla).
+// Full team profile: sticky compact header, 4 tabs (Resumen, Plantilla, Partidos, Tabla).
 // Dark/Light mode responsive. Uses real SportMonks data.
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,15 @@ import {
   Image,
   ActivityIndicator,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import ViewShot, { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFavorites } from '../contexts/FavoritesContext';
@@ -38,12 +42,12 @@ function BackArrow({ color }: { color: string }) {
 }
 
 // ── Share icon ───────────────────────────────────────────────────────────────
-function ShareIcon({ color }: { color: string }) {
+function ShareIcon({ color, size = 18 }: { color: string; size?: number }) {
   return (
-    <View style={{ width: 18, height: 18, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ width: 2, height: 10, backgroundColor: color, borderRadius: 1, position: 'absolute', bottom: 2 }} />
-      <View style={{ position: 'absolute', top: 0, left: 2, width: 6, height: 1.5, backgroundColor: color, transform: [{ rotate: '-45deg' }] }} />
-      <View style={{ position: 'absolute', top: 0, right: 2, width: 6, height: 1.5, backgroundColor: color, transform: [{ rotate: '45deg' }] }} />
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: 2, height: size * 0.56, backgroundColor: color, borderRadius: 1, position: 'absolute', bottom: size * 0.11 }} />
+      <View style={{ position: 'absolute', top: 0, left: size * 0.11, width: size * 0.33, height: 1.5, backgroundColor: color, transform: [{ rotate: '-45deg' }] }} />
+      <View style={{ position: 'absolute', top: 0, right: size * 0.11, width: size * 0.33, height: 1.5, backgroundColor: color, transform: [{ rotate: '45deg' }] }} />
     </View>
   );
 }
@@ -74,7 +78,6 @@ const ResumenTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
   const c = useThemeColors();
   const { info, recentMatches, squad } = data;
 
-  // Top 5 players by number (just a quick display)
   const topPlayers = squad.filter(p => p.positionId !== 24).slice(0, 5);
 
   return (
@@ -103,7 +106,7 @@ const ResumenTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
       {recentMatches.length > 0 && (
         <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
           <Text style={[s.cardTitle, { color: c.textPrimary }]}>Partidos recientes</Text>
-          {recentMatches.slice(0, 3).map((m, i) => (
+          {recentMatches.filter(m => m.isFinished).slice(0, 3).map((m, i) => (
             <View key={i} style={[s.matchRow, { borderTopColor: c.border }]}>
               <View style={s.matchTeam}>
                 {m.homeLogo.startsWith('http') ? (
@@ -215,114 +218,308 @@ const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// TAB: Partidos
+// TAB: Partidos (redesigned — current, previous 3, next 3)
 // ══════════════════════════════════════════════════════════════════════════════
+
+function MatchFixtureCard({
+  m, highlight, label, c,
+}: { m: RecentMatch; highlight?: boolean; label?: string; c: any }) {
+  const resultColors: Record<string, string> = { W: '#10b981', D: '#f59e0b', L: '#ef4444' };
+  return (
+    <View style={[
+      s.fixtureRow,
+      { backgroundColor: c.card, borderColor: highlight ? c.accent : c.border },
+      highlight && { borderWidth: 1.5 },
+    ]}>
+      {label && (
+        <View style={{
+          position: 'absolute', top: -10, left: 14,
+          backgroundColor: c.accent, borderRadius: 8,
+          paddingHorizontal: 8, paddingVertical: 2,
+        }}>
+          <Text style={{ fontSize: 9, fontWeight: '800', color: '#111', letterSpacing: 0.5 }}>{label}</Text>
+        </View>
+      )}
+      <Text style={[s.fixtureDate, { color: c.textTertiary }]}>{m.date}</Text>
+      <View style={s.fixtureTeams}>
+        <View style={s.fixtureTeam}>
+          {m.homeLogo.startsWith('http') ? (
+            <Image source={{ uri: m.homeLogo }} style={s.fixtureLogo} />
+          ) : <Text style={{ fontSize: 14 }}>⚽</Text>}
+          <Text style={[s.fixtureName, { color: c.textPrimary }]} numberOfLines={1}>{m.homeShort}</Text>
+        </View>
+        <View style={s.fixtureScoreWrap}>
+          {m.isFinished ? (
+            <>
+              <Text style={[s.fixtureScore, { color: c.textPrimary }]}>{m.homeScore}</Text>
+              <Text style={[s.fixtureScoreSep, { color: c.textTertiary }]}> </Text>
+              <Text style={[s.fixtureScore, { color: c.textPrimary }]}>{m.awayScore}</Text>
+              {m.result && (
+                <View style={[s.resultDotSmall, { backgroundColor: resultColors[m.result] }]} />
+              )}
+            </>
+          ) : (
+            <Text style={[s.fixtureScore, { color: c.accent, fontSize: 13 }]}>vs</Text>
+          )}
+        </View>
+        <View style={[s.fixtureTeam, { justifyContent: 'flex-end' }]}>
+          <Text style={[s.fixtureName, { color: c.textPrimary, textAlign: 'right' }]} numberOfLines={1}>{m.awayShort}</Text>
+          {m.awayLogo.startsWith('http') ? (
+            <Image source={{ uri: m.awayLogo }} style={s.fixtureLogo} />
+          ) : <Text style={{ fontSize: 14 }}>⚽</Text>}
+        </View>
+      </View>
+    </View>
+  );
+}
 
 const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const [showAll, setShowAll] = useState(false);
 
   if (data.recentMatches.length === 0) {
     return (
       <View style={{ alignItems: 'center', paddingTop: 60 }}>
         <Text style={{ fontSize: 40, marginBottom: 12 }}>📋</Text>
-        <Text style={[{ fontSize: 15, fontWeight: '600', color: c.textSecondary }]}>Sin partidos disponibles</Text>
+        <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>Sin partidos disponibles</Text>
+      </View>
+    );
+  }
+
+  // Split matches: finished (sorted newest first) and upcoming (sorted soonest first)
+  const finishedMatches = data.recentMatches.filter(m => m.isFinished);
+  const upcomingMatches = data.recentMatches
+    .filter(m => !m.isFinished)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Last match = most recent finished
+  const lastMatch = finishedMatches[0] ?? null;
+  // Previous 3 = finished after the last
+  const previousMatches = finishedMatches.slice(1, 4);
+  // Next 3 upcoming
+  const nextMatches = upcomingMatches.slice(0, 3);
+
+  // All matches for "Ver todos"
+  const allSorted = [...data.recentMatches].sort((a, b) => a.date.localeCompare(b.date));
+
+  if (showAll) {
+    return (
+      <View style={{ paddingHorizontal: 16, gap: 6 }}>
+        <TouchableOpacity
+          onPress={() => setShowAll(false)}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 6,
+            paddingVertical: 8,
+          }}
+          activeOpacity={0.7}
+        >
+          <BackArrow color={c.accent} />
+          <Text style={{ fontSize: 13, fontWeight: '700', color: c.accent }}>Volver al resumen</Text>
+        </TouchableOpacity>
+        <Text style={[s.sectionLabel, { color: c.textTertiary }]}>
+          TODOS LOS PARTIDOS ({allSorted.length})
+        </Text>
+        {allSorted.map(m => (
+          <MatchFixtureCard key={m.id} m={m} c={c} />
+        ))}
+        <View style={{ height: 20 }} />
       </View>
     );
   }
 
   return (
-    <View style={{ paddingHorizontal: 16, gap: 4 }}>
-      {data.recentMatches.map((m, i) => (
-        <View key={m.id} style={[s.fixtureRow, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[s.fixtureDate, { color: c.textTertiary }]}>{m.date}</Text>
-          <View style={s.fixtureTeams}>
-            <View style={s.fixtureTeam}>
-              {m.homeLogo.startsWith('http') ? (
-                <Image source={{ uri: m.homeLogo }} style={s.fixtureLogo} />
-              ) : <Text style={{ fontSize: 14 }}>⚽</Text>}
-              <Text style={[s.fixtureName, { color: c.textPrimary }]} numberOfLines={1}>{m.homeShort}</Text>
-            </View>
-            <View style={s.fixtureScoreWrap}>
-              <Text style={[s.fixtureScore, { color: c.textPrimary }]}>{m.homeScore}</Text>
-              <Text style={[s.fixtureScoreSep, { color: c.textTertiary }]}> </Text>
-              <Text style={[s.fixtureScore, { color: c.textPrimary }]}>{m.awayScore}</Text>
-              {m.result && (
-                <View style={[s.resultDotSmall, {
-                  backgroundColor: m.result === 'W' ? '#10b981' : m.result === 'L' ? '#ef4444' : '#f59e0b',
-                }]} />
-              )}
-            </View>
-            <View style={[s.fixtureTeam, { justifyContent: 'flex-end' }]}>
-              <Text style={[s.fixtureName, { color: c.textPrimary, textAlign: 'right' }]} numberOfLines={1}>{m.awayShort}</Text>
-              {m.awayLogo.startsWith('http') ? (
-                <Image source={{ uri: m.awayLogo }} style={s.fixtureLogo} />
-              ) : <Text style={{ fontSize: 14 }}>⚽</Text>}
-            </View>
-          </View>
-        </View>
-      ))}
+    <View style={{ paddingHorizontal: 16, gap: 6 }}>
+      {/* Last match (highlighted) */}
+      {lastMatch && (
+        <>
+          <Text style={[s.sectionLabel, { color: c.textTertiary }]}>ÚLTIMO PARTIDO</Text>
+          <MatchFixtureCard m={lastMatch} highlight c={c} label="ÚLTIMO" />
+        </>
+      )}
+
+      {/* Previous matches */}
+      {previousMatches.length > 0 && (
+        <>
+          <Text style={[s.sectionLabel, { color: c.textTertiary, marginTop: 8 }]}>ANTERIORES</Text>
+          {previousMatches.map(m => (
+            <MatchFixtureCard key={m.id} m={m} c={c} />
+          ))}
+        </>
+      )}
+
+      {/* Upcoming matches */}
+      {nextMatches.length > 0 && (
+        <>
+          <Text style={[s.sectionLabel, { color: c.textTertiary, marginTop: 8 }]}>PRÓXIMOS</Text>
+          {nextMatches.map(m => (
+            <MatchFixtureCard key={m.id} m={m} c={c} />
+          ))}
+        </>
+      )}
+
+      {/* Ver todos button */}
+      {data.recentMatches.length > 7 && (
+        <TouchableOpacity
+          onPress={() => setShowAll(true)}
+          style={[s.verTodosBtn, { borderColor: c.border }]}
+          activeOpacity={0.7}
+        >
+          <Text style={[s.verTodosText, { color: c.accent }]}>
+            Ver todos los partidos ({data.recentMatches.length})
+          </Text>
+        </TouchableOpacity>
+      )}
+
       <View style={{ height: 20 }} />
     </View>
   );
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// TAB: Tabla
+// TAB: Tabla (with tappable teams + share button)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const TablaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const { isDark } = useDarkMode();
+  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
+  const tableRef = useRef<any>(null);
+  const [sharing, setSharing] = useState(false);
+
+  const handleShare = useCallback(async () => {
+    if (!tableRef.current) return;
+    setSharing(true);
+    try {
+      const uri = await captureRef(tableRef, {
+        format: 'png',
+        quality: 1,
+        result: 'tmpfile',
+      });
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          dialogTitle: 'Compartir tabla de posiciones',
+        });
+      } else {
+        Alert.alert('Compartir', 'La función de compartir no está disponible en este dispositivo.');
+      }
+    } catch (err) {
+      console.warn('[TablaTab] share failed:', err);
+    } finally {
+      setSharing(false);
+    }
+  }, []);
 
   if (data.standings.length === 0) {
     return (
       <View style={{ alignItems: 'center', paddingTop: 60 }}>
         <Text style={{ fontSize: 40, marginBottom: 12 }}>🏆</Text>
-        <Text style={[{ fontSize: 15, fontWeight: '600', color: c.textSecondary }]}>Sin tabla disponible</Text>
+        <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>Sin tabla disponible</Text>
       </View>
     );
   }
 
   return (
     <View style={{ paddingHorizontal: 16 }}>
-      <View style={[s.tableCard, { backgroundColor: c.card, borderColor: c.border }]}>
-        {/* Header */}
-        <View style={[s.tableHeader, { backgroundColor: c.surface }]}>
-          <Text style={[s.thPos, { color: c.textTertiary }]}></Text>
-          <Text style={[s.thTeam, { color: c.textTertiary }]}>EQUIPO</Text>
-          <Text style={[s.thStat, { color: c.textTertiary }]}>J</Text>
-          <Text style={[s.thStat, { color: c.textTertiary }]}>G</Text>
-          <Text style={[s.thStat, { color: c.textTertiary }]}>E</Text>
-          <Text style={[s.thStat, { color: c.textTertiary }]}>P</Text>
-          <Text style={[s.thPts, { color: c.textTertiary }]}>PTS</Text>
+      {/* Capturable table area */}
+      <ViewShot ref={tableRef} options={{ format: 'png', quality: 1 }}
+        style={{ backgroundColor: isDark ? '#0D0D0D' : '#fff', borderRadius: 14, overflow: 'hidden' }}
+      >
+        {/* Branding header for shared image */}
+        <View style={{
+          paddingHorizontal: 14, paddingTop: 14, paddingBottom: 8,
+          flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {data.info.logo?.startsWith('http') && (
+              <Image source={{ uri: data.info.logo }} style={{ width: 20, height: 20, borderRadius: 10 }} />
+            )}
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.textPrimary }}>
+              {data.info.leagueName || 'Tabla de posiciones'}
+            </Text>
+          </View>
+          <Text style={{ fontSize: 10, fontWeight: '600', color: c.textTertiary }}>Analistas App</Text>
         </View>
-        {data.standings.map((st, i) => {
-          const isHighlighted = st.team.id === String(data.info.id);
-          return (
-            <View key={st.team.id} style={[
-              s.tableRow,
-              { borderTopColor: c.border },
-              isHighlighted && { backgroundColor: 'rgba(59,130,246,0.1)' },
-            ]}>
-              <Text style={[s.tdPos, { color: isHighlighted ? '#3b82f6' : c.textTertiary }]}>{st.position}</Text>
-              <View style={s.tdTeam}>
-                {st.team.logo.startsWith('http') ? (
-                  <Image source={{ uri: st.team.logo }} style={s.tableLogo} />
-                ) : <Text style={{ fontSize: 12 }}>⚽</Text>}
-                <Text style={[
-                  s.tdTeamName,
-                  { color: c.textPrimary },
-                  isHighlighted && { fontWeight: '700', color: '#3b82f6' },
-                ]} numberOfLines={1}>{st.team.name}</Text>
-              </View>
-              <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.played}</Text>
-              <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.won}</Text>
-              <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.drawn}</Text>
-              <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.lost}</Text>
-              <Text style={[s.tdPts, { color: isHighlighted ? '#3b82f6' : c.textPrimary }]}>{st.points}</Text>
-            </View>
-          );
-        })}
+
+        <View style={[s.tableCard, { backgroundColor: c.card, borderColor: c.border }]}>
+          {/* Header */}
+          <View style={[s.tableHeader, { backgroundColor: c.surface }]}>
+            <Text style={[s.thPos, { color: c.textTertiary }]}></Text>
+            <Text style={[s.thTeam, { color: c.textTertiary }]}>EQUIPO</Text>
+            <Text style={[s.thStat, { color: c.textTertiary }]}>J</Text>
+            <Text style={[s.thStat, { color: c.textTertiary }]}>G</Text>
+            <Text style={[s.thStat, { color: c.textTertiary }]}>E</Text>
+            <Text style={[s.thStat, { color: c.textTertiary }]}>P</Text>
+            <Text style={[s.thPts, { color: c.textTertiary }]}>PTS</Text>
+          </View>
+          {data.standings.map((st) => {
+            const isHighlighted = st.team.id === String(data.info.id);
+            const teamIdNum = Number(st.team.id);
+            return (
+              <TouchableOpacity
+                key={st.team.id}
+                activeOpacity={0.6}
+                onPress={() => {
+                  if (!isNaN(teamIdNum) && teamIdNum > 0 && teamIdNum !== data.info.id) {
+                    navigation.push('TeamDetail', {
+                      teamId: teamIdNum,
+                      teamName: st.team.name,
+                      teamLogo: st.team.logo,
+                      seasonId: data.info.currentSeasonId ?? undefined,
+                    });
+                  }
+                }}
+                style={[
+                  s.tableRow,
+                  { borderTopColor: c.border },
+                  isHighlighted && { backgroundColor: 'rgba(59,130,246,0.12)' },
+                ]}
+              >
+                <Text style={[s.tdPos, { color: isHighlighted ? '#3b82f6' : c.textTertiary }]}>{st.position}</Text>
+                <View style={s.tdTeam}>
+                  {st.team.logo.startsWith('http') ? (
+                    <Image source={{ uri: st.team.logo }} style={s.tableLogo} />
+                  ) : <Text style={{ fontSize: 12 }}>⚽</Text>}
+                  <Text style={[
+                    s.tdTeamName,
+                    { color: c.textPrimary },
+                    isHighlighted && { fontWeight: '700', color: '#3b82f6' },
+                  ]} numberOfLines={1}>{st.team.name}</Text>
+                </View>
+                <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.played}</Text>
+                <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.won}</Text>
+                <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.drawn}</Text>
+                <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.lost}</Text>
+                <Text style={[s.tdPts, { color: isHighlighted ? '#3b82f6' : c.textPrimary }]}>{st.points}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </ViewShot>
+
+      {/* Share section */}
+      <View style={{ alignItems: 'center', marginTop: 20, gap: 8 }}>
+        <Text style={{ fontSize: 13, color: c.textTertiary, textAlign: 'center' }}>
+          Comparte esta tabla con tus amigos.
+        </Text>
+        <TouchableOpacity
+          onPress={handleShare}
+          disabled={sharing}
+          activeOpacity={0.7}
+          style={[s.shareButton, { backgroundColor: c.accent }]}
+        >
+          {sharing ? (
+            <ActivityIndicator size="small" color="#111" />
+          ) : (
+            <>
+              <ShareIcon color="#111" size={14} />
+              <Text style={s.shareButtonText}>Compartir</Text>
+            </>
+          )}
+        </TouchableOpacity>
       </View>
+
       <View style={{ height: 20 }} />
     </View>
   );
@@ -357,6 +554,27 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
       <StatusBar style="light" />
 
+      {/* ── Sticky compact header (always visible) ── */}
+      <View style={[hs.stickyHeader, { backgroundColor: headerBg }]}>
+        <View style={[hs.gradient, { backgroundColor: headerBgLight, opacity: 0.5 }]} />
+        <View style={hs.topBar}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={hs.backBtn} activeOpacity={0.7}>
+            <BackArrow color="#fff" />
+          </TouchableOpacity>
+          <View style={hs.compactCenter}>
+            {teamLogo?.startsWith('http') ? (
+              <Image source={{ uri: teamLogo }} style={hs.compactLogo} />
+            ) : null}
+            <Text style={hs.compactName} numberOfLines={1}>
+              {data?.info.name ?? teamName}
+            </Text>
+          </View>
+          <TouchableOpacity style={hs.shareBtn} activeOpacity={0.7}>
+            <ShareIcon color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 40 }}
@@ -365,21 +583,8 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
       >
         {/* ── Hero Header (scrolls with content) ── */}
         <View style={[hs.hero, { backgroundColor: headerBg }]}>
-          {/* Background gradient overlay */}
           <View style={[hs.gradient, { backgroundColor: headerBgLight, opacity: 0.5 }]} />
 
-          {/* Top bar */}
-          <View style={hs.topBar}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={hs.backBtn} activeOpacity={0.7}>
-              <BackArrow color="#fff" />
-            </TouchableOpacity>
-            <View style={{ flex: 1 }} />
-            <TouchableOpacity style={hs.shareBtn} activeOpacity={0.7}>
-              <ShareIcon color="#fff" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Expanded content */}
           <View style={hs.expanded}>
             {/* League label */}
             <Text style={hs.leagueLabel}>{data?.info.leagueName ?? ''}</Text>
@@ -487,20 +692,23 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const hs = StyleSheet.create({
+  // Sticky compact header
+  stickyHeader: {
+    position: 'relative',
+    zIndex: 20,
+  },
   hero: {
     position: 'relative',
   },
   gradient: {
     ...StyleSheet.absoluteFillObject,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
   },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 4,
-    height: 44,
+    paddingVertical: 8,
+    height: 48,
     zIndex: 2,
   },
   backBtn: {
@@ -513,9 +721,24 @@ const hs = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center', justifyContent: 'center',
   },
+  compactCenter: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+  },
+  compactLogo: {
+    width: 24, height: 24, borderRadius: 12,
+  },
+  compactName: {
+    fontSize: 15, fontWeight: '700', color: '#fff',
+    flexShrink: 1,
+  },
   expanded: {
     alignItems: 'center',
-    paddingTop: 0,
+    paddingTop: 4,
     paddingBottom: 16,
     gap: 6,
   },
@@ -661,7 +884,7 @@ const s = StyleSheet.create({
   // Fixture rows (Partidos tab)
   fixtureRow: {
     borderRadius: 12, borderWidth: 1, padding: 12,
-    marginBottom: 6,
+    marginBottom: 6, position: 'relative',
   },
   fixtureDate: { fontSize: 10, fontWeight: '600', marginBottom: 8, textAlign: 'center' },
   fixtureTeams: { flexDirection: 'row', alignItems: 'center' },
@@ -672,6 +895,17 @@ const s = StyleSheet.create({
   fixtureScore: { fontSize: 16, fontWeight: '800' },
   fixtureScoreSep: { fontSize: 12 },
   resultDotSmall: { width: 7, height: 7, borderRadius: 4 },
+
+  // Ver todos
+  verTodosBtn: {
+    borderRadius: 12, borderWidth: 1,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  verTodosText: {
+    fontSize: 14, fontWeight: '700',
+  },
 
   // Table
   tableCard: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
@@ -694,4 +928,19 @@ const s = StyleSheet.create({
   tdTeamName: { fontSize: 12, fontWeight: '500', flex: 1 },
   tdStat: { width: 26, fontSize: 12, textAlign: 'center' },
   tdPts:  { width: 32, fontSize: 14, fontWeight: '800', textAlign: 'center' },
+
+  // Share button
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    borderRadius: 24,
+    minWidth: 160,
+  },
+  shareButtonText: {
+    fontSize: 14, fontWeight: '700', color: '#111',
+  },
 });
