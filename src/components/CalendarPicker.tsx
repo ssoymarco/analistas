@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
 import { useThemeColors } from '../theme/useTheme';
-import { matchCountForDate } from '../data/mockData';
-
 interface CalendarPickerProps {
   visible: boolean;
   selectedDate: string; // YYYY-MM-DD
   onSelectDate: (dateStr: string) => void;
   onClose: () => void;
   onGoToday: () => void;
+  matchCounts?: Record<string, number>;
 }
 
 const DAY_HEADERS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -23,6 +22,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
   onSelectDate,
   onClose,
   onGoToday,
+  matchCounts = {},
 }) => {
   const c = useThemeColors();
 
@@ -119,7 +119,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
               const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
               const isToday = dateStr === todayStr;
               const isSelected = dateStr === selectedDate;
-              const mCount = matchCountForDate(dateStr);
+              const mCount = matchCounts[dateStr] ?? 0;
 
               return (
                 <TouchableOpacity

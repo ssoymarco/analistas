@@ -11,7 +11,7 @@ export interface LeagueConfig {
 }
 
 export const AVAILABLE_LEAGUES: LeagueConfig[] = [
-  { id: 271, name: 'Danish Superliga', country: 'Denmark', flag: '🇩🇰', currentSeasonId: null },
+  { id: 271, name: 'Danish Superliga', country: 'Denmark', flag: '🇩🇰', currentSeasonId: 25536 },
   { id: 501, name: 'Scottish Premiership', country: 'Scotland', flag: '🏴󠁧󠁢󠁳󠁣󠁴󠁿', currentSeasonId: 25598 },
 ];
 

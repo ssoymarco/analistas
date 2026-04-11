@@ -1,66 +1,167 @@
-import React, { useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useRef, useCallback, useEffect } from 'react';
+import { View, Text, TouchableOpacity, FlatList, StyleSheet, Dimensions } from 'react-native';
 import { useThemeColors } from '../theme/useTheme';
-import { DateItem, matchCountForDate } from '../data/mockData';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const CAL_BTN_WIDTH = 44;
+const SCROLL_WIDTH  = SCREEN_WIDTH - CAL_BTN_WIDTH;
+const ITEM_WIDTH    = 100;
+// How many "extra" days to generate in each direction for virtual infinite scroll
+const BUFFER_DAYS   = 120;
+const CENTER_INDEX  = BUFFER_DAYS; // "today" sits at this index
+
+const DAY_NAMES_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const MONTH_NAMES_SHORT = [
+  'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+  'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+];
+
+function isoDate(d: Date): string {
+  return d.toISOString().split('T')[0];
+}
+
+function dateFromOffset(offset: number): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + offset);
+  return d;
+}
+
+export interface DateItem {
+  label: string;   // 'Hoy', 'Ayer', 'Mañana' or "3 mar"
+  dayName: string; // 'Lun', 'Mar', etc.
+  date: string;    // ISO 'YYYY-MM-DD'
+  offset: number;  // days from today (0 = today, -1 = ayer, 1 = mañana)
+}
+
+function buildDateItem(offset: number): DateItem {
+  const d = dateFromOffset(offset);
+  const dayName = DAY_NAMES_SHORT[d.getDay()];
+  let label: string;
+  if (offset === 0) label = 'Hoy';
+  else if (offset === -1) label = 'Ayer';
+  else if (offset === 1) label = 'Mañana';
+  else label = `${d.getDate()} ${MONTH_NAMES_SHORT[d.getMonth()]}`;
+  return { label, dayName, date: isoDate(d), offset };
+}
+
+// Pre-generate all date items
+const ALL_DATES: DateItem[] = [];
+for (let i = -BUFFER_DAYS; i <= BUFFER_DAYS; i++) {
+  ALL_DATES.push(buildDateItem(i));
+}
 
 interface DateNavigatorProps {
-  dates: DateItem[];
-  selectedIndex: number;
-  onSelectDate: (index: number) => void;
+  /** Currently selected date as ISO string */
+  selectedDate: string;
+  /** Called when user picks a new date */
+  onSelectDate: (date: string) => void;
+  /** Open calendar modal */
   onCalendarPress?: () => void;
+  /** Match counts keyed by ISO date string */
+  matchCounts?: Record<string, number>;
 }
 
 export const DateNavigator: React.FC<DateNavigatorProps> = ({
-  dates,
-  selectedIndex,
+  selectedDate,
   onSelectDate,
   onCalendarPress,
+  matchCounts,
 }) => {
-  const scrollRef = useRef<ScrollView>(null);
+  const flatRef = useRef<FlatList>(null);
   const c = useThemeColors();
+  const hasScrolledInitial = useRef(false);
 
-  const handleSelect = (index: number) => {
-    onSelectDate(index);
-    scrollRef.current?.scrollTo({ x: Math.max(0, (index - 2) * 100), animated: true });
-  };
+  // Find selected index
+  const selectedIndex = ALL_DATES.findIndex(d => d.date === selectedDate);
+  const safeIndex = selectedIndex >= 0 ? selectedIndex : CENTER_INDEX;
+
+  // Scroll to center the selected date
+  const scrollToIndex = useCallback((index: number, animated = true) => {
+    flatRef.current?.scrollToIndex({
+      index,
+      animated,
+      viewPosition: 0.5, // center in viewport
+    });
+  }, []);
+
+  // Scroll to selected date on mount and when it changes
+  useEffect(() => {
+    if (!hasScrolledInitial.current) {
+      // Delay initial scroll to let FlatList measure
+      setTimeout(() => scrollToIndex(safeIndex, false), 50);
+      hasScrolledInitial.current = true;
+    } else {
+      scrollToIndex(safeIndex, true);
+    }
+  }, [safeIndex, scrollToIndex]);
+
+  const handleSelect = useCallback((item: DateItem) => {
+    onSelectDate(item.date);
+  }, [onSelectDate]);
+
+  const renderItem = useCallback(({ item, index }: { item: DateItem; index: number }) => {
+    const isSelected = index === safeIndex;
+    const isToday = item.offset === 0;
+    const count = matchCounts?.[item.date];
+
+    return (
+      <TouchableOpacity
+        style={[s.dateItem, isSelected && [s.dateItemSelected, { borderBottomColor: c.emerald }]]}
+        onPress={() => handleSelect(item)}
+        activeOpacity={0.7}
+      >
+        {/* Day name row — e.g. "Mié, 4 mar" or just "Hoy" for special labels */}
+        {item.offset !== 0 && item.offset !== -1 && item.offset !== 1 && (
+          <Text style={[s.dateLabel, { color: c.textTertiary }, isSelected && { color: c.textSecondary }]}>
+            {item.dayName}
+          </Text>
+        )}
+
+        {/* Main label */}
+        <Text style={[
+          s.dayLabel,
+          { color: c.textTertiary },
+          isSelected && { color: c.textPrimary },
+          isToday && !isSelected && { color: c.emerald },
+        ]}>
+          {item.label}
+        </Text>
+
+        {/* Match count */}
+        {count !== undefined && count > 0 && (
+          <Text style={[s.matchCount, { color: isSelected ? c.emerald : c.textTertiary }]}>
+            {count} partidos
+          </Text>
+        )}
+      </TouchableOpacity>
+    );
+  }, [safeIndex, c, handleSelect, matchCounts]);
+
+  const getItemLayout = useCallback((_: any, index: number) => ({
+    length: ITEM_WIDTH,
+    offset: ITEM_WIDTH * index,
+    index,
+  }), []);
+
+  const keyExtractor = useCallback((item: DateItem) => item.date, []);
 
   return (
     <View style={[s.wrapper, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
-      <ScrollView
-        ref={scrollRef}
+      <FlatList
+        ref={flatRef}
+        data={ALL_DATES}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={s.container}
-      >
-        {dates.map((item, index) => {
-          const isSelected = index === selectedIndex;
-          const isToday = item.label === 'Hoy';
-          return (
-            <TouchableOpacity
-              key={index}
-              style={[s.dateItem, isSelected && [s.dateItemSelected, { borderBottomColor: c.emerald }]]}
-              onPress={() => handleSelect(index)}
-              activeOpacity={0.7}
-            >
-              <Text style={[s.dateLabel, { color: c.textTertiary }, isSelected && { color: c.textSecondary }]}>
-                {item.dayName}{isToday ? '' : `, ${item.date.slice(8)}`}
-              </Text>
-              <Text style={[
-                s.dayLabel,
-                { color: c.textTertiary },
-                isSelected && { color: c.textPrimary },
-                isToday && !isSelected && { color: c.emerald },
-              ]}>
-                {item.label}
-              </Text>
-              {isSelected && (
-                <Text style={[s.matchCount, { color: c.emerald }]}>{matchCountForDate(item.date)} partidos</Text>
-              )}
-              {isSelected && <View style={s.indicator} />}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+        getItemLayout={getItemLayout}
+        initialScrollIndex={safeIndex}
+        style={{ width: SCROLL_WIDTH }}
+        windowSize={7}
+        maxToRenderPerBatch={15}
+        initialNumToRender={9}
+      />
 
       {/* Calendar icon */}
       <TouchableOpacity style={[s.calBtn, { borderLeftColor: c.border }]} activeOpacity={0.7} onPress={onCalendarPress}>
@@ -73,22 +174,40 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
   );
 };
 
+// ── Full date label helper (exported for PartidosScreen) ─────────────────────
+
+const MONTH_NAMES_FULL = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+];
+const DAY_NAMES_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+export function formatFullDate(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00');
+  const dayName = DAY_NAMES_FULL[d.getDay()];
+  const dayNum  = d.getDate();
+  const month   = MONTH_NAMES_FULL[d.getMonth()];
+  const year    = d.getFullYear();
+  return `${dayName}, ${dayNum} De ${month} De ${year}`;
+}
+
+/** Check if a date string is "today" */
+export function isToday(dateStr: string): boolean {
+  return dateStr === isoDate(new Date());
+}
+
+// ── Styles ───────────────────────────────────────────────────────────────────
+
 const s = StyleSheet.create({
   wrapper: {
     flexDirection: 'row',
     borderBottomWidth: 1,
   },
-  container: {
-    paddingHorizontal: 8,
-    gap: 0,
-    alignItems: 'flex-end',
-  },
   dateItem: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    width: ITEM_WIDTH,
     paddingVertical: 8,
-    minWidth: 80,
   },
   dateItemSelected: {
     borderBottomWidth: 2,
@@ -107,12 +226,8 @@ const s = StyleSheet.create({
     fontWeight: '600',
     marginTop: 2,
   },
-  indicator: {
-    width: 0,
-    height: 0,
-  },
   calBtn: {
-    width: 44,
+    width: CAL_BTN_WIDTH,
     alignItems: 'center',
     justifyContent: 'center',
     borderLeftWidth: 1,

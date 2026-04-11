@@ -20,6 +20,10 @@ import type {
   Team,
   OddsMarket,
   PressureIndex,
+  TeamFormEntry,
+  MissingPlayer,
+  MatchPrediction,
+  RefereeStats,
 } from '../data/types';
 
 import {
@@ -30,7 +34,12 @@ import {
   fetchTopScorers,
   fetchH2H,
   fetchTeamById,
+  fetchTeamsBySeasonId,
   fetchSquad,
+  fetchSidelinedByTeam,
+  fetchRefereeStats,
+  fetchTeamRecentFixtures,
+  fetchPredictions,
   SM_STATE_IDS,
   SM_EVENT_TYPES,
   SM_STAT_TYPES,
@@ -47,16 +56,11 @@ import {
   type SMFixtureTVStation,
   type SMWeatherReport,
   type SMOdd,
+  type SMSidelined,
+  type SMRefereeStats,
+  type SMPrediction,
 } from './sportmonks';
 
-import {
-  matches as mockMatches,
-  leagues as mockLeagues,
-  news as mockNews,
-  getLeaguesForDate as mockGetLeaguesForDate,
-  getMatchesForDate as mockGetMatchesForDate,
-} from '../data/mockData';
-import type { League as MockLeagueWithMatches } from '../data/mockData';
 import type { NewsArticle } from '../data/types';
 import { AVAILABLE_LEAGUES, getLeagueConfig, LEAGUE_IDS } from '../config/leagues';
 
@@ -537,17 +541,16 @@ function mapStandingToLeagueStanding(sg: SMStandingGroup): LeagueStanding {
   const p = sg.participant;
   const details = sg.details ?? [];
 
-  // Standing detail type IDs (common SM mappings)
+  // Standing detail type IDs (verified against SM API, April 2026)
+  // 129=GP, 130=W, 131=D, 132=L, 133=GF, 134=GA, 179=GD
   const findDetail = (typeId: number) => details.find(d => d.type_id === typeId)?.value ?? 0;
-  // SM standing detail type_ids: 129=W, 130=D, 131=L, 179=GP, 187=GF, 188=GA, 189=GD
-  const won   = findDetail(129);
-  const drawn = findDetail(130);
-  const lost  = findDetail(131);
-  // Played: prefer explicit GP stat, fallback to W+D+L
-  const played = findDetail(179) || (won + drawn + lost);
-  const gf = findDetail(187);
-  const ga = findDetail(188);
-  const gd = findDetail(189) || (gf - ga);
+  const played = findDetail(129);
+  const won    = findDetail(130);
+  const drawn  = findDetail(131);
+  const lost   = findDetail(132);
+  const gf     = findDetail(133);
+  const ga     = findDetail(134);
+  const gd     = findDetail(179) || (gf - ga);
 
   return {
     position: sg.position,
@@ -573,23 +576,15 @@ function mapStandingToLeagueStanding(sg: SMStandingGroup): LeagueStanding {
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Fetch all fixtures for a given date.
- * Merges real SportMonks data with mock data so the user always sees
- * both real leagues and the demo leagues side by side.
+ * Fetch all fixtures for a given date from SportMonks.
  */
 export async function getFixturesByDate(date: string): Promise<Match[]> {
-  // Always start with mock matches for this date
-  const mockResults = mockGetMatchesForDate(date);
-
   try {
     const fixtures = await fetchFixturesByDate(date, LEAGUE_IDS);
-    if (fixtures.length === 0) return mockResults;
-    const realMatches = fixtures.map(mapFixtureToMatch);
-    // Real leagues on top, then mock leagues
-    return [...realMatches, ...mockResults];
+    return fixtures.map(mapFixtureToMatch);
   } catch (err) {
-    console.warn('[sportsApi] getFixturesByDate failed, using mock only:', err);
-    return mockResults;
+    console.warn('[sportsApi] getFixturesByDate failed:', err);
+    return [];
   }
 }
 
@@ -602,15 +597,11 @@ export interface LeagueWithMatches extends League {
 }
 
 export async function getLeaguesByDate(date: string): Promise<LeagueWithMatches[]> {
-  // Always include mock leagues
-  const mockLeagueResults = mockGetLeaguesForDate(date);
-
   try {
     const fixtures = await fetchFixturesByDate(date, LEAGUE_IDS);
-    if (fixtures.length === 0) return mockLeagueResults;
+    if (fixtures.length === 0) return [];
 
     const matches = fixtures.map(mapFixtureToMatch);
-    // Group real fixtures by league
     const realLeagues: LeagueWithMatches[] = [];
     const leagueMap = new Map<string, LeagueWithMatches>();
     for (const m of matches) {
@@ -629,11 +620,10 @@ export async function getLeaguesByDate(date: string): Promise<LeagueWithMatches[
       leagueMap.get(m.leagueId)!.matches.push(m);
     }
 
-    // Real leagues first, then mock leagues
-    return [...realLeagues, ...mockLeagueResults];
+    return realLeagues;
   } catch (err) {
-    console.warn('[sportsApi] getLeaguesByDate failed, using mock only:', err);
-    return mockLeagueResults;
+    console.warn('[sportsApi] getLeaguesByDate failed:', err);
+    return [];
   }
 }
 
@@ -647,7 +637,7 @@ export async function getLiveFixtures(): Promise<Match[]> {
     return fixtures.map(mapFixtureToMatch);
   } catch (err) {
     console.warn('[sportsApi] getLiveFixtures failed:', err);
-    return mockMatches.filter(m => m.status === 'live');
+    return [];
   }
 }
 
@@ -804,10 +794,134 @@ function computePressureIndex(stats: SMStatistic[] | undefined, homeId: number):
   };
 }
 
+// ── Sidelined → MissingPlayer mapping ───────────────────────────────────────
+
+function mapSidelined(sidelined: SMSidelined[]): MissingPlayer[] {
+  return sidelined.map(s => ({
+    name: s.player?.display_name ?? s.player?.common_name ?? `Player ${s.player_id}`,
+    reason: s.category === 'injury' ? 'injury' : s.category === 'suspension' ? 'suspension' : 'other',
+    detail: s.end_date ? `Hasta ${s.end_date}` : (s.category === 'injury' ? 'Lesión' : s.category === 'suspension' ? 'Suspendido' : 'No disponible'),
+  }));
+}
+
+// ── Referee Stats mapping ───────────────────────────────────────────────────
+
+function mapRefereeStats(raw: { statistics?: SMRefereeStats[] }): RefereeStats | undefined {
+  const stats = raw.statistics;
+  if (!stats || stats.length === 0) return undefined;
+
+  // SM referee stat type_ids: 83=yellowcards, 84=redcards, 56=fouls, 42=penalties
+  // Values can be { total, average } or just a number
+  const extract = (typeId: number): { total: number; avg: number } => {
+    const found = stats.filter(s => s.type_id === typeId);
+    let total = 0, avg = 0;
+    for (const s of found) {
+      if (typeof s.value === 'number') {
+        total += s.value;
+      } else if (s.value && typeof s.value === 'object') {
+        total += s.value.total ?? 0;
+        avg = parseFloat(s.value.average ?? '0') || avg;
+      }
+    }
+    return { total, avg };
+  };
+
+  const yellows = extract(83);
+  const reds = extract(84);
+  const fouls = extract(56);
+  const penalties = extract(42);
+  const matches = stats.find(s => s.type_id === 155); // matches officiated
+  const totalMatches = matches ? (typeof matches.value === 'number' ? matches.value : matches.value?.total ?? 0) : 0;
+
+  if (totalMatches === 0 && yellows.total === 0) return undefined;
+
+  return {
+    yellowCardsPerMatch: yellows.avg || (totalMatches ? +(yellows.total / totalMatches).toFixed(2) : 0),
+    redCardsPerMatch: reds.avg || (totalMatches ? +(reds.total / totalMatches).toFixed(2) : 0),
+    foulsPerMatch: fouls.avg || (totalMatches ? +(fouls.total / totalMatches).toFixed(2) : 0),
+    penaltiesPerMatch: penalties.avg || (totalMatches ? +(penalties.total / totalMatches).toFixed(2) : 0),
+    totalMatches,
+  };
+}
+
+// ── Team Form mapping ───────────────────────────────────────────────────────
+
+function mapTeamForm(fixtures: SMFixture[], teamId: number): TeamFormEntry[] {
+  // Sort by date descending, take last 5 finished
+  const sorted = fixtures
+    .filter(f => {
+      const stateId = f.state?.id ?? f.state_id;
+      return stateId === SM_STATE_IDS.FULL_TIME
+        || stateId === SM_STATE_IDS.FINISHED_AET
+        || stateId === SM_STATE_IDS.FINISHED_PEN;
+    })
+    .sort((a, b) => b.starting_at_timestamp - a.starting_at_timestamp)
+    .slice(0, 5);
+
+  return sorted.map(f => {
+    const home = f.participants?.find(p => p.meta?.location === 'home');
+    const away = f.participants?.find(p => p.meta?.location === 'away');
+    const isHome = home?.id === teamId;
+    const teamGoals = getGoals(f.scores, isHome ? 'home' : 'away');
+    const oppGoals = getGoals(f.scores, isHome ? 'away' : 'home');
+    const opponent = isHome ? away : home;
+    const result: 'W' | 'D' | 'L' = teamGoals > oppGoals ? 'W' : teamGoals < oppGoals ? 'L' : 'D';
+
+    return {
+      matchId: String(f.id),
+      opponent: opponent?.name ?? 'Unknown',
+      opponentLogo: opponent?.image_path ?? '⚽',
+      isHome,
+      goalsFor: teamGoals,
+      goalsAgainst: oppGoals,
+      result,
+      date: f.starting_at.split(' ')[0],
+      league: f.league?.name ?? '',
+    };
+  });
+}
+
+// ── Predictions mapping ─────────────────────────────────────────────────────
+
+function mapPredictions(raw: SMPrediction[]): MatchPrediction[] {
+  const results: MatchPrediction[] = [];
+  for (const p of raw) {
+    const typeName = p.type?.name ?? p.type?.developer_name ?? '';
+    if (!p.predictions) continue;
+
+    // Fulltime Result — has yes/no per outcome type
+    if (typeName.toLowerCase().includes('result') || typeName.toLowerCase().includes('winner')) {
+      // SM returns separate prediction entries for home/draw/away
+      // We need to aggregate them
+      results.push({
+        type: 'Resultado Final',
+        homeWin: p.predictions.yes,
+        draw: undefined,
+        awayWin: undefined,
+        yes: p.predictions.yes,
+        no: p.predictions.no,
+      });
+    } else if (typeName.toLowerCase().includes('btts') || typeName.toLowerCase().includes('both')) {
+      results.push({
+        type: 'Ambos Anotan',
+        yes: p.predictions.yes,
+        no: p.predictions.no,
+      });
+    } else if (typeName.toLowerCase().includes('over') || typeName.toLowerCase().includes('under')) {
+      results.push({
+        type: 'Más/Menos 2.5',
+        yes: p.predictions.yes,
+        no: p.predictions.no,
+      });
+    }
+  }
+  return results;
+}
+
 /**
- * Fetch full fixture detail with SM data available on free plan:
- * events, stats, lineups, venue, referee, weather, TV, H2H, pressure.
- * Odds are not included in the main request to keep response size small (~43KB vs 1.8MB).
+ * Fetch full fixture detail with all available SM data:
+ * events, stats, lineups, venue, referee, weather, TV, H2H, pressure,
+ * injuries, form, predictions, referee stats.
  */
 export async function getFixtureDetail(id: number): Promise<{ match: Match; detail: Partial<MatchDetail> } | null> {
   try {
@@ -817,25 +931,49 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
     const awayTeam = getParticipant(fixture, 'away');
 
     const refereeData = mapReferee(fixture.referees);
+    const mainRefereeId = fixture.referees?.find(r => r.type_id === 6)?.referee_id;
 
-    // Fire secondary requests in parallel — only endpoints available on free plan
-    const [h2hResults] = await Promise.all([
-      // H2H (works on free plan)
+    // Fire ALL secondary requests in parallel
+    const [h2hResults, homeSidelined, awaySidelined, homeFixtures, awayFixtures, refStats, predictions] = await Promise.all([
+      // H2H
       (homeTeam && awayTeam)
-        ? fetchH2H(homeTeam.id, awayTeam.id).catch((e) => {
-            console.warn('[sportsApi] H2H failed:', e.message);
-            return [] as SMFixture[];
-          })
+        ? fetchH2H(homeTeam.id, awayTeam.id).catch(() => [] as SMFixture[])
         : Promise.resolve([] as SMFixture[]),
+      // Sidelined/Injuries — home
+      (homeTeam && fixture.season_id)
+        ? fetchSidelinedByTeam(fixture.season_id, homeTeam.id).catch(() => [] as SMSidelined[])
+        : Promise.resolve([] as SMSidelined[]),
+      // Sidelined/Injuries — away
+      (awayTeam && fixture.season_id)
+        ? fetchSidelinedByTeam(fixture.season_id, awayTeam.id).catch(() => [] as SMSidelined[])
+        : Promise.resolve([] as SMSidelined[]),
+      // Team form — home
+      homeTeam
+        ? fetchTeamRecentFixtures(homeTeam.id).catch(() => [] as SMFixture[])
+        : Promise.resolve([] as SMFixture[]),
+      // Team form — away
+      awayTeam
+        ? fetchTeamRecentFixtures(awayTeam.id).catch(() => [] as SMFixture[])
+        : Promise.resolve([] as SMFixture[]),
+      // Referee stats
+      mainRefereeId
+        ? fetchRefereeStats(mainRefereeId).catch(() => ({ id: 0 }))
+        : Promise.resolve({ id: 0 }),
+      // Predictions
+      fetchPredictions(id).catch(() => [] as SMPrediction[]),
     ]);
 
-    // Build detail from fixture data (no extra API calls for unavailable endpoints)
+    // Filter sidelined to only active (not completed) injuries/suspensions
+    const activeHomeSidelined = homeSidelined.filter(s => !s.completed);
+    const activeAwaySidelined = awaySidelined.filter(s => !s.completed);
+
     const detail: Partial<MatchDetail> = {
       matchId: String(fixture.id),
       venue: mapVenue(fixture.venue),
       referee: refereeData.referee,
       assistantReferees: refereeData.assistants.length > 0 ? refereeData.assistants : undefined,
       fourthOfficial: refereeData.fourthOfficial,
+      refereeStats: mainRefereeId ? mapRefereeStats(refStats as { statistics?: SMRefereeStats[] }) : undefined,
       weather: mapWeather(fixture.weatherreport),
       events: mapEvents(fixture.events, fixture),
       statistics: mapStatistics(fixture.statistics, fixture),
@@ -845,7 +983,13 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
       resultInfo: fixture.result_info ?? undefined,
       odds: mapOdds(fixture.odds),
       pressureIndex: computePressureIndex(fixture.statistics, homeTeam?.id ?? 0),
-      missingPlayers: { home: [], away: [] },
+      missingPlayers: {
+        home: mapSidelined(activeHomeSidelined),
+        away: mapSidelined(activeAwaySidelined),
+      },
+      predictions: predictions.length > 0 ? mapPredictions(predictions) : undefined,
+      homeForm: homeTeam ? mapTeamForm(homeFixtures, homeTeam.id) : undefined,
+      awayForm: awayTeam ? mapTeamForm(awayFixtures, awayTeam.id) : undefined,
       h2h: {
         homeTeam: homeTeam?.name ?? '',
         awayTeam: awayTeam?.name ?? '',
@@ -873,7 +1017,20 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
 export async function getStandings(seasonId: number): Promise<LeagueStanding[]> {
   try {
     const data = await fetchStandings(seasonId);
-    return data.map(mapStandingToLeagueStanding).sort((a, b) => a.position - b.position);
+
+    // Some leagues (e.g. Danish Superliga) have multiple stages (regular + playoffs).
+    // Deduplicate by keeping the entry from the latest stage per team.
+    const byTeam = new Map<number, SMStandingGroup>();
+    for (const sg of data) {
+      const existing = byTeam.get(sg.participant_id);
+      if (!existing || sg.stage_id > existing.stage_id) {
+        byTeam.set(sg.participant_id, sg);
+      }
+    }
+
+    return Array.from(byTeam.values())
+      .map(mapStandingToLeagueStanding)
+      .sort((a, b) => a.position - b.position);
   } catch (err) {
     console.warn('[sportsApi] getStandings failed:', err);
     return [];
@@ -941,10 +1098,10 @@ export async function getLeagues(): Promise<League[]> {
 }
 
 /**
- * Get news articles (still mock — SM doesn't provide news on free plan).
+ * Get news articles — SM doesn't provide news on free plan.
  */
 export async function getNews(): Promise<NewsArticle[]> {
-  return mockNews;
+  return [];
 }
 
 /**
@@ -957,4 +1114,97 @@ export async function getMatchCountForDate(date: string): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+// ── Search Data ─────────────────────────────────────────────────────────────
+
+export interface SearchableTeam {
+  id: number;
+  name: string;
+  shortName: string;
+  logo: string;
+  leagueName: string;
+  leagueId: number;
+  seasonId?: number;
+}
+
+export interface SearchablePlayer {
+  id: number;
+  name: string;
+  image?: string;
+  teamName?: string;
+  teamLogo?: string;
+  teamId?: number;
+  position?: string;
+  jerseyNumber?: number;
+}
+
+export interface SearchableLeague {
+  id: number;
+  name: string;
+  country: string;
+  flag: string;
+  seasonId?: number;
+}
+
+/** Returns all leagues from config as searchable items */
+export function getSearchableLeagues(): SearchableLeague[] {
+  return AVAILABLE_LEAGUES.map(l => ({
+    id: l.id,
+    name: l.name,
+    country: l.country,
+    flag: l.flag,
+    seasonId: l.currentSeasonId ?? undefined,
+  }));
+}
+
+/** Fetches all teams from available leagues for local search */
+export async function getSearchableTeams(): Promise<SearchableTeam[]> {
+  const teams: SearchableTeam[] = [];
+  for (const league of AVAILABLE_LEAGUES) {
+    const seasonId = league.currentSeasonId;
+    if (!seasonId) continue;
+    try {
+      const smTeams = await fetchTeamsBySeasonId(seasonId);
+      for (const t of smTeams) {
+        teams.push({
+          id: t.id,
+          name: t.name,
+          shortName: t.short_code || t.name.slice(0, 3).toUpperCase(),
+          logo: t.image_path || '⚽',
+          leagueName: league.name,
+          leagueId: league.id,
+          seasonId,
+        });
+      }
+    } catch (err) {
+      console.warn(`[sportsApi] getSearchableTeams failed for ${league.name}:`, err);
+    }
+  }
+  return teams;
+}
+
+/** Fetches top scorers from available leagues as searchable players */
+export async function getSearchablePlayers(): Promise<SearchablePlayer[]> {
+  const players: SearchablePlayer[] = [];
+  const seenIds = new Set<number>();
+  for (const league of AVAILABLE_LEAGUES) {
+    const seasonId = league.currentSeasonId;
+    if (!seasonId) continue;
+    try {
+      const scorers = await fetchTopScorers(seasonId);
+      for (const ts of scorers) {
+        if (!ts.player || seenIds.has(ts.player_id)) continue;
+        seenIds.add(ts.player_id);
+        players.push({
+          id: ts.player_id,
+          name: ts.player.display_name || ts.player.common_name || ts.player.name,
+          image: ts.player.image_path || undefined,
+        });
+      }
+    } catch (err) {
+      console.warn(`[sportsApi] getSearchablePlayers failed for ${league.name}:`, err);
+    }
+  }
+  return players;
 }

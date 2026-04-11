@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { useThemeColors } from '../theme/useTheme';
-import type { League, Match } from '../data/mockData';
+import type { Match } from '../data/types';
+import type { LeagueWithMatches } from '../services/sportsApi';
 import { MatchCard } from './MatchCard';
 
 /** Renders a league flag — Image if URL, Text if emoji */
@@ -20,8 +21,9 @@ const LeagueFlag = ({ logo, size = 18 }: { logo: string; size?: number }) => {
 };
 
 interface LeagueSectionProps {
-  league: League;
+  league: LeagueWithMatches;
   onMatchPress?: (match: Match) => void;
+  onLeaguePress?: (league: LeagueWithMatches) => void;
 }
 
 const LEAGUE_FLAGS: Record<string, string> = {
@@ -35,7 +37,7 @@ const LEAGUE_FLAGS: Record<string, string> = {
   'champions-league': '🏆',
 };
 
-export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPress }) => {
+export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPress, onLeaguePress }) => {
   const c = useThemeColors();
   const hasLive = league.matches.some(m => m.status === 'live');
   const flag = league.logo || LEAGUE_FLAGS[league.id] || '🏆';
@@ -51,7 +53,7 @@ export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPre
   return (
     <View style={[s.card, { backgroundColor: c.card }]}>
       {/* Header */}
-      <TouchableOpacity style={[s.header, { backgroundColor: c.surface, borderBottomColor: c.border }]} activeOpacity={0.7}>
+      <TouchableOpacity style={[s.header, { backgroundColor: c.surface, borderBottomColor: c.border }]} activeOpacity={0.7} onPress={() => onLeaguePress?.(league)}>
         <LeagueFlag logo={flag} />
         <Text style={[s.leagueName, { color: c.textSecondary }]}>{league.name}</Text>
         {hasLive && (

@@ -451,7 +451,7 @@ function buildQueryString(params: Record<string, string>): string {
  * Generic fetch wrapper for SportMonks API.
  * Handles auth, pagination traversal, and error handling.
  */
-async function fetchApi<T>(
+export async function fetchApi<T>(
   endpoint: string,
   params: Record<string, string> = {},
 ): Promise<T> {
@@ -550,7 +550,7 @@ export async function fetchLivescores(): Promise<SMFixture[]> {
 /** GET /standings/seasons/{seasonId}?include=participant */
 export async function fetchStandings(seasonId: number): Promise<SMStandingGroup[]> {
   return fetchApi<SMStandingGroup[]>(`standings/seasons/${seasonId}`, {
-    include: 'participant',
+    include: 'participant;details',
   });
 }
 

@@ -7,8 +7,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { news } from '../data/mockData';
 import type { NewsArticle } from '../data/types';
+
+// TODO: replace with real news API
+const news: NewsArticle[] = [];
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 

@@ -1,19 +1,12 @@
-// ── useFixtureDetail — loads full match data (real API or mock) ──────────────
+// ── useFixtureDetail — loads full match data from SportMonks API ─────────────
 import { useState, useEffect, useRef } from 'react';
 import { getFixtureDetail } from '../services/sportsApi';
-import { getMatchDetail } from '../data/mockData';
 import type { MatchDetail } from '../data/types';
 
 interface UseFixtureDetailResult {
   detail: MatchDetail | null;
   loading: boolean;
   error: string | null;
-}
-
-/** IDs over 1000 are real SportMonks fixture IDs; small ones are mock */
-function isRealFixture(id: string): boolean {
-  const n = Number(id);
-  return !isNaN(n) && n > 1000;
 }
 
 export function useFixtureDetail(matchId: string, homeTeamId: string, awayTeamId: string): UseFixtureDetailResult {
@@ -31,26 +24,13 @@ export function useFixtureDetail(matchId: string, homeTeamId: string, awayTeamId
     setLoading(true);
     setError(null);
 
-    if (!isRealFixture(matchId)) {
-      // Mock data — synchronous lookup
-      const mock = getMatchDetail(matchId);
-      setDetail(mock ?? null);
-      setLoading(false);
-      return;
-    }
-
-    // Real SportMonks fixture
-    console.log('[useFixtureDetail] fetching fixture', matchId);
     getFixtureDetail(Number(matchId))
       .then(result => {
         if (!mounted.current) return;
         if (!result) {
-          console.warn('[useFixtureDetail] getFixtureDetail returned null for', matchId);
-          // API returned nothing — try mock as fallback
-          setDetail(getMatchDetail(matchId) ?? null);
+          setDetail(null);
+          setError('No se pudo cargar el detalle del partido');
         } else {
-          console.log('[useFixtureDetail] got detail for', matchId);
-          // Build a MatchDetail from the partial API data
           const partial = result.detail;
           setDetail({
             matchId: result.match.id,
@@ -82,10 +62,7 @@ export function useFixtureDetail(matchId: string, homeTeamId: string, awayTeamId
       })
       .catch(err => {
         if (!mounted.current) return;
-        console.warn('[useFixtureDetail] .then() handler crashed for', matchId, ':', err instanceof Error ? err.message : err);
-        // Try mock fallback on error
-        const mock = getMatchDetail(matchId);
-        setDetail(mock ?? null);
+        setDetail(null);
         setError(err instanceof Error ? err.message : 'Error loading match');
         setLoading(false);
       });

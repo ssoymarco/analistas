@@ -194,8 +194,11 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
           }))
           .sort((a, b) => a.positionId - b.positionId || a.number - b.number);
 
+        // Sort by date descending (most recent first) then take 10
+        const sortedRecent = [...recentData].sort((a, b) => b.starting_at_timestamp - a.starting_at_timestamp);
+
         // Map recent matches
-        const recentMatches: RecentMatch[] = recentData.slice(0, 10).map(f => {
+        const recentMatches: RecentMatch[] = sortedRecent.slice(0, 10).map(f => {
           const home = f.participants?.find(p => p.meta?.location === 'home');
           const away = f.participants?.find(p => p.meta?.location === 'away');
           const homeScore = getGoals(f.scores, 'home');
@@ -233,13 +236,15 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
             const p = sg.participant;
             const details = sg.details ?? [];
             const findDetail = (typeId: number) => details.find(d => d.type_id === typeId)?.value ?? 0;
-            const won = findDetail(129);
-            const drawn = findDetail(130);
-            const lost = findDetail(131);
-            const played = findDetail(179) || (won + drawn + lost);
-            const gf = findDetail(187);
-            const ga = findDetail(188);
-            const gd = findDetail(189) || (gf - ga);
+            // SM standing detail type_ids (verified April 2026):
+            // 129=GP, 130=W, 131=D, 132=L, 133=GF, 134=GA, 179=GD
+            const played = findDetail(129);
+            const won    = findDetail(130);
+            const drawn  = findDetail(131);
+            const lost   = findDetail(132);
+            const gf     = findDetail(133);
+            const ga     = findDetail(134);
+            const gd     = findDetail(179) || (gf - ga);
 
             return {
               position: sg.position,

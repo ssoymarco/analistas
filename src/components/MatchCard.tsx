@@ -8,7 +8,7 @@ import {
   Animated,
 } from 'react-native';
 import { useThemeColors } from '../theme/useTheme';
-import type { Match } from '../data/mockData';
+import type { Match } from '../data/types';
 
 /** Renders a team logo — Image if URL, Text if emoji/short string */
 const TeamLogo = ({ logo, size = 24 }: { logo: string; size?: number }) => {

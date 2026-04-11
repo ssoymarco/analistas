@@ -6,17 +6,18 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { generateDates } from '../data/mockData';
 import type { Match, MatchStatus } from '../data/types';
-import { DateNavigator } from '../components/DateNavigator';
+import { DateNavigator, formatFullDate, isToday } from '../components/DateNavigator';
 import { FilterTabs, FilterTab } from '../components/FilterTabs';
 import { LeagueSection } from '../components/LeagueSection';
 import { CalendarPicker } from '../components/CalendarPicker';
 import { useFixtures } from '../hooks/useFixtures';
+import type { LeagueWithMatches } from '../services/sportsApi';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 
-const DATES = generateDates();
-const TODAY_INDEX = 3;
+function todayISO(): string {
+  return new Date().toISOString().split('T')[0];
+}
 
 // ── Header icons ──────────────────────────────────────────────────────────────
 const BellIcon = ({ color }: { color: string }) => (
@@ -38,11 +39,9 @@ export const PartidosScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
-  const [selectedDateIndex, setSelectedDateIndex] = useState(TODAY_INDEX);
+  const [selectedDate, setSelectedDate] = useState(todayISO());
   const [activeTab, setActiveTab] = useState<FilterTab>('todos');
   const [showCalendar, setShowCalendar] = useState(false);
-
-  const selectedDate = DATES[selectedDateIndex]?.date ?? DATES[TODAY_INDEX].date;
 
   // ── Real data via hook ──────────────────────────────────────────────────────
   const { matches: allMatches, leagues: allLeagues, loading, refreshing, refresh } = useFixtures(selectedDate);
@@ -50,6 +49,13 @@ export const PartidosScreen: React.FC = () => {
   const totalCount    = allMatches.length;
   const liveCount     = useMemo(() => allMatches.filter(m => m.status === 'live').length, [allMatches]);
   const finishedCount = useMemo(() => allMatches.filter(m => m.status === 'finished').length, [allMatches]);
+
+  // Build match counts for the selected date (DateNavigator shows it)
+  const matchCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    counts[selectedDate] = totalCount;
+    return counts;
+  }, [selectedDate, totalCount]);
 
   const filterStatus = useMemo<MatchStatus | null>(() => {
     if (activeTab === 'todos') return null;
@@ -66,24 +72,15 @@ export const PartidosScreen: React.FC = () => {
       .filter(league => league.matches.length > 0);
   }, [filterStatus, allLeagues]);
 
-  const showBackToToday = Math.abs(selectedDateIndex - TODAY_INDEX) >= 2;
+  const showDateLabel = !isToday(selectedDate);
 
   const handleGoToday = useCallback(() => {
-    setSelectedDateIndex(TODAY_INDEX);
+    setSelectedDate(todayISO());
     setActiveTab('todos');
   }, []);
 
   const handleCalendarSelect = useCallback((dateStr: string) => {
-    const idx = DATES.findIndex(d => d.date === dateStr);
-    if (idx >= 0) {
-      setSelectedDateIndex(idx);
-    } else {
-      const target = new Date(dateStr);
-      const first = new Date(DATES[0].date);
-      const last = new Date(DATES[DATES.length - 1].date);
-      if (target < first) setSelectedDateIndex(0);
-      else if (target > last) setSelectedDateIndex(DATES.length - 1);
-    }
+    setSelectedDate(dateStr);
     setShowCalendar(false);
     setActiveTab('todos');
   }, []);
@@ -124,7 +121,7 @@ export const PartidosScreen: React.FC = () => {
           <TouchableOpacity style={{
             width: 38, height: 38, borderRadius: 19,
             backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center',
-          }} activeOpacity={0.7}>
+          }} activeOpacity={0.7} onPress={() => navigation.navigate('GlobalSearch')}>
             <SearchIcon color={c.textSecondary} />
           </TouchableOpacity>
           <View style={{
@@ -138,7 +135,26 @@ export const PartidosScreen: React.FC = () => {
         </View>
       </View>
 
-      <DateNavigator dates={DATES} selectedIndex={selectedDateIndex} onSelectDate={setSelectedDateIndex} onCalendarPress={() => setShowCalendar(true)} />
+      <DateNavigator
+        selectedDate={selectedDate}
+        onSelectDate={setSelectedDate}
+        onCalendarPress={() => setShowCalendar(true)}
+        matchCounts={matchCounts}
+      />
+
+      {/* Full date label when not today */}
+      {showDateLabel && (
+        <View style={{
+          alignItems: 'center', paddingVertical: 8,
+          borderBottomWidth: 1, borderBottomColor: c.border,
+          backgroundColor: c.bg,
+        }}>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: c.textTertiary }}>
+            {formatFullDate(selectedDate)}
+          </Text>
+        </View>
+      )}
+
       <FilterTabs activeTab={activeTab} onTabChange={setActiveTab} liveCounts={liveCount} totalCount={totalCount} finishedCount={finishedCount} />
 
       <ScrollView
@@ -158,17 +174,32 @@ export const PartidosScreen: React.FC = () => {
           <View style={{ alignItems: 'center', paddingTop: 80, gap: 10 }}>
             <Text style={{ fontSize: 48 }}>⚽</Text>
             <Text style={{ fontSize: 18, fontWeight: '700', color: c.textPrimary }}>Sin partidos</Text>
-            <Text style={{ fontSize: 14, color: c.textSecondary, textAlign: 'center' }}>No hay partidos en esta categoría</Text>
+            <Text style={{ fontSize: 14, color: c.textSecondary, textAlign: 'center' }}>
+              {filterStatus && allLeagues.length > 0 ? 'No hay partidos en esta categoría' : 'No hay partidos en este día'}
+            </Text>
           </View>
         ) : (
           filteredLeagues.map(league => (
-            <LeagueSection key={league.id} league={league} onMatchPress={m => navigation.navigate('MatchDetail', { match: m })} />
+            <LeagueSection
+              key={league.id}
+              league={league}
+              onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
+              onLeaguePress={lg => {
+                const seasonId = lg.matches[0]?.seasonId;
+                navigation.navigate('LeagueDetail', {
+                  leagueId: Number(lg.id),
+                  leagueName: lg.name,
+                  leagueLogo: lg.logo,
+                  ...(seasonId ? { seasonId } : {}),
+                });
+              }}
+            />
           ))
         )}
         <View style={{ height: 80 }} />
       </ScrollView>
 
-      {showBackToToday && (
+      {!isToday(selectedDate) && (
         <TouchableOpacity style={{
           position: 'absolute', bottom: 24, alignSelf: 'center',
           backgroundColor: c.emerald, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 24,

@@ -11,6 +11,9 @@ import { NoticiasScreen } from '../screens/NoticiasScreen';
 import { PerfilScreen } from '../screens/PerfilScreen';
 import { MatchDetailScreen } from '../screens/MatchDetailScreen';
 import { TeamDetailScreen } from '../screens/TeamDetailScreen';
+import { PlayerDetailScreen } from '../screens/PlayerDetailScreen';
+import { LeagueDetailScreen } from '../screens/LeagueDetailScreen';
+import { GlobalSearchScreen } from '../screens/GlobalSearchScreen';
 import type { ColorPalette } from '../theme/colors';
 import type { Match } from '../data/types';
 
@@ -24,6 +27,21 @@ export type PartidosStackParamList = {
   PartidosHome: undefined;
   MatchDetail: { match: Match };
   TeamDetail: { teamId: number; teamName: string; teamLogo?: string; seasonId?: number };
+  PlayerDetail: {
+    playerId: number;
+    playerName: string;
+    playerImage?: string;
+    teamName?: string;
+    teamLogo?: string;
+    jerseyNumber?: number;
+  };
+  LeagueDetail: {
+    leagueId: number;
+    leagueName: string;
+    leagueLogo?: string;
+    seasonId?: number;
+  };
+  GlobalSearch: undefined;
 };
 
 export type RootTabParamList = {
@@ -61,6 +79,33 @@ function PartidosNavigator() {
         component={TeamDetailScreen}
         options={{
           animation: 'slide_from_right',
+          gestureEnabled: true,
+          gestureDirection: 'horizontal',
+        }}
+      />
+      <PartidosStack.Screen
+        name="PlayerDetail"
+        component={PlayerDetailScreen}
+        options={{
+          animation: 'slide_from_right',
+          gestureEnabled: true,
+          gestureDirection: 'horizontal',
+        }}
+      />
+      <PartidosStack.Screen
+        name="LeagueDetail"
+        component={LeagueDetailScreen}
+        options={{
+          animation: 'slide_from_right',
+          gestureEnabled: true,
+          gestureDirection: 'horizontal',
+        }}
+      />
+      <PartidosStack.Screen
+        name="GlobalSearch"
+        component={GlobalSearchScreen}
+        options={{
+          animation: 'fade_from_bottom',
           gestureEnabled: true,
           gestureDirection: 'horizontal',
         }}

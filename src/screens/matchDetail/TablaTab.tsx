@@ -1,86 +1,143 @@
 // ── Tabla (Standings) Tab ─────────────────────────────────────────────────────
-// Shows league standings with team highlights + share via ViewShot
+// League standings with zone color bars, LOCAL/VISITA badges, trophy header,
+// zone legend, and share button. Redesigned per Figma.
 import React, { useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../../theme/useTheme';
 import { useStandings } from '../../hooks/useStandings';
 import type { Match, MatchDetail, LeagueStanding } from '../../data/types';
+import type { PartidosStackParamList } from '../../navigation/AppNavigator';
 
-// ── Dynamic require for optional packages ─────────────────────────────────────
+// ── Dynamic imports ──────────────────────────────────────────────────────────
 let ViewShot: any = null;
-let Sharing: any = null;
+let Sharing: any  = null;
 try { ViewShot = require('react-native-view-shot').default; } catch {}
 try { Sharing   = require('expo-sharing'); } catch {}
 
-// ── Team logo (smart: URL vs emoji) ──────────────────────────────────────────
-const TeamLogo: React.FC<{ logo: string; size?: number }> = ({ logo, size = 20 }) => {
-  const isUrl = logo.startsWith('http');
-  if (isUrl) {
+// ── Zone colors ──────────────────────────────────────────────────────────────
+function getZoneColor(position: number, totalTeams: number): string | null {
+  if (position === 1) return '#fbbf24'; // Campeón (gold)
+  if (position <= 4)  return '#3b82f6'; // Champions League
+  if (position <= 6)  return '#f97316'; // Europa League
+  if (position > totalTeams - 3) return '#ef4444'; // Descenso
+  return null;
+}
+
+// ── Team logo ────────────────────────────────────────────────────────────────
+const TeamLogo: React.FC<{ logo: string; size?: number }> = ({ logo, size = 22 }) => {
+  if (logo.startsWith('http')) {
     return <Image source={{ uri: logo }} style={{ width: size, height: size, borderRadius: 2 }} resizeMode="contain" />;
   }
   return <Text style={{ fontSize: size - 4 }}>{logo}</Text>;
 };
 
-// ── Standing row ──────────────────────────────────────────────────────────────
+// ── Share icon ───────────────────────────────────────────────────────────────
+function ShareIcon({ color, size = 16 }: { color: string; size?: number }) {
+  const s = size;
+  const dotR = s * 0.15;
+  return (
+    <View style={{ width: s, height: s }}>
+      <View style={{ position: 'absolute', top: 0, right: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
+      <View style={{ position: 'absolute', top: s * 0.36, left: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
+      <View style={{ position: 'absolute', bottom: 0, right: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
+      <View style={{ position: 'absolute', top: s * 0.18, left: s * 0.18, width: s * 0.52, height: 1.5, backgroundColor: color, transform: [{ rotate: '-25deg' }] }} />
+      <View style={{ position: 'absolute', top: s * 0.62, left: s * 0.18, width: s * 0.52, height: 1.5, backgroundColor: color, transform: [{ rotate: '25deg' }] }} />
+    </View>
+  );
+}
+
+// ── Standing row ─────────────────────────────────────────────────────────────
 const StandingRow: React.FC<{
   row: LeagueStanding;
   isHome: boolean;
   isAway: boolean;
-  isHeader?: boolean;
-}> = ({ row, isHome, isAway }) => {
+  totalTeams: number;
+}> = ({ row, isHome, isAway, totalTeams }) => {
   const c = useThemeColors();
 
-  const highlight = isHome
-    ? { backgroundColor: 'rgba(59,130,246,0.12)', borderLeftWidth: 3, borderLeftColor: '#3b82f6' }
+  const zoneColor = getZoneColor(row.position, totalTeams);
+  const isHighlighted = isHome || isAway;
+
+  const rowBg = isHome
+    ? 'rgba(59,130,246,0.08)'
     : isAway
-    ? { backgroundColor: 'rgba(249,115,22,0.12)', borderLeftWidth: 3, borderLeftColor: '#f97316' }
-    : {};
+    ? 'rgba(249,115,22,0.08)'
+    : 'transparent';
 
   const textColor = isHome ? '#3b82f6' : isAway ? '#f97316' : c.textPrimary;
-
   const gd = row.goalDifference > 0 ? `+${row.goalDifference}` : `${row.goalDifference}`;
+  const gdColor = row.goalDifference > 0 ? '#10b981' : row.goalDifference < 0 ? '#ef4444' : c.textTertiary;
 
   return (
-    <View style={[st.row, { borderBottomColor: c.border }, highlight]}>
-      <Text style={[st.pos, { color: c.textTertiary }]}>{row.position}</Text>
+    <View style={[st.row, { borderBottomColor: c.border, backgroundColor: rowBg }]}>
+      {/* Zone bar */}
+      <View style={[st.zoneBar, { backgroundColor: zoneColor || 'transparent' }]} />
+
+      {/* Position */}
+      <Text style={[st.pos, { color: zoneColor || c.textTertiary }]}>{row.position}</Text>
+
+      {/* Logo */}
       <View style={st.logoCell}>
-        <TeamLogo logo={row.team.logo} size={20} />
+        <TeamLogo logo={row.team.logo} size={22} />
       </View>
-      <Text style={[st.name, { color: textColor }]} numberOfLines={1}>{row.team.shortName}</Text>
+
+      {/* Name + badge */}
+      <View style={st.nameWrap}>
+        <Text style={[st.name, { color: textColor }]} numberOfLines={1}>{row.team.name}</Text>
+        {isHome && (
+          <View style={[st.matchBadge, { backgroundColor: '#f97316' }]}>
+            <Text style={st.matchBadgeText}>LOCAL</Text>
+          </View>
+        )}
+        {isAway && (
+          <View style={[st.matchBadge, { backgroundColor: '#ef4444' }]}>
+            <Text style={st.matchBadgeText}>VISITA</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Stats */}
       <Text style={[st.num, { color: c.textSecondary }]}>{row.played}</Text>
       <Text style={[st.num, { color: c.textSecondary }]}>{row.won}</Text>
       <Text style={[st.num, { color: c.textSecondary }]}>{row.drawn}</Text>
       <Text style={[st.num, { color: c.textSecondary }]}>{row.lost}</Text>
-      <Text style={[st.num, { color: c.textTertiary }]}>{gd}</Text>
-      <Text style={[st.pts, { color: textColor }]}>{row.points}</Text>
+      <Text style={[st.gfga, { color: c.textTertiary }]}>{row.goalsFor}-{row.goalsAgainst}</Text>
+      <Text style={[st.gd, { color: gdColor }]}>{gd}</Text>
+      <Text style={[st.pts, { color: isHighlighted ? textColor : c.textPrimary }]}>{row.points}</Text>
     </View>
   );
 };
 
-// ── Header row ────────────────────────────────────────────────────────────────
+// ── Header row ───────────────────────────────────────────────────────────────
 const HeaderRow: React.FC = () => {
   const c = useThemeColors();
   return (
     <View style={[st.row, st.headerRow, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-      <Text style={[st.headerCell, { width: 24, color: c.textTertiary }]}>#</Text>
-      <View style={{ width: 24 }} />
-      <Text style={[st.headerName, { color: c.textTertiary }]}>Equipo</Text>
-      <Text style={[st.headerNum, { color: c.textTertiary }]}>PJ</Text>
+      <View style={st.zoneBar} />
+      <Text style={[st.headerCell, { width: 24, color: c.textTertiary }]}></Text>
+      <View style={{ width: 26 }} />
+      <View style={st.nameWrap}>
+        <Text style={[st.headerName, { color: c.textTertiary }]}>EQUIPO</Text>
+      </View>
+      <Text style={[st.headerNum, { color: c.textTertiary }]}>J</Text>
       <Text style={[st.headerNum, { color: c.textTertiary }]}>G</Text>
       <Text style={[st.headerNum, { color: c.textTertiary }]}>E</Text>
       <Text style={[st.headerNum, { color: c.textTertiary }]}>P</Text>
-      <Text style={[st.headerNum, { color: c.textTertiary }]}>DG</Text>
-      <Text style={[st.headerPts, { color: c.textTertiary }]}>Pts</Text>
+      <Text style={[st.headerGfga, { color: c.textTertiary }]}>+/-</Text>
+      <Text style={[st.headerGd, { color: c.textTertiary }]}>DG</Text>
+      <Text style={[st.headerPts, { color: c.textTertiary }]}>PTS</Text>
     </View>
   );
 };
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Main component ───────────────────────────────────────────────────────────
 export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ match }) => {
   const c = useThemeColors();
+  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const tableRef = useRef<any>(null);
 
-  // Use the season from the match, fall back to null (no standings)
   const seasonId = match.seasonId ?? null;
   const { standings, loading, error } = useStandings(seasonId);
 
@@ -99,7 +156,6 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
     }
   };
 
-  // ── Loading state ──────────────────────────────────────────────────────────
   if (loading) {
     return (
       <View style={[tb.center, { paddingTop: 60 }]}>
@@ -109,7 +165,6 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
     );
   }
 
-  // ── Empty / error state ────────────────────────────────────────────────────
   if (error || standings.length === 0) {
     return (
       <View style={[tb.center, { paddingTop: 60 }]}>
@@ -117,65 +172,74 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
         <Text style={[tb.emptyTitle, { color: c.textSecondary }]}>
           {error ? 'Error al cargar la tabla' : 'Tabla no disponible'}
         </Text>
-        {!seasonId && (
-          <Text style={[tb.emptySubtitle, { color: c.textTertiary }]}>
-            Esta liga no tiene información de temporada
-          </Text>
-        )}
       </View>
     );
   }
 
-  // ── Legend ─────────────────────────────────────────────────────────────────
-  const Legend: React.FC = () => (
-    <View style={tb.legend}>
-      <View style={tb.legendItem}>
-        <View style={[tb.legendDot, { backgroundColor: '#3b82f6' }]} />
-        <Text style={[tb.legendText, { color: c.textTertiary }]}>{match.homeTeam.shortName}</Text>
+  const seasonStr = `Temporada ${new Date().getFullYear() - 1}/${String(new Date().getFullYear()).slice(2)}`;
+
+  const TableContent = (
+    <>
+      {/* League header */}
+      <TouchableOpacity
+        style={tb.leagueHeader}
+        activeOpacity={0.7}
+        onPress={() => navigation.push('LeagueDetail', {
+          leagueId: Number(match.leagueId) || 0,
+          leagueName: match.league,
+          seasonId: match.seasonId,
+        })}
+      >
+        <Text style={{ fontSize: 28 }}>🏆</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[tb.leagueName, { color: c.textPrimary }]}>{match.league}</Text>
+          <Text style={[tb.leagueSeason, { color: c.textTertiary }]}>{seasonStr} · Jornada</Text>
+        </View>
+      </TouchableOpacity>
+
+      {/* Table */}
+      <View style={[tb.card, { backgroundColor: c.card, borderColor: c.border }]}>
+        <HeaderRow />
+        {standings.map(row => (
+          <StandingRow
+            key={row.team.id}
+            row={row}
+            isHome={row.team.id === homeId}
+            isAway={row.team.id === awayId}
+            totalTeams={standings.length}
+          />
+        ))}
       </View>
-      <View style={tb.legendItem}>
-        <View style={[tb.legendDot, { backgroundColor: '#f97316' }]} />
-        <Text style={[tb.legendText, { color: c.textTertiary }]}>{match.awayTeam.shortName}</Text>
+
+      {/* Zone legend */}
+      <View style={tb.legend}>
+        <View style={tb.legendItem}>
+          <View style={[tb.legendBar, { backgroundColor: '#fbbf24' }]} />
+          <Text style={[tb.legendText, { color: c.textTertiary }]}>Campeón</Text>
+        </View>
+        <View style={tb.legendItem}>
+          <View style={[tb.legendBar, { backgroundColor: '#3b82f6' }]} />
+          <Text style={[tb.legendText, { color: c.textTertiary }]}>Champions League</Text>
+        </View>
+        <View style={tb.legendItem}>
+          <View style={[tb.legendBar, { backgroundColor: '#f97316' }]} />
+          <Text style={[tb.legendText, { color: c.textTertiary }]}>Europa League</Text>
+        </View>
+        <View style={tb.legendItem}>
+          <View style={[tb.legendBar, { backgroundColor: '#ef4444' }]} />
+          <Text style={[tb.legendText, { color: c.textTertiary }]}>Descenso</Text>
+        </View>
       </View>
-    </View>
+    </>
   );
 
   return (
     <View style={tb.outer}>
-      {/* Capturable area */}
       {ViewShot ? (
         <ViewShot ref={tableRef} options={{ format: 'png', quality: 0.95 }}>
-          <View style={[tb.card, { backgroundColor: c.card, borderColor: c.border }]}>
-            <Text style={[tb.title, { color: c.textTertiary }]}>{match.league.toUpperCase()}</Text>
-            <HeaderRow />
-            {standings.map((row) => (
-              <StandingRow
-                key={row.team.id}
-                row={row}
-                isHome={row.team.id === homeId}
-                isAway={row.team.id === awayId}
-              />
-            ))}
-          </View>
-          <Legend />
+          {TableContent}
         </ViewShot>
-      ) : (
-        <>
-          <View style={[tb.card, { backgroundColor: c.card, borderColor: c.border }]}>
-            <Text style={[tb.title, { color: c.textTertiary }]}>{match.league.toUpperCase()}</Text>
-            <HeaderRow />
-            {standings.map((row) => (
-              <StandingRow
-                key={row.team.id}
-                row={row}
-                isHome={row.team.id === homeId}
-                isAway={row.team.id === awayId}
-              />
-            ))}
-          </View>
-          <Legend />
-        </>
-      )}
+      ) : TableContent}
 
       {/* Share button */}
       {ViewShot && Sharing && (
@@ -184,6 +248,7 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
           onPress={handleShare}
           activeOpacity={0.85}
         >
+          <ShareIcon color="#fff" size={16} />
           <Text style={tb.shareBtnText}>COMPARTIR</Text>
         </TouchableOpacity>
       )}
@@ -194,24 +259,34 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
 };
 
 // ── Styles ────────────────────────────────────────────────────────────────────
+
 const st = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    paddingRight: 10,
+    paddingVertical: 10,
     borderBottomWidth: 1,
   },
-  headerRow: { paddingVertical: 7 },
-  pos: { width: 24, fontSize: 12, fontWeight: '600', textAlign: 'center' },
-  logoCell: { width: 24, alignItems: 'center' },
-  name: { flex: 1, fontSize: 13, fontWeight: '600', marginLeft: 6 },
-  num: { width: 26, fontSize: 12, textAlign: 'center' },
-  pts: { width: 30, fontSize: 13, fontWeight: '800', textAlign: 'center' },
-  headerCell: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5, textAlign: 'center' },
-  headerName: { flex: 1, fontSize: 10, fontWeight: '700', letterSpacing: 0.5, marginLeft: 6 },
-  headerNum:  { width: 26, fontSize: 10, fontWeight: '700', textAlign: 'center', letterSpacing: 0.3 },
-  headerPts:  { width: 30, fontSize: 10, fontWeight: '700', textAlign: 'center', letterSpacing: 0.3 },
+  headerRow: { paddingVertical: 8 },
+  zoneBar: { width: 3, height: '100%', borderRadius: 1.5, marginRight: 6 },
+  pos: { width: 22, fontSize: 13, fontWeight: '700', textAlign: 'center' },
+  logoCell: { width: 26, alignItems: 'center', marginRight: 4 },
+  nameWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  name: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  matchBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  matchBadgeText: { fontSize: 8, fontWeight: '800', color: '#fff', letterSpacing: 0.5 },
+  num: { width: 22, fontSize: 12, textAlign: 'center' },
+  gfga: { width: 38, fontSize: 11, textAlign: 'center' },
+  gd: { width: 30, fontSize: 12, fontWeight: '700', textAlign: 'center' },
+  pts: { width: 30, fontSize: 14, fontWeight: '900', textAlign: 'center' },
+
+  headerCell: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3, textAlign: 'center' },
+  headerName: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  headerNum: { width: 22, fontSize: 10, fontWeight: '700', textAlign: 'center' },
+  headerGfga: { width: 38, fontSize: 10, fontWeight: '700', textAlign: 'center' },
+  headerGd: { width: 30, fontSize: 10, fontWeight: '700', textAlign: 'center' },
+  headerPts: { width: 30, fontSize: 10, fontWeight: '700', textAlign: 'center' },
 });
 
 const tb = StyleSheet.create({
@@ -219,20 +294,27 @@ const tb = StyleSheet.create({
   center: { alignItems: 'center', gap: 10 },
   loadingText: { fontSize: 13, marginTop: 12 },
   emptyTitle: { fontSize: 15, fontWeight: '600', textAlign: 'center' },
-  emptySubtitle: { fontSize: 12, textAlign: 'center', marginTop: 4 },
-  card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden', marginBottom: 8 },
-  title: {
-    fontSize: 10, fontWeight: '700', letterSpacing: 1,
-    paddingHorizontal: 14, paddingVertical: 10,
+
+  leagueHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginBottom: 12, paddingHorizontal: 4,
   },
-  legend: { flexDirection: 'row', gap: 16, paddingHorizontal: 4, marginBottom: 16 },
+  leagueName: { fontSize: 18, fontWeight: '800' },
+  leagueSeason: { fontSize: 12, fontWeight: '500', marginTop: 2 },
+
+  card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden', marginBottom: 8 },
+
+  legend: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 14,
+    paddingHorizontal: 4, paddingVertical: 10,
+  },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  legendBar: { width: 3, height: 14, borderRadius: 1.5 },
   legendText: { fontSize: 11, fontWeight: '600' },
+
   shareBtn: {
-    borderRadius: 14, paddingVertical: 16,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderRadius: 14, paddingVertical: 16, marginTop: 4,
   },
   shareBtnText: { fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: 1 },
 });
