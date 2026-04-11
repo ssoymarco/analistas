@@ -40,13 +40,16 @@ export function useFixtureDetail(matchId: string, homeTeamId: string, awayTeamId
     }
 
     // Real SportMonks fixture
+    console.log('[useFixtureDetail] fetching fixture', matchId);
     getFixtureDetail(Number(matchId))
       .then(result => {
         if (!mounted.current) return;
         if (!result) {
+          console.warn('[useFixtureDetail] getFixtureDetail returned null for', matchId);
           // API returned nothing — try mock as fallback
           setDetail(getMatchDetail(matchId) ?? null);
         } else {
+          console.log('[useFixtureDetail] got detail for', matchId);
           // Build a MatchDetail from the partial API data
           const partial = result.detail;
           setDetail({
@@ -79,6 +82,7 @@ export function useFixtureDetail(matchId: string, homeTeamId: string, awayTeamId
       })
       .catch(err => {
         if (!mounted.current) return;
+        console.warn('[useFixtureDetail] .then() handler crashed for', matchId, ':', err instanceof Error ? err.message : err);
         // Try mock fallback on error
         const mock = getMatchDetail(matchId);
         setDetail(mock ?? null);

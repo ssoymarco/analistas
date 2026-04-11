@@ -19,9 +19,6 @@ import type {
   H2HResult,
   Team,
   OddsMarket,
-  MatchPrediction,
-  MissingPlayer,
-  TeamFormEntry,
   PressureIndex,
 } from '../data/types';
 
@@ -34,10 +31,6 @@ import {
   fetchH2H,
   fetchTeamById,
   fetchSquad,
-  fetchCommentaries,
-  fetchPredictions,
-  fetchSidelinedByTeam,
-  fetchTeamRecentFixtures,
   SM_STATE_IDS,
   SM_EVENT_TYPES,
   SM_STAT_TYPES,
@@ -53,10 +46,7 @@ import {
   type SMFixtureReferee,
   type SMFixtureTVStation,
   type SMWeatherReport,
-  type SMCommentary,
   type SMOdd,
-  type SMPrediction,
-  type SMSidelined,
 } from './sportmonks';
 
 import {
@@ -719,18 +709,6 @@ function mapTVStations(stations: SMFixtureTVStation[] | undefined): MatchDetail[
 
 // ── Commentary Mapper ───────────────────────────────────────────────────────
 
-function mapCommentaries(comments: SMCommentary[] | undefined): MatchDetail['commentaries'] {
-  if (!comments || comments.length === 0) return undefined;
-  return comments
-    .sort((a, b) => (b.order ?? 0) - (a.order ?? 0))
-    .map(c => ({
-      minute: c.minute,
-      extraMinute: c.extra_minute ?? null,
-      comment: c.comment,
-      important: c.important,
-    }));
-}
-
 // ── Odds Mapper ─────────────────────────────────────────────────────────────
 
 function mapOdds(odds: SMOdd[] | undefined): OddsMarket[] {
@@ -777,62 +755,6 @@ function mapOdds(odds: SMOdd[] | undefined): OddsMarket[] {
   }
 
   return result;
-}
-
-// ── Predictions Mapper ──────────────────────────────────────────────────────
-
-function mapPredictions(preds: SMPrediction[] | undefined): MatchPrediction[] | undefined {
-  if (!preds || preds.length === 0) return undefined;
-  return preds
-    .filter(p => p.predictions)
-    .map(p => ({
-      type: p.type?.name ?? `Type ${p.type_id}`,
-      yes: p.predictions?.yes,
-      no: p.predictions?.no,
-    }));
-}
-
-// ── Sidelined (Injuries) Mapper ─────────────────────────────────────────────
-
-function mapSidelined(entries: SMSidelined[]): MissingPlayer[] {
-  if (!entries || entries.length === 0) return [];
-  return entries
-    .filter(e => !e.completed)
-    .map(e => ({
-      name: e.player?.display_name ?? e.player?.common_name ?? `Player ${e.player_id}`,
-      reason: e.category === 'injury' ? 'injury' as const
-        : e.category === 'suspension' ? 'suspension' as const
-        : 'other' as const,
-      detail: e.start_date ? `Desde ${e.start_date}` : '',
-    }));
-}
-
-// ── Team Form Mapper ────────────────────────────────────────────────────────
-
-function mapTeamForm(fixtures: SMFixture[], teamId: number): TeamFormEntry[] {
-  return fixtures.slice(0, 5).map(f => {
-    const home = getParticipant(f, 'home');
-    const away = getParticipant(f, 'away');
-    const isHome = home?.id === teamId;
-    const opponent = isHome ? away : home;
-    const goalsFor = getGoals(f.scores, isHome ? 'home' : 'away');
-    const goalsAgainst = getGoals(f.scores, isHome ? 'away' : 'home');
-    let result: 'W' | 'D' | 'L' = 'D';
-    if (goalsFor > goalsAgainst) result = 'W';
-    else if (goalsFor < goalsAgainst) result = 'L';
-
-    return {
-      matchId: String(f.id),
-      opponent: opponent?.name ?? 'Unknown',
-      opponentLogo: opponent?.image_path ?? '⚽',
-      isHome,
-      goalsFor,
-      goalsAgainst,
-      result,
-      date: f.starting_at.split(' ')[0],
-      league: f.league?.name ?? '',
-    };
-  });
 }
 
 // ── Pressure Index (derived from stats) ─────────────────────────────────────
@@ -883,9 +805,9 @@ function computePressureIndex(stats: SMStatistic[] | undefined, homeId: number):
 }
 
 /**
- * Fetch full fixture detail with ALL available SM data:
- * events, stats, lineups, venue, referee, weather, TV, H2H,
- * commentaries, odds, predictions, injuries, team form, pressure.
+ * Fetch full fixture detail with SM data available on free plan:
+ * events, stats, lineups, venue, referee, weather, TV, H2H, pressure.
+ * Odds are not included in the main request to keep response size small (~43KB vs 1.8MB).
  */
 export async function getFixtureDetail(id: number): Promise<{ match: Match; detail: Partial<MatchDetail> } | null> {
   try {
@@ -896,34 +818,18 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
 
     const refereeData = mapReferee(fixture.referees);
 
-    // Fire ALL secondary requests in parallel
-    const [h2hResults, commentaryData, predictionsData, homeSidelined, awaySidelined, homeFormData, awayFormData] = await Promise.all([
-      // H2H
+    // Fire secondary requests in parallel — only endpoints available on free plan
+    const [h2hResults] = await Promise.all([
+      // H2H (works on free plan)
       (homeTeam && awayTeam)
-        ? fetchH2H(homeTeam.id, awayTeam.id).catch(() => [] as SMFixture[])
-        : Promise.resolve([] as SMFixture[]),
-      // Commentaries
-      fetchCommentaries(id).catch(() => [] as SMCommentary[]),
-      // Predictions
-      fetchPredictions(id).catch(() => [] as SMPrediction[]),
-      // Injuries — home
-      (homeTeam && fixture.season_id)
-        ? fetchSidelinedByTeam(fixture.season_id, homeTeam.id).catch(() => [] as SMSidelined[])
-        : Promise.resolve([] as SMSidelined[]),
-      // Injuries — away
-      (awayTeam && fixture.season_id)
-        ? fetchSidelinedByTeam(fixture.season_id, awayTeam.id).catch(() => [] as SMSidelined[])
-        : Promise.resolve([] as SMSidelined[]),
-      // Home recent form
-      homeTeam
-        ? fetchTeamRecentFixtures(homeTeam.id).catch(() => [] as SMFixture[])
-        : Promise.resolve([] as SMFixture[]),
-      // Away recent form
-      awayTeam
-        ? fetchTeamRecentFixtures(awayTeam.id).catch(() => [] as SMFixture[])
+        ? fetchH2H(homeTeam.id, awayTeam.id).catch((e) => {
+            console.warn('[sportsApi] H2H failed:', e.message);
+            return [] as SMFixture[];
+          })
         : Promise.resolve([] as SMFixture[]),
     ]);
 
+    // Build detail from fixture data (no extra API calls for unavailable endpoints)
     const detail: Partial<MatchDetail> = {
       matchId: String(fixture.id),
       venue: mapVenue(fixture.venue),
@@ -936,18 +842,10 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
       homeLineup: mapLineup(fixture.lineups, homeTeam?.id ?? 0, fixture.events),
       awayLineup: mapLineup(fixture.lineups, awayTeam?.id ?? 0, fixture.events),
       tvStations: mapTVStations(fixture.tvstations),
-      commentaries: mapCommentaries(commentaryData),
       resultInfo: fixture.result_info ?? undefined,
-      // ── New data sources ──
       odds: mapOdds(fixture.odds),
-      predictions: mapPredictions(predictionsData),
-      missingPlayers: {
-        home: mapSidelined(homeSidelined),
-        away: mapSidelined(awaySidelined),
-      },
-      homeForm: homeTeam ? mapTeamForm(homeFormData, homeTeam.id) : undefined,
-      awayForm: awayTeam ? mapTeamForm(awayFormData, awayTeam.id) : undefined,
       pressureIndex: computePressureIndex(fixture.statistics, homeTeam?.id ?? 0),
+      missingPlayers: { home: [], away: [] },
       h2h: {
         homeTeam: homeTeam?.name ?? '',
         awayTeam: awayTeam?.name ?? '',
@@ -961,9 +859,10 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
       },
     };
 
+    console.log('[sportsApi] getFixtureDetail OK for', id);
     return { match, detail };
   } catch (err) {
-    console.warn('[sportsApi] getFixtureDetail failed:', err);
+    console.warn('[sportsApi] getFixtureDetail FAILED for id=' + id + ':', err instanceof Error ? err.message : err);
     return null;
   }
 }

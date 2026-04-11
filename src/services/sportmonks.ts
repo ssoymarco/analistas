@@ -457,15 +457,28 @@ async function fetchApi<T>(
   const rawUrl = `${BASE_URL}/${endpoint}?${qs}`;
   const url = proxyUrl(rawUrl);
 
-  const response = await fetch(url);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Unknown error');
-    throw new Error(`SportMonks API error ${response.status}: ${errorText}`);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      throw new Error(`SportMonks API error ${response.status}: ${errorText.slice(0, 200)}`);
+    }
+
+    const json: SMResponse<T> = await response.json();
+
+    // Some SM endpoints return HTTP 200 with no data (e.g. commentaries on free plan)
+    if (json.data === undefined || json.data === null) {
+      throw new Error(`SportMonks: no data in response for ${endpoint}`);
+    }
+
+    return json.data;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const json: SMResponse<T> = await response.json();
-  return json.data;
 }
 
 /**
@@ -521,7 +534,7 @@ export async function fetchFixturesByDate(date: string, leagueIds?: string): Pro
 /** GET /fixtures/{id} — full detail with all available includes */
 export async function fetchFixtureById(id: number): Promise<SMFixture> {
   return fetchApi<SMFixture>(`fixtures/${id}`, {
-    include: 'participants;scores;events;statistics;lineups.player;venue;league;referees.referee;tvstations.tvstation;weatherreport;odds.market',
+    include: 'participants;scores;events;statistics;lineups.player;venue;league;referees.referee;tvstations.tvstation;weatherreport',
   });
 }
 
@@ -674,11 +687,22 @@ export async function fetchSidelinedByTeam(seasonId: number, teamId: number): Pr
 
 // ── Team Recent Fixtures ────────────────────────────────────────────────────
 
-/** GET /fixtures/latest/by-team/{teamId}?include=participants;scores;league */
+/**
+ * GET /fixtures/between/{start}/{end}/{teamId}
+ * Free plan doesn't have /fixtures/latest/by-team, so we use date range instead.
+ */
 export async function fetchTeamRecentFixtures(teamId: number): Promise<SMFixture[]> {
-  return fetchApi<SMFixture[]>(`fixtures/latest/by-team/${teamId}`, {
-    include: 'participants;scores;league',
-  });
+  // Look back 60 days and forward 30 days
+  const now = new Date();
+  const start = new Date(now);
+  start.setDate(start.getDate() - 60);
+  const end = new Date(now);
+  end.setDate(end.getDate() + 30);
+  const fmt = (d: Date) => d.toISOString().split('T')[0];
+  return fetchApi<SMFixture[]>(
+    `fixtures/between/${fmt(start)}/${fmt(end)}/${teamId}`,
+    { include: 'participants;scores;league' },
+  );
 }
 
 // ── Referee Stats ───────────────────────────────────────────────────────────
