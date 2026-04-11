@@ -1,7 +1,7 @@
 // ── Team Detail Screen ────────────────────────────────────────────────────────
 // Full team profile: collapsible header, 4 tabs (Resumen, Plantilla, Partidos, Tabla).
 // Dark/Light mode responsive. Uses real SportMonks data.
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  Animated,
   ActivityIndicator,
   Platform,
 } from 'react-native';
@@ -27,11 +26,6 @@ import type { LeagueStanding } from '../data/types';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'TeamDetail'>;
 type Tab = 'resumen' | 'plantilla' | 'partidos' | 'tabla';
-
-// ── Animation constants ──────────────────────────────────────────────────────
-const HERO_EXPANDED = 220;
-const HERO_COMPACT  = 56;
-const COLLAPSE_RANGE = 120;
 
 // ── Back arrow ───────────────────────────────────────────────────────────────
 function BackArrow({ color }: { color: string }) {
@@ -344,30 +338,11 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
   const { isDark } = useDarkMode();
   const navigation = useNavigation();
   const { isFollowingTeam, toggleFollowTeam } = useFavorites();
-  const scrollY = useRef(new Animated.Value(0)).current;
   const [activeTab, setActiveTab] = useState<Tab>('resumen');
 
   const { data, loading, error } = useTeamDetail(teamId, seasonId);
   const isFollowing = isFollowingTeam(String(teamId));
 
-  // Animated header interpolations
-  const heroHeight = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_RANGE],
-    outputRange: [HERO_EXPANDED, HERO_COMPACT],
-    extrapolate: 'clamp',
-  });
-  const expandedOpacity = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_RANGE * 0.5],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
-  const compactOpacity = scrollY.interpolate({
-    inputRange: [COLLAPSE_RANGE * 0.5, COLLAPSE_RANGE],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
-
-  // Header gradient
   const headerBg = isDark ? '#0a1528' : '#1e40af';
   const headerBgLight = isDark ? '#13243d' : '#2563eb';
 
@@ -382,138 +357,127 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
       <StatusBar style="light" />
 
-      {/* ── Animated Hero Header ── */}
-      <Animated.View style={[hs.hero, { height: heroHeight, backgroundColor: headerBg }]}>
-        {/* Background gradient overlay */}
-        <View style={[hs.gradient, { backgroundColor: headerBgLight, opacity: 0.5 }]} />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 40 }}
+        showsVerticalScrollIndicator={false}
+        stickyHeaderIndices={[1]}
+      >
+        {/* ── Hero Header (scrolls with content) ── */}
+        <View style={[hs.hero, { backgroundColor: headerBg }]}>
+          {/* Background gradient overlay */}
+          <View style={[hs.gradient, { backgroundColor: headerBgLight, opacity: 0.5 }]} />
 
-        {/* Top bar (always visible) */}
-        <View style={hs.topBar}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={hs.backBtn} activeOpacity={0.7}>
-            <BackArrow color="#fff" />
-          </TouchableOpacity>
-          <Animated.View style={{ opacity: compactOpacity, flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-            {teamLogo?.startsWith('http') ? (
-              <Image source={{ uri: teamLogo }} style={{ width: 24, height: 24, borderRadius: 12 }} />
-            ) : null}
-            <Text style={hs.compactName} numberOfLines={1}>{data?.info.name ?? teamName}</Text>
-          </Animated.View>
-          <TouchableOpacity style={hs.shareBtn} activeOpacity={0.7}>
-            <ShareIcon color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Expanded content */}
-        <Animated.View style={[hs.expanded, { opacity: expandedOpacity }]}>
-          {/* League label */}
-          <Text style={hs.leagueLabel}>{data?.info.leagueName ?? ''}</Text>
-
-          {/* Logo */}
-          <View style={hs.logoWrap}>
-            {teamLogo?.startsWith('http') ? (
-              <Image source={{ uri: teamLogo }} style={hs.logo} />
-            ) : (
-              <View style={[hs.logo, { backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }]}>
-                <Text style={{ fontSize: 32 }}>⚽</Text>
-              </View>
-            )}
+          {/* Top bar */}
+          <View style={hs.topBar}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={hs.backBtn} activeOpacity={0.7}>
+              <BackArrow color="#fff" />
+            </TouchableOpacity>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity style={hs.shareBtn} activeOpacity={0.7}>
+              <ShareIcon color="#fff" />
+            </TouchableOpacity>
           </View>
 
-          {/* Team name */}
-          <Text style={hs.teamName}>{data?.info.name ?? teamName}</Text>
+          {/* Expanded content */}
+          <View style={hs.expanded}>
+            {/* League label */}
+            <Text style={hs.leagueLabel}>{data?.info.leagueName ?? ''}</Text>
 
-          {/* City */}
-          {data?.info.city ? (
-            <Text style={hs.cityText}>{data.info.city}</Text>
-          ) : null}
-
-          {/* Follow button */}
-          <TouchableOpacity
-            style={[hs.followBtn, isFollowing && hs.followBtnActive]}
-            onPress={() => toggleFollowTeam(String(teamId))}
-            activeOpacity={0.8}
-          >
-            <Text style={[hs.followText, isFollowing && hs.followTextActive]}>
-              {isFollowing ? '✓ Siguiendo' : '+ Seguir'}
-            </Text>
-          </TouchableOpacity>
-
-          {/* Stats strip: Position, Points, Form */}
-          {data?.teamStanding && (
-            <View style={hs.statsStrip}>
-              <View style={hs.statItem}>
-                <Text style={hs.statValue}>#{data.teamStanding.position}</Text>
-                <Text style={hs.statLabel}>Posición</Text>
-              </View>
-              <View style={hs.statItem}>
-                <Text style={hs.statValue}>{data.teamStanding.points}</Text>
-                <Text style={hs.statLabel}>Puntos</Text>
-              </View>
-              {data.form.length > 0 && (
-                <View style={hs.statItem}>
-                  <FormBadges form={data.form} />
-                  <Text style={hs.statLabel}>Forma</Text>
+            {/* Logo */}
+            <View style={hs.logoWrap}>
+              {teamLogo?.startsWith('http') ? (
+                <Image source={{ uri: teamLogo }} style={hs.logo} />
+              ) : (
+                <View style={[hs.logo, { backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }]}>
+                  <Text style={{ fontSize: 32 }}>⚽</Text>
                 </View>
               )}
             </View>
-          )}
-        </Animated.View>
-      </Animated.View>
 
-      {/* ── Tab bar (sticky) ── */}
-      <View style={[hs.tabBar, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
-        {TABS.map(tab => {
-          const active = activeTab === tab.key;
-          return (
+            {/* Team name */}
+            <Text style={hs.teamName}>{data?.info.name ?? teamName}</Text>
+
+            {/* City */}
+            {data?.info.city ? (
+              <Text style={hs.cityText}>{data.info.city}</Text>
+            ) : null}
+
+            {/* Follow button */}
             <TouchableOpacity
-              key={tab.key}
-              onPress={() => setActiveTab(tab.key)}
-              style={[hs.tab, active && { borderBottomColor: c.accent }]}
-              activeOpacity={0.7}
+              style={[hs.followBtn, isFollowing && hs.followBtnActive]}
+              onPress={() => toggleFollowTeam(String(teamId))}
+              activeOpacity={0.8}
             >
-              <Text style={[
-                hs.tabText,
-                { color: active ? c.textPrimary : c.textTertiary },
-                active && { fontWeight: '700' },
-              ]}>{tab.label}</Text>
+              <Text style={[hs.followText, isFollowing && hs.followTextActive]}>
+                {isFollowing ? '✓ Siguiendo' : '+ Seguir'}
+              </Text>
             </TouchableOpacity>
-          );
-        })}
-      </View>
 
-      {/* ── Scrollable content ── */}
-      <Animated.ScrollView
-        style={{ flex: 1, backgroundColor: c.bg }}
-        contentContainerStyle={{ paddingTop: 12 }}
-        showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: false },
-        )}
-      >
+            {/* Stats strip: Position, Points, Form */}
+            {data?.teamStanding && (
+              <View style={hs.statsStrip}>
+                <View style={hs.statItem}>
+                  <Text style={hs.statValue}>#{data.teamStanding.position}</Text>
+                  <Text style={hs.statLabel}>Posición</Text>
+                </View>
+                <View style={hs.statItem}>
+                  <Text style={hs.statValue}>{data.teamStanding.points}</Text>
+                  <Text style={hs.statLabel}>Puntos</Text>
+                </View>
+                {data.form.length > 0 && (
+                  <View style={hs.statItem}>
+                    <FormBadges form={data.form} />
+                    <Text style={hs.statLabel}>Forma</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* ── Tab bar (sticky on scroll) ── */}
+        <View style={[hs.tabBar, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
+          {TABS.map(tab => {
+            const active = activeTab === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                onPress={() => setActiveTab(tab.key)}
+                style={[hs.tab, active && { borderBottomColor: c.accent }]}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  hs.tabText,
+                  { color: active ? c.textPrimary : c.textTertiary },
+                  active && { fontWeight: '700' },
+                ]}>{tab.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* ── Tab content ── */}
         {loading ? (
           <View style={{ alignItems: 'center', paddingTop: 80, gap: 10 }}>
             <ActivityIndicator size="large" color={c.emerald} />
             <Text style={{ fontSize: 14, color: c.textSecondary, marginTop: 8 }}>Cargando equipo...</Text>
           </View>
         ) : error && !data ? (
-          <View style={{ alignItems: 'center', paddingTop: 80, gap: 10 }}>
+          <View style={{ alignItems: 'center', paddingTop: 80, gap: 10, paddingHorizontal: 20 }}>
             <Text style={{ fontSize: 40 }}>⚠️</Text>
             <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>Error cargando equipo</Text>
-            <Text style={{ fontSize: 12, color: c.textTertiary }}>{error}</Text>
+            <Text style={{ fontSize: 12, color: c.textTertiary, textAlign: 'center' }}>{error}</Text>
           </View>
         ) : data ? (
-          <>
+          <View style={{ paddingTop: 12 }}>
             {activeTab === 'resumen' && <ResumenTab data={data} />}
             {activeTab === 'plantilla' && <PlantillaTab data={data} />}
             {activeTab === 'partidos' && <PartidosTab data={data} />}
             {activeTab === 'tabla' && <TablaTab data={data} />}
-          </>
+          </View>
         ) : null}
-
-        <View style={{ height: 80 }} />
-      </Animated.ScrollView>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -524,7 +488,6 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
 
 const hs = StyleSheet.create({
   hero: {
-    overflow: 'hidden',
     position: 'relative',
   },
   gradient: {
@@ -550,15 +513,11 @@ const hs = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center', justifyContent: 'center',
   },
-  compactName: {
-    fontSize: 16, fontWeight: '700', color: '#fff',
-    textAlign: 'center',
-  },
   expanded: {
     alignItems: 'center',
     paddingTop: 0,
+    paddingBottom: 16,
     gap: 6,
-    zIndex: 1,
   },
   leagueLabel: {
     fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.7)',

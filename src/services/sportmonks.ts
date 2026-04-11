@@ -322,7 +322,9 @@ export interface SMCoach {
 export interface SMTeam extends SMParticipant {
   coach?: SMCoach;
   venue?: SMVenue;
+  /** SM returns this as `activeseasons` (lowercase) */
   activeSeasons?: SMSeason[];
+  activeseasons?: SMSeason[];
 }
 
 export interface SMSeason {
@@ -567,7 +569,7 @@ export async function fetchTeamsBySeasonId(seasonId: number): Promise<SMParticip
 /** GET /teams/{id}?include=coach;venue;activeSeasons */
 export async function fetchTeamById(id: number): Promise<SMTeam> {
   return fetchApi<SMTeam>(`teams/${id}`, {
-    include: 'coach;venue;activeSeasons',
+    include: 'venue;activeSeasons',
   });
 }
 

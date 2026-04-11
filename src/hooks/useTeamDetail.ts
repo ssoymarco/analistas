@@ -136,14 +136,17 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
         const team = await fetchTeamById(teamId);
         if (!mounted.current) return;
 
+        // SM returns `activeseasons` (lowercase) — normalize
+        const seasons = team.activeSeasons ?? team.activeseasons ?? [];
+
         // Determine season ID
         const sId = seasonId
-          ?? team.activeSeasons?.find(s => s.is_current)?.id
-          ?? team.activeSeasons?.[0]?.id
+          ?? seasons.find(s => s.is_current)?.id
+          ?? seasons[0]?.id
           ?? null;
 
-        const leagueName = team.activeSeasons?.find(s => s.id === sId)?.name ?? '';
-        const leagueId = team.activeSeasons?.find(s => s.id === sId)?.league_id ?? 0;
+        const leagueName = seasons.find(s => s.id === sId)?.name ?? '';
+        const leagueId = seasons.find(s => s.id === sId)?.league_id ?? 0;
 
         // Fetch all data in parallel
         const [squadData, recentData, standingsData] = await Promise.all([
@@ -163,8 +166,8 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
           country: '',
           city: team.venue?.city_name ?? '',
           founded: team.founded,
-          coach: team.coach?.display_name ?? team.coach?.common_name ?? '',
-          coachImage: team.coach?.image_path ?? '',
+          coach: '',
+          coachImage: '',
           venueName: team.venue?.name ?? '',
           venueCapacity: team.venue?.capacity ?? 0,
           venueImage: team.venue?.image_path ?? undefined,
