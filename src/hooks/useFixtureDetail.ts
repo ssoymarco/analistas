@@ -53,6 +53,9 @@ export function useFixtureDetail(matchId: string, homeTeamId: string, awayTeamId
             matchId: result.match.id,
             venue: partial.venue ?? { name: 'Estadio', city: '', capacity: 0, surface: 'grass' },
             referee: partial.referee ?? { name: 'Árbitro', nationality: '', flag: '' },
+            assistantReferees: partial.assistantReferees,
+            fourthOfficial: partial.fourthOfficial,
+            refereeStats: partial.refereeStats,
             weather: partial.weather,
             events: partial.events ?? [],
             statistics: partial.statistics ?? [],
@@ -63,6 +66,13 @@ export function useFixtureDetail(matchId: string, homeTeamId: string, awayTeamId
             odds: partial.odds ?? [],
             h2h: partial.h2h ?? { homeTeam: '', awayTeam: '', results: [] },
             missingPlayers: partial.missingPlayers ?? { home: [], away: [] },
+            tvStations: partial.tvStations,
+            commentaries: partial.commentaries,
+            resultInfo: partial.resultInfo,
+            predictions: partial.predictions,
+            homeForm: partial.homeForm,
+            awayForm: partial.awayForm,
+            pressureIndex: partial.pressureIndex,
           });
         }
         setLoading(false);

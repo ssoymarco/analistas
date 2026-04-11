@@ -10,6 +10,7 @@ import { FavoritosScreen } from '../screens/FavoritosScreen';
 import { NoticiasScreen } from '../screens/NoticiasScreen';
 import { PerfilScreen } from '../screens/PerfilScreen';
 import { MatchDetailScreen } from '../screens/MatchDetailScreen';
+import { TeamDetailScreen } from '../screens/TeamDetailScreen';
 import type { ColorPalette } from '../theme/colors';
 import type { Match } from '../data/types';
 
@@ -17,11 +18,12 @@ import type { Match } from '../data/types';
 
 /**
  * Stack nested inside the Partidos tab.
- * MatchDetail lives here so the bottom tab bar stays visible.
+ * MatchDetail and TeamDetail live here so the bottom tab bar stays visible.
  */
 export type PartidosStackParamList = {
   PartidosHome: undefined;
   MatchDetail: { match: Match };
+  TeamDetail: { teamId: number; teamName: string; teamLogo?: string; seasonId?: number };
 };
 
 export type RootTabParamList = {
@@ -48,6 +50,15 @@ function PartidosNavigator() {
       <PartidosStack.Screen
         name="MatchDetail"
         component={MatchDetailScreen}
+        options={{
+          animation: 'slide_from_right',
+          gestureEnabled: true,
+          gestureDirection: 'horizontal',
+        }}
+      />
+      <PartidosStack.Screen
+        name="TeamDetail"
+        component={TeamDetailScreen}
         options={{
           animation: 'slide_from_right',
           gestureEnabled: true,

@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
@@ -273,12 +274,26 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
 
             <View style={scr.heroRow}>
               {/* Home */}
-              <View style={scr.teamCol}>
+              <TouchableOpacity
+                style={scr.teamCol}
+                activeOpacity={0.7}
+                onPress={() => {
+                  const n = Number(match.homeTeam.id);
+                  if (!isNaN(n) && n > 0) {
+                    (navigation as any).push('TeamDetail', {
+                      teamId: n,
+                      teamName: match.homeTeam.name,
+                      teamLogo: match.homeTeam.logo,
+                      seasonId: match.seasonId,
+                    });
+                  }
+                }}
+              >
                 <TeamBadge name={match.homeTeam.name} logo={match.homeTeam.logo} size={64} />
                 <Text style={[scr.teamName, { color: c.textPrimary }]} numberOfLines={2}>
                   {match.homeTeam.name}
                 </Text>
-              </View>
+              </TouchableOpacity>
 
               {/* Center score */}
               <View style={scr.centerCol}>
@@ -307,12 +322,26 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               </View>
 
               {/* Away */}
-              <View style={scr.teamCol}>
+              <TouchableOpacity
+                style={scr.teamCol}
+                activeOpacity={0.7}
+                onPress={() => {
+                  const n = Number(match.awayTeam.id);
+                  if (!isNaN(n) && n > 0) {
+                    (navigation as any).push('TeamDetail', {
+                      teamId: n,
+                      teamName: match.awayTeam.name,
+                      teamLogo: match.awayTeam.logo,
+                      seasonId: match.seasonId,
+                    });
+                  }
+                }}
+              >
                 <TeamBadge name={match.awayTeam.name} logo={match.awayTeam.logo} size={64} />
                 <Text style={[scr.teamName, { color: c.textPrimary }]} numberOfLines={2}>
                   {match.awayTeam.name}
                 </Text>
-              </View>
+              </TouchableOpacity>
             </View>
           </Animated.View>
 

@@ -252,10 +252,64 @@ export interface MatchLineup {
   coachNationality: string;
 }
 
+export interface TVStation {
+  name: string;
+  country?: string;
+  logo?: string;
+}
+
+export interface MatchCommentary {
+  minute: number | null;
+  extraMinute: number | null;
+  comment: string;
+  important: boolean;
+}
+
+export interface MatchPrediction {
+  type: string;     // "Fulltime Result", "BTTS", "Over/Under 2.5"
+  homeWin?: number; // probability 0-100
+  draw?: number;
+  awayWin?: number;
+  yes?: number;
+  no?: number;
+}
+
+export interface TeamFormEntry {
+  matchId: string;
+  opponent: string;
+  opponentLogo: string;
+  isHome: boolean;
+  goalsFor: number;
+  goalsAgainst: number;
+  result: 'W' | 'D' | 'L';
+  date: string;
+  league: string;
+}
+
+export interface RefereeStats {
+  yellowCardsPerMatch: number;
+  redCardsPerMatch: number;
+  foulsPerMatch: number;
+  penaltiesPerMatch: number;
+  totalMatches: number;
+}
+
+export interface PressureIndex {
+  home: number; // 0-100 dominance %
+  away: number;
+  homeAttacks: number;
+  awayAttacks: number;
+  homeDangerousAttacks: number;
+  awayDangerousAttacks: number;
+}
+
 export interface MatchDetail {
   matchId: string;
   venue: MatchVenue;
   referee: MatchReferee;
+  assistantReferees?: string[];
+  fourthOfficial?: string;
+  refereeStats?: RefereeStats;
   weather?: MatchWeather;
   events: MatchEvent[];
   statistics: MatchStatCategory[];
@@ -273,4 +327,11 @@ export interface MatchDetail {
     home: MissingPlayer[];
     away: MissingPlayer[];
   };
+  tvStations?: TVStation[];
+  commentaries?: MatchCommentary[];
+  resultInfo?: string;
+  predictions?: MatchPrediction[];
+  homeForm?: TeamFormEntry[];
+  awayForm?: TeamFormEntry[];
+  pressureIndex?: PressureIndex;
 }

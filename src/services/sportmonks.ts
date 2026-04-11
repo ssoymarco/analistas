@@ -122,6 +122,63 @@ export interface SMFixture {
   statistics?: SMStatistic[];
   lineups?: SMLineupEntry[];
   venue?: SMVenue;
+  referees?: SMFixtureReferee[];
+  tvstations?: SMFixtureTVStation[];
+  weatherreport?: SMWeatherReport;
+  odds?: SMOdd[];
+}
+
+export interface SMFixtureReferee {
+  id: number;
+  fixture_id: number;
+  referee_id: number;
+  type_id: number; // 6=referee, 7=1st assistant, 8=2nd assistant, 9=4th official
+  referee?: {
+    id: number;
+    common_name: string;
+    display_name: string;
+    firstname: string;
+    lastname: string;
+    image_path: string;
+  };
+}
+
+export interface SMFixtureTVStation {
+  id: number;
+  fixture_id: number;
+  tvstation_id: number;
+  country_id: number;
+  tvstation?: {
+    id: number;
+    name: string;
+    url: string | null;
+    image_path: string | null;
+  };
+}
+
+export interface SMWeatherReport {
+  id: number;
+  fixture_id: number;
+  venue_id: number;
+  temperature: { day: number; morning: number; evening: number; night: number };
+  feels_like: { day: number; morning: number; evening: number; night: number };
+  wind: { speed: number; direction: number };
+  humidity: string;
+  pressure: number;
+  clouds: string;
+  description: string;
+  icon: string;
+  type: string;
+  metric: string;
+  current?: {
+    temp: number;
+    wind: number;
+    humidity: string;
+    pressure: number;
+    direction: number;
+    feels_like: number;
+    description: string;
+  };
 }
 
 export interface SMEvent {
@@ -308,31 +365,35 @@ export interface SMSquadPlayer {
 }
 
 // ── Known Stat Type IDs ──────────────────────────────────────────────────────
-// Full list of SM stat type IDs we map to Spanish labels in sportsApi.ts
+// Verified against https://api.sportmonks.com/v3/core/types (April 2026)
 
 export const SM_STAT_TYPES = {
-  // Attack
-  BALL_POSSESSION:      45,
-  SHOTS_TOTAL:          34,
-  SHOTS_ON_TARGET:      52,
-  SHOTS_OFF_TARGET:     53,
-  SHOTS_BLOCKED:       548,
-  SHOTS_INSIDE_BOX:     76,
-  SHOTS_OUTSIDE_BOX:    77,
-  EXPECTED_GOALS:     1605,
-  ATTACKS:             583,
-  DANGEROUS_ATTACKS:   584,
-  // Passes
-  PASSES_TOTAL:         54,
-  PASSES_ACCURACY:      55,
+  // General
+  BALL_POSSESSION:            45,   // "Ball Possession %"
+  GOALS:                      52,   // "Goals"
+  // Shooting
+  GOAL_ATTEMPTS:              54,   // "Goal Attempts" (total shots)
+  SHOTS_ON_TARGET:            86,   // "Shots On Target"
+  SHOTS_BLOCKED:              58,   // "Shots Blocked"
+  GOAL_KICKS:                 53,   // "Goal Kicks"
+  // Passes & creation
+  ASSISTS:                    79,   // "Assists"
+  FREE_KICKS:                 55,   // "Free Kicks"
+  THROWINS:                   60,   // "Throwins"
+  SUCCESSFUL_DRIBBLES_PCT:  1605,   // "Successful Dribbles Percentage"
   // Defence
-  CORNERS:              84,
-  OFFSIDES:             60,
-  SAVES:                86,
+  CORNERS:                    34,   // "Corners"
+  SAVES:                      57,   // "Saves"
   // Discipline
-  FOULS:                56,
-  YELLOW_CARDS:         57,
-  RED_CARDS:            58,
+  FOULS:                      56,   // "Fouls"
+  YELLOWCARDS:                84,   // "Yellowcards"
+  // xG family (available on some plans/leagues)
+  EXPECTED_GOALS:           5304,   // "Expected Goals (xG)"
+  EXPECTED_GOALS_ON_TARGET: 5305,   // "Expected Goals on Target (xGoT)"
+  NP_EXPECTED_GOALS:        7943,   // "Expected Non-Penalty Goals (npxG)"
+  // Advanced
+  BIG_CHANCES_CREATED:       580,   // "Big Chances Created"
+  BIG_CHANCES_MISSED:        581,   // "Big Chances Missed"
 } as const;
 
 // ── Known Event Type IDs ─────────────────────────────────────────────────────
@@ -457,10 +518,10 @@ export async function fetchFixturesByDate(date: string, leagueIds?: string): Pro
   return fetchAllPages<SMFixture>(`fixtures/date/${date}`, params);
 }
 
-/** GET /fixtures/{id} with full detail — includes player sub-data for lineups */
+/** GET /fixtures/{id} — full detail with all available includes */
 export async function fetchFixtureById(id: number): Promise<SMFixture> {
   return fetchApi<SMFixture>(`fixtures/${id}`, {
-    include: 'participants;scores;events;statistics;lineups.player;venue;league',
+    include: 'participants;scores;events;statistics;lineups.player;venue;league;referees.referee;tvstations.tvstation;weatherreport;odds.market',
   });
 }
 
@@ -531,4 +592,108 @@ export async function fetchSeasonsByLeagueId(leagueId: number): Promise<{ id: nu
 /** GET /commentaries/fixtures/{fixtureId} */
 export async function fetchCommentaries(fixtureId: number): Promise<SMCommentary[]> {
   return fetchApi<SMCommentary[]>(`commentaries/fixtures/${fixtureId}`);
+}
+
+// ── Odds Types ──────────────────────────────────────────────────────────────
+
+export interface SMOdd {
+  id: number;
+  fixture_id: number;
+  market_id: number;
+  bookmaker_id: number;
+  label: string;           // "1", "X", "2", "Over 2.5", etc.
+  value: string;            // odds value like "2.10"
+  name: string | null;
+  sort_order: number | null;
+  market_description: string | null;
+  dp3: string;
+  fractional: string;
+  american: string;
+  winning: boolean | null;
+  stopped: boolean;
+  total: string | null;
+  handicap: string | null;
+  participants: string | null;
+  original_label: string | null;
+  latest_bookmaker_update: string | null;
+}
+
+export interface SMOddsMarket {
+  id: number;
+  legacy_id: number | null;
+  name: string;           // "Fulltime Result", "Over/Under", "Both Teams To Score"
+  developer_name: string;
+  has_winning_calculations: boolean;
+}
+
+// ── Predictions ─────────────────────────────────────────────────────────────
+
+export interface SMPrediction {
+  id: number;
+  fixture_id: number;
+  predictions: {
+    yes: number;
+    no: number;
+  } | null;
+  type_id: number;
+  type: {
+    id: number;
+    name: string;          // "Fulltime Result", "BTTS", "Over/Under 2.5"
+    code: string;
+    developer_name: string;
+  } | null;
+}
+
+/** GET /predictions/probabilities/fixtures/{fixtureId} */
+export async function fetchPredictions(fixtureId: number): Promise<SMPrediction[]> {
+  return fetchApi<SMPrediction[]>(`predictions/probabilities/fixtures/${fixtureId}`);
+}
+
+// ── Sidelined (Injuries & Suspensions) ──────────────────────────────────────
+
+export interface SMSidelined {
+  id: number;
+  player_id: number;
+  team_id: number;
+  type_id: number;
+  season_id: number;
+  category: string;       // "injury" | "suspension" | "other"
+  start_date: string;
+  end_date: string | null;
+  games_missed: number | null;
+  completed: boolean;
+  player?: SMPlayer;
+}
+
+/** GET /sidelined/seasons/{seasonId}/teams/{teamId}?include=player */
+export async function fetchSidelinedByTeam(seasonId: number, teamId: number): Promise<SMSidelined[]> {
+  return fetchApi<SMSidelined[]>(`sidelined/seasons/${seasonId}/teams/${teamId}`, {
+    include: 'player',
+  });
+}
+
+// ── Team Recent Fixtures ────────────────────────────────────────────────────
+
+/** GET /fixtures/latest/by-team/{teamId}?include=participants;scores;league */
+export async function fetchTeamRecentFixtures(teamId: number): Promise<SMFixture[]> {
+  return fetchApi<SMFixture[]>(`fixtures/latest/by-team/${teamId}`, {
+    include: 'participants;scores;league',
+  });
+}
+
+// ── Referee Stats ───────────────────────────────────────────────────────────
+
+export interface SMRefereeStats {
+  id: number;
+  referee_id: number;
+  season_id: number;
+  type_id: number;
+  value: { total: number; average: string } | number;
+}
+
+/** GET /referees/{id}?include=statistics */
+export async function fetchRefereeStats(refereeId: number): Promise<{ id: number; statistics?: SMRefereeStats[] } & Record<string, unknown>> {
+  return fetchApi<{ id: number; statistics?: SMRefereeStats[] } & Record<string, unknown>>(`referees/${refereeId}`, {
+    include: 'statistics',
+  });
 }

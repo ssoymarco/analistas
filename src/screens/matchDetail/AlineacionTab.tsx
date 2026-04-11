@@ -1,8 +1,7 @@
 // ── Alineación Tab ────────────────────────────────────────────────────────────
-// Both teams on the same pitch simultaneously.
-// Home = top half (GK at top), Away = bottom half (GK at bottom).
-// Pitch color adapts to dark / light mode.
-// COMPARTIR button captures and shares via ViewShot + expo-sharing.
+// Premium pitch design with grass stripes, corner arcs, penalty arcs,
+// goal frame markings, and polished player dots.
+// Fully responsive to Dark / Light mode.
 import React, { useRef } from 'react';
 import {
   View,
@@ -10,6 +9,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Image,
+  Dimensions,
 } from 'react-native';
 import { useThemeColors } from '../../theme/useTheme';
 import { useDarkMode } from '../../contexts/DarkModeContext';
@@ -22,14 +22,48 @@ try { ViewShot = require('react-native-view-shot').default; } catch {}
 try { Sharing   = require('expo-sharing'); } catch {}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const HOME_COLOR  = '#3b82f6';   // blue  — local
-const AWAY_COLOR  = '#f97316';   // orange — visitante
-const PITCH_HEIGHT = 360;
-const DOT_SIZE     = 28;
+const HOME_COLOR   = '#3b82f6';
+const AWAY_COLOR   = '#f97316';
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const PITCH_MARGIN = 16;
+const PITCH_WIDTH  = SCREEN_WIDTH - PITCH_MARGIN * 2;
+const PITCH_HEIGHT = 520;
+const DOT_SIZE     = 32;
+const STRIPE_COUNT = 14; // number of grass stripes across pitch
+
+// ── Pitch theme palettes ─────────────────────────────────────────────────────
+interface PitchTheme {
+  grassA: string;     // main stripe
+  grassB: string;     // alternate stripe
+  lineColor: string;  // markings
+  lineWidth: number;
+  goalFrame: string;  // goal post colour
+  shadow: string;     // inner shadow / vignette
+  dotGlow: string;    // glow behind player dots
+}
+
+const DARK_PITCH: PitchTheme = {
+  grassA: '#14532d',
+  grassB: '#166534',
+  lineColor: 'rgba(255,255,255,0.25)',
+  lineWidth: 1.5,
+  goalFrame: 'rgba(255,255,255,0.35)',
+  shadow: 'rgba(0,0,0,0.4)',
+  dotGlow: 'rgba(0,0,0,0.5)',
+};
+
+const LIGHT_PITCH: PitchTheme = {
+  grassA: '#22c55e',
+  grassB: '#16a34a',
+  lineColor: 'rgba(255,255,255,0.75)',
+  lineWidth: 1.5,
+  goalFrame: 'rgba(255,255,255,0.85)',
+  shadow: 'rgba(0,0,0,0.08)',
+  dotGlow: 'rgba(0,0,0,0.15)',
+};
 
 // ── Group starters into formation rows ────────────────────────────────────────
 function groupIntoRows(starters: LineupPlayer[]): LineupPlayer[][] {
-  // If SM formation_field data is present, use formationRow
   const hasRows = starters.some(p => p.formationRow != null);
 
   if (hasRows) {
@@ -44,7 +78,7 @@ function groupIntoRows(starters: LineupPlayer[]): LineupPlayer[][] {
       .map(([, ps]) => [...ps].sort((a, b) => (a.formationCol ?? 0) - (b.formationCol ?? 0)));
   }
 
-  // Fallback: bucket by y coordinate bands (mock data)
+  // Fallback: bucket by y coordinate bands
   const sorted = [...starters].sort((a, b) => a.y - b.y);
   const rows: LineupPlayer[][] = [];
   let bucket: LineupPlayer[] = [];
@@ -61,43 +95,7 @@ function groupIntoRows(starters: LineupPlayer[]): LineupPlayer[][] {
   return rows;
 }
 
-// ── Player dot ────────────────────────────────────────────────────────────────
-const PlayerDot: React.FC<{ player: LineupPlayer; color: string }> = ({ player, color }) => {
-  // Visual state
-  let bgColor = color;
-  let borderStyle = {};
-  if (player.redCard)    { bgColor = '#dc2626'; }
-  else if (player.yellowCard) { bgColor = mixColor(color, '#ca8a04', 0.5); }
-  if (player.isCaptain)  { borderStyle = { borderWidth: 2, borderColor: '#fbbf24' }; }
-
-  const subBadge = player.isSubstituted;
-  const goalBadge = (player.goals ?? 0) > 0;
-
-  return (
-    <View style={st.dotWrap}>
-      <View style={st.dotOuter}>
-        {/* Goal badge (top-left) */}
-        {goalBadge && (
-          <View style={st.goalBadge}>
-            <Text style={st.goalBadgeText}>⚽</Text>
-          </View>
-        )}
-        {/* Sub badge (top-right) */}
-        {subBadge && (
-          <View style={st.subBadge}>
-            <Text style={st.subBadgeText}>↓</Text>
-          </View>
-        )}
-        <View style={[st.dot, { backgroundColor: bgColor }, borderStyle]}>
-          <Text style={st.dotNum}>{player.number}</Text>
-        </View>
-      </View>
-      <Text style={st.dotName} numberOfLines={1}>{player.shortName}</Text>
-    </View>
-  );
-};
-
-/** Blend two hex colours. ratio 0→colorA, 1→colorB */
+// ── Color utility ────────────────────────────────────────────────────────────
 function mixColor(hexA: string, hexB: string, ratio: number): string {
   const parse = (h: string) => [
     parseInt(h.slice(1, 3), 16),
@@ -112,29 +110,269 @@ function mixColor(hexA: string, hexB: string, ratio: number): string {
   return `rgb(${r},${g},${b})`;
 }
 
-// ── Pitch markings (absolute layer) ──────────────────────────────────────────
-const PitchMarkings: React.FC<{ lineColor: string }> = ({ lineColor }) => (
-  <>
-    {/* Outer border */}
-    <View style={[pm.border, { borderColor: lineColor }]} pointerEvents="none" />
-    {/* Half-way line */}
-    <View style={[pm.halfway, { backgroundColor: lineColor }]} pointerEvents="none" />
-    {/* Centre circle */}
-    <View style={[pm.centreCircle, { borderColor: lineColor }]} pointerEvents="none" />
-    {/* Centre dot */}
-    <View style={[pm.centreDot, { backgroundColor: lineColor }]} pointerEvents="none" />
-    {/* Top penalty box */}
-    <View style={[pm.penTop, { borderColor: lineColor }]} pointerEvents="none" />
-    {/* Top goal box */}
-    <View style={[pm.goalTop, { borderColor: lineColor }]} pointerEvents="none" />
-    {/* Bottom penalty box */}
-    <View style={[pm.penBot, { borderColor: lineColor }]} pointerEvents="none" />
-    {/* Bottom goal box */}
-    <View style={[pm.goalBot, { borderColor: lineColor }]} pointerEvents="none" />
-  </>
-);
+// ── Player dot ────────────────────────────────────────────────────────────────
+const PlayerDot: React.FC<{
+  player: LineupPlayer;
+  color: string;
+  theme: PitchTheme;
+  hasImage?: boolean;
+}> = ({ player, color, theme, hasImage }) => {
+  let bgColor = color;
+  let borderStyle: any = { borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)' };
 
-// ── Bench table ───────────────────────────────────────────────────────────────
+  if (player.redCard) {
+    bgColor = '#dc2626';
+    borderStyle = { borderWidth: 2.5, borderColor: '#fca5a5' };
+  } else if (player.yellowCard) {
+    bgColor = mixColor(color, '#ca8a04', 0.45);
+    borderStyle = { borderWidth: 2.5, borderColor: '#fde047' };
+  }
+  if (player.isCaptain) {
+    borderStyle = { borderWidth: 2.5, borderColor: '#fbbf24' };
+  }
+
+  const goalCount = player.goals ?? 0;
+  const subbed    = player.isSubstituted;
+  const imageUri  = player.imageUrl;
+
+  return (
+    <View style={dot.wrap}>
+      {/* Glow behind dot */}
+      <View style={[dot.glow, { backgroundColor: theme.dotGlow }]} />
+
+      <View style={dot.outer}>
+        {/* Goal badge */}
+        {goalCount > 0 && (
+          <View style={dot.goalBadge}>
+            <Text style={dot.goalEmoji}>⚽</Text>
+            {goalCount > 1 && <Text style={dot.goalCount}>×{goalCount}</Text>}
+          </View>
+        )}
+        {/* Sub badge */}
+        {subbed && (
+          <View style={dot.subBadge}>
+            <Text style={dot.subArrow}>↓</Text>
+          </View>
+        )}
+        {/* Yellow card indicator */}
+        {player.yellowCard && !player.redCard && (
+          <View style={dot.cardBadge}>
+            <View style={[dot.cardRect, { backgroundColor: '#facc15' }]} />
+          </View>
+        )}
+        {/* Red card indicator */}
+        {player.redCard && (
+          <View style={dot.cardBadge}>
+            <View style={[dot.cardRect, { backgroundColor: '#ef4444' }]} />
+          </View>
+        )}
+
+        {/* The dot itself */}
+        <View style={[dot.circle, { backgroundColor: bgColor }, borderStyle]}>
+          {imageUri && typeof imageUri === 'string' && imageUri.startsWith('http') ? (
+            <Image source={{ uri: imageUri }} style={dot.image} />
+          ) : (
+            <Text style={dot.number}>{player.number}</Text>
+          )}
+        </View>
+      </View>
+
+      <Text style={dot.name} numberOfLines={1}>{player.shortName}</Text>
+    </View>
+  );
+};
+
+// ── Grass Stripes ────────────────────────────────────────────────────────────
+const GrassStripes: React.FC<{ theme: PitchTheme }> = ({ theme }) => {
+  const stripeH = PITCH_HEIGHT / STRIPE_COUNT;
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {Array.from({ length: STRIPE_COUNT }).map((_, i) => (
+        <View
+          key={i}
+          style={{
+            height: stripeH,
+            backgroundColor: i % 2 === 0 ? theme.grassA : theme.grassB,
+          }}
+        />
+      ))}
+    </View>
+  );
+};
+
+// ── Pitch Markings ───────────────────────────────────────────────────────────
+const PitchMarkings: React.FC<{ theme: PitchTheme }> = ({ theme }) => {
+  const lc = theme.lineColor;
+  const lw = theme.lineWidth;
+  const gf = theme.goalFrame;
+
+  // Proportional sizing
+  const PAD = 10;          // edge padding
+  const PEN_W = 50;        // penalty box width (% of pitch)
+  const PEN_H = 70;        // penalty box height
+  const GOAL_W = 24;       // goal box width (%)
+  const GOAL_H = 30;       // goal box height
+  const CIRCLE = 54;       // centre circle diameter
+  const ARC_SIZE = 14;     // corner arc size
+  const GOAL_FRAME_W = 18; // goal frame width (%)
+  const GOAL_FRAME_H = 8;  // goal frame height
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {/* Outer border */}
+      <View style={{
+        position: 'absolute',
+        top: PAD, left: PAD, right: PAD, bottom: PAD,
+        borderWidth: lw, borderColor: lc, borderRadius: 2,
+      }} />
+
+      {/* Half-way line */}
+      <View style={{
+        position: 'absolute',
+        top: '50%', left: PAD, right: PAD,
+        height: lw, backgroundColor: lc,
+      }} />
+
+      {/* Centre circle */}
+      <View style={{
+        position: 'absolute',
+        width: CIRCLE, height: CIRCLE,
+        borderRadius: CIRCLE / 2,
+        borderWidth: lw, borderColor: lc,
+        left: '50%', top: '50%',
+        marginLeft: -CIRCLE / 2,
+        marginTop: -CIRCLE / 2,
+      }} />
+
+      {/* Centre dot */}
+      <View style={{
+        position: 'absolute',
+        width: 6, height: 6, borderRadius: 3,
+        backgroundColor: lc,
+        left: '50%', top: '50%',
+        marginLeft: -3, marginTop: -3,
+      }} />
+
+      {/* ── Top penalty area ── */}
+      <View style={{
+        position: 'absolute',
+        top: PAD,
+        left: `${(100 - PEN_W) / 2}%`,
+        right: `${(100 - PEN_W) / 2}%`,
+        height: PEN_H,
+        borderWidth: lw, borderColor: lc,
+        borderTopWidth: 0,
+      }} />
+
+      {/* Top goal area */}
+      <View style={{
+        position: 'absolute',
+        top: PAD,
+        left: `${(100 - GOAL_W) / 2}%`,
+        right: `${(100 - GOAL_W) / 2}%`,
+        height: GOAL_H,
+        borderWidth: lw, borderColor: lc,
+        borderTopWidth: 0,
+      }} />
+
+      {/* Top penalty spot */}
+      <View style={{
+        position: 'absolute',
+        top: PAD + PEN_H - 18,
+        left: '50%', marginLeft: -2.5,
+        width: 5, height: 5, borderRadius: 2.5,
+        backgroundColor: lc,
+      }} />
+
+      {/* Top goal frame */}
+      <View style={{
+        position: 'absolute',
+        top: PAD - GOAL_FRAME_H + 1,
+        left: `${(100 - GOAL_FRAME_W) / 2}%`,
+        right: `${(100 - GOAL_FRAME_W) / 2}%`,
+        height: GOAL_FRAME_H,
+        borderWidth: lw + 0.5,
+        borderColor: gf,
+        borderTopLeftRadius: 3,
+        borderTopRightRadius: 3,
+        borderBottomWidth: 0,
+      }} />
+
+      {/* ── Bottom penalty area ── */}
+      <View style={{
+        position: 'absolute',
+        bottom: PAD,
+        left: `${(100 - PEN_W) / 2}%`,
+        right: `${(100 - PEN_W) / 2}%`,
+        height: PEN_H,
+        borderWidth: lw, borderColor: lc,
+        borderBottomWidth: 0,
+      }} />
+
+      {/* Bottom goal area */}
+      <View style={{
+        position: 'absolute',
+        bottom: PAD,
+        left: `${(100 - GOAL_W) / 2}%`,
+        right: `${(100 - GOAL_W) / 2}%`,
+        height: GOAL_H,
+        borderWidth: lw, borderColor: lc,
+        borderBottomWidth: 0,
+      }} />
+
+      {/* Bottom penalty spot */}
+      <View style={{
+        position: 'absolute',
+        bottom: PAD + PEN_H - 18,
+        left: '50%', marginLeft: -2.5,
+        width: 5, height: 5, borderRadius: 2.5,
+        backgroundColor: lc,
+      }} />
+
+      {/* Bottom goal frame */}
+      <View style={{
+        position: 'absolute',
+        bottom: PAD - GOAL_FRAME_H + 1,
+        left: `${(100 - GOAL_FRAME_W) / 2}%`,
+        right: `${(100 - GOAL_FRAME_W) / 2}%`,
+        height: GOAL_FRAME_H,
+        borderWidth: lw + 0.5,
+        borderColor: gf,
+        borderBottomLeftRadius: 3,
+        borderBottomRightRadius: 3,
+        borderTopWidth: 0,
+      }} />
+
+      {/* ── Corner arcs ── */}
+      {/* Top-left */}
+      <View style={{
+        position: 'absolute', top: PAD - ARC_SIZE / 2, left: PAD - ARC_SIZE / 2,
+        width: ARC_SIZE, height: ARC_SIZE, borderRadius: ARC_SIZE / 2,
+        borderWidth: lw, borderColor: lc,
+      }} />
+      {/* Top-right */}
+      <View style={{
+        position: 'absolute', top: PAD - ARC_SIZE / 2, right: PAD - ARC_SIZE / 2,
+        width: ARC_SIZE, height: ARC_SIZE, borderRadius: ARC_SIZE / 2,
+        borderWidth: lw, borderColor: lc,
+      }} />
+      {/* Bottom-left */}
+      <View style={{
+        position: 'absolute', bottom: PAD - ARC_SIZE / 2, left: PAD - ARC_SIZE / 2,
+        width: ARC_SIZE, height: ARC_SIZE, borderRadius: ARC_SIZE / 2,
+        borderWidth: lw, borderColor: lc,
+      }} />
+      {/* Bottom-right */}
+      <View style={{
+        position: 'absolute', bottom: PAD - ARC_SIZE / 2, right: PAD - ARC_SIZE / 2,
+        width: ARC_SIZE, height: ARC_SIZE, borderRadius: ARC_SIZE / 2,
+        borderWidth: lw, borderColor: lc,
+      }} />
+    </View>
+  );
+};
+
+// ── Bench table ──────────────────────────────────────────────────────────────
 const BenchTable: React.FC<{
   match: Match;
   homeBench: LineupPlayer[];
@@ -204,6 +442,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const captureRef = useRef<any>(null);
+  const theme = isDark ? DARK_PITCH : LIGHT_PITCH;
 
   const homeStarters = detail.homeLineup.starters ?? [];
   const awayStarters = detail.awayLineup.starters ?? [];
@@ -211,11 +450,6 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   const awayBench    = (detail.awayLineup.bench ?? []).slice(0, 9);
   const hasLineups   = homeStarters.length > 0 || awayStarters.length > 0;
 
-  // Theme-responsive pitch colours
-  const pitchBg    = isDark ? '#0d3320' : '#2e7d45';
-  const pitchLine  = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.55)';
-
-  // Formation rows
   const homeRows = groupIntoRows(homeStarters);
   const awayRows = groupIntoRows(awayStarters);
 
@@ -243,61 +477,78 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   }
 
   const PitchBlock = (
-    <View style={[ms.pitch, { backgroundColor: pitchBg }]}>
-      <PitchMarkings lineColor={pitchLine} />
+    <View style={[ms.pitchContainer, { backgroundColor: isDark ? '#0a1f15' : '#15803d' }]}>
+      {/* Outer decorative border / shadow */}
+      <View style={[ms.pitchShadow, { borderColor: theme.shadow }]} />
 
-      {/* ── Home team — top half ── */}
-      <View style={ms.topHalf}>
-        {homeRows.map((row, ri) => (
-          <View key={ri} style={ms.playerRow}>
-            {row.map(p => <PlayerDot key={p.id} player={p} color={HOME_COLOR} />)}
+      <View style={[ms.pitch]}>
+        {/* Grass stripes */}
+        <GrassStripes theme={theme} />
+
+        {/* Pitch markings */}
+        <PitchMarkings theme={theme} />
+
+        {/* ── Home team — top half ── */}
+        <View style={ms.topHalf}>
+          {homeRows.map((row, ri) => (
+            <View key={ri} style={ms.playerRow}>
+              {row.map(p => <PlayerDot key={p.id} player={p} color={HOME_COLOR} theme={theme} />)}
+            </View>
+          ))}
+        </View>
+
+        {/* ── Half-way team labels ── */}
+        <View style={ms.halfLabels} pointerEvents="none">
+          <View style={[ms.halfBadge, { backgroundColor: 'rgba(59,130,246,0.85)' }]}>
+            <Text style={ms.halfBadgeText}>{match.homeTeam.shortName}</Text>
           </View>
-        ))}
-      </View>
-
-      {/* ── Team labels at half-way line ── */}
-      <View style={ms.halfLabels} pointerEvents="none">
-        <Text style={[ms.halfLabel, { color: HOME_COLOR }]}>{match.homeTeam.shortName}</Text>
-        <Text style={[ms.halfSep, { color: 'rgba(255,255,255,0.3)' }]}>·</Text>
-        <Text style={[ms.halfLabel, { color: AWAY_COLOR }]}>{match.awayTeam.shortName}</Text>
-      </View>
-
-      {/* ── Away team — bottom half (column-reverse → GK at bottom) ── */}
-      <View style={ms.bottomHalf}>
-        {awayRows.map((row, ri) => (
-          <View key={ri} style={ms.playerRow}>
-            {row.map(p => <PlayerDot key={p.id} player={p} color={AWAY_COLOR} />)}
+          <View style={[ms.halfDot, { backgroundColor: 'rgba(255,255,255,0.3)' }]} />
+          <View style={[ms.halfBadge, { backgroundColor: 'rgba(249,115,22,0.85)' }]}>
+            <Text style={ms.halfBadgeText}>{match.awayTeam.shortName}</Text>
           </View>
-        ))}
+        </View>
+
+        {/* ── Away team — bottom half ── */}
+        <View style={ms.bottomHalf}>
+          {awayRows.map((row, ri) => (
+            <View key={ri} style={ms.playerRow}>
+              {row.map(p => <PlayerDot key={p.id} player={p} color={AWAY_COLOR} theme={theme} />)}
+            </View>
+          ))}
+        </View>
       </View>
     </View>
   );
 
   return (
     <View style={ms.outer}>
-      {/* ── Pitch + ViewShot ── */}
+      {/* ── Pitch ── */}
       {ViewShot ? (
         <ViewShot ref={captureRef} options={{ format: 'png', quality: 1.0 }}>
           {PitchBlock}
         </ViewShot>
       ) : PitchBlock}
 
-      {/* ── Formation + Coach strip ── */}
-      <View style={[ms.formationStrip, { backgroundColor: c.surface, borderColor: c.border }]}>
+      {/* ── Formation strip ── */}
+      <View style={[ms.formationStrip, { backgroundColor: c.card, borderColor: c.border }]}>
         <View style={ms.formationSide}>
-          <Text style={[ms.formationNum, { color: HOME_COLOR }]}>{detail.homeLineup.formation}</Text>
+          <View style={[ms.formationBadge, { backgroundColor: 'rgba(59,130,246,0.12)' }]}>
+            <Text style={[ms.formationNum, { color: HOME_COLOR }]}>{detail.homeLineup.formation}</Text>
+          </View>
           {!!detail.homeLineup.coach && (
-            <Text style={[ms.coachName, { color: c.textTertiary }]} numberOfLines={1}>
-              🧑‍💼 {detail.homeLineup.coach}
+            <Text style={[ms.coachName, { color: c.textSecondary }]} numberOfLines={1}>
+              {detail.homeLineup.coach}
             </Text>
           )}
         </View>
         <View style={[ms.formationDivider, { backgroundColor: c.border }]} />
         <View style={[ms.formationSide, ms.formationSideRight]}>
-          <Text style={[ms.formationNum, { color: AWAY_COLOR }]}>{detail.awayLineup.formation}</Text>
+          <View style={[ms.formationBadge, { backgroundColor: 'rgba(249,115,22,0.12)' }]}>
+            <Text style={[ms.formationNum, { color: AWAY_COLOR }]}>{detail.awayLineup.formation}</Text>
+          </View>
           {!!detail.awayLineup.coach && (
-            <Text style={[ms.coachName, { color: c.textTertiary }]} numberOfLines={1}>
-              🧑‍💼 {detail.awayLineup.coach}
+            <Text style={[ms.coachName, { color: c.textSecondary }]} numberOfLines={1}>
+              {detail.awayLineup.coach}
             </Text>
           )}
         </View>
@@ -305,16 +556,26 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
 
       {/* ── Legend ── */}
       <View style={ms.legend}>
-        {[
-          { color: '#fbbf24', label: 'Capitán' },
-          { color: '#ca8a04', label: 'Tarjeta amarilla' },
-          { color: '#dc2626', label: 'Tarjeta roja' },
-        ].map(({ color, label }) => (
-          <View key={label} style={ms.legendItem}>
-            <View style={[ms.legendDot, { backgroundColor: color }]} />
-            <Text style={[ms.legendText, { color: c.textTertiary }]}>{label}</Text>
+        <View style={ms.legendItem}>
+          <View style={[ms.legendDotBorder, { borderColor: '#fbbf24' }]}>
+            <View style={[ms.legendDotInner, { backgroundColor: HOME_COLOR }]} />
           </View>
-        ))}
+          <Text style={[ms.legendText, { color: c.textTertiary }]}>Capitán</Text>
+        </View>
+        <View style={ms.legendItem}>
+          <View style={[ms.legendRect, { backgroundColor: '#facc15' }]} />
+          <Text style={[ms.legendText, { color: c.textTertiary }]}>Amarilla</Text>
+        </View>
+        <View style={ms.legendItem}>
+          <View style={[ms.legendRect, { backgroundColor: '#ef4444' }]} />
+          <Text style={[ms.legendText, { color: c.textTertiary }]}>Roja</Text>
+        </View>
+        <View style={ms.legendItem}>
+          <View style={[ms.legendSubIcon, { backgroundColor: '#10b981' }]}>
+            <Text style={{ fontSize: 7, color: '#fff', fontWeight: '800' }}>↓</Text>
+          </View>
+          <Text style={[ms.legendText, { color: c.textTertiary }]}>Sustituido</Text>
+        </View>
       </View>
 
       {/* ── Bench ── */}
@@ -327,7 +588,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
           onPress={handleShare}
           activeOpacity={0.82}
         >
-          <Text style={ms.shareBtnText}>COMPARTIR</Text>
+          <Text style={ms.shareBtnText}>📤  COMPARTIR</Text>
         </TouchableOpacity>
       )}
 
@@ -339,34 +600,49 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const ms = StyleSheet.create({
-  outer: { paddingHorizontal: 16, paddingTop: 8 },
+  outer: { paddingHorizontal: PITCH_MARGIN, paddingTop: 8 },
 
   // Empty state
   empty: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 32, gap: 8 },
   emptyText: { fontSize: 16, fontWeight: '600', textAlign: 'center' },
   emptySubText: { fontSize: 12, textAlign: 'center', lineHeight: 18 },
 
+  // Pitch container (outer glow / padding)
+  pitchContainer: {
+    borderRadius: 18,
+    padding: 3,
+    overflow: 'hidden',
+  },
+  pitchShadow: {
+    ...StyleSheet.absoluteFillObject,
+    borderWidth: 3,
+    borderRadius: 18,
+    opacity: 0.5,
+  },
+
   // Pitch
   pitch: {
     height: PITCH_HEIGHT,
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
     position: 'relative',
-    marginBottom: 0,
   },
+
   topHalf: {
     flex: 1,
     flexDirection: 'column',
     justifyContent: 'space-evenly',
-    paddingVertical: 8,
-    paddingHorizontal: 6,
+    paddingVertical: 16,
+    paddingHorizontal: 10,
+    zIndex: 2,
   },
   bottomHalf: {
     flex: 1,
-    flexDirection: 'column-reverse',  // GK row renders at bottom
+    flexDirection: 'column-reverse',
     justifyContent: 'space-evenly',
-    paddingVertical: 8,
-    paddingHorizontal: 6,
+    paddingVertical: 16,
+    paddingHorizontal: 10,
+    zIndex: 2,
   },
   playerRow: {
     flexDirection: 'row',
@@ -383,28 +659,48 @@ const ms = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 6,
-    transform: [{ translateY: -8 }],
+    gap: 8,
+    transform: [{ translateY: -11 }],
+    zIndex: 3,
   },
-  halfLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-  halfSep:   { fontSize: 10 },
+  halfBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  halfBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: 0.5,
+  },
+  halfDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+  },
 
   // Formation strip
   formationStrip: {
     flexDirection: 'row',
     borderWidth: 1,
-    borderRadius: 12,
-    marginTop: 8,
+    borderRadius: 14,
+    marginTop: 10,
     overflow: 'hidden',
   },
   formationSide: {
     flex: 1,
-    padding: 10,
+    padding: 12,
     alignItems: 'flex-start',
-    gap: 2,
+    gap: 4,
   },
   formationSideRight: { alignItems: 'flex-end' },
-  formationNum: { fontSize: 16, fontWeight: '800' },
+  formationBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  formationNum: { fontSize: 16, fontWeight: '800', letterSpacing: 0.5 },
   coachName: { fontSize: 11, fontWeight: '500' },
   formationDivider: { width: 1 },
 
@@ -412,169 +708,133 @@ const ms = StyleSheet.create({
   legend: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    paddingVertical: 10,
+    gap: 12,
+    paddingVertical: 12,
     paddingHorizontal: 2,
   },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  legendDot:  { width: 8, height: 8, borderRadius: 4 },
+  legendDotBorder: {
+    width: 14, height: 14, borderRadius: 7,
+    borderWidth: 2,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  legendDotInner: { width: 8, height: 8, borderRadius: 4 },
+  legendRect: { width: 10, height: 14, borderRadius: 2 },
+  legendSubIcon: {
+    width: 12, height: 12, borderRadius: 6,
+    alignItems: 'center', justifyContent: 'center',
+  },
   legendText: { fontSize: 10, fontWeight: '500' },
 
   // Share button
   shareBtn: {
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: 14,
     alignItems: 'center',
     marginTop: 10,
   },
-  shareBtnText: { fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: 1 },
+  shareBtnText: { fontSize: 14, fontWeight: '800', color: '#fff', letterSpacing: 0.8 },
 });
 
-// Player dot styles
-const st = StyleSheet.create({
-  dotWrap: {
+// ── Player dot styles ────────────────────────────────────────────────────────
+const dot = StyleSheet.create({
+  wrap: {
     alignItems: 'center',
-    width: DOT_SIZE + 14,
+    width: DOT_SIZE + 18,
     gap: 3,
   },
-  dotOuter: {
+  glow: {
+    position: 'absolute',
+    width: DOT_SIZE + 8,
+    height: DOT_SIZE + 8,
+    borderRadius: (DOT_SIZE + 8) / 2,
+    top: -4,
+    left: (DOT_SIZE + 18 - DOT_SIZE - 8) / 2,
+    opacity: 0.4,
+  },
+  outer: {
     position: 'relative',
     width: DOT_SIZE,
     height: DOT_SIZE,
   },
-  dot: {
+  circle: {
     width: DOT_SIZE,
     height: DOT_SIZE,
     borderRadius: DOT_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    // Subtle shadow
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.35,
-    shadowRadius: 2,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.45,
+    shadowRadius: 4,
+    elevation: 5,
   },
-  dotNum: {
-    fontSize: 9,
+  image: {
+    width: DOT_SIZE - 4,
+    height: DOT_SIZE - 4,
+    borderRadius: (DOT_SIZE - 4) / 2,
+  },
+  number: {
+    fontSize: 11,
     fontWeight: '900',
     color: '#fff',
     includeFontPadding: false,
   },
-  dotName: {
-    fontSize: 7,
+  name: {
+    fontSize: 8,
     fontWeight: '700',
     color: '#fff',
     textAlign: 'center',
-    maxWidth: DOT_SIZE + 14,
-    // Text shadow for readability on any pitch colour
-    textShadowColor: 'rgba(0,0,0,0.8)',
+    maxWidth: DOT_SIZE + 18,
+    textShadowColor: 'rgba(0,0,0,0.9)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    textShadowRadius: 3,
   },
-  // Goal badge — top-left corner of dot
+  // Goal badge — top-left
   goalBadge: {
     position: 'absolute',
-    top: -5,
-    left: -5,
+    top: -6,
+    left: -6,
     zIndex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  goalBadgeText: { fontSize: 9 },
-  // Sub badge — top-right corner
+  goalEmoji: { fontSize: 10 },
+  goalCount: { fontSize: 7, fontWeight: '900', color: '#fff', marginLeft: -1, textShadowColor: '#000', textShadowRadius: 2, textShadowOffset: { width: 0, height: 1 } },
+  // Sub badge — top-right
   subBadge: {
     position: 'absolute',
     top: -4,
     right: -4,
     backgroundColor: '#10b981',
-    borderRadius: 5,
-    width: 10,
-    height: 10,
+    borderRadius: 7,
+    width: 14,
+    height: 14,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,
-  },
-  subBadgeText: { fontSize: 7, color: '#fff', fontWeight: '800' },
-});
-
-// Pitch marking styles (absolute positioned overlay)
-const pm = StyleSheet.create({
-  border: {
-    position: 'absolute',
-    top: 4, left: 8, right: 8, bottom: 4,
     borderWidth: 1.5,
-    borderRadius: 4,
+    borderColor: 'rgba(0,0,0,0.2)',
   },
-  halfway: {
+  subArrow: { fontSize: 8, color: '#fff', fontWeight: '800' },
+  // Card badge — bottom-right
+  cardBadge: {
     position: 'absolute',
-    top: '50%',
-    left: 8,
-    right: 8,
-    height: 1.5,
+    bottom: -2,
+    right: -3,
+    zIndex: 2,
   },
-  centreCircle: {
-    position: 'absolute',
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 1.5,
-    left: '50%',
-    top: '50%',
-    marginLeft: -32,
-    marginTop: -32,
-  },
-  centreDot: {
-    position: 'absolute',
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    left: '50%',
-    top: '50%',
-    marginLeft: -2.5,
-    marginTop: -2.5,
-  },
-  // Top penalty area
-  penTop: {
-    position: 'absolute',
-    top: 4,
-    left: '25%',
-    right: '25%',
-    height: 58,
-    borderWidth: 1.5,
-    borderTopWidth: 0,
-  },
-  // Top goal area (6-yard box)
-  goalTop: {
-    position: 'absolute',
-    top: 4,
-    left: '38%',
-    right: '38%',
-    height: 24,
-    borderWidth: 1.5,
-    borderTopWidth: 0,
-  },
-  // Bottom penalty area
-  penBot: {
-    position: 'absolute',
-    bottom: 4,
-    left: '25%',
-    right: '25%',
-    height: 58,
-    borderWidth: 1.5,
-    borderBottomWidth: 0,
-  },
-  // Bottom goal area
-  goalBot: {
-    position: 'absolute',
-    bottom: 4,
-    left: '38%',
-    right: '38%',
-    height: 24,
-    borderWidth: 1.5,
-    borderBottomWidth: 0,
+  cardRect: {
+    width: 7,
+    height: 10,
+    borderRadius: 1.5,
+    borderWidth: 0.5,
+    borderColor: 'rgba(0,0,0,0.2)',
   },
 });
 
-// Bench styles
+// ── Bench styles ─────────────────────────────────────────────────────────────
 const bch = StyleSheet.create({
   table: {
     borderRadius: 14,
@@ -613,9 +873,9 @@ const bch = StyleSheet.create({
   },
   cellRight: { justifyContent: 'flex-end' },
   num: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,

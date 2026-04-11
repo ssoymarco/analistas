@@ -18,6 +18,11 @@ import type {
   MatchLineup,
   H2HResult,
   Team,
+  OddsMarket,
+  MatchPrediction,
+  MissingPlayer,
+  TeamFormEntry,
+  PressureIndex,
 } from '../data/types';
 
 import {
@@ -30,6 +35,9 @@ import {
   fetchTeamById,
   fetchSquad,
   fetchCommentaries,
+  fetchPredictions,
+  fetchSidelinedByTeam,
+  fetchTeamRecentFixtures,
   SM_STATE_IDS,
   SM_EVENT_TYPES,
   SM_STAT_TYPES,
@@ -42,6 +50,13 @@ import {
   type SMLineupEntry,
   type SMTopScorer,
   type SMVenue,
+  type SMFixtureReferee,
+  type SMFixtureTVStation,
+  type SMWeatherReport,
+  type SMCommentary,
+  type SMOdd,
+  type SMPrediction,
+  type SMSidelined,
 } from './sportmonks';
 
 import {
@@ -248,34 +263,36 @@ function mapEvents(events: SMEvent[] | undefined, fixture: SMFixture): MatchEven
 // ── Statistics Mapper ───────────────────────────────────────────────────────
 
 const STAT_TYPE_NAMES: Record<number, string> = {
-  // Ataque
-  [SM_STAT_TYPES.BALL_POSSESSION]:    'Posesión',
-  [SM_STAT_TYPES.SHOTS_TOTAL]:        'Tiros totales',
-  [SM_STAT_TYPES.SHOTS_ON_TARGET]:    'Tiros a puerta',
-  [SM_STAT_TYPES.SHOTS_OFF_TARGET]:   'Tiros fuera',
-  [SM_STAT_TYPES.SHOTS_BLOCKED]:      'Tiros bloqueados',
-  [SM_STAT_TYPES.SHOTS_INSIDE_BOX]:   'Tiros dentro área',
-  [SM_STAT_TYPES.SHOTS_OUTSIDE_BOX]:  'Tiros fuera área',
-  [SM_STAT_TYPES.EXPECTED_GOALS]:     'xG',
-  [SM_STAT_TYPES.ATTACKS]:            'Ataques',
-  [SM_STAT_TYPES.DANGEROUS_ATTACKS]:  'Ataques peligrosos',
-  // Pases
-  [SM_STAT_TYPES.PASSES_TOTAL]:       'Pases totales',
-  [SM_STAT_TYPES.PASSES_ACCURACY]:    'Precisión de pases',
+  // General / Ataque
+  [SM_STAT_TYPES.BALL_POSSESSION]:            'Posesión',
+  [SM_STAT_TYPES.GOALS]:                      'Goles',
+  [SM_STAT_TYPES.GOAL_ATTEMPTS]:              'Tiros totales',
+  [SM_STAT_TYPES.SHOTS_ON_TARGET]:            'Tiros a puerta',
+  [SM_STAT_TYPES.SHOTS_BLOCKED]:              'Tiros bloqueados',
+  [SM_STAT_TYPES.GOAL_KICKS]:                 'Saques de meta',
+  // Creación / Pases
+  [SM_STAT_TYPES.ASSISTS]:                    'Asistencias',
+  [SM_STAT_TYPES.FREE_KICKS]:                 'Tiros libres',
+  [SM_STAT_TYPES.THROWINS]:                   'Saques de banda',
+  [SM_STAT_TYPES.SUCCESSFUL_DRIBBLES_PCT]:    'Regates exitosos',
+  [SM_STAT_TYPES.BIG_CHANCES_CREATED]:        'Ocasiones claras creadas',
+  [SM_STAT_TYPES.BIG_CHANCES_MISSED]:         'Ocasiones claras falladas',
+  // xG family
+  [SM_STAT_TYPES.EXPECTED_GOALS]:             'xG (Goles esperados)',
+  [SM_STAT_TYPES.EXPECTED_GOALS_ON_TARGET]:   'xGoT',
+  [SM_STAT_TYPES.NP_EXPECTED_GOALS]:          'npxG',
   // Defensa
-  [SM_STAT_TYPES.CORNERS]:            'Córners',
-  [SM_STAT_TYPES.OFFSIDES]:           'Fueras de juego',
-  [SM_STAT_TYPES.SAVES]:              'Paradas',
+  [SM_STAT_TYPES.CORNERS]:                    'Córners',
+  [SM_STAT_TYPES.SAVES]:                      'Paradas',
   // Disciplina
-  [SM_STAT_TYPES.FOULS]:              'Faltas',
-  [SM_STAT_TYPES.YELLOW_CARDS]:       'Tarjetas amarillas',
-  [SM_STAT_TYPES.RED_CARDS]:          'Tarjetas rojas',
+  [SM_STAT_TYPES.FOULS]:                      'Faltas',
+  [SM_STAT_TYPES.YELLOWCARDS]:                'Tarjetas amarillas',
 };
 
 // Which stat IDs are percentages (displayed with % suffix)
 const PERCENTAGE_STAT_IDS = new Set<number>([
   SM_STAT_TYPES.BALL_POSSESSION,
-  SM_STAT_TYPES.PASSES_ACCURACY,
+  SM_STAT_TYPES.SUCCESSFUL_DRIBBLES_PCT,
 ]);
 
 // Category groupings — order matters for display
@@ -284,29 +301,36 @@ const STAT_CATEGORIES: { name: string; typeIds: number[] }[] = [
     name: 'Ataque',
     typeIds: [
       SM_STAT_TYPES.BALL_POSSESSION,
-      SM_STAT_TYPES.SHOTS_TOTAL,
+      SM_STAT_TYPES.GOALS,
+      SM_STAT_TYPES.GOAL_ATTEMPTS,
       SM_STAT_TYPES.SHOTS_ON_TARGET,
-      SM_STAT_TYPES.SHOTS_OFF_TARGET,
       SM_STAT_TYPES.SHOTS_BLOCKED,
-      SM_STAT_TYPES.SHOTS_INSIDE_BOX,
-      SM_STAT_TYPES.SHOTS_OUTSIDE_BOX,
-      SM_STAT_TYPES.EXPECTED_GOALS,
-      SM_STAT_TYPES.ATTACKS,
-      SM_STAT_TYPES.DANGEROUS_ATTACKS,
+      SM_STAT_TYPES.GOAL_KICKS,
     ],
   },
   {
-    name: 'Pases',
+    name: 'Creación',
     typeIds: [
-      SM_STAT_TYPES.PASSES_TOTAL,
-      SM_STAT_TYPES.PASSES_ACCURACY,
+      SM_STAT_TYPES.ASSISTS,
+      SM_STAT_TYPES.FREE_KICKS,
+      SM_STAT_TYPES.THROWINS,
+      SM_STAT_TYPES.SUCCESSFUL_DRIBBLES_PCT,
+      SM_STAT_TYPES.BIG_CHANCES_CREATED,
+      SM_STAT_TYPES.BIG_CHANCES_MISSED,
+    ],
+  },
+  {
+    name: 'Goles Esperados (xG)',
+    typeIds: [
+      SM_STAT_TYPES.EXPECTED_GOALS,
+      SM_STAT_TYPES.EXPECTED_GOALS_ON_TARGET,
+      SM_STAT_TYPES.NP_EXPECTED_GOALS,
     ],
   },
   {
     name: 'Defensa',
     typeIds: [
       SM_STAT_TYPES.CORNERS,
-      SM_STAT_TYPES.OFFSIDES,
       SM_STAT_TYPES.SAVES,
     ],
   },
@@ -314,8 +338,7 @@ const STAT_CATEGORIES: { name: string; typeIds: number[] }[] = [
     name: 'Disciplina',
     typeIds: [
       SM_STAT_TYPES.FOULS,
-      SM_STAT_TYPES.YELLOW_CARDS,
-      SM_STAT_TYPES.RED_CARDS,
+      SM_STAT_TYPES.YELLOWCARDS,
     ],
   },
 ];
@@ -638,8 +661,231 @@ export async function getLiveFixtures(): Promise<Match[]> {
   }
 }
 
+// ── Referee Mapper ──────────────────────────────────────────────────────────
+
+function mapReferee(refs: SMFixtureReferee[] | undefined) {
+  if (!refs || refs.length === 0) return { referee: { name: '', nationality: '', flag: '' }, assistants: [] as string[], fourthOfficial: undefined as string | undefined };
+
+  const main = refs.find(r => r.type_id === 6);
+  const assistants = refs.filter(r => r.type_id === 7 || r.type_id === 8);
+  const fourth = refs.find(r => r.type_id === 9);
+
+  return {
+    referee: {
+      name: main?.referee?.display_name ?? main?.referee?.common_name ?? '',
+      nationality: '',
+      flag: '👔',
+    },
+    assistants: assistants.map(a => a.referee?.display_name ?? a.referee?.common_name ?? ''),
+    fourthOfficial: fourth?.referee?.display_name ?? fourth?.referee?.common_name ?? undefined,
+  };
+}
+
+// ── Weather Mapper ──────────────────────────────────────────────────────────
+
+function mapWeather(w: SMWeatherReport | undefined): MatchDetail['weather'] | undefined {
+  if (!w) return undefined;
+
+  const weatherIcons: Record<string, string> = {
+    'clear-day': '☀️', 'clear-night': '🌙',
+    'partly-cloudy-day': '⛅', 'partly-cloudy-night': '☁️',
+    'cloudy': '☁️', 'rain': '🌧️', 'snow': '🌨️',
+    'sleet': '🌨️', 'wind': '💨', 'fog': '🌫️',
+    'overcast clouds': '☁️', 'broken clouds': '⛅',
+    'scattered clouds': '⛅', 'few clouds': '🌤️',
+    'light rain': '🌦️', 'moderate rain': '🌧️', 'heavy rain': '🌧️',
+  };
+
+  const desc = w.description || '';
+  const icon = weatherIcons[desc.toLowerCase()] || weatherIcons[w.icon] || '🌡️';
+  const temp = w.current?.temp ?? w.temperature?.day ?? 0;
+  const wind = w.current?.wind ?? w.wind?.speed ?? 0;
+  const humidity = parseInt(w.current?.humidity ?? w.humidity ?? '0') || 0;
+
+  return { temp: Math.round(temp), description: desc, icon, wind: Math.round(wind), humidity };
+}
+
+// ── TV Station Mapper ───────────────────────────────────────────────────────
+
+function mapTVStations(stations: SMFixtureTVStation[] | undefined): MatchDetail['tvStations'] {
+  if (!stations || stations.length === 0) return undefined;
+  return stations
+    .filter(s => s.tvstation?.name)
+    .map(s => ({
+      name: s.tvstation!.name,
+      logo: s.tvstation!.image_path ?? undefined,
+    }));
+}
+
+// ── Commentary Mapper ───────────────────────────────────────────────────────
+
+function mapCommentaries(comments: SMCommentary[] | undefined): MatchDetail['commentaries'] {
+  if (!comments || comments.length === 0) return undefined;
+  return comments
+    .sort((a, b) => (b.order ?? 0) - (a.order ?? 0))
+    .map(c => ({
+      minute: c.minute,
+      extraMinute: c.extra_minute ?? null,
+      comment: c.comment,
+      important: c.important,
+    }));
+}
+
+// ── Odds Mapper ─────────────────────────────────────────────────────────────
+
+function mapOdds(odds: SMOdd[] | undefined): OddsMarket[] {
+  if (!odds || odds.length === 0) return [];
+
+  // Group by market name
+  const marketMap = new Map<string, { name: string; options: { label: string; value: number }[] }>();
+  for (const o of odds) {
+    const marketName = (o as any).market?.name ?? o.market_description ?? `Market ${o.market_id}`;
+    if (!marketMap.has(marketName)) {
+      marketMap.set(marketName, { name: marketName, options: [] });
+    }
+    const val = parseFloat(o.value);
+    if (!isNaN(val) && val > 0) {
+      marketMap.get(marketName)!.options.push({
+        label: o.label || o.original_label || '?',
+        value: val,
+      });
+    }
+  }
+
+  // Prioritize key markets
+  const PRIORITY_MARKETS = ['Fulltime Result', 'Match Winner', '1X2', 'Over/Under', 'Both Teams To Score', 'Double Chance'];
+  const result: OddsMarket[] = [];
+  const seen = new Set<string>();
+
+  // Add priority markets first
+  for (const pm of PRIORITY_MARKETS) {
+    for (const [key, market] of marketMap) {
+      if (key.toLowerCase().includes(pm.toLowerCase()) && !seen.has(key) && market.options.length > 0) {
+        result.push(market);
+        seen.add(key);
+      }
+    }
+  }
+
+  // Add remaining (up to 8 total)
+  for (const [key, market] of marketMap) {
+    if (result.length >= 8) break;
+    if (!seen.has(key) && market.options.length > 0 && market.options.length <= 6) {
+      result.push(market);
+      seen.add(key);
+    }
+  }
+
+  return result;
+}
+
+// ── Predictions Mapper ──────────────────────────────────────────────────────
+
+function mapPredictions(preds: SMPrediction[] | undefined): MatchPrediction[] | undefined {
+  if (!preds || preds.length === 0) return undefined;
+  return preds
+    .filter(p => p.predictions)
+    .map(p => ({
+      type: p.type?.name ?? `Type ${p.type_id}`,
+      yes: p.predictions?.yes,
+      no: p.predictions?.no,
+    }));
+}
+
+// ── Sidelined (Injuries) Mapper ─────────────────────────────────────────────
+
+function mapSidelined(entries: SMSidelined[]): MissingPlayer[] {
+  if (!entries || entries.length === 0) return [];
+  return entries
+    .filter(e => !e.completed)
+    .map(e => ({
+      name: e.player?.display_name ?? e.player?.common_name ?? `Player ${e.player_id}`,
+      reason: e.category === 'injury' ? 'injury' as const
+        : e.category === 'suspension' ? 'suspension' as const
+        : 'other' as const,
+      detail: e.start_date ? `Desde ${e.start_date}` : '',
+    }));
+}
+
+// ── Team Form Mapper ────────────────────────────────────────────────────────
+
+function mapTeamForm(fixtures: SMFixture[], teamId: number): TeamFormEntry[] {
+  return fixtures.slice(0, 5).map(f => {
+    const home = getParticipant(f, 'home');
+    const away = getParticipant(f, 'away');
+    const isHome = home?.id === teamId;
+    const opponent = isHome ? away : home;
+    const goalsFor = getGoals(f.scores, isHome ? 'home' : 'away');
+    const goalsAgainst = getGoals(f.scores, isHome ? 'away' : 'home');
+    let result: 'W' | 'D' | 'L' = 'D';
+    if (goalsFor > goalsAgainst) result = 'W';
+    else if (goalsFor < goalsAgainst) result = 'L';
+
+    return {
+      matchId: String(f.id),
+      opponent: opponent?.name ?? 'Unknown',
+      opponentLogo: opponent?.image_path ?? '⚽',
+      isHome,
+      goalsFor,
+      goalsAgainst,
+      result,
+      date: f.starting_at.split(' ')[0],
+      league: f.league?.name ?? '',
+    };
+  });
+}
+
+// ── Pressure Index (derived from stats) ─────────────────────────────────────
+
+function computePressureIndex(stats: SMStatistic[] | undefined, homeId: number): PressureIndex | undefined {
+  if (!stats || stats.length === 0) return undefined;
+
+  // Try to find possession, goal attempts, corners
+  let homePoss = 50, awayPoss = 50;
+  let homeAttempts = 0, awayAttempts = 0;
+  let homeCorners = 0, awayCorners = 0;
+
+  for (const s of stats) {
+    const val = typeof s.data.value === 'number' ? s.data.value : parseFloat(String(s.data.value)) || 0;
+    const isHome = s.participant_id === homeId;
+
+    if (s.type_id === SM_STAT_TYPES.BALL_POSSESSION) {
+      if (isHome) homePoss = val; else awayPoss = val;
+    }
+    if (s.type_id === SM_STAT_TYPES.GOAL_ATTEMPTS) {
+      if (isHome) homeAttempts = val; else awayAttempts = val;
+    }
+    if (s.type_id === SM_STAT_TYPES.CORNERS) {
+      if (isHome) homeCorners = val; else awayCorners = val;
+    }
+  }
+
+  // If no meaningful data, skip
+  if (homeAttempts === 0 && awayAttempts === 0 && homePoss === 50 && awayPoss === 50) return undefined;
+
+  // Weighted pressure = 40% possession + 40% shots + 20% corners
+  const totalAttempts = homeAttempts + awayAttempts || 1;
+  const totalCorners = homeCorners + awayCorners || 1;
+  const homePressure = Math.round(
+    0.4 * homePoss +
+    0.4 * (homeAttempts / totalAttempts * 100) +
+    0.2 * (homeCorners / totalCorners * 100)
+  );
+
+  return {
+    home: Math.min(99, Math.max(1, homePressure)),
+    away: Math.min(99, Math.max(1, 100 - homePressure)),
+    homeAttacks: homeAttempts,
+    awayAttacks: awayAttempts,
+    homeDangerousAttacks: homeCorners,
+    awayDangerousAttacks: awayCorners,
+  };
+}
+
 /**
- * Fetch full fixture detail (events, stats, lineups, venue).
+ * Fetch full fixture detail with ALL available SM data:
+ * events, stats, lineups, venue, referee, weather, TV, H2H,
+ * commentaries, odds, predictions, injuries, team form, pressure.
  */
 export async function getFixtureDetail(id: number): Promise<{ match: Match; detail: Partial<MatchDetail> } | null> {
   try {
@@ -648,13 +894,71 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
     const homeTeam = getParticipant(fixture, 'home');
     const awayTeam = getParticipant(fixture, 'away');
 
+    const refereeData = mapReferee(fixture.referees);
+
+    // Fire ALL secondary requests in parallel
+    const [h2hResults, commentaryData, predictionsData, homeSidelined, awaySidelined, homeFormData, awayFormData] = await Promise.all([
+      // H2H
+      (homeTeam && awayTeam)
+        ? fetchH2H(homeTeam.id, awayTeam.id).catch(() => [] as SMFixture[])
+        : Promise.resolve([] as SMFixture[]),
+      // Commentaries
+      fetchCommentaries(id).catch(() => [] as SMCommentary[]),
+      // Predictions
+      fetchPredictions(id).catch(() => [] as SMPrediction[]),
+      // Injuries — home
+      (homeTeam && fixture.season_id)
+        ? fetchSidelinedByTeam(fixture.season_id, homeTeam.id).catch(() => [] as SMSidelined[])
+        : Promise.resolve([] as SMSidelined[]),
+      // Injuries — away
+      (awayTeam && fixture.season_id)
+        ? fetchSidelinedByTeam(fixture.season_id, awayTeam.id).catch(() => [] as SMSidelined[])
+        : Promise.resolve([] as SMSidelined[]),
+      // Home recent form
+      homeTeam
+        ? fetchTeamRecentFixtures(homeTeam.id).catch(() => [] as SMFixture[])
+        : Promise.resolve([] as SMFixture[]),
+      // Away recent form
+      awayTeam
+        ? fetchTeamRecentFixtures(awayTeam.id).catch(() => [] as SMFixture[])
+        : Promise.resolve([] as SMFixture[]),
+    ]);
+
     const detail: Partial<MatchDetail> = {
       matchId: String(fixture.id),
       venue: mapVenue(fixture.venue),
+      referee: refereeData.referee,
+      assistantReferees: refereeData.assistants.length > 0 ? refereeData.assistants : undefined,
+      fourthOfficial: refereeData.fourthOfficial,
+      weather: mapWeather(fixture.weatherreport),
       events: mapEvents(fixture.events, fixture),
       statistics: mapStatistics(fixture.statistics, fixture),
       homeLineup: mapLineup(fixture.lineups, homeTeam?.id ?? 0, fixture.events),
       awayLineup: mapLineup(fixture.lineups, awayTeam?.id ?? 0, fixture.events),
+      tvStations: mapTVStations(fixture.tvstations),
+      commentaries: mapCommentaries(commentaryData),
+      resultInfo: fixture.result_info ?? undefined,
+      // ── New data sources ──
+      odds: mapOdds(fixture.odds),
+      predictions: mapPredictions(predictionsData),
+      missingPlayers: {
+        home: mapSidelined(homeSidelined),
+        away: mapSidelined(awaySidelined),
+      },
+      homeForm: homeTeam ? mapTeamForm(homeFormData, homeTeam.id) : undefined,
+      awayForm: awayTeam ? mapTeamForm(awayFormData, awayTeam.id) : undefined,
+      pressureIndex: computePressureIndex(fixture.statistics, homeTeam?.id ?? 0),
+      h2h: {
+        homeTeam: homeTeam?.name ?? '',
+        awayTeam: awayTeam?.name ?? '',
+        results: h2hResults.map(f => ({
+          date: f.starting_at.split(' ')[0],
+          homeScore: getGoals(f.scores, 'home'),
+          awayScore: getGoals(f.scores, 'away'),
+          competition: f.league?.name ?? '',
+          venue: '',
+        })),
+      },
     };
 
     return { match, detail };
