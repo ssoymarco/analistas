@@ -155,7 +155,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const { match } = route.params;
   const c          = useThemeColors();
   const { isDark } = useDarkMode();
-  const navigation = useNavigation();
+  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
 
   const isLive      = match.status === 'live';
   const isFinished  = match.status === 'finished';
@@ -275,12 +275,13 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
             <View style={scr.heroRow}>
               {/* Home */}
               <TouchableOpacity
-                style={scr.teamCol}
-                activeOpacity={0.7}
+                style={[scr.teamCol, { zIndex: 10 }]}
+                activeOpacity={0.5}
                 onPress={() => {
+                  console.log('[TeamNav] home tap, id=', match.homeTeam.id);
                   const n = Number(match.homeTeam.id);
                   if (!isNaN(n) && n > 0) {
-                    (navigation as any).push('TeamDetail', {
+                    navigation.push('TeamDetail', {
                       teamId: n,
                       teamName: match.homeTeam.name,
                       teamLogo: match.homeTeam.logo,
@@ -323,12 +324,13 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
 
               {/* Away */}
               <TouchableOpacity
-                style={scr.teamCol}
-                activeOpacity={0.7}
+                style={[scr.teamCol, { zIndex: 10 }]}
+                activeOpacity={0.5}
                 onPress={() => {
+                  console.log('[TeamNav] away tap, id=', match.awayTeam.id);
                   const n = Number(match.awayTeam.id);
                   if (!isNaN(n) && n > 0) {
-                    (navigation as any).push('TeamDetail', {
+                    navigation.push('TeamDetail', {
                       teamId: n,
                       teamName: match.awayTeam.name,
                       teamLogo: match.awayTeam.logo,
@@ -346,7 +348,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           </Animated.View>
 
           {/* ── COMPACT view (fades in) — logos + score in one row ── */}
-          <Animated.View style={[scr.heroCompact, { opacity: compactOpacity }]}>
+          <Animated.View style={[scr.heroCompact, { opacity: compactOpacity }]} pointerEvents="none">
             {/* Back button space already in navBar row */}
             <View style={scr.compactInner}>
               <TeamBadgeSmall name={match.homeTeam.name} logo={match.homeTeam.logo} />
