@@ -18,6 +18,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
+import { SkeletonLeagueDetail } from '../components/Skeleton';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useLeagueDetail } from '../hooks/useLeagueDetail';
@@ -637,10 +638,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
     return (
       <SafeAreaView style={[s.safe, { backgroundColor: c.bg }]} edges={['top']}>
         <StatusBar style={isDark ? 'light' : 'dark'} />
-        <View style={s.loadingWrap}>
-          <ActivityIndicator size="large" color={c.accent} />
-          <Text style={[s.loadingText, { color: c.textTertiary }]}>Cargando liga...</Text>
-        </View>
+        <SkeletonLeagueDetail />
       </SafeAreaView>
     );
   }

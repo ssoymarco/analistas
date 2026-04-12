@@ -56,6 +56,7 @@ export interface NewsArticle {
   id: string;
   title: string;
   summary: string;
+  content?: string;   // full article body (paragraphs separated by \n\n)
   image: string;
   source: string;
   time: string;

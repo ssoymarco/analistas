@@ -1099,9 +1099,11 @@ export async function getLeagues(): Promise<League[]> {
 
 /**
  * Get news articles — SM doesn't provide news on free plan.
+ * Returns mock data for now.
  */
 export async function getNews(): Promise<NewsArticle[]> {
-  return [];
+  const { news } = await import('../data/mockData');
+  return news;
 }
 
 /**

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
+import { SkeletonPartidos } from '../components/Skeleton';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
@@ -16,7 +17,8 @@ import type { LeagueWithMatches } from '../services/sportsApi';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 
 function todayISO(): string {
-  return new Date().toISOString().split('T')[0];
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // ── Header icons ──────────────────────────────────────────────────────────────
@@ -166,9 +168,8 @@ export const PartidosScreen: React.FC = () => {
         }
       >
         {loading ? (
-          <View style={{ alignItems: 'center', paddingTop: 80, gap: 10 }}>
-            <ActivityIndicator size="large" color={c.emerald} />
-            <Text style={{ fontSize: 14, color: c.textSecondary, marginTop: 8 }}>Cargando partidos...</Text>
+          <View style={{ paddingTop: 8 }}>
+            <SkeletonPartidos />
           </View>
         ) : filteredLeagues.length === 0 ? (
           <View style={{ alignItems: 'center', paddingTop: 80, gap: 10 }}>

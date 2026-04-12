@@ -10,6 +10,7 @@ import { OnboardingScreen } from '../screens/onboarding/OnboardingScreen';
 import { PartidosScreen } from '../screens/PartidosScreen';
 import { FavoritosScreen } from '../screens/FavoritosScreen';
 import { NoticiasScreen } from '../screens/NoticiasScreen';
+import { NewsDetailScreen } from '../screens/NewsDetailScreen';
 import { PerfilScreen } from '../screens/PerfilScreen';
 import { MatchDetailScreen } from '../screens/MatchDetailScreen';
 import { TeamDetailScreen } from '../screens/TeamDetailScreen';
@@ -17,7 +18,7 @@ import { PlayerDetailScreen } from '../screens/PlayerDetailScreen';
 import { LeagueDetailScreen } from '../screens/LeagueDetailScreen';
 import { GlobalSearchScreen } from '../screens/GlobalSearchScreen';
 import type { ColorPalette } from '../theme/colors';
-import type { Match } from '../data/types';
+import type { Match, NewsArticle } from '../data/types';
 
 // ── Param lists ───────────────────────────────────────────────────────────────
 
@@ -46,6 +47,39 @@ export type PartidosStackParamList = {
   GlobalSearch: undefined;
 };
 
+/**
+ * Stack nested inside the Favoritos tab.
+ * Same detail screens as Partidos — navigable without switching tabs.
+ */
+export type FavoritosStackParamList = {
+  FavoritosHome: undefined;
+  MatchDetail: { match: Match };
+  TeamDetail: { teamId: number; teamName: string; teamLogo?: string; seasonId?: number };
+  PlayerDetail: {
+    playerId: number;
+    playerName: string;
+    playerImage?: string;
+    teamName?: string;
+    teamLogo?: string;
+    jerseyNumber?: number;
+  };
+  LeagueDetail: {
+    leagueId: number;
+    leagueName: string;
+    leagueLogo?: string;
+    seasonId?: number;
+  };
+};
+
+/**
+ * Stack nested inside the Noticias tab.
+ * NewsDetail slides in from the right, tab bar stays visible.
+ */
+export type NoticiasStackParamList = {
+  NoticiasHome: undefined;
+  NewsDetail: { article: NewsArticle };
+};
+
 export type RootTabParamList = {
   Partidos: undefined;
   Favoritos: undefined;
@@ -56,8 +90,10 @@ export type RootTabParamList = {
 // Keep for backward compat (MatchDetailScreen imports this)
 export type RootStackParamList = PartidosStackParamList;
 
-const PartidosStack = createNativeStackNavigator<PartidosStackParamList>();
-const Tab           = createBottomTabNavigator<RootTabParamList>();
+const PartidosStack  = createNativeStackNavigator<PartidosStackParamList>();
+const FavoritosStack = createNativeStackNavigator<FavoritosStackParamList>();
+const NoticiasStack  = createNativeStackNavigator<NoticiasStackParamList>();
+const Tab            = createBottomTabNavigator<RootTabParamList>();
 
 // ── Partidos nested stack ─────────────────────────────────────────────────────
 // Nesting the stack INSIDE the tab means the tab bar stays rendered
@@ -113,6 +149,37 @@ function PartidosNavigator() {
         }}
       />
     </PartidosStack.Navigator>
+  );
+}
+
+// ── Favoritos nested stack ────────────────────────────────────────────────────
+
+const detailScreenOpts = {
+  animation: 'slide_from_right' as const,
+  gestureEnabled: true,
+  gestureDirection: 'horizontal' as const,
+};
+
+function FavoritosNavigator() {
+  return (
+    <FavoritosStack.Navigator screenOptions={{ headerShown: false }}>
+      <FavoritosStack.Screen name="FavoritosHome" component={FavoritosScreen} />
+      <FavoritosStack.Screen name="MatchDetail"  component={MatchDetailScreen}  options={detailScreenOpts} />
+      <FavoritosStack.Screen name="TeamDetail"   component={TeamDetailScreen}   options={detailScreenOpts} />
+      <FavoritosStack.Screen name="PlayerDetail" component={PlayerDetailScreen} options={detailScreenOpts} />
+      <FavoritosStack.Screen name="LeagueDetail" component={LeagueDetailScreen} options={detailScreenOpts} />
+    </FavoritosStack.Navigator>
+  );
+}
+
+// ── Noticias nested stack ─────────────────────────────────────────────────
+
+function NoticiasNavigator() {
+  return (
+    <NoticiasStack.Navigator screenOptions={{ headerShown: false }}>
+      <NoticiasStack.Screen name="NoticiasHome" component={NoticiasScreen} />
+      <NoticiasStack.Screen name="NewsDetail"   component={NewsDetailScreen} options={detailScreenOpts} />
+    </NoticiasStack.Navigator>
   );
 }
 
@@ -230,8 +297,8 @@ function MainTabs() {
         component={PartidosNavigator}
         options={{ tabBarLabel: 'Partidos' }}
       />
-      <Tab.Screen name="Favoritos" component={FavoritosScreen} />
-      <Tab.Screen name="Noticias"  component={NoticiasScreen} />
+      <Tab.Screen name="Favoritos" component={FavoritosNavigator} />
+      <Tab.Screen name="Noticias"  component={NoticiasNavigator} />
       <Tab.Screen name="Perfil"    component={PerfilScreen} />
     </Tab.Navigator>
   );

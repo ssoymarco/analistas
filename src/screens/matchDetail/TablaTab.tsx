@@ -8,6 +8,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../../theme/useTheme';
 import { useStandings } from '../../hooks/useStandings';
 import type { Match, MatchDetail, LeagueStanding } from '../../data/types';
+import { SkeletonLeagueDetail } from '../../components/Skeleton';
 import type { PartidosStackParamList } from '../../navigation/AppNavigator';
 
 // ── Dynamic imports ──────────────────────────────────────────────────────────
@@ -157,12 +158,7 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
   };
 
   if (loading) {
-    return (
-      <View style={[tb.center, { paddingTop: 60 }]}>
-        <ActivityIndicator size="large" color={c.accent} />
-        <Text style={[tb.loadingText, { color: c.textTertiary }]}>Cargando tabla…</Text>
-      </View>
-    );
+    return <SkeletonLeagueDetail />;
   }
 
   if (error || standings.length === 0) {

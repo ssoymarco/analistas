@@ -177,7 +177,7 @@ async function fetchLeagueFixtures(leagueId: number): Promise<SMFixture[]> {
   for (let d = -7; d <= 7; d++) {
     const dt = new Date(now);
     dt.setDate(dt.getDate() + d);
-    dates.push(dt.toISOString().split('T')[0]);
+    dates.push(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`);
   }
 
   const results: SMFixture[] = [];

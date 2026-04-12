@@ -18,6 +18,7 @@ import { useFavorites } from '../../contexts/FavoritesContext';
 import { useAuth } from '../../contexts/AuthContext';
 import type { AuthMethod } from '../../contexts/AuthContext';
 import { getSearchableTeams, getSearchableLeagues, getSearchablePlayers } from '../../services/sportsApi';
+import { normalize } from '../../utils/normalize';
 import type { SearchableTeam, SearchableLeague, SearchablePlayer } from '../../services/sportsApi';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -427,9 +428,9 @@ const TeamsStep: React.FC<{
 
   const filtered = useMemo(() => {
     if (!query.trim()) return teams;
-    const q = query.toLowerCase();
+    const q = normalize(query);
     return teams.filter(t =>
-      t.name.toLowerCase().includes(q) || t.shortName.toLowerCase().includes(q),
+      normalize(t.name).includes(q) || normalize(t.shortName).includes(q),
     );
   }, [teams, query]);
 
@@ -610,8 +611,8 @@ const PlayersStep: React.FC<{
 
   const filtered = useMemo(() => {
     if (!query.trim()) return players;
-    const q = query.toLowerCase();
-    return players.filter(p => p.name.toLowerCase().includes(q));
+    const q = normalize(query);
+    return players.filter(p => normalize(p.name).includes(q));
   }, [players, query]);
 
   if (loading) {

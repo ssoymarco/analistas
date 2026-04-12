@@ -8,6 +8,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SkeletonSearch } from '../components/Skeleton';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
@@ -42,9 +43,7 @@ interface RecentSearch {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function normalize(str: string): string {
-  return str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
+import { normalize } from '../utils/normalize';
 
 function highlightMatch(text: string, query: string): React.ReactNode[] {
   if (!query) return [text];
@@ -408,10 +407,7 @@ export const GlobalSearchScreen: React.FC = () => {
       </View>
 
       {loading ? (
-        <View style={s.loadingWrap}>
-          <ActivityIndicator size="large" color={c.accent} />
-          <Text style={[s.loadingText, { color: c.textSecondary }]}>Cargando datos...</Text>
-        </View>
+        <SkeletonSearch />
       ) : isSearching ? (
         /* ── Search results ── */
         results.length === 0 ? (

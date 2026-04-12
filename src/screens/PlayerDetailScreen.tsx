@@ -18,6 +18,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
+import { SkeletonPlayerDetail } from '../components/Skeleton';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { usePlayerDetail } from '../hooks/usePlayerDetail';
@@ -773,10 +774,7 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
 
         {/* ── Tab content ── */}
         {loading ? (
-          <View style={{ alignItems: 'center', paddingTop: 80, gap: 10 }}>
-            <ActivityIndicator size="large" color={c.accent} />
-            <Text style={{ fontSize: 14, color: c.textSecondary, marginTop: 8 }}>Cargando jugador...</Text>
-          </View>
+          <SkeletonPlayerDetail />
         ) : !data ? (
           <View style={{ alignItems: 'center', paddingTop: 80, gap: 10 }}>
             <Text style={{ fontSize: 36 }}>👤</Text>

@@ -1,7 +1,7 @@
 // ── Match Detail Screen ───────────────────────────────────────────────────────
 // Redesigned header with dark navy gradient, bell & share icons, time capsule,
 // team badges with "VS", collapsible hero, 4 tabs, "Volver arriba" FAB.
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,10 +13,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { SkeletonMatchDetail } from '../components/Skeleton';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
+import { useUserStats } from '../contexts/UserStatsContext';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFixtureDetail } from '../hooks/useFixtureDetail';
 import { useCountdown } from '../hooks/useCountdown';
@@ -216,6 +218,10 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const isScheduled = match.status === 'scheduled';
 
   const { detail, loading } = useFixtureDetail(match.id, match.homeTeam.id, match.awayTeam.id);
+  const { incrementMatchesViewed } = useUserStats();
+
+  // Track match view (once per unique match)
+  useEffect(() => { incrementMatchesViewed(match.id); }, [match.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
   const TABS: { key: Tab; label: string }[] = [
@@ -471,19 +477,14 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
         )}
       >
         {loading || !detail ? (
-          <View style={scr.emptyWrap}>
-            {loading ? (
-              <>
-                <Text style={{ fontSize: 36 }}>⏳</Text>
-                <Text style={[scr.emptyText, { color: c.textTertiary }]}>Cargando…</Text>
-              </>
-            ) : (
-              <>
-                <Text style={{ fontSize: 36 }}>📋</Text>
-                <Text style={[scr.emptyText, { color: c.textSecondary }]}>Detalle no disponible</Text>
-              </>
-            )}
-          </View>
+          loading ? (
+            <SkeletonMatchDetail />
+          ) : (
+            <View style={scr.emptyWrap}>
+              <Text style={{ fontSize: 36 }}>📋</Text>
+              <Text style={[scr.emptyText, { color: c.textSecondary }]}>Detalle no disponible</Text>
+            </View>
+          )
         ) : (
           <>
             {activeTab === 'previa'     && <EnVivoTab     match={match} detail={detail} />}

@@ -1,16 +1,19 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, FlatList, Dimensions,
+  TextInput, FlatList, Dimensions, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
+import { SkeletonNoticias } from '../components/Skeleton';
+import { getNews } from '../services/sportsApi';
 import type { NewsArticle } from '../data/types';
-
-// TODO: replace with real news API
-const news: NewsArticle[] = [];
+import type { NoticiasStackParamList } from '../navigation/AppNavigator';
+import { normalize } from '../utils/normalize';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -148,9 +151,32 @@ function SectionLabel({ label, emoji, c }: { label: string; emoji?: string; c: R
 export const NoticiasScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
+  const navigation = useNavigation<NativeStackNavigationProp<NoticiasStackParamList>>();
+  const [news, setNews] = useState<NewsArticle[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('para-ti');
   const [searchQuery, setSearchQuery] = useState('');
-  const [showSearch, setShowSearch] = useState(false);
+  // showSearch removed — search bar is always visible below tabs
+
+  const loadNews = useCallback(async () => {
+    try {
+      const data = await getNews();
+      setNews(data);
+    } catch {
+      // silently fail — keep existing data
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => { loadNews(); }, [loadNews]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadNews();
+  }, [loadNews]);
 
   const filtered = useMemo(() => {
     let base = news;
@@ -158,23 +184,23 @@ export const NoticiasScreen: React.FC = () => {
       base = base.filter(n => n.sections?.includes(activeTab));
     }
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+      const q = normalize(searchQuery);
       base = base.filter(n =>
-        n.title.toLowerCase().includes(q) ||
-        n.category.toLowerCase().includes(q) ||
-        n.source.toLowerCase().includes(q),
+        normalize(n.title).includes(q) ||
+        normalize(n.category).includes(q) ||
+        normalize(n.source).includes(q),
       );
     }
     return base;
-  }, [activeTab, searchQuery]);
+  }, [activeTab, searchQuery, news]);
 
   const hero = filtered[0];
   const stories = filtered.slice(1, 4);
   const rest = filtered.slice(4);
 
-  const handlePress = (_article: NewsArticle) => {
-    // TODO: navigate to NewsDetail screen
-  };
+  const handlePress = useCallback((article: NewsArticle) => {
+    navigation.navigate('NewsDetail', { article });
+  }, [navigation]);
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: c.bg }]} edges={['top']}>
@@ -182,29 +208,7 @@ export const NoticiasScreen: React.FC = () => {
 
       {/* Header */}
       <View style={styles.header}>
-        {showSearch ? (
-          <View style={[styles.searchBar, { backgroundColor: c.surface, borderColor: c.border }]}>
-            <Text style={styles.searchIcon}>🔍</Text>
-            <TextInput
-              style={[styles.searchInput, { color: c.textPrimary }]}
-              placeholder="Buscar noticias..."
-              placeholderTextColor={c.textTertiary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoFocus
-            />
-            <TouchableOpacity onPress={() => { setShowSearch(false); setSearchQuery(''); }}>
-              <Text style={[styles.searchClose, { color: c.textSecondary }]}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <>
-            <Text style={[styles.title, { color: c.textPrimary }]}>Noticias</Text>
-            <TouchableOpacity onPress={() => setShowSearch(true)} style={styles.headerIcon}>
-              <Text style={styles.headerIconText}>🔍</Text>
-            </TouchableOpacity>
-          </>
-        )}
+        <Text style={[styles.title, { color: c.textPrimary }]}>Noticias</Text>
       </View>
 
       {/* Tabs */}
@@ -217,13 +221,13 @@ export const NoticiasScreen: React.FC = () => {
               style={[
                 styles.tab,
                 { backgroundColor: c.surface, borderColor: c.border },
-                active && { backgroundColor: c.textPrimary, borderColor: c.textPrimary },
+                active && { backgroundColor: c.accent, borderColor: c.accent },
               ]}
               onPress={() => setActiveTab(tab.id)}
               activeOpacity={0.7}
             >
               <Text style={styles.tabEmoji}>{tab.emoji}</Text>
-              <Text style={[styles.tabLabel, { color: c.textSecondary }, active && { color: c.bg }]}>
+              <Text style={[styles.tabLabel, { color: c.textSecondary }, active && { color: '#fff' }]}>
                 {tab.label}
               </Text>
             </TouchableOpacity>
@@ -231,12 +235,38 @@ export const NoticiasScreen: React.FC = () => {
         })}
       </View>
 
+      {/* Search bar */}
+      <View style={styles.searchWrap}>
+        <View style={[styles.searchBar, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={[styles.searchInput, { color: c.textPrimary }]}
+            placeholder="Buscar noticias..."
+            placeholderTextColor={c.textTertiary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Text style={[styles.searchClear, { color: c.textSecondary }]}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={c.accent} />
+        }
       >
-        {filtered.length === 0 ? (
+        {loading ? (
+          <View style={{ paddingTop: 8 }}>
+            <SkeletonNoticias />
+          </View>
+        ) : filtered.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>📰</Text>
             <Text style={[styles.emptyTitle, { color: c.textPrimary }]}>Sin noticias</Text>
@@ -296,16 +326,17 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28, fontWeight: '800', letterSpacing: -0.8,
   },
-  headerIcon: { padding: 6 },
-  headerIconText: { fontSize: 20 },
+
+  // Search
+  searchWrap: { paddingHorizontal: 16, marginBottom: 8 },
   searchBar: {
-    flex: 1, flexDirection: 'row', alignItems: 'center',
-    borderRadius: 12, paddingHorizontal: 12, height: 40,
+    flexDirection: 'row', alignItems: 'center',
+    borderRadius: 12, paddingHorizontal: 12, height: 42,
     borderWidth: 1,
   },
   searchIcon: { fontSize: 14, marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 14 },
-  searchClose: { fontSize: 14, paddingLeft: 8 },
+  searchInput: { flex: 1, fontSize: 14, padding: 0 },
+  searchClear: { fontSize: 13, paddingLeft: 8, fontWeight: '600' },
 
   // Tabs
   tabBar: {

@@ -36,7 +36,8 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
     setViewMonth(parts[1] - 1);
   }, [selectedDate]);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const isSelectedToday = selectedDate === todayStr;
 
   const monthName = new Date(viewYear, viewMonth, 1)

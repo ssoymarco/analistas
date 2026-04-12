@@ -16,6 +16,7 @@ const DEFAULT_NOTIFS: Record<string, boolean> = {
 
 interface OnboardingContextType {
   hasCompletedOnboarding: boolean;
+  ready: boolean;
   completeOnboarding: () => void;
   resetOnboarding: () => void;
   selectedTeams: string[];
@@ -30,6 +31,7 @@ interface OnboardingContextType {
 
 const OnboardingContext = createContext<OnboardingContextType>({
   hasCompletedOnboarding: false,
+  ready: false,
   completeOnboarding: () => {}, resetOnboarding: () => {},
   selectedTeams: [], toggleTeam: () => {},
   selectedLeagues: [], toggleLeague: () => {},
@@ -39,6 +41,7 @@ const OnboardingContext = createContext<OnboardingContextType>({
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
   const [hasCompletedOnboarding, setHasCompleted] = useState(false);
+  const [ready, setReady] = useState(false);
   const [selectedTeams, setSelectedTeams] = useState<string[]>([]);
   const [selectedLeagues, setSelectedLeagues] = useState<string[]>([]);
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
@@ -60,6 +63,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       if (map[KEYS.notifications]) {
         try { setNotifications({ ...DEFAULT_NOTIFS, ...JSON.parse(map[KEYS.notifications]!) }); } catch {}
       }
+      setReady(true);
     });
   }, []);
 
@@ -107,7 +111,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
 
   return (
     <OnboardingContext.Provider value={{
-      hasCompletedOnboarding, completeOnboarding, resetOnboarding,
+      hasCompletedOnboarding, ready, completeOnboarding, resetOnboarding,
       selectedTeams, toggleTeam,
       selectedLeagues, toggleLeague,
       selectedPlayers, togglePlayer,
