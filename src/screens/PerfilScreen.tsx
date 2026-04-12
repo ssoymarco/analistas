@@ -174,7 +174,7 @@ function PromoBanner() {
 // ── Streak helpers ───────────────────────────────────────────────────────────
 const STREAK_MILESTONES = [
   { days: 3,   emoji: '🌱', name: 'Primer brote',   desc: '¡Ya diste el primer paso, sigue así!', color: '#4ade80' },
-  { days: 7,   emoji: '🔥', name: 'En llamas',       desc: 'Una semana sin fallar. ¡Verdadero hincha!', color: '#fb923c' },
+  { days: 7,   emoji: '🔥', name: 'En llamas',       desc: 'Una semana sin fallar. ¡Verdadero hincha!', color: '#ff7a00' },
   { days: 14,  emoji: '⚡', name: 'Electrizante',    desc: 'Tu compromiso con el fútbol habla por sí solo.', color: '#facc15' },
   { days: 30,  emoji: '🏆', name: 'Campeón',         desc: 'Un mes entero. No eres un aficionado cualquiera.', color: '#60a5fa' },
   { days: 60,  emoji: '💎', name: 'Diamante',        desc: '60 días sin parar. Eres un analista de élite.', color: '#a78bfa' },
@@ -182,50 +182,50 @@ const STREAK_MILESTONES = [
   { days: 365, emoji: '🏟️', name: 'Inmortal',       desc: 'Un año entero. Eres historia viva del fútbol.', color: '#34d399' },
 ];
 
-function getAnalistasDice(days: number): { quote: string; sub: string; stat: string } {
+function getStreakQuote(days: number): { quote: string; sub: string } {
   if (days < 3) return {
     quote: '"El fútbol se vive mejor cada día."',
     sub: 'Abre la app diario y descubre más.',
-    stat: 'Los usuarios con racha activa consultan 4× más partidos',
   };
   if (days < 7) return {
     quote: '"Tu equipo juega aunque tú no lo veas."',
     sub: 'Pero los verdaderos hinchas nunca faltan.',
-    stat: 'Los usuarios con racha activa consultan 4× más partidos',
   };
   if (days < 14) return {
     quote: '"La constancia define al verdadero fan."',
     sub: 'Una semana seguida no es casualidad.',
-    stat: 'Solo el 28% de los usuarios llegan a 7 días de racha',
   };
   if (days < 30) return {
     quote: '"Estar al día es una forma de respeto al deporte."',
     sub: 'Tu dedicación marca la diferencia.',
-    stat: 'Solo el 12% de los usuarios superan las 2 semanas',
   };
   if (days < 100) return {
     quote: '"No eres cualquier aficionado. Eres un Analista."',
     sub: 'Un mes entero demuestra quién eres.',
-    stat: 'Estás en el top 5% de usuarios más comprometidos',
   };
   return {
     quote: '"Tu pasión por el fútbol no tiene límites."',
     sub: 'Aquí está la prueba de tu compromiso.',
-    stat: 'Estás en el top 1% de usuarios de Analistas',
   };
 }
 
-function StreakModal({ visible, onClose, streakDays, recoveriesRemaining, streakNotifyEnabled, onToggleNotify, c, isDark }: {
+const HEADER_MAX = 200;
+const HEADER_MIN = 60;
+const HEADER_SCROLL = HEADER_MAX - HEADER_MIN;
+
+function StreakModal({ visible, onClose, streakDays, streakNotifyEnabled, onToggleNotify, c, isDark }: {
   visible: boolean; onClose: () => void;
-  streakDays: number; recoveriesRemaining: number;
+  streakDays: number;
   streakNotifyEnabled: boolean; onToggleNotify: (v: boolean) => void;
   c: ColorPalette; isDark: boolean;
 }) {
+  const scrollY = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.7)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible) {
+      scrollY.setValue(0);
       scaleAnim.setValue(0.7);
       opacityAnim.setValue(0);
       Animated.parallel([
@@ -234,6 +234,26 @@ function StreakModal({ visible, onClose, streakDays, recoveriesRemaining, streak
       ]).start();
     }
   }, [visible]);
+
+  // Header animations driven by scroll
+  const headerHeight = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL],
+    outputRange: [HEADER_MAX, HEADER_MIN],
+    extrapolate: 'clamp',
+  });
+  const expandedOpacity = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL * 0.5],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+  const collapsedOpacity = scrollY.interpolate({
+    inputRange: [HEADER_SCROLL * 0.5, HEADER_SCROLL],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+
+  const accent = '#ff7a00';
+  const headerBg = isDark ? '#1f1000' : '#fff4e6';
 
   // Next milestone
   const nextMilestone = STREAK_MILESTONES.find(m => m.days > streakDays) ?? null;
@@ -244,89 +264,113 @@ function StreakModal({ visible, onClose, streakDays, recoveriesRemaining, streak
     ? Math.min(1, (streakDays - progressBase) / (progressTarget - progressBase))
     : 1;
 
-  const dice = getAnalistasDice(streakDays);
-
-  // Gradient colors for header
-  const headerBg = isDark ? '#2a1a08' : '#fff7ed';
-  const headerAccent = '#fb923c';
+  const quote = getStreakQuote(streakDays);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
-        <TouchableOpacity activeOpacity={1} style={{
+        <View style={{
           backgroundColor: c.card, borderTopLeftRadius: 28, borderTopRightRadius: 28,
-          maxHeight: '92%',
+          maxHeight: '92%', overflow: 'hidden',
         }}>
-          {/* ─── HEADER with warm gradient feel ─── */}
-          <View style={{
-            borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden',
+          {/* ─── COLLAPSIBLE HEADER ─── */}
+          <Animated.View style={{
+            height: headerHeight,
+            backgroundColor: headerBg,
+            borderTopLeftRadius: 28, borderTopRightRadius: 28,
+            overflow: 'hidden',
+            borderBottomWidth: 1,
+            borderBottomColor: isDark ? 'rgba(255,122,0,0.2)' : 'rgba(255,122,0,0.15)',
           }}>
-            {/* Handle */}
-            <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)', marginTop: 10, marginBottom: 4, zIndex: 2 }} />
+            {/* Handle bar */}
+            <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.12)', marginTop: 10, zIndex: 5 }} />
 
-            <View style={{
-              paddingTop: 8, paddingBottom: 24, paddingHorizontal: 20,
-              backgroundColor: headerBg,
-              borderBottomWidth: 1, borderBottomColor: isDark ? 'rgba(251,146,60,0.15)' : 'rgba(251,146,60,0.2)',
+            {/* Close */}
+            <TouchableOpacity
+              style={{ position: 'absolute', top: 14, right: 16, width: 32, height: 32, borderRadius: 16, backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}
+              onPress={onClose}
+            >
+              <Text style={{ fontSize: 14, color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.4)', fontWeight: '700' }}>✕</Text>
+            </TouchableOpacity>
+
+            {/* Decorative glows — more vibrant */}
+            <View style={{ position: 'absolute', top: -30, right: -30, width: 150, height: 150, borderRadius: 75, backgroundColor: `rgba(255,122,0,${isDark ? '0.18' : '0.1'})` }} />
+            <View style={{ position: 'absolute', bottom: -25, left: -25, width: 110, height: 110, borderRadius: 55, backgroundColor: `rgba(255,122,0,${isDark ? '0.12' : '0.06'})` }} />
+            <View style={{ position: 'absolute', top: 20, left: 30, width: 60, height: 60, borderRadius: 30, backgroundColor: `rgba(255,180,0,${isDark ? '0.08' : '0.04'})` }} />
+
+            {/* EXPANDED — big counter */}
+            <Animated.View style={{
+              position: 'absolute', top: 20, left: 0, right: 0, bottom: 0,
+              alignItems: 'center', justifyContent: 'center',
+              opacity: expandedOpacity,
             }}>
-              {/* Decorative warm glow */}
-              <View style={{ position: 'absolute', top: -40, right: -40, width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(251,146,60,0.08)' }} />
-              <View style={{ position: 'absolute', bottom: -20, left: -20, width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(251,146,60,0.05)' }} />
-
-              {/* Close button */}
-              <TouchableOpacity
-                style={{ position: 'absolute', top: 16, right: 16, width: 32, height: 32, borderRadius: 16, backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}
-                onPress={onClose}
-              >
-                <Text style={{ fontSize: 14, color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)', fontWeight: '700' }}>✕</Text>
-              </TouchableOpacity>
-
-              {/* Big counter */}
               <Animated.View style={{ alignItems: 'center', transform: [{ scale: scaleAnim }], opacity: opacityAnim }}>
-                <Text style={{ fontSize: 48, marginBottom: -4 }}>🔥</Text>
-                <Text style={{ fontSize: 56, fontWeight: '900', color: headerAccent, lineHeight: 64 }}>{streakDays}</Text>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.5)', marginTop: 2 }}>
+                <Text style={{ fontSize: 50 }}>🔥</Text>
+                <Text style={{ fontSize: 60, fontWeight: '900', color: accent, lineHeight: 68, marginTop: -6 }}>{streakDays}</Text>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.5)', marginTop: 2 }}>
                   {streakDays === 1 ? 'día de racha' : 'días de racha'}
                 </Text>
               </Animated.View>
-            </View>
-          </View>
+            </Animated.View>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 40 : 28 }}>
+            {/* COLLAPSED — inline compact */}
+            <Animated.View style={{
+              position: 'absolute', top: 0, left: 0, right: 50, bottom: 0,
+              flexDirection: 'row', alignItems: 'center',
+              paddingTop: 12, paddingLeft: 20, gap: 8,
+              opacity: collapsedOpacity,
+            }}>
+              <Text style={{ fontSize: 24 }}>🔥</Text>
+              <Text style={{ fontSize: 24, fontWeight: '900', color: accent }}>{streakDays}</Text>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.4)' }}>
+                {streakDays === 1 ? 'día de racha' : 'días de racha'}
+              </Text>
+            </Animated.View>
+          </Animated.View>
+
+          {/* ─── SCROLLABLE CONTENT ─── */}
+          <Animated.ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 40 : 28 }}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+              { useNativeDriver: false },
+            )}
+            scrollEventThrottle={16}
+          >
             {/* ─── NEXT MILESTONE ─── */}
             {nextMilestone && (
               <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 4 }}>
                 <View style={{
-                  backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.025)',
                   borderRadius: 16, padding: 16,
                   borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
                 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <View>
+                    <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: c.textPrimary }}>Siguiente logro</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
                         <Text style={{ fontSize: 14 }}>{nextMilestone.emoji}</Text>
                         <Text style={{ fontSize: 12, color: c.textSecondary }}>
-                          "{nextMilestone.name}" · faltan <Text style={{ fontWeight: '700', color: headerAccent }}>{nextMilestone.days - streakDays} días</Text>
+                          "{nextMilestone.name}" · faltan <Text style={{ fontWeight: '700', color: accent }}>{nextMilestone.days - streakDays} días</Text>
                         </Text>
                       </View>
                     </View>
                     <View style={{
                       width: 48, height: 48, borderRadius: 14,
                       backgroundColor: nextMilestone.color + '1A',
-                      alignItems: 'center', justifyContent: 'center',
+                      alignItems: 'center', justifyContent: 'center', marginLeft: 12,
                     }}>
                       <Text style={{ fontSize: 24 }}>{nextMilestone.emoji}</Text>
                     </View>
                   </View>
 
-                  {/* Progress bar */}
                   <View style={{ height: 6, borderRadius: 3, backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', marginTop: 14, overflow: 'hidden' }}>
                     <View style={{ height: '100%', borderRadius: 3, backgroundColor: nextMilestone.color, width: `${Math.max(2, Math.round(progressPct * 100))}%` }} />
                   </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
                     <Text style={{ fontSize: 10, color: c.textTertiary }}>{progressBase} días</Text>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: headerAccent }}>{Math.round(progressPct * 100)}%</Text>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: accent }}>{Math.round(progressPct * 100)}%</Text>
                     <Text style={{ fontSize: 10, color: c.textTertiary }}>{nextMilestone.days} días</Text>
                   </View>
                 </View>
@@ -342,17 +386,17 @@ function StreakModal({ visible, onClose, streakDays, recoveriesRemaining, streak
                   const isCurrent = nextMilestone?.days === m.days;
                   return (
                     <View key={m.days} style={{
-                      width: 96, alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8,
+                      width: 100, alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8,
                       backgroundColor: isDark
                         ? (achieved ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)')
-                        : (achieved ? 'rgba(0,0,0,0.03)' : 'rgba(0,0,0,0.015)'),
+                        : (achieved ? `${m.color}0D` : 'rgba(0,0,0,0.015)'),
                       borderRadius: 16,
                       borderWidth: isCurrent ? 2 : 1,
                       borderColor: isCurrent ? m.color + '66' : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'),
                     }}>
                       <View style={{
-                        width: 44, height: 44, borderRadius: 22,
-                        backgroundColor: achieved ? m.color + '22' : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                        width: 46, height: 46, borderRadius: 23,
+                        backgroundColor: achieved ? m.color + '22' : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'),
                         alignItems: 'center', justifyContent: 'center', marginBottom: 8,
                       }}>
                         <Text style={{ fontSize: 22, opacity: achieved ? 1 : 0.25 }}>{m.emoji}</Text>
@@ -375,32 +419,23 @@ function StreakModal({ visible, onClose, streakDays, recoveriesRemaining, streak
               </ScrollView>
             </View>
 
-            {/* ─── ANALISTAS DICE ─── */}
+            {/* ─── MOTIVATIONAL QUOTE ─── */}
             <View style={{ paddingHorizontal: 20, paddingTop: 20 }}>
               <View style={{
-                backgroundColor: isDark ? 'rgba(251,146,60,0.08)' : 'rgba(251,146,60,0.06)',
+                backgroundColor: isDark ? 'rgba(255,122,0,0.07)' : 'rgba(255,122,0,0.05)',
                 borderRadius: 16, padding: 16,
-                borderWidth: 1, borderColor: isDark ? 'rgba(251,146,60,0.15)' : 'rgba(251,146,60,0.12)',
+                borderWidth: 1, borderColor: isDark ? 'rgba(255,122,0,0.15)' : 'rgba(255,122,0,0.1)',
               }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-                  <Text style={{ fontSize: 12 }}>⚽</Text>
-                  <Text style={{ fontSize: 10, fontWeight: '800', color: headerAccent, letterSpacing: 1 }}>ANALISTAS DICE</Text>
-                </View>
                 <Text style={{ fontSize: 16, fontWeight: '800', color: c.textPrimary, lineHeight: 22, marginBottom: 6 }}>
-                  {dice.quote}
+                  {quote.quote}
                 </Text>
-                <Text style={{ fontSize: 12, color: c.textTertiary, lineHeight: 18, marginBottom: 12 }}>
-                  {dice.sub}
+                <Text style={{ fontSize: 12, color: c.textTertiary, lineHeight: 18 }}>
+                  {quote.sub}
                 </Text>
-                <View style={{ borderTopWidth: 1, borderTopColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', paddingTop: 10 }}>
-                  <Text style={{ fontSize: 11, color: c.textSecondary, lineHeight: 16 }}>
-                    📊 {dice.stat} y se mantienen al día con sus equipos favoritos.
-                  </Text>
-                </View>
               </View>
             </View>
 
-            {/* ─── RECOVERIES ─── */}
+            {/* ─── NOTIFICATION TOGGLE ─── */}
             <View style={{ paddingHorizontal: 20, paddingTop: 16 }}>
               <View style={{
                 flexDirection: 'row', alignItems: 'center', gap: 12,
@@ -408,43 +443,14 @@ function StreakModal({ visible, onClose, streakDays, recoveriesRemaining, streak
                 borderRadius: 14, padding: 14,
                 borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
               }}>
-                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(59,130,246,0.1)', alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontSize: 18 }}>🛡️</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: c.textPrimary }}>Recuperaciones</Text>
-                  <Text style={{ fontSize: 11, color: c.textTertiary, marginTop: 2 }}>Si un día no puedes entrar, la racha se mantiene automáticamente</Text>
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', gap: 3 }}>
-                    {[0, 1, 2].map(i => (
-                      <View key={i} style={{
-                        width: 10, height: 10, borderRadius: 5,
-                        backgroundColor: i < recoveriesRemaining ? '#3b82f6' : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'),
-                      }} />
-                    ))}
-                  </View>
-                  <Text style={{ fontSize: 9, color: c.textTertiary, marginTop: 3 }}>{recoveriesRemaining}/3 este mes</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* ─── NOTIFICATION TOGGLE ─── */}
-            <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
-              <View style={{
-                flexDirection: 'row', alignItems: 'center', gap: 12,
-                backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
-                borderRadius: 14, padding: 14,
-                borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
-              }}>
-                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(249,115,22,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: `rgba(255,122,0,${isDark ? '0.12' : '0.08'})`, alignItems: 'center', justifyContent: 'center' }}>
                   <Text style={{ fontSize: 18 }}>🔔</Text>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, fontWeight: '700', color: c.textPrimary }}>¡No rompas la racha!</Text>
                   <Text style={{ fontSize: 11, color: c.textTertiary, marginTop: 2 }}>Te avisaremos si estás a punto de perderla para que entres a activarla.</Text>
                 </View>
-                <CustomToggle value={streakNotifyEnabled} onToggle={() => onToggleNotify(!streakNotifyEnabled)} activeColor="#f97316" icon="🔔" />
+                <CustomToggle value={streakNotifyEnabled} onToggle={() => onToggleNotify(!streakNotifyEnabled)} activeColor={accent} icon="🔔" />
               </View>
             </View>
 
@@ -460,8 +466,8 @@ function StreakModal({ visible, onClose, streakDays, recoveriesRemaining, streak
                 <Text style={{ fontSize: 14, fontWeight: '600', color: c.textTertiary }}>Cerrar</Text>
               </TouchableOpacity>
             </View>
-          </ScrollView>
-        </TouchableOpacity>
+          </Animated.ScrollView>
+        </View>
       </View>
     </Modal>
   );
@@ -484,7 +490,7 @@ export const PerfilScreen: React.FC = () => {
   const { user, isAuthenticated, login, logout } = useAuth();
   const { resetOnboarding } = useOnboarding();
   const { followedTeamIds, followedPlayerIds, followedLeagueIds } = useFavorites();
-  const { matchesViewed, newsRead, streakDays, recoveriesRemaining, streakNotifyEnabled, setStreakNotify } = useUserStats();
+  const { matchesViewed, newsRead, streakDays, streakNotifyEnabled, setStreakNotify } = useUserStats();
   const totalFavorites = followedTeamIds.length + followedPlayerIds.length + followedLeagueIds.length;
 
   const [loading, setLoading] = useState(true);
@@ -617,7 +623,7 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 12, color: c.textTertiary }}>Racha activa</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#fb923c' }}>{streakDays} {streakDays === 1 ? 'día' : 'días'} 🔥</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#ff7a00' }}>{streakDays} {streakDays === 1 ? 'día' : 'días'} 🔥</Text>
               <Text style={{ fontSize: 18, color: c.textTertiary }}>›</Text>
             </View>
           </TouchableOpacity>
@@ -717,7 +723,6 @@ export const PerfilScreen: React.FC = () => {
         visible={streakModalVisible}
         onClose={() => setStreakModalVisible(false)}
         streakDays={streakDays}
-        recoveriesRemaining={recoveriesRemaining}
         streakNotifyEnabled={streakNotifyEnabled}
         onToggleNotify={setStreakNotify}
         c={c}
