@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, Modal, TextInput,
+  View, Text, ScrollView, TouchableOpacity, Modal, TextInput, Animated,
   NativeSyntheticEvent, NativeScrollEvent, Share, Linking, Platform, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -171,6 +171,200 @@ function PromoBanner() {
   );
 }
 
+// ── Streak helpers ───────────────────────────────────────────────────────────
+const STREAK_MILESTONES = [
+  { days: 7,   emoji: '⚡', label: '7 días',    color: '#f59e0b' },
+  { days: 30,  emoji: '💎', label: '30 días',   color: '#60a5fa' },
+  { days: 100, emoji: '👑', label: '100 días',  color: '#a78bfa' },
+  { days: 365, emoji: '🏆', label: '1 año',     color: '#34d399' },
+];
+
+function streakMotivation(days: number): string {
+  if (days <= 1) return '¡Hoy arrancaste tu racha!\nVuelve mañana para mantenerla 💪';
+  if (days < 7)  return `¡${days} días seguidos!\nNo pierdas el ritmo, vas muy bien 🔥`;
+  if (days < 14) return `¡Una semana completa!\nEres un verdadero analista ⚡`;
+  if (days < 30) return `¡${days} días sin parar!\nLa constancia es tu superpoder 🚀`;
+  if (days < 100) return `¡Un mes entero!\nNada ni nadie te para 💎`;
+  if (days < 365) return `¡${days} días seguidos!\nEres una leyenda del análisis 👑`;
+  return `¡Un año entero!\nEres historia viva del fútbol 🏆`;
+}
+
+function getLast14Days(): string[] {
+  const days: string[] = [];
+  const d = new Date();
+  for (let i = 13; i >= 0; i--) {
+    const dd = new Date(d);
+    dd.setDate(d.getDate() - i);
+    days.push(
+      `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}-${String(dd.getDate()).padStart(2, '0')}`
+    );
+  }
+  return days;
+}
+
+function getDayLabel(iso: string): string {
+  const d = new Date(iso + 'T00:00:00');
+  return ['D', 'L', 'M', 'X', 'J', 'V', 'S'][d.getDay()];
+}
+
+function StreakModal({ visible, onClose, streakDays, activeDates, c, isDark }: {
+  visible: boolean; onClose: () => void;
+  streakDays: number; activeDates: string[];
+  c: ColorPalette; isDark: boolean;
+}) {
+  const scaleAnim = useRef(new Animated.Value(0.7)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      scaleAnim.setValue(0.7);
+      opacityAnim.setValue(0);
+      Animated.parallel([
+        Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, tension: 120, friction: 8 }),
+        Animated.timing(opacityAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [visible]);
+
+  const activeDateSet = new Set(activeDates);
+  const last14 = getLast14Days();
+
+  // Next milestone
+  const nextMilestone = STREAK_MILESTONES.find(m => m.days > streakDays) ?? null;
+  const prevMilestone = [...STREAK_MILESTONES].reverse().find(m => m.days <= streakDays) ?? null;
+  const progressBase = prevMilestone ? prevMilestone.days : 0;
+  const progressTarget = nextMilestone ? nextMilestone.days : streakDays;
+  const progressPct = nextMilestone
+    ? Math.min(1, (streakDays - progressBase) / (progressTarget - progressBase))
+    : 1;
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <TouchableOpacity
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' }}
+        activeOpacity={1} onPress={onClose}
+      >
+        <TouchableOpacity activeOpacity={1} style={{
+          backgroundColor: c.card, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+          paddingBottom: Platform.OS === 'ios' ? 40 : 28,
+        }}>
+          {/* Handle */}
+          <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: c.border, marginTop: 10, marginBottom: 4 }} />
+          {/* Close */}
+          <TouchableOpacity style={{ position: 'absolute', top: 16, right: 16, width: 30, height: 30, borderRadius: 15, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', zIndex: 10 }} onPress={onClose}>
+            <Text style={{ fontSize: 13, color: c.textSecondary, fontWeight: '700' }}>✕</Text>
+          </TouchableOpacity>
+
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 8 }}>
+            {/* Big streak counter */}
+            <Animated.View style={{ alignItems: 'center', marginBottom: 28, transform: [{ scale: scaleAnim }], opacity: opacityAnim }}>
+              <Text style={{ fontSize: 56, marginBottom: 4 }}>🔥</Text>
+              <Text style={{ fontSize: 64, fontWeight: '900', color: '#fb923c', lineHeight: 72 }}>{streakDays}</Text>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: c.textSecondary, marginTop: 2 }}>
+                {streakDays === 1 ? 'día de racha' : 'días de racha'}
+              </Text>
+              <Text style={{ fontSize: 13, color: c.textTertiary, textAlign: 'center', marginTop: 10, lineHeight: 20, paddingHorizontal: 12 }}>
+                {streakMotivation(streakDays)}
+              </Text>
+            </Animated.View>
+
+            {/* 14-day calendar */}
+            <Text style={{ fontSize: 10, fontWeight: '700', color: c.textTertiary, letterSpacing: 1.5, marginBottom: 12 }}>ÚLTIMAS 2 SEMANAS</Text>
+            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 28 }}>
+              {last14.map((iso, i) => {
+                const isActive = activeDateSet.has(iso);
+                const isToday = i === 13;
+                return (
+                  <View key={iso} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+                    <Text style={{ fontSize: 9, color: isToday ? c.accent : c.textTertiary, fontWeight: isToday ? '700' : '400' }}>
+                      {getDayLabel(iso)}
+                    </Text>
+                    <View style={{
+                      width: 28, height: 28, borderRadius: 14,
+                      backgroundColor: isActive
+                        ? (isToday ? c.accent : 'rgba(0,224,150,0.25)')
+                        : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'),
+                      alignItems: 'center', justifyContent: 'center',
+                      borderWidth: isToday ? 2 : 0, borderColor: c.accent,
+                    }}>
+                      <Text style={{ fontSize: 12 }}>{isActive ? (isToday ? '🔥' : '✓') : ''}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Milestones */}
+            <Text style={{ fontSize: 10, fontWeight: '700', color: c.textTertiary, letterSpacing: 1.5, marginBottom: 12 }}>HITOS</Text>
+            <View style={{ gap: 10, marginBottom: 24 }}>
+              {STREAK_MILESTONES.map(m => {
+                const achieved = streakDays >= m.days;
+                return (
+                  <View key={m.days} style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 12,
+                    backgroundColor: achieved
+                      ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)')
+                      : 'transparent',
+                    borderRadius: 14, padding: 12,
+                    borderWidth: 1,
+                    borderColor: achieved ? m.color + '33' : c.border,
+                  }}>
+                    <View style={{
+                      width: 40, height: 40, borderRadius: 12,
+                      backgroundColor: achieved ? m.color + '22' : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Text style={{ fontSize: 20, opacity: achieved ? 1 : 0.3 }}>{m.emoji}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[{ fontSize: 13, fontWeight: '700' }, achieved ? { color: m.color } : { color: c.textTertiary }]}>
+                        {m.label}
+                      </Text>
+                      {!achieved && (
+                        <Text style={{ fontSize: 11, color: c.textTertiary, marginTop: 2 }}>
+                          Te faltan {m.days - streakDays} día{m.days - streakDays !== 1 ? 's' : ''}
+                        </Text>
+                      )}
+                    </View>
+                    {achieved
+                      ? <Text style={{ fontSize: 16, color: m.color }}>✓</Text>
+                      : <Text style={{ fontSize: 16, color: c.textTertiary, opacity: 0.3 }}>🔒</Text>
+                    }
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Progress to next milestone */}
+            {nextMilestone && (
+              <View style={{ backgroundColor: c.surface, borderRadius: 16, padding: 16, marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: c.textPrimary }}>
+                    Próximo hito: {nextMilestone.emoji} {nextMilestone.label}
+                  </Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: nextMilestone.color }}>
+                    {streakDays}/{nextMilestone.days}
+                  </Text>
+                </View>
+                <View style={{ height: 8, borderRadius: 4, backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', overflow: 'hidden' }}>
+                  <View style={{
+                    height: '100%', borderRadius: 4,
+                    backgroundColor: nextMilestone.color,
+                    width: `${Math.round(progressPct * 100)}%`,
+                  }} />
+                </View>
+                <Text style={{ fontSize: 11, color: c.textTertiary, marginTop: 8, textAlign: 'center' }}>
+                  {nextMilestone.days - streakDays} día{nextMilestone.days - streakDays !== 1 ? 's' : ''} más para conseguirlo
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
 // ── Languages ────────────────────────────────────────────────────────────────
 const LANGUAGES = [
   { id: 'es', flag: '🇲🇽', name: 'Español' },
@@ -188,7 +382,7 @@ export const PerfilScreen: React.FC = () => {
   const { user, isAuthenticated, login, logout } = useAuth();
   const { resetOnboarding } = useOnboarding();
   const { followedTeamIds, followedPlayerIds, followedLeagueIds } = useFavorites();
-  const { matchesViewed, newsRead, streakDays } = useUserStats();
+  const { matchesViewed, newsRead, streakDays, activeDates } = useUserStats();
   const totalFavorites = followedTeamIds.length + followedPlayerIds.length + followedLeagueIds.length;
 
   const [loading, setLoading] = useState(true);
@@ -197,6 +391,7 @@ export const PerfilScreen: React.FC = () => {
   const [timeFormat, setTimeFormat] = useState<'24h' | '12h'>('24h');
   const [momiosEnabled, setMomiosEnabled] = useState(true);
   const [selectedLang, setSelectedLang] = useState('es');
+  const [streakModalVisible, setStreakModalVisible] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
   const [codeModalVisible, setCodeModalVisible] = useState(false);
   const [aboutModalVisible, setAboutModalVisible] = useState(false);
@@ -309,12 +504,18 @@ export const PerfilScreen: React.FC = () => {
             </TouchableOpacity>
           )}
 
-          {/* Streak */}
-          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.bg, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 10, marginTop: 16 }} activeOpacity={0.8}>
+          {/* Streak pill */}
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.bg, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 10, marginTop: 16 }}
+            activeOpacity={0.8}
+            onPress={() => setStreakModalVisible(true)}
+          >
             <Text style={{ fontSize: 14 }}>🔥</Text>
-            <Text style={{ fontSize: 12, color: c.textTertiary }}>Racha activa</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#fb923c' }}>{streakDays} días 🔥</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 12, color: c.textTertiary }}>Racha activa</Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#fb923c' }}>{streakDays} {streakDays === 1 ? 'día' : 'días'} 🔥</Text>
               <Text style={{ fontSize: 18, color: c.textTertiary }}>›</Text>
             </View>
           </TouchableOpacity>
@@ -408,6 +609,16 @@ export const PerfilScreen: React.FC = () => {
       )}
 
       {/* ── MODALS ── */}
+
+      {/* Streak */}
+      <StreakModal
+        visible={streakModalVisible}
+        onClose={() => setStreakModalVisible(false)}
+        streakDays={streakDays}
+        activeDates={activeDates}
+        c={c}
+        isDark={isDark}
+      />
 
       {/* Logout */}
       <Modal visible={logoutModalVisible} transparent animationType="fade" onRequestClose={() => setLogoutModalVisible(false)}>

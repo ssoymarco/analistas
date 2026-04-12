@@ -12,6 +12,7 @@ const KEYS = {
   lastActiveDate: 'analistas_last_active_date',
   viewedMatchIds: 'analistas_viewed_match_ids',
   readNewsIds: 'analistas_read_news_ids',
+  activeDates: 'analistas_active_dates',
 };
 
 function todayISO(): string {
@@ -29,6 +30,7 @@ interface UserStatsContextType {
   matchesViewed: number;
   newsRead: number;
   streakDays: number;
+  activeDates: string[];   // ISO dates (YYYY-MM-DD) when user was active
   incrementMatchesViewed: (matchId: string) => void;
   incrementNewsRead: (articleId: string) => void;
   resetStats: () => Promise<void>;
@@ -38,6 +40,7 @@ const UserStatsContext = createContext<UserStatsContextType>({
   matchesViewed: 0,
   newsRead: 0,
   streakDays: 1,
+  activeDates: [],
   incrementMatchesViewed: () => {},
   incrementNewsRead: () => {},
   resetStats: async () => {},
@@ -49,6 +52,7 @@ export const UserStatsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [matchesViewed, setMatchesViewed] = useState(0);
   const [newsRead, setNewsRead] = useState(0);
   const [streakDays, setStreakDays] = useState(1);
+  const [activeDates, setActiveDates] = useState<string[]>([]);
   const [viewedMatchIds, setViewedMatchIds] = useState<Set<string>>(new Set());
   const [readNewsIds, setReadNewsIds] = useState<Set<string>>(new Set());
   const [ready, setReady] = useState(false);
@@ -57,13 +61,14 @@ export const UserStatsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     (async () => {
       try {
-        const [mv, nr, sd, lad, vmIds, rnIds] = await AsyncStorage.multiGet([
+        const [mv, nr, sd, lad, vmIds, rnIds, adRaw] = await AsyncStorage.multiGet([
           KEYS.matchesViewed,
           KEYS.newsRead,
           KEYS.streakDays,
           KEYS.lastActiveDate,
           KEYS.viewedMatchIds,
           KEYS.readNewsIds,
+          KEYS.activeDates,
         ]);
 
         const savedMatches = parseInt(mv[1] ?? '0', 10) || 0;
@@ -72,6 +77,7 @@ export const UserStatsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const lastActive = lad[1] ?? '';
         const savedViewedIds: string[] = vmIds[1] ? JSON.parse(vmIds[1]) : [];
         const savedReadIds: string[] = rnIds[1] ? JSON.parse(rnIds[1]) : [];
+        let savedActiveDates: string[] = adRaw[1] ? JSON.parse(adRaw[1]) : [];
 
         // ── Streak logic ──
         const today = todayISO();
@@ -82,18 +88,28 @@ export const UserStatsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         } else if (lastActive === yesterday) {
           // Active yesterday — streak continues
           savedStreak += 1;
+          // Add today to activeDates (keep last 60 days max)
+          if (!savedActiveDates.includes(today)) {
+            savedActiveDates = [...savedActiveDates, today].slice(-60);
+          }
           await AsyncStorage.setItem(KEYS.streakDays, String(savedStreak));
           await AsyncStorage.setItem(KEYS.lastActiveDate, today);
+          await AsyncStorage.setItem(KEYS.activeDates, JSON.stringify(savedActiveDates));
         } else {
           // Missed a day or first launch — reset streak
           savedStreak = 1;
+          if (!savedActiveDates.includes(today)) {
+            savedActiveDates = [...savedActiveDates, today].slice(-60);
+          }
           await AsyncStorage.setItem(KEYS.streakDays, '1');
           await AsyncStorage.setItem(KEYS.lastActiveDate, today);
+          await AsyncStorage.setItem(KEYS.activeDates, JSON.stringify(savedActiveDates));
         }
 
         setMatchesViewed(savedMatches);
         setNewsRead(savedNews);
         setStreakDays(savedStreak);
+        setActiveDates(savedActiveDates);
         setViewedMatchIds(new Set(savedViewedIds));
         setReadNewsIds(new Set(savedReadIds));
         setReady(true);
@@ -141,6 +157,7 @@ export const UserStatsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setMatchesViewed(0);
     setNewsRead(0);
     setStreakDays(1);
+    setActiveDates([]);
     setViewedMatchIds(new Set());
     setReadNewsIds(new Set());
     await AsyncStorage.multiRemove(Object.values(KEYS));
@@ -151,6 +168,7 @@ export const UserStatsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       matchesViewed,
       newsRead,
       streakDays,
+      activeDates,
       incrementMatchesViewed,
       incrementNewsRead,
       resetStats,
