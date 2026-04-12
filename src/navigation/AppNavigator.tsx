@@ -1,10 +1,12 @@
-import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import React, { useMemo, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
+import { useOnboarding } from '../contexts/OnboardingContext';
+import { OnboardingScreen } from '../screens/onboarding/OnboardingScreen';
 import { PartidosScreen } from '../screens/PartidosScreen';
 import { FavoritosScreen } from '../screens/FavoritosScreen';
 import { NoticiasScreen } from '../screens/NoticiasScreen';
@@ -262,11 +264,48 @@ function makeNavTheme(c: ColorPalette, isDark: boolean) {
 export const AppNavigator: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
+  const { hasCompletedOnboarding, ready } = useOnboarding();
   const navTheme = useMemo(() => makeNavTheme(c, isDark), [c, isDark]);
 
+  // Fade-in the main app after onboarding completes (Feature 9)
+  const mainFade     = useRef(new Animated.Value(0)).current;
+  const wasOnboarding = useRef(false);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (!hasCompletedOnboarding) {
+      wasOnboarding.current = true;
+      return;
+    }
+    if (wasOnboarding.current) {
+      // Coming from onboarding — fade in smoothly
+      Animated.timing(mainFade, {
+        toValue: 1,
+        duration: 500,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    } else {
+      // Returning user — show immediately, no animation
+      mainFade.setValue(1);
+    }
+  }, [ready, hasCompletedOnboarding]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Wait for AsyncStorage to resolve before deciding what to show
+  if (!ready) {
+    return <View style={{ flex: 1, backgroundColor: c.bg }} />;
+  }
+
+  // First launch — show onboarding flow
+  if (!hasCompletedOnboarding) {
+    return <OnboardingScreen />;
+  }
+
   return (
-    <NavigationContainer theme={navTheme}>
-      <MainTabs />
-    </NavigationContainer>
+    <Animated.View style={{ flex: 1, opacity: mainFade }}>
+      <NavigationContainer theme={navTheme}>
+        <MainTabs />
+      </NavigationContainer>
+    </Animated.View>
   );
 };

@@ -20,7 +20,7 @@ import type { AuthMethod } from '../../contexts/AuthContext';
 import { getSearchableTeams, getSearchableLeagues, getSearchablePlayers } from '../../services/sportsApi';
 import type { SearchableTeam, SearchableLeague, SearchablePlayer } from '../../services/sportsApi';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const TOTAL_STEPS = 6;
 
 // ── Accent colors ───────────────────────────────────────────────────────────
@@ -66,6 +66,36 @@ const pgb = StyleSheet.create({
   track: { height: 3, borderRadius: 2 },
   fill: { height: '100%', borderRadius: 2, backgroundColor: GREEN },
 });
+
+// ── Step Dots ───────────────────────────────────────────────────────────────
+const StepDot: React.FC<{ state: 'done' | 'active' | 'upcoming'; accent: string }> = ({ state, accent }) => {
+  const widthAnim = useRef(new Animated.Value(state === 'active' ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.timing(widthAnim, {
+      toValue: state === 'active' ? 1 : 0,
+      duration: 350,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [state]);
+  return (
+    <Animated.View style={{
+      height: 5,
+      width: widthAnim.interpolate({ inputRange: [0, 1], outputRange: [5, 18] }),
+      borderRadius: 2.5,
+      backgroundColor: state === 'upcoming' ? 'rgba(255,255,255,0.18)' : accent,
+      opacity: state === 'done' ? 0.55 : 1,
+    }} />
+  );
+};
+
+const StepDots: React.FC<{ step: number; total: number; accent: string }> = ({ step, total, accent }) => (
+  <View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>
+    {Array.from({ length: total }).map((_, i) => (
+      <StepDot key={i} state={i < step ? 'done' : i === step ? 'active' : 'upcoming'} accent={accent} />
+    ))}
+  </View>
+);
 
 // ── Custom Toggle ───────────────────────────────────────────────────────────
 const CustomToggle: React.FC<{ value: boolean; onToggle: () => void }> = ({ value, onToggle }) => {
@@ -1057,6 +1087,146 @@ const prs = StyleSheet.create({
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ── Welcome Animation (post-registration) ─────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CONFETTI_COLS = ['#10b981','#fbbf24','#3b82f6','#f97316','#ef4444','#8b5cf6','#ec4899','#ffffff'];
+
+// Golden-ratio spacing gives well-distributed deterministic X positions
+const _PHI = 1.61803398875;
+const PARTICLES = Array.from({ length: 28 }, (_, i) => ({
+  id: i,
+  x: (((i * _PHI) % 1) * SCREEN_W),
+  color: CONFETTI_COLS[i % CONFETTI_COLS.length],
+  size: 6 + (i % 4) * 2.5,
+  delay: (i % 7) * 120,
+  duration: 1800 + (i % 5) * 300,
+  drift: (i % 2 === 0 ? 1 : -1) * (15 + (i % 4) * 8),
+  startRot: (i * 37) % 360,
+}));
+
+const FallingParticle: React.FC<{ p: typeof PARTICLES[0] }> = ({ p }) => {
+  const y   = useRef(new Animated.Value(-20)).current;
+  const x   = useRef(new Animated.Value(0)).current;
+  const rot = useRef(new Animated.Value(p.startRot)).current;
+  const op  = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const anim = Animated.sequence([
+      Animated.delay(p.delay),
+      Animated.parallel([
+        Animated.timing(op,  { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.timing(y,   { toValue: SCREEN_H + 40, duration: p.duration, easing: Easing.linear, useNativeDriver: true }),
+        Animated.sequence([
+          Animated.timing(x, { toValue: p.drift, duration: p.duration / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(x, { toValue: 0,       duration: p.duration / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+        Animated.timing(rot, { toValue: p.startRot + 540, duration: p.duration, easing: Easing.linear, useNativeDriver: true }),
+        Animated.sequence([
+          Animated.delay(p.duration - 400),
+          Animated.timing(op, { toValue: 0, duration: 400, useNativeDriver: true }),
+        ]),
+      ]),
+    ]);
+    anim.start();
+    return () => anim.stop();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const spin = rot.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] });
+  return (
+    <Animated.View style={{
+      position: 'absolute',
+      left: p.x,
+      top: 0,
+      width: p.size,
+      height: p.size * 0.5,
+      borderRadius: 1,
+      backgroundColor: p.color,
+      opacity: op,
+      transform: [{ translateY: y }, { translateX: x }, { rotate: spin }],
+    }} />
+  );
+};
+
+const WelcomeAnimation: React.FC<{ userName: string; onComplete: () => void }> = ({ userName, onComplete }) => {
+  const fadeOut   = useRef(new Animated.Value(1)).current;
+  const titleScale = useRef(new Animated.Value(0.85)).current;
+  const titleOp   = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    // Entrance: title scales up and fades in
+    Animated.parallel([
+      Animated.spring(titleScale, { toValue: 1, friction: 6, tension: 50, useNativeDriver: true }),
+      Animated.timing(titleOp, { toValue: 1, duration: 450, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+
+    // After 2700 ms, fade everything out then call onComplete
+    const timer = setTimeout(() => {
+      Animated.timing(fadeOut, { toValue: 0, duration: 500, easing: Easing.in(Easing.cubic), useNativeDriver: true })
+        .start(() => onComplete());
+    }, 2700);
+
+    return () => clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const displayName = userName.trim()
+    ? userName.trim().split(' ')[0].toUpperCase()
+    : 'ANALISTA';
+
+  return (
+    <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#0D0D0D', opacity: fadeOut, zIndex: 999 }]}>
+      {/* Confetti layer */}
+      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+        {PARTICLES.map(p => <FallingParticle key={p.id} p={p} />)}
+      </View>
+
+      {/* Central content */}
+      <Animated.View style={[wl.content, { opacity: titleOp, transform: [{ scale: titleScale }] }]}>
+        <View style={wl.logoWrap}>
+          <View style={[wl.logoBall, { borderColor: GREEN }]}>
+            <Text style={wl.logoEmoji}>⚽</Text>
+          </View>
+        </View>
+
+        <Text style={wl.welcomeLabel}>BIENVENIDO</Text>
+        <Text style={[wl.nameText, { color: GREEN }]}>{displayName}</Text>
+
+        <View style={[wl.divider, { backgroundColor: GREEN }]} />
+
+        <Text style={wl.tagline}>Tu experiencia futbolística{'\n'}empieza ahora</Text>
+      </Animated.View>
+    </Animated.View>
+  );
+};
+
+const wl = StyleSheet.create({
+  content: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  logoWrap: { marginBottom: 28 },
+  logoBall: {
+    width: 80, height: 80, borderRadius: 40,
+    borderWidth: 2.5,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(16,185,129,0.08)',
+  },
+  logoEmoji: { fontSize: 40 },
+  welcomeLabel: {
+    fontSize: 14, fontWeight: '800', letterSpacing: 4,
+    color: 'rgba(255,255,255,0.5)', marginBottom: 8,
+  },
+  nameText: { fontSize: 42, fontWeight: '900', letterSpacing: 1, marginBottom: 20 },
+  divider: { width: 48, height: 3, borderRadius: 2, marginBottom: 20 },
+  tagline: {
+    fontSize: 15, fontWeight: '500', color: 'rgba(255,255,255,0.55)',
+    textAlign: 'center', lineHeight: 24,
+  },
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ── Main Onboarding Screen ─────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1081,6 +1251,9 @@ export const OnboardingScreen: React.FC = () => {
 
   // Step state
   const [step, setStep] = useState(0);
+
+  // Welcome animation (shown after finishOnboarding)
+  const [showWelcomeAnim, setShowWelcomeAnim] = useState(false);
 
   // User name for presentación
   const [userName, setUserName] = useState('');
@@ -1163,8 +1336,9 @@ export const OnboardingScreen: React.FC = () => {
     } else {
       login('guest');
     }
-    completeOnboarding();
-  }, [selectedTeams, selectedLeagues, selectedPlayers, isFollowingTeam, isFollowingLeague, isFollowingPlayer, toggleFollowTeam, toggleFollowLeague, toggleFollowPlayer, login, completeOnboarding]);
+    // Show welcome animation; completeOnboarding is called when it finishes
+    setShowWelcomeAnim(true);
+  }, [selectedTeams, selectedLeagues, selectedPlayers, isFollowingTeam, isFollowingLeague, isFollowingPlayer, toggleFollowTeam, toggleFollowLeague, toggleFollowPlayer, login]);
 
   // ── Step metadata ───────────────────────────────────────────────────────
   const stepMeta: Record<number, { title: string; subtitle: string }> = {
@@ -1191,6 +1365,9 @@ export const OnboardingScreen: React.FC = () => {
         <StatusBar barStyle="light-content" />
         <ProgressBar step={0} bgColor={c.border} />
         <WelcomeStep onNext={goNext} />
+        {showWelcomeAnim && (
+          <WelcomeAnimation userName={userName} onComplete={completeOnboarding} />
+        )}
       </View>
     );
   }
@@ -1201,12 +1378,13 @@ export const OnboardingScreen: React.FC = () => {
       <View style={[ob.root, { backgroundColor: c.bg, paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
         <ProgressBar step={5} bgColor={c.border} />
-        {/* Back button */}
+        {/* Back button + Step dots */}
         <View style={ob.topBar}>
           <TouchableOpacity onPress={goBack} style={ob.backBtn} activeOpacity={0.7} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
             <BackArrow color={c.textSecondary} />
           </TouchableOpacity>
-          <View />
+          <StepDots step={4} total={5} accent={GREEN} />
+          <View style={{ width: 40 }} />
         </View>
         <Animated.View style={[ob.content, { opacity: fadeAnim, transform: [{ translateX: slideAnim }] }]}>
           <PresentacionStep
@@ -1220,6 +1398,9 @@ export const OnboardingScreen: React.FC = () => {
           />
         </Animated.View>
         <View style={{ height: insets.bottom + 8 }} />
+        {showWelcomeAnim && (
+          <WelcomeAnimation userName={userName} onComplete={completeOnboarding} />
+        )}
       </View>
     );
   }
@@ -1236,6 +1417,8 @@ export const OnboardingScreen: React.FC = () => {
         <TouchableOpacity onPress={goBack} style={ob.backBtn} activeOpacity={0.7} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <BackArrow color={c.textSecondary} />
         </TouchableOpacity>
+        {/* Step dots centered between back and skip */}
+        <StepDots step={step - 1} total={5} accent={GREEN} />
         <TouchableOpacity onPress={handleSkipToEnd} activeOpacity={0.7} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Text style={[ob.skipText, { color: c.textTertiary }]}>Omitir</Text>
         </TouchableOpacity>
@@ -1266,6 +1449,10 @@ export const OnboardingScreen: React.FC = () => {
           <Text style={ob.ctaBtnText}>{ctaLabel()}</Text>
         </TouchableOpacity>
       </View>
+
+      {showWelcomeAnim && (
+        <WelcomeAnimation userName={userName} onComplete={completeOnboarding} />
+      )}
     </View>
   );
 };
