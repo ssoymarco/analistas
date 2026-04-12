@@ -28,6 +28,7 @@ import { useTeamDetail } from '../hooks/useTeamDetail';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import type { TeamDetailData, SquadPlayer, RecentMatch, FormEntry } from '../hooks/useTeamDetail';
 import type { LeagueStanding } from '../data/types';
+import { SkeletonTeamDetail } from '../components/Skeleton';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'TeamDetail'>;
 type Tab = 'resumen' | 'plantilla' | 'partidos' | 'tabla';
@@ -249,16 +250,36 @@ const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
 // TAB: Partidos (redesigned — current, previous 3, next 3)
 // ══════════════════════════════════════════════════════════════════════════════
 
+/** Convert RecentMatch to a navigable Match object */
+function recentToMatch(m: RecentMatch): import('../data/types').Match {
+  return {
+    id: String(m.id),
+    homeTeam: { id: '0', name: m.homeName, shortName: m.homeShort, logo: m.homeLogo },
+    awayTeam: { id: '0', name: m.awayName, shortName: m.awayShort, logo: m.awayLogo },
+    homeScore: m.homeScore,
+    awayScore: m.awayScore,
+    status: m.isFinished ? 'finished' : 'scheduled',
+    time: m.isFinished ? 'FT' : 'vs',
+    league: m.league,
+    leagueId: '',
+    date: m.date,
+  };
+}
+
 function MatchFixtureCard({
-  m, highlight, label, c,
-}: { m: RecentMatch; highlight?: boolean; label?: string; c: any }) {
+  m, highlight, label, c, onPress,
+}: { m: RecentMatch; highlight?: boolean; label?: string; c: any; onPress?: () => void }) {
   const resultColors: Record<string, string> = { W: '#10b981', D: '#f59e0b', L: '#ef4444' };
   return (
-    <View style={[
-      s.fixtureRow,
-      { backgroundColor: c.card, borderColor: highlight ? c.accent : c.border },
-      highlight && { borderWidth: 1.5 },
-    ]}>
+    <TouchableOpacity
+      style={[
+        s.fixtureRow,
+        { backgroundColor: c.card, borderColor: highlight ? c.accent : c.border },
+        highlight && { borderWidth: 1.5 },
+      ]}
+      activeOpacity={0.7}
+      onPress={onPress}
+    >
       {label && (
         <View style={{
           position: 'absolute', top: -10, left: 14,
@@ -297,13 +318,18 @@ function MatchFixtureCard({
           ) : <Text style={{ fontSize: 14 }}>⚽</Text>}
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
 const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const [showAll, setShowAll] = useState(false);
+
+  const goToMatch = useCallback((m: RecentMatch) => {
+    navigation.push('MatchDetail', { match: recentToMatch(m) });
+  }, [navigation]);
 
   if (data.recentMatches.length === 0) {
     return (
@@ -314,7 +340,7 @@ const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
     );
   }
 
-  // Split matches: finished (sorted newest first) and upcoming (sorted soonest first)
+  // Split: finished (newest first) and upcoming (soonest first)
   const finishedMatches = data.recentMatches.filter(m => m.isFinished);
   const upcomingMatches = data.recentMatches
     .filter(m => !m.isFinished)
@@ -322,12 +348,12 @@ const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
 
   // Last match = most recent finished
   const lastMatch = finishedMatches[0] ?? null;
-  // Previous 3 = finished after the last
-  const previousMatches = finishedMatches.slice(1, 4);
+  // Previous = older finished (chronological: oldest first so they appear top)
+  const previousMatches = finishedMatches.slice(1, 4).reverse();
   // Next 3 upcoming
   const nextMatches = upcomingMatches.slice(0, 3);
 
-  // All matches for "Ver todos"
+  // All matches for "Ver todos" — chronological order
   const allSorted = [...data.recentMatches].sort((a, b) => a.date.localeCompare(b.date));
 
   if (showAll) {
@@ -348,7 +374,7 @@ const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
           TODOS LOS PARTIDOS ({allSorted.length})
         </Text>
         {allSorted.map(m => (
-          <MatchFixtureCard key={m.id} m={m} c={c} />
+          <MatchFixtureCard key={m.id} m={m} c={c} onPress={() => goToMatch(m)} />
         ))}
         <View style={{ height: 20 }} />
       </View>
@@ -357,30 +383,30 @@ const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
 
   return (
     <View style={{ paddingHorizontal: 16, gap: 6 }}>
-      {/* Last match (highlighted) */}
-      {lastMatch && (
-        <>
-          <Text style={[s.sectionLabel, { color: c.textTertiary }]}>ÚLTIMO PARTIDO</Text>
-          <MatchFixtureCard m={lastMatch} highlight c={c} label="ÚLTIMO" />
-        </>
-      )}
-
-      {/* Previous matches */}
+      {/* Previous matches (oldest first → top of list) */}
       {previousMatches.length > 0 && (
         <>
-          <Text style={[s.sectionLabel, { color: c.textTertiary, marginTop: 8 }]}>ANTERIORES</Text>
+          <Text style={[s.sectionLabel, { color: c.textTertiary }]}>ANTERIORES</Text>
           {previousMatches.map(m => (
-            <MatchFixtureCard key={m.id} m={m} c={c} />
+            <MatchFixtureCard key={m.id} m={m} c={c} onPress={() => goToMatch(m)} />
           ))}
         </>
       )}
 
-      {/* Upcoming matches */}
+      {/* Last match (highlighted — center) */}
+      {lastMatch && (
+        <>
+          <Text style={[s.sectionLabel, { color: c.textTertiary, marginTop: 8 }]}>ÚLTIMO PARTIDO</Text>
+          <MatchFixtureCard m={lastMatch} highlight c={c} label="ÚLTIMO" onPress={() => goToMatch(lastMatch)} />
+        </>
+      )}
+
+      {/* Upcoming matches (below) */}
       {nextMatches.length > 0 && (
         <>
           <Text style={[s.sectionLabel, { color: c.textTertiary, marginTop: 8 }]}>PRÓXIMOS</Text>
           {nextMatches.map(m => (
-            <MatchFixtureCard key={m.id} m={m} c={c} />
+            <MatchFixtureCard key={m.id} m={m} c={c} onPress={() => goToMatch(m)} />
           ))}
         </>
       )}
@@ -565,6 +591,8 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
   const { isFollowingTeam, toggleFollowTeam } = useFavorites();
   const [activeTab, setActiveTab] = useState<Tab>('resumen');
   const scrollY = useRef(new Animated.Value(0)).current;
+  const heroHeight = useRef(0);
+  const [showFixedTabs, setShowFixedTabs] = useState(false);
 
   const { data, loading, error } = useTeamDetail(teamId, seasonId);
   const isFollowing = isFollowingTeam(String(teamId));
@@ -594,7 +622,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
-      {/* ── Sticky compact header (always visible) ── */}
+      {/* ── Sticky compact header (always visible) + fixed tab bar ── */}
       <View style={[hs.stickyHeader, { backgroundColor: headerBg }]}>
         <View style={hs.topBar}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={[hs.backBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7}>
@@ -612,21 +640,52 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
             <ShareIcon color={hText} />
           </TouchableOpacity>
         </View>
+        {/* Fixed tab bar — inside stickyHeader so it renders above ScrollView on Android */}
+        {showFixedTabs && (
+          <View style={[hs.fixedTabBar, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
+            {TABS.map(tab => {
+              const active = activeTab === tab.key;
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  onPress={() => setActiveTab(tab.key)}
+                  style={[hs.tab, active && { borderBottomColor: c.accent }]}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    hs.tabText,
+                    { color: active ? c.textPrimary : c.textTertiary },
+                    active && { fontWeight: '700' },
+                  ]}>{tab.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
       </View>
 
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
-        stickyHeaderIndices={[1]}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: false },
-        )}
+        /* stickyHeaderIndices removed — Android wraps sticky headers in a native
+           container that breaks flexDirection:'row'. Tabs scroll with content for now. */
+        onScroll={(e: any) => {
+          const y = e.nativeEvent.contentOffset.y;
+          // Drive compact header animation
+          scrollY.setValue(y);
+          // Toggle fixed tab bar visibility
+          const threshold = heroHeight.current > 0 ? heroHeight.current - 48 : 200;
+          if (y >= threshold && !showFixedTabs) setShowFixedTabs(true);
+          else if (y < threshold && showFixedTabs) setShowFixedTabs(false);
+        }}
         scrollEventThrottle={16}
       >
         {/* ── Hero Header (scrolls with content) ── */}
-        <View style={[hs.hero, { backgroundColor: headerBg }]}>
+        <View
+          style={[hs.hero, { backgroundColor: headerBg }]}
+          onLayout={(e) => { heroHeight.current = e.nativeEvent.layout.height; }}
+        >
 
           <View style={hs.expanded}>
             {/* League label */}
@@ -684,7 +743,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
           </View>
         </View>
 
-        {/* ── Tab bar (sticky on scroll) ── */}
+        {/* ── Tab bar (scrolls with content) ── */}
         <View style={[hs.tabBar, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
           {TABS.map(tab => {
             const active = activeTab === tab.key;
@@ -707,10 +766,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
 
         {/* ── Tab content ── */}
         {loading ? (
-          <View style={{ alignItems: 'center', paddingTop: 80, gap: 10 }}>
-            <ActivityIndicator size="large" color={c.emerald} />
-            <Text style={{ fontSize: 14, color: c.textSecondary, marginTop: 8 }}>Cargando equipo...</Text>
-          </View>
+          <SkeletonTeamDetail />
         ) : error && !data ? (
           <View style={{ alignItems: 'center', paddingTop: 80, gap: 10, paddingHorizontal: 20 }}>
             <Text style={{ fontSize: 40 }}>⚠️</Text>
@@ -726,6 +782,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
           </View>
         ) : null}
       </ScrollView>
+
     </SafeAreaView>
   );
 };
@@ -824,8 +881,13 @@ const hs = StyleSheet.create({
   statValue: { fontSize: 18, fontWeight: '800' },
   statLabel: { fontSize: 9, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase' },
 
-  // Tab bar
+  // Tab bar (in-flow, scrolls with content)
   tabBar: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+  },
+  // Fixed tab bar — rendered inside stickyHeader, below topBar, when scrolled past hero
+  fixedTabBar: {
     flexDirection: 'row',
     borderBottomWidth: 1,
   },
