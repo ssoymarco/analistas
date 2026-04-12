@@ -186,17 +186,15 @@ function NoticiasNavigator() {
 // ── Tab icons ─────────────────────────────────────────────────────────────────
 
 const PartidosIcon = ({ color }: { color: string }) => (
-  <View style={iconS.partidosWrap}>
-    <View style={[iconS.partidosPanel, { borderColor: color }]}>
-      <View style={[iconS.partidosPanelLine, { backgroundColor: color, width: 6 }]} />
-      <View style={[iconS.partidosPanelLine, { backgroundColor: color, width: 4 }]} />
-    </View>
-    <View style={[iconS.partidosDivider, { backgroundColor: color }]} />
-    <View style={[iconS.partidosPanel, { borderColor: color }]}>
-      <View style={[iconS.partidosPanelLine, { backgroundColor: color, width: 6 }]} />
-      <View style={[iconS.partidosPanelLine, { backgroundColor: color, width: 4 }]} />
-    </View>
-    <View style={iconS.partidosDot} />
+  <View style={{ width: 22, height: 24, borderRadius: 2, borderWidth: 1.6, borderColor: color, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+    {/* Center line */}
+    <View style={{ position: 'absolute', width: '100%', height: 1.4, backgroundColor: color, opacity: 0.5 }} />
+    {/* Center circle */}
+    <View style={{ width: 7, height: 7, borderRadius: 4, borderWidth: 1.3, borderColor: color, opacity: 0.5 }} />
+    {/* Top penalty area */}
+    <View style={{ position: 'absolute', top: 0, width: 11, height: 4, borderWidth: 1.2, borderColor: color, borderTopWidth: 0, opacity: 0.35 }} />
+    {/* Bottom penalty area */}
+    <View style={{ position: 'absolute', bottom: 0, width: 11, height: 4, borderWidth: 1.2, borderColor: color, borderBottomWidth: 0, opacity: 0.35 }} />
   </View>
 );
 
@@ -225,20 +223,6 @@ const PerfilIcon = ({ color }: { color: string }) => (
 );
 
 const iconS = StyleSheet.create({
-  partidosWrap: {
-    width: 26, height: 22, flexDirection: 'row',
-    alignItems: 'center', justifyContent: 'center', gap: 1, position: 'relative',
-  },
-  partidosPanel: {
-    width: 10, height: 18, borderRadius: 3, borderWidth: 1.8,
-    justifyContent: 'center', alignItems: 'center', gap: 2,
-  },
-  partidosPanelLine: { height: 1.5, borderRadius: 1, opacity: 0.6 },
-  partidosDivider:   { width: 1.5, height: 10, borderRadius: 1, opacity: 0.4 },
-  partidosDot: {
-    position: 'absolute', top: -1, right: -2,
-    width: 6, height: 6, borderRadius: 3, backgroundColor: '#ef4444',
-  },
   favWrap:     { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   favStar:     { fontSize: 22, lineHeight: 24 },
   noticiasWrap: { width: 20, height: 20, borderRadius: 4, borderWidth: 1.8, overflow: 'hidden' },
@@ -287,8 +271,18 @@ function MainTabs() {
           letterSpacing: 0.2,
           marginTop: 2,
         },
-        tabBarIcon: ({ color, focused }) =>
-          TAB_ICONS[route.name]?.(color, focused) ?? null,
+        tabBarIcon: ({ color, focused }) => (
+          <View style={{ alignItems: 'center' }}>
+            {TAB_ICONS[route.name]?.(color, focused) ?? null}
+            {focused && (
+              <View style={{
+                width: 16, height: 3, borderRadius: 1.5,
+                backgroundColor: c.accent,
+                marginTop: 4,
+              }} />
+            )}
+          </View>
+        ),
       })}
     >
       {/* Partidos tab uses its own nested stack so MatchDetail keeps the tab bar */}

@@ -1,5 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
+import { useUserStats } from '../contexts/UserStatsContext';
+import { StreakModal } from '../components/StreakModal';
 import { SkeletonPartidos } from '../components/Skeleton';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -41,6 +43,8 @@ export const PartidosScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
+  const { streakDays, streakNotifyEnabled, setStreakNotify } = useUserStats();
+  const [streakModalVisible, setStreakModalVisible] = useState(false);
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [activeTab, setActiveTab] = useState<FilterTab>('todos');
   const [showCalendar, setShowCalendar] = useState(false);
@@ -126,14 +130,18 @@ export const PartidosScreen: React.FC = () => {
           }} activeOpacity={0.7} onPress={() => navigation.navigate('GlobalSearch')}>
             <SearchIcon color={c.textSecondary} />
           </TouchableOpacity>
-          <View style={{
-            flexDirection: 'row', alignItems: 'center', gap: 2,
-            backgroundColor: 'rgba(249,115,22,0.12)',
-            paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12,
-          }}>
-            <Text style={{ fontSize: 14, fontWeight: '800', color: '#fb923c' }}>7</Text>
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: 2,
+              backgroundColor: 'rgba(255,122,0,0.12)',
+              paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12,
+            }}
+            activeOpacity={0.7}
+            onPress={() => setStreakModalVisible(true)}
+          >
+            <Text style={{ fontSize: 14, fontWeight: '800', color: '#ff7a00' }}>{streakDays}</Text>
             <Text style={{ fontSize: 14 }}>🔥</Text>
-          </View>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -211,6 +219,16 @@ export const PartidosScreen: React.FC = () => {
       )}
 
       <CalendarPicker visible={showCalendar} selectedDate={selectedDate} onSelectDate={handleCalendarSelect} onClose={() => setShowCalendar(false)} onGoToday={() => { handleGoToday(); setShowCalendar(false); }} />
+
+      <StreakModal
+        visible={streakModalVisible}
+        onClose={() => setStreakModalVisible(false)}
+        streakDays={streakDays}
+        streakNotifyEnabled={streakNotifyEnabled}
+        onToggleNotify={setStreakNotify}
+        c={c}
+        isDark={isDark}
+      />
     </SafeAreaView>
   );
 };
