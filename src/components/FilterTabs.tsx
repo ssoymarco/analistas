@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { useThemeColors } from '../theme/useTheme';
+import { haptics } from '../utils/haptics';
 
 export type FilterTab = 'todos' | 'vivo' | 'finalizados' | 'proximos';
 
@@ -50,7 +51,7 @@ export const FilterTabs: React.FC<FilterTabsProps> = ({
             <TouchableOpacity
               key={tab.key}
               style={[s.tab, isActive && { backgroundColor: c.surface }]}
-              onPress={() => onTabChange(tab.key)}
+              onPress={() => { haptics.selection(); onTabChange(tab.key); }}
               activeOpacity={0.7}
             >
               <Text style={s.emoji}>{tab.emoji}</Text>

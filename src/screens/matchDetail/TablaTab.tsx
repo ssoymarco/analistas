@@ -196,14 +196,19 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
       {/* Table */}
       <View style={[tb.card, { backgroundColor: c.card, borderColor: c.border }]}>
         <HeaderRow />
-        {standings.map(row => (
-          <StandingRow
-            key={row.team.id}
-            row={row}
-            isHome={row.team.id === homeId}
-            isAway={row.team.id === awayId}
-            totalTeams={standings.length}
-          />
+        {standings.map((row, idx) => (
+          <React.Fragment key={row.team.id}>
+            {/* Group divider for multi-group leagues (e.g. championship/relegation split) */}
+            {idx > 0 && row.groupId != null && standings[idx - 1].groupId != null && row.groupId !== standings[idx - 1].groupId && (
+              <View style={{ height: 2, backgroundColor: c.border, marginVertical: 2 }} />
+            )}
+            <StandingRow
+              row={row}
+              isHome={row.team.id === homeId}
+              isAway={row.team.id === awayId}
+              totalTeams={standings.length}
+            />
+          </React.Fragment>
         ))}
       </View>
 

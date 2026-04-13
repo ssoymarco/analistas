@@ -8,6 +8,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, FlatList, Image,
 } from 'react-native';
+import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
@@ -515,7 +516,7 @@ export const FavoritosScreen: React.FC = () => {
             <TouchableOpacity
               key={item.id}
               style={[st.chip, { backgroundColor: c.accentDim, borderColor: c.accent + '44' }]}
-              onPress={() => config.toggle(item)}
+              onPress={() => { haptics.medium(); config.toggle(item); }}
               activeOpacity={0.8}
             >
               <Text style={st.chipEmoji}>{item.emoji}</Text>
@@ -600,7 +601,7 @@ export const FavoritosScreen: React.FC = () => {
                     ? { backgroundColor: '#10b981' }
                     : { backgroundColor: c.accent },
                 ]}
-                onPress={() => config.toggle(item)}
+                onPress={() => { haptics.medium(); config.toggle(item); }}
                 activeOpacity={0.8}
               >
                 <Text style={st.followBtnText}>

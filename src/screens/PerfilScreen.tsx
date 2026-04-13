@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity, Modal, TextInput,
   NativeSyntheticEvent, NativeScrollEvent, Share, Linking, Platform, Alert,
 } from 'react-native';
+import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
@@ -79,7 +80,7 @@ function CustomToggle({ value, onToggle, activeColor, icon }: {
   return (
     <TouchableOpacity
       style={{ width: 48, height: 28, borderRadius: 14, justifyContent: 'center', backgroundColor: value ? activeColor : 'rgba(128,128,128,0.25)' }}
-      onPress={onToggle} activeOpacity={0.8}
+      onPress={() => { haptics.light(); onToggle(); }} activeOpacity={0.8}
     >
       <View style={{
         width: 22, height: 22, borderRadius: 11, backgroundColor: '#ffffff',
@@ -218,7 +219,7 @@ export const PerfilScreen: React.FC = () => {
   const currentLang = LANGUAGES.find(l => l.id === selectedLang);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => { setShowNameInHeader(e.nativeEvent.contentOffset.y > 90); }, []);
-  const handleLogout = () => { setLogoutModalVisible(false); logout(); resetOnboarding(); };
+  const handleLogout = () => { haptics.heavy(); setLogoutModalVisible(false); logout(); resetOnboarding(); };
 
   const handleShare = useCallback(async () => {
     try { await Share.share({ message: 'Descarga Analistas, la mejor app para seguir el fútbol en tiempo real ⚽\nhttps://analistas.app' }); } catch {}
@@ -242,6 +243,7 @@ export const PerfilScreen: React.FC = () => {
 
   const handleRedeemCode = useCallback(() => {
     if (!redeemCode.trim()) return;
+    haptics.success();
     Alert.alert('Código ingresado', `El código "${redeemCode}" será validado próximamente.`);
     setCodeModalVisible(false); setRedeemCode('');
   }, [redeemCode]);
@@ -372,7 +374,7 @@ export const PerfilScreen: React.FC = () => {
           <MenuRow c={c} emoji="🔔" label="Notificaciones" iconBg="rgba(249,115,22,0.15)" />
           <MenuRow c={c} emoji={isDark ? '🌙' : '☀️'} label="Apariencia" sublabel={isDark ? 'Modo oscuro' : 'Modo claro'} iconBg={isDark ? 'rgba(99,102,241,0.15)' : 'rgba(234,179,8,0.15)'} rightElement={<CustomToggle value={isDark} onToggle={toggleDark} activeColor={isDark ? '#6366f1' : '#eab308'} icon={isDark ? '🌙' : '☀️'} />} />
           <MenuRow c={c} emoji="🕐" label="Formato de hora" sublabel={timeFormat === '24h' ? '14:30' : '2:30 PM'} iconBg="rgba(6,182,212,0.15)" rightElement={
-            <TouchableOpacity style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: 'rgba(6,182,212,0.15)', borderWidth: 1, borderColor: 'rgba(6,182,212,0.2)' }} onPress={() => setTimeFormat(f => f === '24h' ? '12h' : '24h')} activeOpacity={0.7}>
+            <TouchableOpacity style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: 'rgba(6,182,212,0.15)', borderWidth: 1, borderColor: 'rgba(6,182,212,0.2)' }} onPress={() => { haptics.selection(); setTimeFormat(f => f === '24h' ? '12h' : '24h'); }} activeOpacity={0.7}>
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#06b6d4' }}>{timeFormat}</Text>
             </TouchableOpacity>
           } />

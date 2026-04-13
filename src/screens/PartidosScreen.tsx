@@ -188,10 +188,11 @@ export const PartidosScreen: React.FC = () => {
             </Text>
           </View>
         ) : (
-          filteredLeagues.map(league => (
+          filteredLeagues.map((league, idx) => (
             <LeagueSection
               key={league.id}
               league={league}
+              index={idx}
               onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
               onLeaguePress={lg => {
                 const seasonId = lg.matches[0]?.seasonId;

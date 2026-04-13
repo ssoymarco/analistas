@@ -48,6 +48,8 @@ export interface LeagueStandingRow {
   goalsAgainst: number;
   goalDifference: number;
   points: number;
+  /** Group ID for multi-group leagues (championship/relegation splits). Null for simple leagues. */
+  groupId?: number | null;
 }
 
 export interface TopScorerRow {
@@ -117,6 +119,59 @@ function mapStanding(sg: SMStandingGroup): LeagueStandingRow {
     goalDifference: detailValue(sg.details, DETAIL_TYPE.GOAL_DIFF),
     points: sg.points,
   };
+}
+
+/**
+ * Deduplicate standings for multi-stage leagues (e.g. Danish Superliga).
+ *
+ * Problem: leagues with championship/relegation splits have multiple entries
+ * per team (one per stage). The API position field is local to each group
+ * (1-6 in championship, 1-6 in relegation) causing duplicated positions.
+ *
+ * Solution:
+ * 1. Flatten any nested arrays
+ * 2. Keep only the latest stage per team (highest stage_id)
+ * 3. Sort by group then position
+ * 4. Assign global sequential positions
+ */
+function deduplicateStandings(rawData: SMStandingGroup[]): LeagueStandingRow[] {
+  // Guard: flatten nested arrays (some leagues return [[group1], [group2]])
+  const data: SMStandingGroup[] = rawData.length > 0 && Array.isArray(rawData[0])
+    ? (rawData as unknown as SMStandingGroup[][]).flat()
+    : rawData;
+
+  if (data.length === 0) return [];
+
+  // Step 1: Keep only latest stage per team
+  const byTeam = new Map<number, SMStandingGroup>();
+  for (const sg of data) {
+    if (!sg.participant_id) continue;
+    const existing = byTeam.get(sg.participant_id);
+    if (!existing || sg.stage_id > existing.stage_id) {
+      byTeam.set(sg.participant_id, sg);
+    }
+  }
+
+  const deduplicated = Array.from(byTeam.values());
+
+  // Step 2: Detect multi-group
+  const groupIds = new Set(deduplicated.map(sg => sg.group_id ?? 0));
+  const isMultiGroup = groupIds.size > 1;
+
+  // Step 3: Sort by group_id then position
+  deduplicated.sort((a, b) => {
+    const gA = a.group_id ?? 0;
+    const gB = b.group_id ?? 0;
+    if (gA !== gB) return gA - gB;
+    return a.position - b.position;
+  });
+
+  // Step 4: Map with global positions
+  return deduplicated.map((sg, idx) => ({
+    ...mapStanding(sg),
+    position: isMultiGroup ? idx + 1 : sg.position,
+    groupId: isMultiGroup ? (sg.group_id ?? null) : null,
+  }));
 }
 
 function mapTopScorer(ts: SMTopScorer, idx: number): TopScorerRow {
@@ -256,8 +311,8 @@ export function useLeagueDetail(
 
         if (!mounted.current) return;
 
-        // 3. Map data
-        const standings = standingsRaw.map(mapStanding).sort((a, b) => a.position - b.position);
+        // 3. Map data — dedup standings for multi-stage leagues
+        const standings = deduplicateStandings(standingsRaw);
         const teams = teamsRaw.map(mapTeam).sort((a, b) => a.name.localeCompare(b.name));
 
         // Build team lookup for top scorers

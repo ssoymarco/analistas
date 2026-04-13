@@ -3,6 +3,8 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, FlatList, Dimensions, RefreshControl,
 } from 'react-native';
+import { haptics } from '../utils/haptics';
+import { AnimatedPressable } from '../components/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
@@ -55,10 +57,11 @@ function LeagueBadge({ category }: { category: string }) {
 function HeroCard({ article, onPress, c }: { article: NewsArticle; onPress: () => void; c: ReturnType<typeof useThemeColors> }) {
   const isRecent = (article.timeAgo ?? 999) <= 90;
   return (
-    <TouchableOpacity
+    <AnimatedPressable
       style={[styles.heroCard, { backgroundColor: c.card }]}
       onPress={onPress}
-      activeOpacity={0.9}
+      scaleValue={0.97}
+      haptic="light"
     >
       {/* Gradient overlay */}
       <View style={styles.heroGradient} />
@@ -87,7 +90,7 @@ function HeroCard({ article, onPress, c }: { article: NewsArticle; onPress: () =
           <Text style={[styles.heroTime, { color: c.textTertiary }]}>{article.time}</Text>
         </View>
       </View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 }
 
@@ -223,7 +226,7 @@ export const NoticiasScreen: React.FC = () => {
                 { backgroundColor: c.surface, borderColor: c.border },
                 active && { backgroundColor: c.accent, borderColor: c.accent },
               ]}
-              onPress={() => setActiveTab(tab.id)}
+              onPress={() => { haptics.selection(); setActiveTab(tab.id); }}
               activeOpacity={0.7}
             >
               <Text style={styles.tabEmoji}>{tab.emoji}</Text>

@@ -8,6 +8,7 @@ import {
   Animated,
 } from 'react-native';
 import { useThemeColors } from '../theme/useTheme';
+import { AnimatedPressable } from './AnimatedPressable';
 import type { Match } from '../data/types';
 
 /** Renders a team logo — Image if URL, Text if emoji/short string */
@@ -41,10 +42,11 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
   const awayWon = isFinished && match.awayScore > match.homeScore;
 
   return (
-    <TouchableOpacity
+    <AnimatedPressable
       style={[s.card, { backgroundColor: c.card, borderBottomColor: c.border }]}
       onPress={() => onPress?.(match)}
-      activeOpacity={0.7}
+      scaleValue={0.98}
+      haptic="none"
     >
       <View style={s.row}>
         {/* Home team (left) */}
@@ -95,7 +97,7 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
           <BellIcon muted={match.isFavorite} c={c} />
         </TouchableOpacity>
       </View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 };
 

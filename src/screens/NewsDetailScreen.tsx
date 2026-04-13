@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Animated, Dimensions, Share, Platform,
 } from 'react-native';
+import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -163,6 +164,7 @@ export const NewsDetailScreen: React.FC = () => {
 
   const handleReaction = useCallback((emoji: string) => {
     if (userReaction === emoji) return; // can't undo — only change
+    haptics.medium();
 
     // Pop animation
     const anim = reactionScales.current[emoji];

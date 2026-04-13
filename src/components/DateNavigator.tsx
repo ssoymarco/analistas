@@ -1,6 +1,7 @@
 import React, { useRef, useCallback, useEffect } from 'react';
 import { View, Text, TouchableOpacity, FlatList, StyleSheet, Dimensions } from 'react-native';
 import { useThemeColors } from '../theme/useTheme';
+import { haptics } from '../utils/haptics';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CAL_BTN_WIDTH = 44;
@@ -97,6 +98,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
   }, [safeIndex, scrollToIndex]);
 
   const handleSelect = useCallback((item: DateItem) => {
+    haptics.selection();
     onSelectDate(item.date);
   }, [onSelectDate]);
 

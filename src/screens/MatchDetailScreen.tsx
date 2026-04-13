@@ -1,7 +1,7 @@
 // ── Match Detail Screen ───────────────────────────────────────────────────────
 // Redesigned header with dark navy gradient, bell & share icons, time capsule,
 // team badges with "VS", collapsible hero, 4 tabs, "Volver arriba" FAB.
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Animated,
   Dimensions,
 } from 'react-native';
+import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { SkeletonMatchDetail } from '../components/Skeleton';
@@ -232,6 +233,26 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   ];
   const [activeTab, setActiveTab] = useState<Tab>('previa');
 
+  // ── Sliding tab indicator ─────────────────────────────────────────────────
+  const screenWidth = Dimensions.get('window').width;
+  const TAB_COUNT = TABS.length;
+  const tabWidth = screenWidth / TAB_COUNT;
+  const INDICATOR_W = 28;
+  const indicatorX = useRef(new Animated.Value((tabWidth - INDICATOR_W) / 2)).current;
+
+  const handleTabSwitch = useCallback((key: Tab) => {
+    haptics.selection();
+    setActiveTab(key);
+    const idx = TABS.findIndex(t => t.key === key);
+    const target = idx * tabWidth + (tabWidth - INDICATOR_W) / 2;
+    Animated.spring(indicatorX, {
+      toValue: target,
+      useNativeDriver: true,
+      speed: 22,
+      bounciness: 5,
+    }).start();
+  }, [TABS, tabWidth, indicatorX]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Animated hero ──────────────────────────────────────────────────────────
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -440,15 +461,15 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           </Animated.View>
         </Animated.View>
 
-        {/* ── Tab bar ── */}
+        {/* ── Tab bar with sliding indicator ── */}
         <View style={[scr.tabBarWrap, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
           {TABS.map(t => {
             const active = activeTab === t.key;
             return (
               <TouchableOpacity
                 key={t.key}
-                style={[scr.tabBtn, active && { borderBottomColor: c.accent }]}
-                onPress={() => setActiveTab(t.key)}
+                style={scr.tabBtn}
+                onPress={() => handleTabSwitch(t.key)}
                 activeOpacity={0.7}
               >
                 <Text style={[
@@ -459,6 +480,11 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               </TouchableOpacity>
             );
           })}
+          {/* Sliding indicator */}
+          <Animated.View style={[
+            scr.tabIndicator,
+            { backgroundColor: c.accent, transform: [{ translateX: indicatorX }] },
+          ]} />
         </View>
       </Animated.View>
 
@@ -647,15 +673,21 @@ const scr = StyleSheet.create({
   tabBarWrap: {
     flexDirection: 'row',
     borderBottomWidth: 1,
+    position: 'relative' as const,
   },
   tabBtn: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: 12,
-    borderBottomWidth: 2.5,
-    borderBottomColor: 'transparent',
   },
   tabText: { fontSize: 13, fontWeight: '600' },
+  tabIndicator: {
+    position: 'absolute' as const,
+    bottom: -1,
+    width: 28,
+    height: 2.5,
+    borderRadius: 1.25,
+  },
 
   // Empty / loading
   emptyWrap: { alignItems: 'center', paddingTop: 80, gap: 12 },

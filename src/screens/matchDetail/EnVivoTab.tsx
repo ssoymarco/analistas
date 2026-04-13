@@ -9,6 +9,9 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useThemeColors } from '../../theme/useTheme';
+import { haptics } from '../../utils/haptics';
+import { AnimatedPressable } from '../../components/AnimatedPressable';
+import { GoalPicker, GOAL_OPTIONS } from '../../components/GoalPicker';
 import type {
   Match, MatchDetail, MatchEvent, H2HResult, TeamFormEntry,
   OddsMarket, MatchPrediction, MissingPlayer, PressureIndex,
@@ -164,13 +167,36 @@ const ev = StyleSheet.create({
 const VOTE_STORAGE_PREFIX = '@prediction_votes_';
 const VOTE_COUNTS_PREFIX  = '@prediction_counts_';
 
+type PollKey = 'winner' | 'goals' | 'corners' | 'bothScore' | 'redCard' | 'firstScorer';
+const ALL_POLL_KEYS: PollKey[] = ['winner', 'goals', 'corners', 'bothScore', 'redCard', 'firstScorer'];
+const TOTAL_POLLS = ALL_POLL_KEYS.length;
+
 interface VoteState {
-  winner?: string;   // '1' | 'X' | '2'
-  goals?: string;    // '+2.5' | '-2.5'
+  winner?: string;       // '1' | 'X' | '2'
+  goals?: string;        // '0'..'5' | '6+'
+  corners?: string;      // '+8.5' | '-8.5'
+  bothScore?: string;    // 'si' | 'no'
+  redCard?: string;      // 'si' | 'no'
+  firstScorer?: string;  // 'home' | 'away'
 }
 interface VoteCounts {
-  winner: Record<string, number>;  // { '1': n, 'X': n, '2': n }
-  goals: Record<string, number>;   // { '+2.5': n, '-2.5': n }
+  winner: Record<string, number>;
+  goals: Record<string, number>;
+  corners: Record<string, number>;
+  bothScore: Record<string, number>;
+  redCard: Record<string, number>;
+  firstScorer: Record<string, number>;
+}
+
+function defaultCounts(): VoteCounts {
+  return {
+    winner: { '1': 0, 'X': 0, '2': 0 },
+    goals: Object.fromEntries(GOAL_OPTIONS.map(k => [k, 0])),
+    corners: { '+8.5': 0, '-8.5': 0 },
+    bothScore: { si: 0, no: 0 },
+    redCard: { si: 0, no: 0 },
+    firstScorer: { home: 0, away: 0 },
+  };
 }
 
 async function loadVotes(matchId: string): Promise<{ votes: VoteState; counts: VoteCounts }> {
@@ -180,18 +206,26 @@ async function loadVotes(matchId: string): Promise<{ votes: VoteState; counts: V
       AsyncStorage.getItem(VOTE_COUNTS_PREFIX + matchId),
     ]);
     const votes: VoteState = vRaw ? JSON.parse(vRaw) : {};
-    const counts: VoteCounts = cRaw
-      ? JSON.parse(cRaw)
-      : { winner: { '1': 0, 'X': 0, '2': 0 }, goals: { '+2.5': 0, '-2.5': 0 } };
+    const defaults = defaultCounts();
+    const stored: Partial<VoteCounts> = cRaw ? JSON.parse(cRaw) : {};
+    // Merge: keep stored data, fill missing polls with defaults
+    const counts: VoteCounts = {
+      winner: { ...defaults.winner, ...stored.winner },
+      goals: { ...defaults.goals, ...stored.goals },
+      corners: { ...defaults.corners, ...stored.corners },
+      bothScore: { ...defaults.bothScore, ...stored.bothScore },
+      redCard: { ...defaults.redCard, ...stored.redCard },
+      firstScorer: { ...defaults.firstScorer, ...stored.firstScorer },
+    };
     return { votes, counts };
   } catch {
-    return { votes: {}, counts: { winner: { '1': 0, 'X': 0, '2': 0 }, goals: { '+2.5': 0, '-2.5': 0 } } };
+    return { votes: {}, counts: defaultCounts() };
   }
 }
 
 async function saveVote(
   matchId: string,
-  poll: 'winner' | 'goals',
+  poll: PollKey,
   option: string,
   currentVotes: VoteState,
   currentCounts: VoteCounts,
@@ -211,7 +245,7 @@ async function saveVote(
   return { votes: newVotes, counts: newCounts };
 }
 
-// ── Predictions carousel ─────────────────────────────────────────────────────
+// ── Predictions carousel (6 interactive polls) ─────────────────────────────
 const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
   const c = useThemeColors();
   const [activeDot, setActiveDot] = useState(0);
@@ -219,10 +253,7 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
 
   // ── Vote state ──
   const [votes, setVotes] = useState<VoteState>({});
-  const [counts, setCounts] = useState<VoteCounts>({
-    winner: { '1': 0, 'X': 0, '2': 0 },
-    goals: { '+2.5': 0, '-2.5': 0 },
-  });
+  const [counts, setCounts] = useState<VoteCounts>(defaultCounts);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -233,9 +264,9 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
     });
   }, [match.id]);
 
-  const handleVote = useCallback(async (poll: 'winner' | 'goals', option: string) => {
-    // Already voted on this poll → ignore
+  const handleVote = useCallback(async (poll: PollKey, option: string) => {
     if (votes[poll]) return;
+    haptics.medium();
     const { votes: nv, counts: nc } = await saveVote(match.id, poll, option, votes, counts);
     setVotes(nv);
     setCounts(nc);
@@ -243,24 +274,56 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
 
   const handleCarouselScroll = (e: any) => {
     const idx = Math.round(e.nativeEvent.contentOffset.x / (CARD_WIDTH + CARD_GAP));
-    setActiveDot(idx);
+    if (idx !== activeDot) setActiveDot(idx);
   };
 
-  const winnerTotal = Object.values(counts.winner).reduce((a, b) => a + b, 0);
-  const goalsTotal  = Object.values(counts.goals).reduce((a, b) => a + b, 0);
-  const answeredCount = (votes.winner ? 1 : 0) + (votes.goals ? 1 : 0);
+  const answeredCount = ALL_POLL_KEYS.filter(k => votes[k] != null).length;
 
-  // Helper: get percentage string
+  // Helper: get percentage
   const pct = (n: number, total: number) => total > 0 ? Math.round((n / total) * 100) : 0;
 
+  // Helper: render a binary option button (compact, full-width)
+  const BinaryBtn = ({ pollKey, optKey, label, sub }: {
+    pollKey: PollKey; optKey: string; label: string; sub: string;
+  }) => {
+    const voted = votes[pollKey] != null;
+    const isSelected = votes[pollKey] === optKey;
+    const total = Object.values(counts[pollKey]).reduce((a, b) => a + b, 0);
+    const percentage = pct(counts[pollKey][optKey] || 0, total);
+
+    return (
+      <AnimatedPressable
+        style={[
+          pc.optBtn,
+          { borderColor: isSelected ? c.accent : c.border, backgroundColor: isSelected ? c.accent + '12' : c.surface },
+        ]}
+        scaleValue={0.95}
+        haptic="none"
+        onPress={() => handleVote(pollKey, optKey)}
+        disabled={voted}
+      >
+        <Text style={[pc.optLabel, { color: isSelected ? c.accent : c.textPrimary }]}>{label}</Text>
+        <Text style={[pc.optSub, { color: isSelected ? c.accent : c.textTertiary }]}>{sub}</Text>
+        {voted && (
+          <Text style={[pc.optPct, { color: isSelected ? c.accent : c.textTertiary }]}>{percentage}%</Text>
+        )}
+      </AnimatedPressable>
+    );
+  };
+
+  // Helper: total votes for a poll
+  const pollTotal = (key: PollKey) => Object.values(counts[key]).reduce((a, b) => a + b, 0);
+
+  // Helper: vote count text
+  const VoteCountText = ({ pollKey }: { pollKey: PollKey }) => {
+    const total = pollTotal(pollKey);
+    if (!votes[pollKey] || total === 0) return null;
+    return <Text style={[pc.totalVotes, { color: c.textTertiary }]}>{total} {total === 1 ? 'voto' : 'votos'}</Text>;
+  };
+
   const cards = [
-    // Card 1: Who wins?
-    <View key="1" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <View style={pc.cardHeader}>
-        <TeamBadgeMini name={match.homeTeam.shortName} logo={match.homeTeam.logo} color="#ef4444" />
-        <Text style={[pc.vsLabel, { color: c.textTertiary }]}>vs</Text>
-        <TeamBadgeMini name={match.awayTeam.shortName} logo={match.awayTeam.logo} color="#9ca3af" />
-      </View>
+    // ── Card 1: ¿Quién ganará? ──────────────────────────────────────────────
+    <View key="winner" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <Text style={[pc.question, { color: c.textPrimary }]}>¿Quién crees que ganará?</Text>
       <View style={pc.optionsRow}>
         {[
@@ -270,91 +333,81 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
         ].map(opt => {
           const voted = votes.winner != null;
           const isSelected = votes.winner === opt.key;
-          const percentage = pct(counts.winner[opt.key] || 0, winnerTotal);
+          const total = pollTotal('winner');
+          const percentage = pct(counts.winner[opt.key] || 0, total);
           return (
-            <TouchableOpacity
+            <AnimatedPressable
               key={opt.key}
               style={[
-                pc.optionBtn,
-                { borderColor: isSelected ? c.accent : c.border },
-                isSelected && { backgroundColor: c.accent + '18' },
+                pc.optBtn,
+                { borderColor: isSelected ? c.accent : c.border, backgroundColor: isSelected ? c.accent + '12' : c.surface },
               ]}
-              activeOpacity={voted ? 1 : 0.7}
+              scaleValue={0.93}
+              haptic="none"
               onPress={() => handleVote('winner', opt.key)}
+              disabled={voted}
             >
-              <Text style={[pc.optionLabel, { color: isSelected ? c.accent : c.textPrimary }]}>{opt.label}</Text>
-              <Text style={[pc.optionTeam, { color: isSelected ? c.accent : c.textTertiary }]}>{opt.sub}</Text>
+              <Text style={[pc.optLabel, { color: isSelected ? c.accent : c.textPrimary }]}>{opt.label}</Text>
+              <Text style={[pc.optSub, { color: isSelected ? c.accent : c.textTertiary }]}>{opt.sub}</Text>
               {voted && (
-                <View style={pc.resultBadge}>
-                  <Text style={[pc.resultPct, { color: isSelected ? c.accent : c.textTertiary }]}>{percentage}%</Text>
-                </View>
+                <Text style={[pc.optPct, { color: isSelected ? c.accent : c.textTertiary }]}>{percentage}%</Text>
               )}
-            </TouchableOpacity>
+            </AnimatedPressable>
           );
         })}
       </View>
-      {votes.winner && (
-        <Text style={[pc.totalVotes, { color: c.textTertiary }]}>
-          {winnerTotal} {winnerTotal === 1 ? 'voto' : 'votos'}
-        </Text>
-      )}
+      <VoteCountText pollKey="winner" />
     </View>,
 
-    // Card 2: Goals
-    <View key="2" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <View style={pc.cardHeader}>
-        <TeamBadgeMini name={match.homeTeam.shortName} logo={match.homeTeam.logo} color="#ef4444" />
-        <Text style={[pc.vsLabel, { color: c.textTertiary }]}>vs</Text>
-        <TeamBadgeMini name={match.awayTeam.shortName} logo={match.awayTeam.logo} color="#9ca3af" />
-      </View>
+    // ── Card 2: ¿Cuántos goles? ─────────────────────────────────────────────
+    <View key="goals" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <Text style={[pc.question, { color: c.textPrimary }]}>¿Cuántos goles habrá?</Text>
-      <View style={pc.optionsRow}>
-        {[
-          { key: '+2.5', label: '+2.5', sub: 'Más goles' },
-          { key: '-2.5', label: '-2.5', sub: 'Menos goles' },
-        ].map(opt => {
-          const voted = votes.goals != null;
-          const isSelected = votes.goals === opt.key;
-          const percentage = pct(counts.goals[opt.key] || 0, goalsTotal);
-          return (
-            <TouchableOpacity
-              key={opt.key}
-              style={[
-                pc.optionBtn, pc.optionBtnWide,
-                { borderColor: isSelected ? c.accent : c.border },
-                isSelected && { backgroundColor: c.accent + '18' },
-              ]}
-              activeOpacity={voted ? 1 : 0.7}
-              onPress={() => handleVote('goals', opt.key)}
-            >
-              <Text style={[pc.optionLabel, { color: isSelected ? c.accent : c.textPrimary }]}>{opt.label}</Text>
-              <Text style={[pc.optionTeam, { color: isSelected ? c.accent : c.textTertiary }]}>{opt.sub}</Text>
-              {voted && (
-                <View style={pc.resultBadge}>
-                  <Text style={[pc.resultPct, { color: isSelected ? c.accent : c.textTertiary }]}>{percentage}%</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      {votes.goals && (
-        <Text style={[pc.totalVotes, { color: c.textTertiary }]}>
-          {goalsTotal} {goalsTotal === 1 ? 'voto' : 'votos'}
-        </Text>
-      )}
+      <GoalPicker
+        selected={votes.goals}
+        onSelect={(val) => handleVote('goals', val)}
+        counts={counts.goals}
+        cardWidth={CARD_WIDTH}
+      />
     </View>,
 
-    // Card 3: CTA / Ad
-    <View key="3" style={[pc.card, pc.ctaCard, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={{ fontSize: 40 }}>🎰</Text>
-      <Text style={[pc.ctaTitle, { color: c.textPrimary }]}>¿Listo para apostar?</Text>
-      <TouchableOpacity style={pc.ctaBtn} activeOpacity={0.8}>
-        <Text style={pc.ctaBtnText}>Apuesta ahora</Text>
-      </TouchableOpacity>
-      <Text style={[pc.ctaDisclaimer, { color: c.textTertiary }]}>
-        Publicidad · +18 · Juega responsablemente
-      </Text>
+    // ── Card 3: Corners ─────────────────────────────────────────────────────
+    <View key="corners" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
+      <Text style={[pc.question, { color: c.textPrimary }]}>¿Más o menos de 8.5 corners?</Text>
+      <View style={pc.optionsRow}>
+        <BinaryBtn pollKey="corners" optKey="+8.5" label="+8.5" sub="Más corners" />
+        <BinaryBtn pollKey="corners" optKey="-8.5" label="-8.5" sub="Menos corners" />
+      </View>
+      <VoteCountText pollKey="corners" />
+    </View>,
+
+    // ── Card 4: Ambos anotan ────────────────────────────────────────────────
+    <View key="btts" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
+      <Text style={[pc.question, { color: c.textPrimary }]}>¿Ambos equipos anotarán?</Text>
+      <View style={pc.optionsRow}>
+        <BinaryBtn pollKey="bothScore" optKey="si" label="Sí" sub="Ambos anotan" />
+        <BinaryBtn pollKey="bothScore" optKey="no" label="No" sub="Al menos uno no" />
+      </View>
+      <VoteCountText pollKey="bothScore" />
+    </View>,
+
+    // ── Card 5: Tarjeta roja ────────────────────────────────────────────────
+    <View key="red" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
+      <Text style={[pc.question, { color: c.textPrimary }]}>¿Habrá tarjeta roja?</Text>
+      <View style={pc.optionsRow}>
+        <BinaryBtn pollKey="redCard" optKey="si" label="Sí" sub="Habrá roja" />
+        <BinaryBtn pollKey="redCard" optKey="no" label="No" sub="Sin rojas" />
+      </View>
+      <VoteCountText pollKey="redCard" />
+    </View>,
+
+    // ── Card 6: Primer gol ──────────────────────────────────────────────────
+    <View key="first" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
+      <Text style={[pc.question, { color: c.textPrimary }]}>¿Quién anota primero?</Text>
+      <View style={pc.optionsRow}>
+        <BinaryBtn pollKey="firstScorer" optKey="home" label={match.homeTeam.shortName} sub="Local" />
+        <BinaryBtn pollKey="firstScorer" optKey="away" label={match.awayTeam.shortName} sub="Visitante" />
+      </View>
+      <VoteCountText pollKey="firstScorer" />
     </View>,
   ];
 
@@ -366,7 +419,6 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
         <Text style={[pc.headerTitle, { color: c.textPrimary }]}>PREDICCIONES</Text>
         <Text style={[pc.headerLeague, { color: c.textTertiary }]}>  · {match.league}</Text>
         <View style={{ flex: 1 }} />
-        {/* Pagination dots */}
         <View style={pc.dots}>
           {cards.map((_, i) => (
             <View key={i} style={[
@@ -376,7 +428,7 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
             ]} />
           ))}
         </View>
-        <Text style={[pc.counter, { color: c.textTertiary }]}>{answeredCount}/2</Text>
+        <Text style={[pc.counter, { color: c.textTertiary }]}>{answeredCount}/{TOTAL_POLLS}</Text>
       </View>
       <Text style={[pc.hintText, { color: c.textTertiary }]}>Desliza para más  →</Text>
 
@@ -421,7 +473,7 @@ function TeamBadgeMini({ name, logo, color }: { name: string; logo: string; colo
 }
 
 const pc = StyleSheet.create({
-  outer: { gap: 8 },
+  outer: { gap: 6 },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -438,43 +490,39 @@ const pc = StyleSheet.create({
     fontSize: 11, fontWeight: '500',
     textAlign: 'right', paddingRight: 4, marginTop: -2,
   },
+  // ── Card shell (fixed height for uniformity) ──
   card: {
-    borderRadius: 14, borderWidth: 1, padding: 16, gap: 14,
+    borderRadius: 16, borderWidth: 1, paddingHorizontal: 16,
+    paddingTop: 16, paddingBottom: 16, gap: 10,
+    height: 170,
+    justifyContent: 'center' as const,
   },
-  cardHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
-  },
-  vsLabel: { fontSize: 12, fontWeight: '500' },
-  question: { fontSize: 17, fontWeight: '800', textAlign: 'center' },
-  optionsRow: { flexDirection: 'row', gap: 10 },
-  optionBtn: {
-    flex: 1, alignItems: 'center', paddingVertical: 16,
-    borderRadius: 12, borderWidth: 1, gap: 4,
-  },
-  optionBtnWide: { paddingVertical: 18 },
-  optionLabel: { fontSize: 22, fontWeight: '900' },
-  optionTeam: { fontSize: 11, fontWeight: '600' },
-  ctaCard: { alignItems: 'center', justifyContent: 'center' },
-  ctaTitle: { fontSize: 17, fontWeight: '800', textAlign: 'center' },
-  ctaBtn: {
-    backgroundColor: '#10b981', paddingHorizontal: 32, paddingVertical: 14,
+  question: { fontSize: 16, fontWeight: '800', textAlign: 'center' },
+  // ── Options row ──
+  optionsRow: { flexDirection: 'row', gap: 8 },
+  // ── Option buttons ──
+  optBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 6,
     borderRadius: 14,
+    borderWidth: 1.5,
+    gap: 3,
   },
-  ctaBtnText: { fontSize: 16, fontWeight: '800', color: '#fff' },
-  ctaDisclaimer: { fontSize: 10, fontWeight: '500' },
-  resultBadge: { marginTop: 4 },
-  resultPct: { fontSize: 15, fontWeight: '800' },
-  totalVotes: { fontSize: 11, fontWeight: '600', textAlign: 'center', marginTop: -4 },
+  optLabel: { fontSize: 22, fontWeight: '900' },
+  optSub: { fontSize: 10, fontWeight: '600' },
+  optPct: { fontSize: 15, fontWeight: '800', marginTop: 2 },
+  // ── Vote count ──
+  totalVotes: { fontSize: 10, fontWeight: '600', textAlign: 'center' },
 });
 
 // ── Poll Results (live/finished) — shows locked voting results ───────────────
 const PollResultsSection: React.FC<{ match: Match }> = ({ match }) => {
   const c = useThemeColors();
   const [votes, setVotes] = useState<VoteState>({});
-  const [counts, setCounts] = useState<VoteCounts>({
-    winner: { '1': 0, 'X': 0, '2': 0 },
-    goals: { '+2.5': 0, '-2.5': 0 },
-  });
+  const [counts, setCounts] = useState<VoteCounts>(defaultCounts);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -485,37 +533,84 @@ const PollResultsSection: React.FC<{ match: Match }> = ({ match }) => {
     });
   }, [match.id]);
 
-  const winnerTotal = Object.values(counts.winner).reduce((a, b) => a + b, 0);
-  const goalsTotal  = Object.values(counts.goals).reduce((a, b) => a + b, 0);
   const pct = (n: number, total: number) => total > 0 ? Math.round((n / total) * 100) : 0;
-
-  // If nobody voted, don't show anything
-  if (!loaded || (winnerTotal === 0 && goalsTotal === 0)) return null;
 
   const isFinished = match.status === 'finished';
   const totalGoals = match.homeScore + match.awayScore;
 
-  // Determine actual outcomes for finished matches
-  const actualWinner = isFinished
-    ? (match.homeScore > match.awayScore ? '1' : match.homeScore < match.awayScore ? '2' : 'X')
-    : null;
-  const actualGoals = isFinished
-    ? (totalGoals > 2.5 ? '+2.5' : '-2.5')
-    : null;
+  // Define all 6 polls with their options and actual result logic
+  const pollConfigs: Array<{
+    key: PollKey;
+    question: string;
+    options: Array<{ key: string; label: string }>;
+    barColor: string;
+    actual: string | null;
+    resultText?: string;
+  }> = [
+    {
+      key: 'winner',
+      question: '¿Quién gana?',
+      options: [
+        { key: '1', label: match.homeTeam.shortName },
+        { key: 'X', label: 'Empate' },
+        { key: '2', label: match.awayTeam.shortName },
+      ],
+      barColor: '#3b82f6',
+      actual: isFinished
+        ? (match.homeScore > match.awayScore ? '1' : match.homeScore < match.awayScore ? '2' : 'X')
+        : null,
+    },
+    {
+      key: 'goals',
+      question: '¿Cuántos goles?',
+      options: GOAL_OPTIONS.map(k => ({ key: k, label: `${k} gol${k === '1' ? '' : 'es'}` })),
+      barColor: '#f59e0b',
+      actual: isFinished ? (totalGoals >= 6 ? '6+' : String(totalGoals)) : null,
+      resultText: isFinished ? `Resultado: ${totalGoals} ${totalGoals === 1 ? 'gol' : 'goles'}` : undefined,
+    },
+    {
+      key: 'corners',
+      question: 'Corners: ¿Más o menos de 8.5?',
+      options: [{ key: '+8.5', label: '+8.5' }, { key: '-8.5', label: '-8.5' }],
+      barColor: '#8b5cf6',
+      actual: null, // corners stat not available in Match type
+    },
+    {
+      key: 'bothScore',
+      question: '¿Ambos equipos anotaron?',
+      options: [{ key: 'si', label: 'Sí' }, { key: 'no', label: 'No' }],
+      barColor: '#06b6d4',
+      actual: isFinished ? (match.homeScore > 0 && match.awayScore > 0 ? 'si' : 'no') : null,
+    },
+    {
+      key: 'redCard',
+      question: '¿Tarjeta roja?',
+      options: [{ key: 'si', label: 'Sí' }, { key: 'no', label: 'No' }],
+      barColor: '#ef4444',
+      actual: null, // would need match events data
+    },
+    {
+      key: 'firstScorer',
+      question: '¿Quién anotó primero?',
+      options: [
+        { key: 'home', label: match.homeTeam.shortName },
+        { key: 'away', label: match.awayTeam.shortName },
+      ],
+      barColor: '#f97316',
+      actual: null, // would need match events data
+    },
+  ];
 
-  const winnerOptions = [
-    { key: '1', label: '1', sub: match.homeTeam.shortName },
-    { key: 'X', label: 'X', sub: 'Empate' },
-    { key: '2', label: '2', sub: match.awayTeam.shortName },
-  ];
-  const goalsOptions = [
-    { key: '+2.5', label: '+2.5', sub: 'Más de 2.5' },
-    { key: '-2.5', label: '-2.5', sub: 'Menos de 2.5' },
-  ];
+  // Only show polls that have votes
+  const activePolls = pollConfigs.filter(p => {
+    const total = Object.values(counts[p.key]).reduce((a, b) => a + b, 0);
+    return total > 0;
+  });
+
+  if (!loaded || activePolls.length === 0) return null;
 
   return (
     <View style={[pr.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      {/* Header */}
       <View style={pr.header}>
         <Text style={{ fontSize: 16 }}>📊</Text>
         <Text style={[pr.title, { color: c.textPrimary }]}>Predicciones de la comunidad</Text>
@@ -528,80 +623,45 @@ const PollResultsSection: React.FC<{ match: Match }> = ({ match }) => {
         </View>
       </View>
 
-      {/* Winner poll */}
-      {winnerTotal > 0 && (
-        <View style={[pr.pollBlock, { borderTopColor: c.border }]}>
-          <Text style={[pr.pollQuestion, { color: c.textSecondary }]}>¿Quién gana?</Text>
-          <View style={pr.barsWrap}>
-            {winnerOptions.map(opt => {
-              const count = counts.winner[opt.key] || 0;
-              const percentage = pct(count, winnerTotal);
-              const isWinner = actualWinner === opt.key;
-              const userPicked = votes.winner === opt.key;
-              const barColor = isWinner ? '#10b981' : (actualWinner && !isWinner ? c.textTertiary + '40' : '#3b82f6');
+      {activePolls.map(poll => {
+        const total = Object.values(counts[poll.key]).reduce((a, b) => a + b, 0);
+        return (
+          <View key={poll.key} style={[pr.pollBlock, { borderTopColor: c.border }]}>
+            <Text style={[pr.pollQuestion, { color: c.textSecondary }]}>{poll.question}</Text>
+            <View style={pr.barsWrap}>
+              {poll.options.map(opt => {
+                const count = counts[poll.key][opt.key] || 0;
+                const percentage = pct(count, total);
+                const isCorrect = poll.actual === opt.key;
+                const userPicked = votes[poll.key] === opt.key;
+                const barColor = isCorrect ? '#10b981' : (poll.actual && !isCorrect ? c.textTertiary + '40' : poll.barColor);
 
-              return (
-                <View key={opt.key} style={pr.barRow}>
-                  <View style={pr.barLabelWrap}>
-                    <Text style={[pr.barLabel, { color: isWinner ? '#10b981' : c.textPrimary }]}>
-                      {opt.label}
+                return (
+                  <View key={opt.key} style={pr.barRow}>
+                    <View style={pr.barLabelWrap}>
+                      <Text style={[pr.barLabel, { color: isCorrect ? '#10b981' : c.textPrimary }]} numberOfLines={1}>
+                        {opt.label}
+                      </Text>
+                      {userPicked && <Text style={{ fontSize: 8 }}>👤</Text>}
+                      {isFinished && isCorrect && <Text style={{ fontSize: 10 }}>✅</Text>}
+                    </View>
+                    <View style={[pr.barBg, { backgroundColor: c.surface }]}>
+                      <View style={[pr.barFill, { width: `${Math.max(percentage, 2)}%`, backgroundColor: barColor }]} />
+                    </View>
+                    <Text style={[pr.barPct, { color: isCorrect ? '#10b981' : c.textSecondary }]}>
+                      {percentage}%
                     </Text>
-                    {userPicked && <Text style={{ fontSize: 8 }}>👤</Text>}
-                    {isFinished && isWinner && <Text style={{ fontSize: 10 }}>✅</Text>}
                   </View>
-                  <View style={[pr.barBg, { backgroundColor: c.surface }]}>
-                    <View style={[pr.barFill, { width: `${Math.max(percentage, 2)}%`, backgroundColor: barColor }]} />
-                  </View>
-                  <Text style={[pr.barPct, { color: isWinner ? '#10b981' : c.textSecondary }]}>
-                    {percentage}%
-                  </Text>
-                </View>
-              );
-            })}
+                );
+              })}
+            </View>
+            <Text style={[pr.voteCount, { color: c.textTertiary }]}>{total} votos</Text>
+            {poll.resultText && (
+              <Text style={[pr.actualResult, { color: c.textTertiary }]}>{poll.resultText}</Text>
+            )}
           </View>
-          <Text style={[pr.voteCount, { color: c.textTertiary }]}>{winnerTotal} votos</Text>
-        </View>
-      )}
-
-      {/* Goals poll */}
-      {goalsTotal > 0 && (
-        <View style={[pr.pollBlock, { borderTopColor: c.border }]}>
-          <Text style={[pr.pollQuestion, { color: c.textSecondary }]}>¿Más o menos de 2.5 goles?</Text>
-          <View style={pr.barsWrap}>
-            {goalsOptions.map(opt => {
-              const count = counts.goals[opt.key] || 0;
-              const percentage = pct(count, goalsTotal);
-              const isCorrect = actualGoals === opt.key;
-              const userPicked = votes.goals === opt.key;
-              const barColor = isCorrect ? '#10b981' : (actualGoals && !isCorrect ? c.textTertiary + '40' : '#f59e0b');
-
-              return (
-                <View key={opt.key} style={pr.barRow}>
-                  <View style={pr.barLabelWrap}>
-                    <Text style={[pr.barLabel, { color: isCorrect ? '#10b981' : c.textPrimary }]}>
-                      {opt.label}
-                    </Text>
-                    {userPicked && <Text style={{ fontSize: 8 }}>👤</Text>}
-                    {isFinished && isCorrect && <Text style={{ fontSize: 10 }}>✅</Text>}
-                  </View>
-                  <View style={[pr.barBg, { backgroundColor: c.surface }]}>
-                    <View style={[pr.barFill, { width: `${Math.max(percentage, 2)}%`, backgroundColor: barColor }]} />
-                  </View>
-                  <Text style={[pr.barPct, { color: isCorrect ? '#10b981' : c.textSecondary }]}>
-                    {percentage}%
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-          <Text style={[pr.voteCount, { color: c.textTertiary }]}>{goalsTotal} votos</Text>
-          {isFinished && (
-            <Text style={[pr.actualResult, { color: c.textTertiary }]}>
-              Resultado: {totalGoals} {totalGoals === 1 ? 'gol' : 'goles'}
-            </Text>
-          )}
-        </View>
-      )}
+        );
+      })}
     </View>
   );
 };

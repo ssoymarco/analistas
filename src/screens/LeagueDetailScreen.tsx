@@ -139,14 +139,16 @@ const ClasificacionTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
           <Text style={[cl.hPts, { color: c.textTertiary }]}>PTS</Text>
         </View>
 
-        {standings.map(row => {
+        {standings.map((row, idx) => {
           const zoneColor = getZoneColor(row.position, totalTeams);
           const gd = row.goalDifference > 0 ? `+${row.goalDifference}` : `${row.goalDifference}`;
           const gdColor = row.goalDifference > 0 ? '#10b981' : row.goalDifference < 0 ? '#ef4444' : c.textTertiary;
+          const showGroupDivider = idx > 0 && row.groupId != null && standings[idx - 1].groupId != null && row.groupId !== standings[idx - 1].groupId;
 
           return (
+            <React.Fragment key={row.teamId}>
+            {showGroupDivider && <View style={{ height: 2, backgroundColor: c.border, marginVertical: 2 }} />}
             <TouchableOpacity
-              key={row.teamId}
               style={[cl.row, { borderBottomColor: c.border }]}
               activeOpacity={0.7}
               onPress={() => navigation.push('TeamDetail', {
@@ -172,6 +174,7 @@ const ClasificacionTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
               <Text style={[cl.gd, { color: gdColor }]}>{gd}</Text>
               <Text style={[cl.pts, { color: c.textPrimary }]}>{row.points}</Text>
             </TouchableOpacity>
+            </React.Fragment>
           );
         })}
       </View>

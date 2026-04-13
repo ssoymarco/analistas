@@ -1016,21 +1016,51 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
  */
 export async function getStandings(seasonId: number): Promise<LeagueStanding[]> {
   try {
-    const data = await fetchStandings(seasonId);
+    const rawData = await fetchStandings(seasonId);
 
-    // Some leagues (e.g. Danish Superliga) have multiple stages (regular + playoffs).
-    // Deduplicate by keeping the entry from the latest stage per team.
+    // Guard: flatten nested arrays (some leagues return [[group1], [group2]])
+    const data: SMStandingGroup[] = rawData.length > 0 && Array.isArray(rawData[0])
+      ? (rawData as unknown as SMStandingGroup[][]).flat()
+      : rawData;
+
+    if (data.length === 0) return [];
+
+    // ── Step 1: Deduplicate by team — keep the latest stage per team ─────────
+    // Leagues like the Danish Superliga have multiple stages:
+    //   Stage A (regular season, 22 games) → Stage B (playoffs, 26+ games)
+    // Each team appears once per stage; we want the most recent one.
     const byTeam = new Map<number, SMStandingGroup>();
     for (const sg of data) {
+      if (!sg.participant_id) continue;
       const existing = byTeam.get(sg.participant_id);
       if (!existing || sg.stage_id > existing.stage_id) {
         byTeam.set(sg.participant_id, sg);
       }
     }
 
-    return Array.from(byTeam.values())
-      .map(mapStandingToLeagueStanding)
-      .sort((a, b) => a.position - b.position);
+    const deduplicated = Array.from(byTeam.values());
+
+    // ── Step 2: Detect multi-group leagues ───────────────────────────────────
+    // After dedup, teams may be in different groups within the same stage
+    // (e.g. championship group vs relegation group). The `position` field
+    // is local to each group (1-6 in both), so we need global ordering.
+    const groupIds = new Set(deduplicated.map(sg => sg.group_id ?? 0));
+    const isMultiGroup = groupIds.size > 1;
+
+    // Sort: by group_id first (championship groups get lower IDs), then by position
+    deduplicated.sort((a, b) => {
+      const gA = a.group_id ?? 0;
+      const gB = b.group_id ?? 0;
+      if (gA !== gB) return gA - gB;
+      return a.position - b.position;
+    });
+
+    // ── Step 3: Map to LeagueStanding with sequential global positions ───────
+    return deduplicated.map((sg, idx) => ({
+      ...mapStandingToLeagueStanding(sg),
+      position: isMultiGroup ? idx + 1 : sg.position,
+      groupId: isMultiGroup ? (sg.group_id ?? null) : null,
+    }));
   } catch (err) {
     console.warn('[sportsApi] getStandings failed:', err);
     return [];

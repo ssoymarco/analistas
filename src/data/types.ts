@@ -43,6 +43,9 @@ export interface LeagueStanding {
   goalsAgainst: number;
   goalDifference: number;
   points: number;
+  /** Group ID for leagues with stage splits (e.g. championship/relegation).
+   *  Null for simple single-table leagues. Used for dividers in UI. */
+  groupId?: number | null;
 }
 
 export interface League {
