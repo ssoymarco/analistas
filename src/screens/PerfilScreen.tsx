@@ -5,7 +5,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { PerfilStackParamList } from '../navigation/AppNavigator';
 import { useThemeColors } from '../theme/useTheme';
 import type { ColorPalette } from '../theme/colors';
 import { useDarkMode } from '../contexts/DarkModeContext';
@@ -131,9 +134,9 @@ function CenterModal({ visible, onClose, c, children }: {
 }
 
 // ── Promo Banner ─────────────────────────────────────────────────────────────
-function PromoBanner() {
+function PromoBanner({ onPress }: { onPress?: () => void }) {
   return (
-    <TouchableOpacity style={{ marginHorizontal: 16, marginTop: 20, borderRadius: 16, backgroundColor: '#0d2b1a', overflow: 'hidden', padding: 16 }} activeOpacity={0.9}>
+    <TouchableOpacity style={{ marginHorizontal: 16, marginTop: 20, borderRadius: 16, backgroundColor: '#0d2b1a', overflow: 'hidden', padding: 16 }} activeOpacity={0.9} onPress={onPress}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
         <View style={{ backgroundColor: '#111', borderRadius: 8, padding: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -186,6 +189,7 @@ const LANGUAGES = [
 export const PerfilScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark, toggleDark } = useDarkMode();
+  const navigation = useNavigation<NativeStackNavigationProp<PerfilStackParamList>>();
   const { user, isAuthenticated, login, logout } = useAuth();
   const { resetOnboarding } = useOnboarding();
   const { followedTeamIds, followedPlayerIds, followedLeagueIds } = useFavorites();
@@ -372,14 +376,21 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#06b6d4' }}>{timeFormat}</Text>
             </TouchableOpacity>
           } />
-          <MenuRow c={c} emoji="📱" label="Ícono de la app" sublabel="Exclusivo para titulares" iconBg="rgba(168,85,247,0.15)" />
+          <MenuRow c={c} emoji="📱" label="Ícono de la app" sublabel="Exclusivo para titulares" iconBg="rgba(168,85,247,0.15)" onPress={() => navigation.navigate('HazteTitular', { source: 'icon' })} />
           <MenuRow c={c} emoji="🎁" label="Canjea un código" iconBg="rgba(236,72,153,0.15)" onPress={() => setCodeModalVisible(true)} />
           <MenuRow c={c} emoji="👥" label="Invitar amigos" sublabel="Comparte Analistas" iconBg="rgba(99,102,241,0.15)" onPress={handleShare} />
-          <MenuRow c={c} emoji="📊" label="Momios" sublabel={momiosEnabled ? 'Contenido de apuestas visible' : 'Contenido de apuestas oculto'} iconBg="rgba(16,185,129,0.15)" rightElement={<CustomToggle value={momiosEnabled} onToggle={() => setMomiosEnabled(v => !v)} activeColor="#10b981" icon={momiosEnabled ? '📊' : '🔒'} />} />
+          <MenuRow c={c} emoji="📊" label="Momios" sublabel={momiosEnabled ? 'Contenido de apuestas visible' : 'Contenido de apuestas oculto'} iconBg="rgba(16,185,129,0.15)" rightElement={<CustomToggle value={momiosEnabled} onToggle={() => {
+            if (momiosEnabled) {
+              // Trying to turn OFF → requires premium
+              navigation.navigate('HazteTitular', { source: 'momios' });
+            } else {
+              setMomiosEnabled(true);
+            }
+          }} activeColor="#10b981" icon={momiosEnabled ? '📊' : '🔒'} />} />
           <MenuRow c={c} emoji="🗑️" label="Borrar caché" sublabel="Liberar espacio" iconBg="rgba(239,68,68,0.1)" isLast onPress={handleClearCache} />
         </View>
 
-        <PromoBanner />
+        <PromoBanner onPress={() => navigation.navigate('HazteTitular', { source: 'promo' })} />
 
         {/* Información */}
         <SectionHeader label="Información" c={c} />

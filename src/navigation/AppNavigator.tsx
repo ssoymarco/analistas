@@ -12,6 +12,7 @@ import { FavoritosScreen } from '../screens/FavoritosScreen';
 import { NoticiasScreen } from '../screens/NoticiasScreen';
 import { NewsDetailScreen } from '../screens/NewsDetailScreen';
 import { PerfilScreen } from '../screens/PerfilScreen';
+import { HazteTitularScreen } from '../screens/HazteTitularScreen';
 import { MatchDetailScreen } from '../screens/MatchDetailScreen';
 import { TeamDetailScreen } from '../screens/TeamDetailScreen';
 import { PlayerDetailScreen } from '../screens/PlayerDetailScreen';
@@ -80,6 +81,15 @@ export type NoticiasStackParamList = {
   NewsDetail: { article: NewsArticle };
 };
 
+/**
+ * Stack nested inside the Perfil tab.
+ * HazteTitular (premium paywall) lives here.
+ */
+export type PerfilStackParamList = {
+  PerfilHome: undefined;
+  HazteTitular: { source?: 'icon' | 'momios' | 'promo' } | undefined;
+};
+
 export type RootTabParamList = {
   Partidos: undefined;
   Favoritos: undefined;
@@ -93,6 +103,7 @@ export type RootStackParamList = PartidosStackParamList;
 const PartidosStack  = createNativeStackNavigator<PartidosStackParamList>();
 const FavoritosStack = createNativeStackNavigator<FavoritosStackParamList>();
 const NoticiasStack  = createNativeStackNavigator<NoticiasStackParamList>();
+const PerfilStack    = createNativeStackNavigator<PerfilStackParamList>();
 const Tab            = createBottomTabNavigator<RootTabParamList>();
 
 // ── Partidos nested stack ─────────────────────────────────────────────────────
@@ -180,6 +191,17 @@ function NoticiasNavigator() {
       <NoticiasStack.Screen name="NoticiasHome" component={NoticiasScreen} />
       <NoticiasStack.Screen name="NewsDetail"   component={NewsDetailScreen} options={detailScreenOpts} />
     </NoticiasStack.Navigator>
+  );
+}
+
+// ── Perfil nested stack ─────────────────────────────────────────────────────
+
+function PerfilNavigator() {
+  return (
+    <PerfilStack.Navigator screenOptions={{ headerShown: false }}>
+      <PerfilStack.Screen name="PerfilHome" component={PerfilScreen} />
+      <PerfilStack.Screen name="HazteTitular" component={HazteTitularScreen} options={detailScreenOpts} />
+    </PerfilStack.Navigator>
   );
 }
 
@@ -293,7 +315,7 @@ function MainTabs() {
       />
       <Tab.Screen name="Favoritos" component={FavoritosNavigator} />
       <Tab.Screen name="Noticias"  component={NoticiasNavigator} />
-      <Tab.Screen name="Perfil"    component={PerfilScreen} />
+      <Tab.Screen name="Perfil"    component={PerfilNavigator} />
     </Tab.Navigator>
   );
 }
