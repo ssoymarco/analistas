@@ -10,6 +10,7 @@ import {
   TextInput, Image, Dimensions, Platform, StatusBar, ActivityIndicator,
   Keyboard, Easing, KeyboardAvoidingView,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../../theme/useTheme';
 import { useDarkMode } from '../../contexts/DarkModeContext';
@@ -1149,6 +1150,131 @@ const FallingParticle: React.FC<{ p: typeof PARTICLES[0] }> = ({ p }) => {
   );
 };
 
+// ── Personalizing Screen ────────────────────────────────────────────────────
+// Shows a fake progress from 0→100% giving the sensation of hyper-personalization.
+// When done, calls onComplete which triggers the WelcomeAnimation.
+
+const PERSONALIZING_STEPS = [
+  'Configurando tus equipos favoritos…',
+  'Analizando tus preferencias…',
+  'Preparando tu feed personalizado…',
+  'Optimizando notificaciones…',
+  'Todo listo, estamos preparando tu experiencia…',
+];
+
+const PersonalizingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
+  const [percent, setPercent] = useState(0);
+  const [stepIdx, setStepIdx] = useState(0);
+  const progressWidth = useRef(new Animated.Value(0)).current;
+  const emojiScale = useRef(new Animated.Value(0.5)).current;
+  const emojiOp = useRef(new Animated.Value(0)).current;
+  const textOp = useRef(new Animated.Value(0)).current;
+  const checkScale = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    // Entrance
+    Animated.parallel([
+      Animated.spring(emojiScale, { toValue: 1, friction: 6, tension: 50, useNativeDriver: true }),
+      Animated.timing(emojiOp, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.timing(textOp, { toValue: 1, duration: 400, delay: 200, useNativeDriver: true }),
+    ]).start();
+
+    // Progress simulation — 3 seconds total
+    const totalDuration = 3000;
+    const intervalMs = 50;
+    const totalTicks = totalDuration / intervalMs;
+    let tick = 0;
+
+    const interval = setInterval(() => {
+      tick++;
+      // Ease-out curve: fast at start, slow at end
+      const linear = tick / totalTicks;
+      const eased = 1 - Math.pow(1 - linear, 2.5);
+      const pct = Math.min(100, Math.round(eased * 100));
+
+      setPercent(pct);
+      setStepIdx(Math.min(PERSONALIZING_STEPS.length - 1, Math.floor(eased * PERSONALIZING_STEPS.length)));
+
+      // Haptic at 25%, 50%, 75%, 100%
+      if (pct === 25 || pct === 50 || pct === 75) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      }
+
+      if (tick >= totalTicks) {
+        clearInterval(interval);
+        setPercent(100);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+
+        // Show checkmark
+        Animated.spring(checkScale, { toValue: 1, friction: 5, tension: 60, useNativeDriver: true }).start();
+
+        // Transition to welcome after a beat
+        setTimeout(onComplete, 800);
+      }
+    }, intervalMs);
+
+    // Animate progress bar width
+    Animated.timing(progressWidth, {
+      toValue: 1,
+      duration: totalDuration,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: false,
+    }).start();
+
+    return () => clearInterval(interval);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#0D0D0D', zIndex: 998, alignItems: 'center', justifyContent: 'center', padding: 32 }]}>
+      <StatusBar barStyle="light-content" />
+
+      {/* Emoji */}
+      <Animated.View style={{ transform: [{ scale: emojiScale }], opacity: emojiOp, marginBottom: 24 }}>
+        <Text style={{ fontSize: 64 }}>⚽</Text>
+      </Animated.View>
+
+      {/* Title */}
+      <Animated.View style={{ opacity: textOp, alignItems: 'center' }}>
+        <Text style={{ fontSize: 22, fontWeight: '800', color: '#ffffff', letterSpacing: -0.3, marginBottom: 8 }}>
+          Personalizando
+        </Text>
+        <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginBottom: 28, lineHeight: 20 }}>
+          {PERSONALIZING_STEPS[stepIdx]}
+        </Text>
+      </Animated.View>
+
+      {/* Percentage */}
+      <Text style={{ fontSize: 64, fontWeight: '900', color: GREEN, marginBottom: 20 }}>
+        {percent}%
+      </Text>
+
+      {/* Progress bar */}
+      <View style={{ width: '100%', height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginBottom: 16 }}>
+        <Animated.View style={{
+          height: '100%', borderRadius: 3, backgroundColor: GREEN,
+          width: progressWidth.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+        }} />
+      </View>
+
+      {/* Checkmark on completion */}
+      {percent === 100 && (
+        <Animated.View style={{ marginTop: 16, transform: [{ scale: checkScale }] }}>
+          <View style={{
+            width: 56, height: 56, borderRadius: 28, backgroundColor: GREEN,
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <View style={{
+              width: 14, height: 24,
+              borderRightWidth: 3.5, borderBottomWidth: 3.5, borderColor: '#fff',
+              transform: [{ rotate: '45deg' }, { translateY: -2 }],
+            }} />
+          </View>
+        </Animated.View>
+      )}
+    </Animated.View>
+  );
+};
+
 const WelcomeAnimation: React.FC<{ userName: string; onComplete: () => void }> = ({ userName, onComplete }) => {
   const fadeOut   = useRef(new Animated.Value(1)).current;
   const titleScale = useRef(new Animated.Value(0.85)).current;
@@ -1253,7 +1379,8 @@ export const OnboardingScreen: React.FC = () => {
   // Step state
   const [step, setStep] = useState(0);
 
-  // Welcome animation (shown after finishOnboarding)
+  // Personalizing + Welcome animation states
+  const [showPersonalizing, setShowPersonalizing] = useState(false);
   const [showWelcomeAnim, setShowWelcomeAnim] = useState(false);
 
   // User name for presentación
@@ -1297,6 +1424,27 @@ export const OnboardingScreen: React.FC = () => {
     }
   }, [pendingFadeIn, step]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Haptic wrappers ──────────────────────────────────────────────────────
+  const hapticToggleTeam = useCallback((id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    toggleTeam(id);
+  }, [toggleTeam]);
+
+  const hapticTogglePlayer = useCallback((id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    togglePlayer(id);
+  }, [togglePlayer]);
+
+  const hapticToggleLeague = useCallback((id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    toggleLeague(id);
+  }, [toggleLeague]);
+
+  const hapticToggleNotification = useCallback((id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    toggleNotification(id);
+  }, [toggleNotification]);
+
   // ── Navigation ──────────────────────────────────────────────────────────
   const animateTransition = useCallback((next: number) => {
     const direction = next > step ? 1 : -1;
@@ -1312,6 +1460,7 @@ export const OnboardingScreen: React.FC = () => {
 
   const goNext = useCallback(() => {
     Keyboard.dismiss();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     if (step < TOTAL_STEPS - 1) animateTransition(step + 1);
   }, [step, animateTransition]);
 
@@ -1337,8 +1486,8 @@ export const OnboardingScreen: React.FC = () => {
     } else {
       login('guest');
     }
-    // Show welcome animation; completeOnboarding is called when it finishes
-    setShowWelcomeAnim(true);
+    // Show personalizing → then welcome animation
+    setShowPersonalizing(true);
   }, [selectedTeams, selectedLeagues, selectedPlayers, isFollowingTeam, isFollowingLeague, isFollowingPlayer, toggleFollowTeam, toggleFollowLeague, toggleFollowPlayer, login]);
 
   // ── Step metadata ───────────────────────────────────────────────────────
@@ -1366,6 +1515,9 @@ export const OnboardingScreen: React.FC = () => {
         <StatusBar barStyle="light-content" />
         <ProgressBar step={0} bgColor={c.border} />
         <WelcomeStep onNext={goNext} />
+        {showPersonalizing && !showWelcomeAnim && (
+          <PersonalizingScreen onComplete={() => setShowWelcomeAnim(true)} />
+        )}
         {showWelcomeAnim && (
           <WelcomeAnimation userName={userName} onComplete={completeOnboarding} />
         )}
@@ -1399,6 +1551,9 @@ export const OnboardingScreen: React.FC = () => {
           />
         </Animated.View>
         <View style={{ height: insets.bottom + 8 }} />
+        {showPersonalizing && !showWelcomeAnim && (
+          <PersonalizingScreen onComplete={() => setShowWelcomeAnim(true)} />
+        )}
         {showWelcomeAnim && (
           <WelcomeAnimation userName={userName} onComplete={completeOnboarding} />
         )}
@@ -1432,16 +1587,16 @@ export const OnboardingScreen: React.FC = () => {
 
       <Animated.View style={[ob.stepContent, { opacity: fadeAnim, transform: [{ translateX: slideAnim }] }]}>
         {step === 1 && (
-          <TeamsStep teams={teams} loading={teamsLoading} selectedTeams={selectedTeams} toggleTeam={toggleTeam} />
+          <TeamsStep teams={teams} loading={teamsLoading} selectedTeams={selectedTeams} toggleTeam={hapticToggleTeam} />
         )}
         {step === 2 && (
-          <PlayersStep players={players} loading={playersLoading} selectedPlayers={selectedPlayers} togglePlayer={togglePlayer} />
+          <PlayersStep players={players} loading={playersLoading} selectedPlayers={selectedPlayers} togglePlayer={hapticTogglePlayer} />
         )}
         {step === 3 && (
-          <LeaguesStep selectedLeagues={selectedLeagues} toggleLeague={toggleLeague} />
+          <LeaguesStep selectedLeagues={selectedLeagues} toggleLeague={hapticToggleLeague} />
         )}
         {step === 4 && (
-          <NotificationsStep notifications={notifications} toggleNotification={toggleNotification} />
+          <NotificationsStep notifications={notifications} toggleNotification={hapticToggleNotification} />
         )}
       </Animated.View>
 
