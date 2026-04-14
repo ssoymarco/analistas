@@ -577,10 +577,17 @@ export async function fetchStandings(seasonId: number): Promise<SMStandingGroup[
  * Uses pagination to handle large seasons. Includes round data for grouping.
  */
 export async function fetchFixturesBySeasonId(seasonId: number): Promise<SMFixture[]> {
-  return fetchAllPages<SMFixture>(`fixtures/seasons/${seasonId}`, {
-    include: 'participants;scores;state;round;venue',
-    per_page: '150',
-  });
+  try {
+    const data = await fetchAllPages<SMFixture>(`fixtures/seasons/${seasonId}`, {
+      include: 'participants;scores;state;round;venue',
+      per_page: '150',
+    });
+    console.log('[sportmonks] fetchFixturesBySeasonId:', seasonId, '→', data.length, 'fixtures');
+    return data;
+  } catch (err) {
+    console.error('[sportmonks] fetchFixturesBySeasonId FAILED for', seasonId, ':', err);
+    return [];
+  }
 }
 
 /** GET /topscorers/seasons/{seasonId}?include=player */

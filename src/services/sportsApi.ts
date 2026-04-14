@@ -1299,7 +1299,9 @@ export async function getCupBracket(
   currentFixtureId?: string,
 ): Promise<CupRound[]> {
   try {
+    console.log('[getCupBracket] fetching fixtures for seasonId:', seasonId);
     const fixtures = await fetchFixturesBySeasonId(seasonId);
+    console.log('[getCupBracket] got', fixtures.length, 'fixtures, first round:', fixtures[0]?.round?.name ?? 'no round');
     if (fixtures.length === 0) return [];
 
     // ── Group by round ────────────────────────────────────────────────────────
