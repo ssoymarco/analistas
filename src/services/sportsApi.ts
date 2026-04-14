@@ -60,6 +60,7 @@ import {
   type SMRefereeStats,
   type SMPrediction,
   type SMRound,
+  type SMStage,
   fetchFixturesBySeasonId,
 } from './sportmonks';
 
@@ -1299,40 +1300,54 @@ export async function getCupBracket(
   currentFixtureId?: string,
 ): Promise<CupRound[]> {
   try {
-    console.log('[getCupBracket] fetching fixtures for seasonId:', seasonId);
     const fixtures = await fetchFixturesBySeasonId(seasonId);
-    console.log('[getCupBracket] got', fixtures.length, 'fixtures, first round:', fixtures[0]?.round?.name ?? 'no round');
     if (fixtures.length === 0) return [];
 
-    // ── Group by round ────────────────────────────────────────────────────────
-    const roundMap = new Map<number, { meta: SMRound | undefined; fixtures: SMFixture[] }>();
+    // ── Group by STAGE (not round) ────────────────────────────────────────────
+    // SportMonks structure: Stage = bracket phase (R16, QF, SF, Final)
+    //                       Round = matchday within a stage (leg 1, leg 2)
+    // Grouping by round gives us matchdays. Grouping by stage gives bracket phases.
+    const stageMap = new Map<number, {
+      name: string;
+      sortOrder: number;
+      isCurrent: boolean;
+      isFinished: boolean;
+      fixtures: typeof fixtures;
+    }>();
 
     for (const fixture of fixtures) {
-      const roundId = fixture.round_id ?? 0;
-      if (!roundMap.has(roundId)) {
-        roundMap.set(roundId, { meta: fixture.round, fixtures: [] });
+      const stageId = fixture.stage_id ?? fixture.round?.stage_id ?? 0;
+      if (!stageMap.has(stageId)) {
+        const stage = (fixture as any).stage;
+        stageMap.set(stageId, {
+          name: stage?.name ?? fixture.round?.name ?? 'Ronda',
+          sortOrder: stage?.sort_order ?? fixture.round?.sort_order ?? 999,
+          isCurrent: stage?.is_current ?? false,
+          isFinished: stage?.finished ?? false,
+          fixtures: [],
+        });
       }
-      roundMap.get(roundId)!.fixtures.push(fixture);
+      stageMap.get(stageId)!.fixtures.push(fixture);
     }
 
     // ── Convert to CupRound[] ─────────────────────────────────────────────────
     const rounds: CupRound[] = [];
 
-    for (const [, { meta, fixtures: roundFixtures }] of roundMap) {
-      const ties = pairFixturesToTies(roundFixtures)
+    for (const [stageId, { name, sortOrder, isCurrent, isFinished, fixtures: stageFixtures }] of stageMap) {
+      const ties = pairFixturesToTies(stageFixtures)
         .map(f => mapTie(f, currentFixtureId));
 
       rounds.push({
-        id: meta?.id ?? 0,
-        name: translateRoundName(meta?.name ?? 'Ronda'),
-        sortOrder: meta?.sort_order ?? 999,
-        isCurrent: meta?.is_current ?? false,
-        isFinished: meta?.finished ?? false,
+        id: stageId,
+        name: translateRoundName(name),
+        sortOrder,
+        isCurrent,
+        isFinished,
         ties,
       });
     }
 
-    // Sort: earliest round first (R32 → R16 → QF → SF → Final)
+    // Sort: earliest stage first (Prelim → R16 → QF → SF → Final)
     rounds.sort((a, b) => a.sortOrder - b.sortOrder);
     return rounds;
 

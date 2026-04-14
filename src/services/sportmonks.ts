@@ -119,6 +119,7 @@ export interface SMFixture {
   league?: SMLeague;
   state?: SMState;
   round?: SMRound;
+  stage?: SMStage;
   events?: SMEvent[];
   statistics?: SMStatistic[];
   lineups?: SMLineupEntry[];
@@ -241,6 +242,18 @@ export interface SMRound {
   sort_order: number;
   starting_at?: string;
   ending_at?: string;
+}
+
+export interface SMStage {
+  id: number;
+  sport_id: number;
+  league_id: number;
+  season_id: number;
+  type_id: number;
+  name: string;
+  sort_order: number;
+  finished: boolean;
+  is_current: boolean;
 }
 
 export interface SMStandingGroup {
@@ -580,7 +593,7 @@ export async function fetchFixturesBySeasonId(seasonId: number): Promise<SMFixtu
   // SportMonks v3 has no /fixtures/seasons/{id} endpoint.
   // Use the /fixtures endpoint with fixtureSeasonIds filter instead.
   return fetchAllPages<SMFixture>('fixtures', {
-    include: 'participants;scores;state;round;venue',
+    include: 'participants;scores;state;round;stage;venue',
     filters: `fixtureSeasonIds:${seasonId}`,
     per_page: '150',
   });

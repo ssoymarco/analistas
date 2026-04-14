@@ -187,7 +187,7 @@ const BracketTieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
           ]}
           numberOfLines={1}
         >
-          {tie.homeTeam.shortName || tie.homeTeam.name}
+          {tie.homeTeam.name}
         </Text>
         <Text style={[
           bk.score,
@@ -210,7 +210,7 @@ const BracketTieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
           ]}
           numberOfLines={1}
         >
-          {tie.awayTeam.shortName || tie.awayTeam.name}
+          {tie.awayTeam.name}
         </Text>
         <Text style={[
           bk.score,
