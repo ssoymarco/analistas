@@ -550,9 +550,11 @@ export async function fetchLivescores(): Promise<SMFixture[]> {
 
 /** GET /standings/seasons/{seasonId}?include=participant;details */
 export async function fetchStandings(seasonId: number): Promise<SMStandingGroup[]> {
-  return fetchAllPages<SMStandingGroup>(`standings/seasons/${seasonId}`, {
+  // Standings don't paginate like fixtures — use direct fetchApi
+  const data = await fetchApi<SMStandingGroup[]>(`standings/seasons/${seasonId}`, {
     include: 'participant;details',
   });
+  return Array.isArray(data) ? data : [];
 }
 
 /** GET /topscorers/seasons/{seasonId}?include=player */

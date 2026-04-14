@@ -1034,9 +1034,9 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
  */
 export async function getStandings(seasonId: number): Promise<LeagueStanding[]> {
   try {
-    console.log('[sportsApi] getStandings called with seasonId:', seasonId);
+    console.log('[getStandings] seasonId:', seasonId);
     const rawData = await fetchStandings(seasonId);
-    console.log('[sportsApi] getStandings raw entries:', rawData.length);
+    console.log('[getStandings] rawData entries:', rawData.length, 'first:', rawData[0]?.participant_id ?? 'none');
 
     // Guard: flatten nested arrays (some leagues return [[group1], [group2]])
     const data: SMStandingGroup[] = rawData.length > 0 && Array.isArray(rawData[0])
