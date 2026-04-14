@@ -221,9 +221,13 @@ const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
                     jerseyNumber: p.number,
                   })}
                 >
-                  <View style={[s.squadNum, { backgroundColor: c.surface }]}>
-                    <Text style={[s.squadNumText, { color: c.textPrimary }]}>{p.number}</Text>
-                  </View>
+                  {p.image ? (
+                    <Image source={{ uri: p.image }} style={[s.squadNum, { backgroundColor: c.surface }]} />
+                  ) : (
+                    <View style={[s.squadNum, { backgroundColor: c.surface }]}>
+                      <Text style={[s.squadNumText, { color: c.textPrimary }]}>{p.number}</Text>
+                    </View>
+                  )}
                   <View style={{ flex: 1, gap: 1 }}>
                     <Text style={[s.squadName, { color: c.textPrimary }]}>{p.displayName}</Text>
                     <Text style={[s.squadMeta, { color: c.textTertiary }]}>

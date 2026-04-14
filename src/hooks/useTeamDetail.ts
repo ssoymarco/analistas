@@ -139,20 +139,30 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
         // SM returns `activeseasons` (lowercase) — normalize
         const seasons = team.activeSeasons ?? team.activeseasons ?? [];
 
-        // Determine season ID
+        // Determine season ID — try multiple fallbacks
         const sId = seasonId
           ?? seasons.find(s => s.is_current)?.id
           ?? seasons[0]?.id
           ?? null;
+        // If still null, try matching league config
+        const leagueCfg = sId ? null : (() => {
+          const leagueIdFromSeasons = seasons[0]?.league_id;
+          if (leagueIdFromSeasons) {
+            const { getLeagueConfig: getLc } = require('../config/leagues');
+            return getLc(leagueIdFromSeasons);
+          }
+          return null;
+        })();
+        const effectiveSeasonId = sId ?? leagueCfg?.currentSeasonId ?? null;
 
-        const leagueName = seasons.find(s => s.id === sId)?.name ?? '';
-        const leagueId = seasons.find(s => s.id === sId)?.league_id ?? 0;
+        const leagueName = seasons.find(s => s.id === effectiveSeasonId)?.name ?? '';
+        const leagueId = seasons.find(s => s.id === effectiveSeasonId)?.league_id ?? 0;
 
         // Fetch all data in parallel
         const [squadData, recentData, standingsData] = await Promise.all([
-          sId ? fetchSquad(sId, teamId).catch(() => [] as SMSquadPlayer[]) : Promise.resolve([] as SMSquadPlayer[]),
+          effectiveSeasonId ? fetchSquad(effectiveSeasonId, teamId).catch(() => [] as SMSquadPlayer[]) : Promise.resolve([] as SMSquadPlayer[]),
           fetchTeamRecentFixtures(teamId).catch(() => [] as SMFixture[]),
-          sId ? fetchStandings(sId).catch(() => [] as SMStandingGroup[]) : Promise.resolve([] as SMStandingGroup[]),
+          effectiveSeasonId ? fetchStandings(effectiveSeasonId).catch(() => [] as SMStandingGroup[]) : Promise.resolve([] as SMStandingGroup[]),
         ]);
 
         if (!mounted.current) return;
