@@ -26,8 +26,8 @@ const IOS_CLIENT_ID =
 
 // Web Client ID: Firebase Console → Authentication → Sign-in method
 // → Google → Web SDK configuration → Web client ID
-// TODO: Fill this in from Firebase Console if needed for Android / web
-const WEB_CLIENT_ID = IOS_CLIENT_ID; // fallback until web client is configured
+const WEB_CLIENT_ID =
+  '562270448336-d3ae5g54347do4nrmsoagjf7jsbc4d38.apps.googleusercontent.com';
 
 export function useGoogleAuth() {
   const [request, response, promptAsync] = Google.useAuthRequest({
