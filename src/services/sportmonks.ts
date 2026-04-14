@@ -536,7 +536,8 @@ export async function fetchFixturesByDate(date: string, leagueIds?: string): Pro
 /** GET /fixtures/{id} — full detail with ALL available includes (Pro plan) */
 export async function fetchFixtureById(id: number): Promise<SMFixture> {
   return fetchApi<SMFixture>(`fixtures/${id}`, {
-    include: 'participants;scores;events;statistics;lineups.player;venue;league;referees.referee;tvstations.tvstation;weatherreport;odds;predictions',
+    // Note: 'odds' causes 403 on Pro plan — omitted. Fetch separately if needed.
+    include: 'participants;scores;events;statistics;lineups.player;venue;league;referees.referee;tvstations.tvstation;weatherreport;predictions',
   });
 }
 
