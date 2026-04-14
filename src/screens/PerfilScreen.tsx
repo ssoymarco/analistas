@@ -371,7 +371,7 @@ export const PerfilScreen: React.FC = () => {
           </View>
 
           {!isAuthenticated && (
-            <TouchableOpacity style={{ backgroundColor: c.accent, paddingHorizontal: 28, paddingVertical: 11, borderRadius: 20, alignSelf: 'center', marginTop: 12 }} onPress={() => login('google')} activeOpacity={0.8}>
+            <TouchableOpacity style={{ backgroundColor: c.accent, paddingHorizontal: 28, paddingVertical: 11, borderRadius: 20, alignSelf: 'center', marginTop: 12 }} onPress={resetOnboarding} activeOpacity={0.8}>
               <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Iniciar sesión</Text>
             </TouchableOpacity>
           )}
@@ -413,7 +413,7 @@ export const PerfilScreen: React.FC = () => {
 
         {/* Guest Banner */}
         {!isAuthenticated && (
-          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginTop: 16, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: '#1d4ed8' }} activeOpacity={0.9} onPress={() => login('google')}>
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginTop: 16, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: '#1d4ed8' }} activeOpacity={0.9} onPress={resetOnboarding}>
             <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: 20 }}>👤</Text>
             </View>
@@ -467,7 +467,7 @@ export const PerfilScreen: React.FC = () => {
 
         {/* Cerrar sesión */}
         <View style={{ backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, marginTop: 16, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
-          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 13 }} activeOpacity={0.7} onPress={() => isAuthenticated ? setLogoutModalVisible(true) : logout()}>
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 13 }} activeOpacity={0.7} onPress={() => isAuthenticated ? setLogoutModalVisible(true) : (logout(), resetOnboarding())}>
             <IconCircle emoji="→" bg="rgba(239,68,68,0.1)" />
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 14, fontWeight: '500', color: '#ef4444' }}>{isAuthenticated ? 'Cerrar sesión' : 'Salir'}</Text>
