@@ -548,9 +548,9 @@ export async function fetchLivescores(): Promise<SMFixture[]> {
   });
 }
 
-/** GET /standings/seasons/{seasonId}?include=participant */
+/** GET /standings/seasons/{seasonId}?include=participant;details */
 export async function fetchStandings(seasonId: number): Promise<SMStandingGroup[]> {
-  return fetchApi<SMStandingGroup[]>(`standings/seasons/${seasonId}`, {
+  return fetchAllPages<SMStandingGroup>(`standings/seasons/${seasonId}`, {
     include: 'participant;details',
   });
 }

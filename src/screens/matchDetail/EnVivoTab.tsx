@@ -710,13 +710,35 @@ const AIPredictionsSection: React.FC<{ predictions: MatchPrediction[]; match: Ma
       </View>
 
       {predictions.map((pred, idx) => {
-        // Determine if it's a 3-way (result) or 2-way (yes/no) prediction
-        const isThreeWay = pred.homeWin != null || pred.type.includes('Resultado');
-        const isYesNo = pred.yes != null && pred.no != null;
+        // 3-way prediction (Resultado Final, Doble Oportunidad)
+        const isThreeWay = pred.homeWin != null && pred.draw != null && pred.awayWin != null;
+        const isYesNo = pred.yes != null && pred.no != null && !isThreeWay;
 
-        if (isThreeWay && pred.yes != null) {
-          // SM returns individual entries for result — show as probability bar
-          return null; // Skip individual entries, we combine below
+        if (isThreeWay) {
+          const homeLabel = pred.type.includes('Doble') ? '1X' : match.homeTeam.shortName;
+          const drawLabel = pred.type.includes('Doble') ? 'X2' : 'Empate';
+          const awayLabel = pred.type.includes('Doble') ? '12' : match.awayTeam.shortName;
+          return (
+            <View key={idx} style={[ai.predBlock, { borderTopColor: c.border }]}>
+              <Text style={[ai.predLabel, { color: c.textSecondary }]}>{pred.type}</Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                {[
+                  { label: homeLabel, pct: pred.homeWin! },
+                  { label: drawLabel, pct: pred.draw! },
+                  { label: awayLabel, pct: pred.awayWin! },
+                ].map((opt, i) => {
+                  const best = Math.max(pred.homeWin!, pred.draw!, pred.awayWin!);
+                  const isBest = opt.pct === best;
+                  return (
+                    <View key={i} style={{ flex: 1, alignItems: 'center', gap: 4, backgroundColor: isBest ? 'rgba(16,185,129,0.1)' : c.surface, borderRadius: 10, paddingVertical: 10 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: c.textSecondary }}>{opt.label}</Text>
+                      <Text style={{ fontSize: 18, fontWeight: '900', color: isBest ? '#10b981' : c.textPrimary }}>{Math.round(opt.pct)}%</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          );
         }
 
         if (isYesNo) {

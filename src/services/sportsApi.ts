@@ -887,33 +887,49 @@ function mapTeamForm(fixtures: SMFixture[], teamId: number): TeamFormEntry[] {
 
 function mapPredictions(raw: SMPrediction[]): MatchPrediction[] {
   const results: MatchPrediction[] = [];
+
   for (const p of raw) {
-    const typeName = p.type?.name ?? p.type?.developer_name ?? '';
     if (!p.predictions) continue;
 
-    // Fulltime Result — has yes/no per outcome type
-    if (typeName.toLowerCase().includes('result') || typeName.toLowerCase().includes('winner')) {
-      // SM returns separate prediction entries for home/draw/away
-      // We need to aggregate them
-      results.push({
-        type: 'Resultado Final',
-        homeWin: p.predictions.yes,
-        draw: undefined,
-        awayWin: undefined,
-        yes: p.predictions.yes,
-        no: p.predictions.no,
-      });
-    } else if (typeName.toLowerCase().includes('btts') || typeName.toLowerCase().includes('both')) {
+    // Map by type_id (reliable) OR type.name (fallback)
+    const typeId = p.type_id;
+    const typeName = (p.type?.name ?? p.type?.developer_name ?? '').toLowerCase();
+    const preds = p.predictions as Record<string, number>;
+
+    // 233: Fulltime Result (1X2) — keys: home, draw, away
+    if (typeId === 233 || typeName.includes('result') || typeName.includes('winner')) {
+      if (preds.home != null && preds.draw != null && preds.away != null) {
+        results.push({
+          type: 'Resultado Final',
+          homeWin: Math.round(preds.home * 10) / 10,
+          draw: Math.round(preds.draw * 10) / 10,
+          awayWin: Math.round(preds.away * 10) / 10,
+        });
+      }
+    }
+    // 331: Both Teams To Score — keys: yes, no
+    else if (typeId === 331 || typeName.includes('btts') || typeName.includes('both')) {
       results.push({
         type: 'Ambos Anotan',
-        yes: p.predictions.yes,
-        no: p.predictions.no,
+        yes: Math.round((preds.yes ?? 0) * 10) / 10,
+        no: Math.round((preds.no ?? 0) * 10) / 10,
       });
-    } else if (typeName.toLowerCase().includes('over') || typeName.toLowerCase().includes('under')) {
+    }
+    // 234: Over/Under 2.5 Goals — keys: yes, no
+    else if (typeId === 234 || typeName.includes('over') || typeName.includes('under')) {
       results.push({
         type: 'Más/Menos 2.5',
-        yes: p.predictions.yes,
-        no: p.predictions.no,
+        yes: Math.round((preds.yes ?? 0) * 10) / 10,
+        no: Math.round((preds.no ?? 0) * 10) / 10,
+      });
+    }
+    // 239: Double Chance — keys: draw_home, draw_away, home_away
+    else if (typeId === 239) {
+      results.push({
+        type: 'Doble Oportunidad',
+        homeWin: Math.round((preds.home_away ?? 0) * 10) / 10,
+        draw: Math.round((preds.draw_home ?? 0) * 10) / 10,
+        awayWin: Math.round((preds.draw_away ?? 0) * 10) / 10,
       });
     }
   }
