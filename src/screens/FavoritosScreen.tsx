@@ -52,12 +52,12 @@ type Tab = 'equipos' | 'ligas' | 'jugadores';
 // Shown to all users regardless of connected SportMonks leagues.
 
 const POPULAR_TEAMS: FavItem[] = [
-  { id: 'america',      name: 'América',             subtitle: 'Liga MX · México',             emoji: '🦅' },
-  { id: 'chivas',       name: 'Chivas',              subtitle: 'Liga MX · México',             emoji: '🐐' },
-  { id: 'tigres',       name: 'Tigres UANL',         subtitle: 'Liga MX · México',             emoji: '🐯' },
-  { id: 'cruz-azul',    name: 'Cruz Azul',           subtitle: 'Liga MX · México',             emoji: '🔵' },
-  { id: 'monterrey',    name: 'Monterrey',           subtitle: 'Liga MX · México',             emoji: '⚽' },
-  { id: 'pumas',        name: 'Pumas UNAM',          subtitle: 'Liga MX · México',             emoji: '🐆' },
+  { id: '2687',  name: 'América',     subtitle: 'Liga MX · México',     emoji: '🦅', smId: 2687,  image: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png' },
+  { id: '427',   name: 'Guadalajara', subtitle: 'Liga MX · México',     emoji: '🐐', smId: 427,   image: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png' },
+  { id: '609',   name: 'Tigres UANL', subtitle: 'Liga MX · México',     emoji: '🐯', smId: 609,   image: 'https://cdn.sportmonks.com/images/soccer/teams/1/609.png' },
+  { id: '2626',  name: 'Cruz Azul',   subtitle: 'Liga MX · México',     emoji: '🔵', smId: 2626,  image: 'https://cdn.sportmonks.com/images/soccer/teams/2/2626.png' },
+  { id: '2662',  name: 'Monterrey',   subtitle: 'Liga MX · México',     emoji: '⚽', smId: 2662,  image: 'https://cdn.sportmonks.com/images/soccer/teams/6/2662.png' },
+  { id: '2989',  name: 'Pumas UNAM',  subtitle: 'Liga MX · México',     emoji: '🐆', smId: 2989,  image: 'https://cdn.sportmonks.com/images/soccer/teams/13/2989.png' },
   { id: 'real-madrid',  name: 'Real Madrid',         subtitle: 'La Liga · España',             emoji: '👑' },
   { id: 'barcelona',    name: 'Barcelona',           subtitle: 'La Liga · España',             emoji: '🔵🔴' },
   { id: 'liverpool',    name: 'Liverpool',           subtitle: 'Premier League · Inglaterra',  emoji: '🔴' },

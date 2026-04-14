@@ -1193,35 +1193,40 @@ export function getSearchableLeagues(): SearchableLeague[] {
 /** Fetches all teams from available leagues for local search */
 // ── Popular Teams (hardcoded for instant onboarding, sorted by global popularity) ──
 
+// All IDs verified against SportMonks API (April 2026)
 const POPULAR_TEAMS: SearchableTeam[] = [
   // Liga MX — México (first for Mexican market)
-  { id: 2789, name: 'Club América', shortName: 'AME', logo: 'https://cdn.sportmonks.com/images/soccer/teams/21/2789.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 2790, name: 'Chivas Guadalajara', shortName: 'CHI', logo: 'https://cdn.sportmonks.com/images/soccer/teams/22/2790.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 2791, name: 'Cruz Azul', shortName: 'CAZ', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/2791.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 2794, name: 'Tigres UANL', shortName: 'TIG', logo: 'https://cdn.sportmonks.com/images/soccer/teams/26/2794.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 2793, name: 'Monterrey', shortName: 'MTY', logo: 'https://cdn.sportmonks.com/images/soccer/teams/25/2793.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 2796, name: 'Pumas UNAM', shortName: 'PUM', logo: 'https://cdn.sportmonks.com/images/soccer/teams/28/2796.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 2795, name: 'Santos Laguna', shortName: 'SAN', logo: 'https://cdn.sportmonks.com/images/soccer/teams/27/2795.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 2792, name: 'Toluca', shortName: 'TOL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/24/2792.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2687,   name: 'América',              shortName: 'AME', logo: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 427,    name: 'Guadalajara',          shortName: 'GUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2626,   name: 'Cruz Azul',            shortName: 'CAZ', logo: 'https://cdn.sportmonks.com/images/soccer/teams/2/2626.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 609,    name: 'Tigres UANL',          shortName: 'TUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/1/609.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2662,   name: 'Monterrey',            shortName: 'MNT', logo: 'https://cdn.sportmonks.com/images/soccer/teams/6/2662.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2989,   name: 'Pumas UNAM',           shortName: 'PUM', logo: 'https://cdn.sportmonks.com/images/soccer/teams/13/2989.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2844,   name: 'Santos Laguna',        shortName: 'SLA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/28/2844.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 967,    name: 'Toluca',               shortName: 'TOL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/7/967.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 10036,  name: 'Pachuca',              shortName: 'PCH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/20/10036.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 680,    name: 'Atlas',                shortName: 'ATS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/680.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
   // Europe — Top clubs
-  { id: 3468, name: 'Real Madrid', shortName: 'RMA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/12/3468.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
-  { id: 83, name: 'Barcelona', shortName: 'BAR', logo: 'https://cdn.sportmonks.com/images/soccer/teams/19/83.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
-  { id: 9, name: 'Manchester City', shortName: 'MCI', logo: 'https://cdn.sportmonks.com/images/soccer/teams/9/9.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
-  { id: 14, name: 'Manchester United', shortName: 'MUN', logo: 'https://cdn.sportmonks.com/images/soccer/teams/14/14.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
-  { id: 8, name: 'Liverpool', shortName: 'LIV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/8.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
-  { id: 18, name: 'Arsenal', shortName: 'ARS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/18.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
-  { id: 503, name: 'Bayern München', shortName: 'BAY', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/503.png', leagueName: 'Bundesliga', leagueId: 82, seasonId: 25646 },
-  { id: 489, name: 'Juventus', shortName: 'JUV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/9/489.png', leagueName: 'Serie A', leagueId: 384, seasonId: 25533 },
-  { id: 3468, name: 'AC Milan', shortName: 'MIL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/17/497.png', leagueName: 'Serie A', leagueId: 384, seasonId: 25533 },
-  { id: 85, name: 'Paris Saint-Germain', shortName: 'PSG', logo: 'https://cdn.sportmonks.com/images/soccer/teams/21/85.png', leagueName: 'Ligue 1', leagueId: 301, seasonId: 25651 },
+  { id: 3468,   name: 'Real Madrid',          shortName: 'RMA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/12/3468.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  { id: 83,     name: 'FC Barcelona',         shortName: 'BAR', logo: 'https://cdn.sportmonks.com/images/soccer/teams/19/83.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  { id: 9,      name: 'Manchester City',      shortName: 'MCI', logo: 'https://cdn.sportmonks.com/images/soccer/teams/9/9.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
+  { id: 14,     name: 'Manchester United',    shortName: 'MUN', logo: 'https://cdn.sportmonks.com/images/soccer/teams/14/14.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
+  { id: 8,      name: 'Liverpool',            shortName: 'LIV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/8.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
+  { id: 19,     name: 'Arsenal',              shortName: 'ARS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/19/19.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
+  { id: 18,     name: 'Chelsea',              shortName: 'CHE', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/18.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
+  { id: 503,    name: 'Bayern München',       shortName: 'BAY', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/503.png', leagueName: 'Bundesliga', leagueId: 82, seasonId: 25646 },
+  { id: 625,    name: 'Juventus',             shortName: 'JUV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/17/625.png', leagueName: 'Serie A', leagueId: 384, seasonId: 25533 },
+  { id: 113,    name: 'AC Milan',             shortName: 'MIL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/17/113.png', leagueName: 'Serie A', leagueId: 384, seasonId: 25533 },
+  { id: 2930,   name: 'Inter',                shortName: 'INT', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/2930.png', leagueName: 'Serie A', leagueId: 384, seasonId: 25533 },
+  { id: 591,    name: 'Paris Saint-Germain',  shortName: 'PSG', logo: 'https://cdn.sportmonks.com/images/soccer/teams/15/591.png', leagueName: 'Ligue 1', leagueId: 301, seasonId: 25651 },
   // Americas — Other
-  { id: 7177, name: 'Inter Miami', shortName: 'MIA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/25/7177.png', leagueName: 'MLS', leagueId: 779, seasonId: 26720 },
-  { id: 77, name: 'Boca Juniors', shortName: 'BOC', logo: 'https://cdn.sportmonks.com/images/soccer/teams/13/77.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
-  { id: 78, name: 'River Plate', shortName: 'RIV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/14/78.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
-  { id: 121, name: 'Flamengo', shortName: 'FLA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/25/121.png', leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
+  { id: 239235, name: 'Inter Miami',          shortName: 'MIA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/3/239235.png', leagueName: 'MLS', leagueId: 779, seasonId: 26720 },
+  { id: 587,    name: 'Boca Juniors',         shortName: 'BOC', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/587.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
+  { id: 10002,  name: 'River Plate',          shortName: 'RIV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/10002.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
+  { id: 1024,   name: 'Flamengo',             shortName: 'FLA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/0/1024.png', leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
   // Saudi Arabia
-  { id: 2932, name: 'Al-Nassr', shortName: 'NAS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/12/2932.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
-  { id: 2931, name: 'Al-Hilal', shortName: 'HIL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/2931.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
+  { id: 2506,   name: 'Al Nassr',             shortName: 'ANA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/10/2506.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
+  { id: 7011,   name: 'Al Hilal',             shortName: 'ALH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/3/7011.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
 ];
 
 // ── Popular Players (hardcoded for instant onboarding) ──

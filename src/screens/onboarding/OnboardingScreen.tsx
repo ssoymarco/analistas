@@ -1241,7 +1241,9 @@ const PersonalizingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete 
 
       {/* Emoji */}
       <Animated.View style={{ transform: [{ scale: emojiScale }], opacity: emojiOp, marginBottom: 24 }}>
-        <Text style={{ fontSize: 64 }}>⚽</Text>
+        <View style={{ width: 80, height: 80, borderRadius: 40, borderWidth: 2.5, borderColor: GREEN, backgroundColor: 'rgba(16,185,129,0.08)', alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontSize: 28, fontWeight: '900', color: GREEN, letterSpacing: -0.5 }}>A</Text>
+        </View>
       </Animated.View>
 
       {/* Title */}
