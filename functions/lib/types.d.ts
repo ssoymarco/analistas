@@ -237,8 +237,8 @@ export declare const SM_STATE_IDS: {
     readonly DELETED: 22;
     readonly TBD: 25;
 };
-export declare const LIVE_STATE_IDS: Set<4 | 2 | 3 | 6 | 7 | 8>;
-export declare const FINISHED_STATE_IDS: Set<5 | 9 | 10>;
+export declare const LIVE_STATE_IDS: Set<4 | 8 | 2 | 3 | 6 | 7>;
+export declare const FINISHED_STATE_IDS: Set<9 | 5 | 10>;
 /** Standing detail type_id → meaning */
 export declare const STANDING_DETAIL_TYPES: {
     readonly GP: 129;
