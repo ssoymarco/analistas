@@ -39,6 +39,27 @@ const CARD_GAP = 10;
 const SIDE_PAD = 20;
 const CARD_W = (SCREEN_W - SIDE_PAD * 2 - CARD_GAP * 2) / 3;
 
+// ── i18n-ready strings ─────────────────────────────────────────────────
+// Centralized for future translation (i18next / expo-localization).
+const i18n = {
+  personalizing: {
+    title: 'Personalizando',
+    steps: [
+      'Configurando tus equipos favoritos…',
+      'Analizando tus preferencias…',
+      'Preparando tu feed personalizado…',
+      'Optimizando notificaciones…',
+      'Todo listo, estamos preparando tu experiencia…',
+    ],
+  },
+  welcome: {
+    label: 'BIENVENIDO',
+    tagline: 'Tu experiencia como analista\nempieza ahora',
+    cta: 'Empezar',
+    defaultName: 'ANALISTA',
+  },
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ── Shared sub-components ──────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1150,13 +1171,7 @@ const FallingParticle: React.FC<{ p: typeof PARTICLES[0] }> = ({ p }) => {
 // Shows a fake progress from 0→100% giving the sensation of hyper-personalization.
 // When done, calls onComplete which triggers the WelcomeAnimation.
 
-const PERSONALIZING_STEPS = [
-  'Configurando tus equipos favoritos…',
-  'Analizando tus preferencias…',
-  'Preparando tu feed personalizado…',
-  'Optimizando notificaciones…',
-  'Todo listo, estamos preparando tu experiencia…',
-];
+const PERSONALIZING_STEPS = i18n.personalizing.steps;
 
 const PersonalizingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
   const [percent, setPercent] = useState(0);
@@ -1175,8 +1190,8 @@ const PersonalizingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete 
       Animated.timing(textOp, { toValue: 1, duration: 400, delay: 200, useNativeDriver: true }),
     ]).start();
 
-    // Progress simulation — 3 seconds total
-    const totalDuration = 3000;
+    // Progress simulation — 6 seconds total (enough to read each step)
+    const totalDuration = 6000;
     const intervalMs = 50;
     const totalTicks = totalDuration / intervalMs;
     let tick = 0;
@@ -1209,10 +1224,10 @@ const PersonalizingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete 
       }
     }, intervalMs);
 
-    // Animate progress bar width
+    // Animate progress bar width (matches totalDuration)
     Animated.timing(progressWidth, {
       toValue: 1,
-      duration: totalDuration,
+      duration: 6000,
       easing: Easing.out(Easing.quad),
       useNativeDriver: false,
     }).start();
@@ -1232,7 +1247,7 @@ const PersonalizingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete 
       {/* Title */}
       <Animated.View style={{ opacity: textOp, alignItems: 'center' }}>
         <Text style={{ fontSize: 22, fontWeight: '800', color: '#ffffff', letterSpacing: -0.3, marginBottom: 8 }}>
-          Personalizando
+          {i18n.personalizing.title}
         </Text>
         <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginBottom: 28, lineHeight: 20 }}>
           {PERSONALIZING_STEPS[stepIdx]}
@@ -1276,25 +1291,23 @@ const WelcomeAnimation: React.FC<{ userName: string; onComplete: () => void }> =
   const titleScale = useRef(new Animated.Value(0.85)).current;
   const titleOp   = useRef(new Animated.Value(0)).current;
 
+  const handleStart = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    Animated.timing(fadeOut, { toValue: 0, duration: 500, easing: Easing.in(Easing.cubic), useNativeDriver: true })
+      .start(() => onComplete());
+  }, [fadeOut, onComplete]);
+
   useEffect(() => {
     // Entrance: title scales up and fades in
     Animated.parallel([
       Animated.spring(titleScale, { toValue: 1, friction: 6, tension: 50, useNativeDriver: true }),
       Animated.timing(titleOp, { toValue: 1, duration: 450, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
     ]).start();
-
-    // After 2700 ms, fade everything out then call onComplete
-    const timer = setTimeout(() => {
-      Animated.timing(fadeOut, { toValue: 0, duration: 500, easing: Easing.in(Easing.cubic), useNativeDriver: true })
-        .start(() => onComplete());
-    }, 2700);
-
-    return () => clearTimeout(timer);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const displayName = userName.trim()
     ? userName.trim().split(' ')[0].toUpperCase()
-    : 'ANALISTA';
+    : i18n.welcome.defaultName;
 
   return (
     <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#0D0D0D', opacity: fadeOut, zIndex: 999 }]}>
@@ -1311,12 +1324,16 @@ const WelcomeAnimation: React.FC<{ userName: string; onComplete: () => void }> =
           </View>
         </View>
 
-        <Text style={wl.welcomeLabel}>BIENVENIDO</Text>
+        <Text style={wl.welcomeLabel}>{i18n.welcome.label}</Text>
         <Text style={[wl.nameText, { color: GREEN }]}>{displayName}</Text>
 
         <View style={[wl.divider, { backgroundColor: GREEN }]} />
 
-        <Text style={wl.tagline}>Tu experiencia futbolística{'\n'}empieza ahora</Text>
+        <Text style={wl.tagline}>{i18n.welcome.tagline}</Text>
+
+        <TouchableOpacity style={wl.ctaBtn} onPress={handleStart} activeOpacity={0.85}>
+          <Text style={wl.ctaBtnText}>{i18n.welcome.cta}</Text>
+        </TouchableOpacity>
       </Animated.View>
     </Animated.View>
   );
@@ -1346,6 +1363,13 @@ const wl = StyleSheet.create({
   tagline: {
     fontSize: 15, fontWeight: '500', color: 'rgba(255,255,255,0.55)',
     textAlign: 'center', lineHeight: 24,
+  },
+  ctaBtn: {
+    backgroundColor: GREEN, borderRadius: 16, paddingVertical: 16,
+    paddingHorizontal: 48, marginTop: 40,
+  },
+  ctaBtnText: {
+    fontSize: 16, fontWeight: '800', color: '#fff', letterSpacing: 0.5,
   },
 });
 
