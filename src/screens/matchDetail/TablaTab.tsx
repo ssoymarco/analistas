@@ -1,12 +1,15 @@
 // ── Tabla (Standings) Tab ─────────────────────────────────────────────────────
-// League standings with zone color bars, LOCAL/VISITA badges, trophy header,
-// zone legend, and share button. Redesigned per Figma.
+// Auto-detects competition type:
+//   • League (round-robin) → standings table with zone bars
+//   • Cup (knockout)       → bracket view with ties/legs/aggregate
 import React, { useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../../theme/useTheme';
 import { useStandings } from '../../hooks/useStandings';
+import { useCupBracket } from '../../hooks/useCupBracket';
+import { CupBracketView } from '../../components/CupBracketView';
 import type { Match, MatchDetail, LeagueStanding } from '../../data/types';
 import { SkeletonLeagueDetail } from '../../components/Skeleton';
 import type { PartidosStackParamList } from '../../navigation/AppNavigator';
@@ -140,22 +143,27 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const tableRef = useRef<any>(null);
 
-  // Resolve league config — try by ID first, then by league name as last resort
+  // ── Season ID resolution (triple fallback) ──────────────────────────────────
   const leagueConfig =
     (match.leagueId ? getLeagueConfig(Number(match.leagueId)) : undefined)
     ?? (match.league ? getLeagueConfigByName(match.league) : undefined);
 
-  // Resolve seasonId with multiple fallbacks
   const seasonId: number | null =
     (match.seasonId && match.seasonId > 0) ? match.seasonId
     : (leagueConfig?.currentSeasonId ?? null);
 
-  console.log('[TablaTab] league:', match.league, '| leagueId:', match.leagueId,
-    '| match.seasonId:', match.seasonId,
-    '| config:', leagueConfig?.name, leagueConfig?.currentSeasonId,
-    '| resolved:', seasonId);
+  // ── Standings (league competitions) ─────────────────────────────────────────
+  const { standings, loading: standingsLoading, error: standingsError } = useStandings(seasonId);
 
-  const { standings, loading, error } = useStandings(seasonId);
+  // ── Cup bracket (knockout competitions — when standings are empty) ────────────
+  // We detect "cup" automatically: if standings return [] after loading → it's knockout.
+  const isCup = !standingsLoading && !standingsError && standings.length === 0;
+  const { rounds, loading: bracketLoading } = useCupBracket(
+    isCup ? seasonId : null,
+    match.id,
+  );
+
+  const loading = standingsLoading || (isCup && bracketLoading);
 
   const homeId = match.homeTeam.id;
   const awayId = match.awayTeam.id;
@@ -176,17 +184,24 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
     return <SkeletonLeagueDetail />;
   }
 
-  if (error || standings.length === 0) {
+  // ── Cup bracket view ─────────────────────────────────────────────────────────
+  if (isCup) {
+    const seasonStr = `Temporada ${new Date().getFullYear() - 1}/${String(new Date().getFullYear()).slice(2)}`;
+    return (
+      <CupBracketView
+        rounds={rounds}
+        leagueName={match.league}
+        seasonStr={seasonStr}
+      />
+    );
+  }
+
+  // ── Error / no data ──────────────────────────────────────────────────────────
+  if (standingsError) {
     return (
       <View style={[tb.center, { paddingTop: 60 }]}>
         <Text style={{ fontSize: 40 }}>📋</Text>
-        <Text style={[tb.emptyTitle, { color: c.textSecondary }]}>
-          {error ? 'Error al cargar la tabla' : 'Tabla no disponible'}
-        </Text>
-        {/* DEBUG — remove before release */}
-        <Text style={{ color: '#666', fontSize: 11, marginTop: 12, textAlign: 'center' }}>
-          {match.league + ' | leagueId=' + match.leagueId + '\nseasonId=' + match.seasonId + ' | resolved=' + seasonId + '\nerr=' + (error ?? 'none')}
-        </Text>
+        <Text style={[tb.emptyTitle, { color: c.textSecondary }]}>Error al cargar la tabla</Text>
       </View>
     );
   }

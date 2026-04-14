@@ -118,6 +118,7 @@ export interface SMFixture {
   scores?: SMScore[];
   league?: SMLeague;
   state?: SMState;
+  round?: SMRound;
   events?: SMEvent[];
   statistics?: SMStatistic[];
   lineups?: SMLineupEntry[];
@@ -226,6 +227,20 @@ export interface SMLineupEntry {
   player_name: string;
   jersey_number: number;
   player?: SMPlayer;
+}
+
+export interface SMRound {
+  id: number;
+  sport_id: number;
+  league_id: number;
+  season_id: number;
+  stage_id: number;
+  name: string;
+  finished: boolean;
+  is_current: boolean;
+  sort_order: number;
+  starting_at?: string;
+  ending_at?: string;
 }
 
 export interface SMStandingGroup {
@@ -557,6 +572,17 @@ export async function fetchStandings(seasonId: number): Promise<SMStandingGroup[
   });
   console.log('[sportmonks] fetchStandings response type:', typeof data, 'isArray:', Array.isArray(data), 'length:', Array.isArray(data) ? data.length : 'N/A');
   return Array.isArray(data) ? data : [];
+}
+
+/**
+ * GET /fixtures/seasons/{seasonId} — all fixtures for a season (cup brackets).
+ * Uses pagination to handle large seasons. Includes round data for grouping.
+ */
+export async function fetchFixturesBySeasonId(seasonId: number): Promise<SMFixture[]> {
+  return fetchAllPages<SMFixture>(`fixtures/seasons/${seasonId}`, {
+    include: 'participants;scores;state;round',
+    per_page: '150',
+  });
 }
 
 /** GET /topscorers/seasons/{seasonId}?include=player */

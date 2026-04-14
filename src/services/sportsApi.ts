@@ -59,6 +59,8 @@ import {
   type SMSidelined,
   type SMRefereeStats,
   type SMPrediction,
+  type SMRound,
+  fetchFixturesBySeasonId,
 } from './sportmonks';
 
 import type { NewsArticle } from '../data/types';
@@ -1089,6 +1091,253 @@ export async function getStandings(seasonId: number): Promise<LeagueStanding[]> 
     }));
   } catch (err) {
     console.warn('[sportsApi] getStandings failed:', err);
+    return [];
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CUP BRACKET — for knockout / elimination competitions
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** One leg (match) of a knockout tie */
+export interface CupLeg {
+  fixtureId: string;
+  date: string;              // "YYYY-MM-DD"
+  status: MatchStatus;
+  homeTeam: Team;
+  awayTeam: Team;
+  homeScore: number | null;  // null if not yet played
+  awayScore: number | null;
+  legLabel: string;          // "IDA" | "VUELTA" | ""
+}
+
+/** One matchup between two teams (may have 1 or 2 legs) */
+export interface CupTie {
+  id: string;
+  homeTeam: Team;            // canonical first-leg home team
+  awayTeam: Team;
+  legs: CupLeg[];
+  aggregate: { home: number; away: number } | null;
+  winner: Team | null;
+  isCurrentMatch: boolean;   // one of the fixtures is the match being viewed
+}
+
+/** A round of the knockout phase (Round of 16, Quarter-finals, etc.) */
+export interface CupRound {
+  id: number;
+  name: string;              // translated to Spanish
+  sortOrder: number;
+  isCurrent: boolean;
+  isFinished: boolean;
+  ties: CupTie[];
+}
+
+// ── Round name translations (EN → ES) ────────────────────────────────────────
+
+const ROUND_TRANSLATIONS: Record<string, string> = {
+  // Generic knockout names
+  'round of 128': 'Ronda de 128',
+  'round of 64': 'Ronda de 64',
+  'round of 32': 'Dieciseisavos',
+  'round of 16': 'Octavos de Final',
+  '16th finals': 'Octavos de Final',
+  'quarter-finals': 'Cuartos de Final',
+  'quarter finals': 'Cuartos de Final',
+  'quarterfinals': 'Cuartos de Final',
+  '8th finals': 'Cuartos de Final',
+  'semi-finals': 'Semifinales',
+  'semi finals': 'Semifinales',
+  'semifinals': 'Semifinales',
+  '4th finals': 'Semifinales',
+  'final': 'Final',
+  '1st final': 'Final',
+  // Qualifying / early rounds
+  'qualifying': 'Clasificatoria',
+  'qualifying round': 'Ronda Clasificatoria',
+  'play-offs': 'Play-Off',
+  'playoff': 'Play-Off',
+  'playoff round': 'Play-Off',
+  '1st round': 'Primera Ronda',
+  '2nd round': 'Segunda Ronda',
+  '3rd round': 'Tercera Ronda',
+  '4th round': 'Cuarta Ronda',
+  'round 1': 'Primera Ronda',
+  'round 2': 'Segunda Ronda',
+  'round 3': 'Tercera Ronda',
+  'round 4': 'Cuarta Ronda',
+  // Group stage (hybrids)
+  'group stage': 'Fase de Grupos',
+  'group phase': 'Fase de Grupos',
+  'league phase': 'Fase de Liga',
+};
+
+function translateRoundName(name: string): string {
+  const lower = name.toLowerCase().trim();
+  return ROUND_TRANSLATIONS[lower] ?? name;
+}
+
+// ── Leg label from fixture.leg field ─────────────────────────────────────────
+
+function getLegLabel(legStr: string | undefined, totalLegs: number): string {
+  if (totalLegs <= 1) return '';
+  const n = parseInt(legStr ?? '0', 10);
+  if (n === 1) return 'IDA';
+  if (n === 2) return 'VUELTA';
+  return '';
+}
+
+// ── Pair fixtures into ties by team combination ───────────────────────────────
+
+function pairFixturesToTies(fixtures: SMFixture[]): SMFixture[][] {
+  const tieMap = new Map<string, SMFixture[]>();
+
+  for (const fixture of fixtures) {
+    const home = getParticipant(fixture, 'home');
+    const away = getParticipant(fixture, 'away');
+    if (!home || !away) continue;
+
+    // Use aggregate_id if present (SM groups legs explicitly); else pair by teams
+    const key = fixture.aggregate_id
+      ? `agg_${fixture.aggregate_id}`
+      : `teams_${[home.id, away.id].sort().join('-')}`;
+
+    if (!tieMap.has(key)) tieMap.set(key, []);
+    tieMap.get(key)!.push(fixture);
+  }
+
+  // Sort legs by date (ascending: leg 1 before leg 2)
+  return Array.from(tieMap.values()).map(legs =>
+    [...legs].sort((a, b) => a.starting_at.localeCompare(b.starting_at))
+  );
+}
+
+// ── Map a set of fixtures (1 or 2 legs) → CupTie ─────────────────────────────
+
+function mapTie(fixtures: SMFixture[], currentFixtureId?: string): CupTie {
+  // Canonical teams: home/away of the FIRST leg
+  const firstLeg = fixtures[0];
+  const homeTeam = mapParticipantToTeam(getParticipant(firstLeg, 'home'));
+  const awayTeam = mapParticipantToTeam(getParticipant(firstLeg, 'away'));
+  const totalLegs = fixtures.length;
+
+  const legs: CupLeg[] = fixtures.map(fixture => {
+    const fHome = getParticipant(fixture, 'home');
+    const fAway = getParticipant(fixture, 'away');
+    const status = mapStateToStatus(fixture.state_id);
+    const played = status !== 'scheduled';
+    return {
+      fixtureId: String(fixture.id),
+      date: fixture.starting_at.split(' ')[0],
+      status,
+      homeTeam: mapParticipantToTeam(fHome),
+      awayTeam: mapParticipantToTeam(fAway),
+      homeScore: played ? getGoals(fixture.scores, 'home') : null,
+      awayScore: played ? getGoals(fixture.scores, 'away') : null,
+      legLabel: getLegLabel(fixture.leg, totalLegs),
+    };
+  });
+
+  // Compute aggregate (track from canonical home team's perspective)
+  let aggHome = 0;
+  let aggAway = 0;
+  let hasAnyScore = false;
+
+  for (const leg of legs) {
+    if (leg.homeScore === null || leg.awayScore === null) continue;
+    hasAnyScore = true;
+    // If this leg's home matches the canonical home team → add directly
+    if (leg.homeTeam.id === homeTeam.id) {
+      aggHome += leg.homeScore;
+      aggAway += leg.awayScore;
+    } else {
+      // Reversed leg (vuelta at canonical away team's ground)
+      aggHome += leg.awayScore;
+      aggAway += leg.homeScore;
+    }
+  }
+
+  const aggregate = hasAnyScore ? { home: aggHome, away: aggAway } : null;
+
+  // Determine winner — check participant meta.winner first, then aggregate
+  let winner: Team | null = null;
+
+  // Check if all legs are finished before declaring a winner
+  const allLegsFinished = legs.every(l => l.status === 'finished');
+  if (allLegsFinished && aggregate) {
+    if (aggregate.home > aggregate.away) winner = homeTeam;
+    else if (aggregate.away > aggregate.home) winner = awayTeam;
+    // Equal aggregate → could be pens/ET, don't declare winner without more data
+  }
+
+  // Also try meta.winner on individual fixtures (SM sets this after pens/ET)
+  if (!winner) {
+    for (const fixture of [...fixtures].reverse()) {
+      if (mapStateToStatus(fixture.state_id) !== 'finished') continue;
+      const homeP = getParticipant(fixture, 'home');
+      const awayP = getParticipant(fixture, 'away');
+      if (homeP?.meta?.winner) { winner = mapParticipantToTeam(homeP); break; }
+      if (awayP?.meta?.winner) { winner = mapParticipantToTeam(awayP); break; }
+    }
+  }
+
+  return {
+    id: fixtures.map(f => f.id).join('-'),
+    homeTeam,
+    awayTeam,
+    legs,
+    aggregate,
+    winner,
+    isCurrentMatch: !!currentFixtureId && fixtures.some(f => String(f.id) === currentFixtureId),
+  };
+}
+
+/**
+ * Fetch the full cup bracket for a season.
+ * Returns rounds sorted from earliest (R32) to latest (Final),
+ * each containing ties with scores and winners.
+ */
+export async function getCupBracket(
+  seasonId: number,
+  currentFixtureId?: string,
+): Promise<CupRound[]> {
+  try {
+    const fixtures = await fetchFixturesBySeasonId(seasonId);
+    if (fixtures.length === 0) return [];
+
+    // ── Group by round ────────────────────────────────────────────────────────
+    const roundMap = new Map<number, { meta: SMRound | undefined; fixtures: SMFixture[] }>();
+
+    for (const fixture of fixtures) {
+      const roundId = fixture.round_id ?? 0;
+      if (!roundMap.has(roundId)) {
+        roundMap.set(roundId, { meta: fixture.round, fixtures: [] });
+      }
+      roundMap.get(roundId)!.fixtures.push(fixture);
+    }
+
+    // ── Convert to CupRound[] ─────────────────────────────────────────────────
+    const rounds: CupRound[] = [];
+
+    for (const [, { meta, fixtures: roundFixtures }] of roundMap) {
+      const ties = pairFixturesToTies(roundFixtures)
+        .map(f => mapTie(f, currentFixtureId));
+
+      rounds.push({
+        id: meta?.id ?? 0,
+        name: translateRoundName(meta?.name ?? 'Ronda'),
+        sortOrder: meta?.sort_order ?? 999,
+        isCurrent: meta?.is_current ?? false,
+        isFinished: meta?.finished ?? false,
+        ties,
+      });
+    }
+
+    // Sort: earliest round first (R32 → R16 → QF → SF → Final)
+    rounds.sort((a, b) => a.sortOrder - b.sortOrder);
+    return rounds;
+
+  } catch (err) {
+    console.warn('[sportsApi] getCupBracket failed:', err);
     return [];
   }
 }
