@@ -10,7 +10,7 @@ import { useStandings } from '../../hooks/useStandings';
 import type { Match, MatchDetail, LeagueStanding } from '../../data/types';
 import { SkeletonLeagueDetail } from '../../components/Skeleton';
 import type { PartidosStackParamList } from '../../navigation/AppNavigator';
-import { getLeagueConfig } from '../../config/leagues';
+import { getLeagueConfig, getLeagueConfigByName } from '../../config/leagues';
 
 // ── Dynamic imports ──────────────────────────────────────────────────────────
 let ViewShot: any = null;
@@ -140,15 +140,19 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const tableRef = useRef<any>(null);
 
-  // Resolve seasonId: use match.seasonId if truthy, else fallback to league config
-  const leagueConfig = getLeagueConfig(Number(match.leagueId));
-  const seasonId = (match.seasonId && match.seasonId > 0)
-    ? match.seasonId
+  // Resolve league config — try by ID first, then by league name as last resort
+  const leagueConfig =
+    (match.leagueId ? getLeagueConfig(Number(match.leagueId)) : undefined)
+    ?? (match.league ? getLeagueConfigByName(match.league) : undefined);
+
+  // Resolve seasonId with multiple fallbacks
+  const seasonId: number | null =
+    (match.seasonId && match.seasonId > 0) ? match.seasonId
     : (leagueConfig?.currentSeasonId ?? null);
 
-  console.log('[TablaTab] leagueId:', match.leagueId,
+  console.log('[TablaTab] league:', match.league, '| leagueId:', match.leagueId,
     '| match.seasonId:', match.seasonId,
-    '| config.seasonId:', leagueConfig?.currentSeasonId,
+    '| config:', leagueConfig?.name, leagueConfig?.currentSeasonId,
     '| resolved:', seasonId);
 
   const { standings, loading, error } = useStandings(seasonId);
@@ -181,7 +185,7 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
         </Text>
         {/* DEBUG — remove before release */}
         <Text style={{ color: '#666', fontSize: 11, marginTop: 12, textAlign: 'center' }}>
-          {'leagueId=' + match.leagueId + ' | seasonId=' + match.seasonId + '\nresolved=' + seasonId + ' | err=' + (error ?? 'none')}
+          {match.league + ' | leagueId=' + match.leagueId + '\nseasonId=' + match.seasonId + ' | resolved=' + seasonId + '\nerr=' + (error ?? 'none')}
         </Text>
       </View>
     );

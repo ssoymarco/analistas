@@ -192,8 +192,14 @@ function mapFixtureToMatch(fixture: SMFixture): Match {
   const home = getParticipant(fixture, 'home');
   const away = getParticipant(fixture, 'away');
   const status = mapStateToStatus(fixture.state_id);
-  const leagueConfig = getLeagueConfig(fixture.league_id);
+
+  // league_id can be 0/null/missing on some fixtures — fall back to the included league object's id
+  const rawLeagueId: number = fixture.league_id || (fixture.league as any)?.id || 0;
+  const leagueConfig = getLeagueConfig(rawLeagueId);
   const dateStr = fixture.starting_at.split(' ')[0]; // "YYYY-MM-DD"
+
+  // season_id can be missing — fall back to the league's current season from our config
+  const rawSeasonId: number = fixture.season_id || leagueConfig?.currentSeasonId || 0;
 
   const homeScoreHT = getHalfTimeGoals(fixture.scores, 'home');
   const awayScoreHT = getHalfTimeGoals(fixture.scores, 'away');
@@ -211,11 +217,11 @@ function mapFixtureToMatch(fixture: SMFixture): Match {
     minute: getLiveMinute(fixture),
     stateLabel: mapStateLabel(fixture.state_id),
     league: fixture.league?.name ?? leagueConfig?.name ?? 'Unknown',
-    leagueId: String(fixture.league_id),
+    leagueId: rawLeagueId > 0 ? String(rawLeagueId) : '',
     date: dateStr,
     isFavorite: false,
     startingAtUtc: fixture.starting_at,
-    seasonId: fixture.season_id,
+    seasonId: rawSeasonId > 0 ? rawSeasonId : undefined,
   };
 }
 

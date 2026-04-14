@@ -94,3 +94,9 @@ export const LEAGUE_IDS = AVAILABLE_LEAGUES.map((l) => l.id).join(',');
 export function getLeagueConfig(id: number): LeagueConfig | undefined {
   return AVAILABLE_LEAGUES.find((l) => l.id === id);
 }
+
+/** Find a league config by its name (case-insensitive, for fallback when id is missing) */
+export function getLeagueConfigByName(name: string): LeagueConfig | undefined {
+  const lower = name.toLowerCase();
+  return AVAILABLE_LEAGUES.find((l) => l.name.toLowerCase() === lower);
+}
