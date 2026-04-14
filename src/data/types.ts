@@ -179,7 +179,8 @@ export interface MatchStatCategory {
     home: number;
     away: number;
     unit?: string;
-    type?: 'percentage' | 'number';
+    /** percentage = show %, decimal = show 2 decimals (xG), number = integer */
+    type?: 'percentage' | 'decimal' | 'number';
   }[];
 }
 
@@ -254,6 +255,8 @@ export interface MatchLineup {
   bench: LineupPlayer[];
   coach: string;
   coachNationality: string;
+  coachImageUrl?: string;  // photo from participants.coach include
+  isExpected?: boolean; // true when sourced from expectedlineups add-on (AI prediction)
 }
 
 export interface TVStation {

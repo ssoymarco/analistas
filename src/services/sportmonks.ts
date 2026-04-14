@@ -55,6 +55,8 @@ export interface SMParticipant {
     winner?: boolean;
     position?: number;
   };
+  /** Populated when include `participants.coach` is requested */
+  coach?: SMCoach;
 }
 
 export interface SMScore {
@@ -123,6 +125,8 @@ export interface SMFixture {
   events?: SMEvent[];
   statistics?: SMStatistic[];
   lineups?: SMLineupEntry[];
+  expectedlineups?: SMExpectedLineupEntry[]; // add-on: Expected Lineups (type_id = 77614)
+  coaches?: SMFixtureCoach[];               // include=coaches — home + away coach with meta.participant_id
   venue?: SMVenue;
   referees?: SMFixtureReferee[];
   tvstations?: SMFixtureTVStation[];
@@ -228,6 +232,19 @@ export interface SMLineupEntry {
   player_name: string;
   jersey_number: number;
   player?: SMPlayer;
+}
+
+/** Expected lineup entry — same shape as SMLineupEntry, type_id is always 77614 */
+export type SMExpectedLineupEntry = SMLineupEntry;
+
+/** Coach entry returned inside a fixture when include=coaches is used */
+export interface SMFixtureCoach extends SMCoach {
+  meta: {
+    fixture_id: number;
+    coach_id: number;
+    /** Links to SMParticipant.id — use to find home/away coach */
+    participant_id: number;
+  };
 }
 
 export interface SMRound {
@@ -406,6 +423,7 @@ export const SM_STAT_TYPES = {
   SHOTS_ON_TARGET:            86,   // "Shots On Target"
   SHOTS_BLOCKED:              58,   // "Shots Blocked"
   GOAL_KICKS:                 53,   // "Goal Kicks"
+  OFFSIDES:                   51,   // "Offsides"
   // Passes & creation
   ASSISTS:                    79,   // "Assists"
   FREE_KICKS:                 55,   // "Free Kicks"
@@ -417,6 +435,7 @@ export const SM_STAT_TYPES = {
   // Discipline
   FOULS:                      56,   // "Fouls"
   YELLOWCARDS:                84,   // "Yellowcards"
+  REDCARDS:                   83,   // "Redcards"
   // xG family (available on some plans/leagues)
   EXPECTED_GOALS:           5304,   // "Expected Goals (xG)"
   EXPECTED_GOALS_ON_TARGET: 5305,   // "Expected Goals on Target (xGoT)"
@@ -565,7 +584,7 @@ export async function fetchFixturesByDate(date: string, leagueIds?: string): Pro
 export async function fetchFixtureById(id: number): Promise<SMFixture> {
   return fetchApi<SMFixture>(`fixtures/${id}`, {
     // Note: 'odds' causes 403 on Pro plan — omitted. Fetch separately if needed.
-    include: 'participants;scores;events;statistics;lineups.player;venue;league;referees.referee;tvstations.tvstation;weatherreport;predictions',
+    include: 'participants;scores;events;statistics;lineups.player;expectedLineups.player;coaches;venue;league;referees.referee;tvstations.tvstation;weatherreport;predictions',
   });
 }
 

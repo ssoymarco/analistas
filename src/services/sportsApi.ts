@@ -127,6 +127,42 @@ function getHalfTimeGoals(scores: SMScore[] | undefined, location: 'home' | 'awa
   return ht !== undefined ? ht.score.goals : undefined;
 }
 
+// ── Timezone utilities ───────────────────────────────────────────────────────
+// SportMonks returns starting_at as UTC ("2026-04-15 00:00:00").
+// These helpers convert UTC to the device's local timezone automatically —
+// no hardcoding required. Works for any timezone worldwide.
+
+/**
+ * Convert a SportMonks UTC timestamp ("YYYY-MM-DD HH:MM:SS") to local date string.
+ * e.g. "2026-04-15 00:00:00" UTC → "2026-04-14" in Mexico City (UTC-5)
+ */
+function utcStringToLocalDateStr(startingAt: string): string {
+  const dt = new Date(startingAt.replace(' ', 'T') + 'Z');
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Given a local date string ("YYYY-MM-DD"), return the UTC date(s) that overlap
+ * with that local calendar day. Returns 1 string when local day == UTC day, or
+ * 2 strings when the evening crosses a UTC midnight boundary.
+ *
+ * e.g. for UTC-5 on "2026-04-14":
+ *   local midnight  = 05:00 UTC → UTC date "2026-04-14"
+ *   local 23:59     = 04:59 UTC next day → UTC date "2026-04-15"
+ *   → returns ["2026-04-14", "2026-04-15"]
+ */
+function getUtcDatesForLocalDay(localDateStr: string): string[] {
+  // Parsing without 'Z' uses local timezone ← this is intentional
+  const startOfDay = new Date(`${localDateStr}T00:00:00`);
+  const endOfDay   = new Date(`${localDateStr}T23:59:59`);
+  const utcStart = startOfDay.toISOString().slice(0, 10);
+  const utcEnd   = endOfDay.toISOString().slice(0, 10);
+  return utcStart === utcEnd ? [utcStart] : [utcStart, utcEnd];
+}
+
 // ── Time Display ────────────────────────────────────────────────────────────
 
 function getTimeDisplay(fixture: SMFixture): string {
@@ -199,7 +235,8 @@ function mapFixtureToMatch(fixture: SMFixture): Match {
   // league_id can be 0/null/missing on some fixtures — fall back to the included league object's id
   const rawLeagueId: number = fixture.league_id || (fixture.league as any)?.id || 0;
   const leagueConfig = getLeagueConfig(rawLeagueId);
-  const dateStr = fixture.starting_at.split(' ')[0]; // "YYYY-MM-DD"
+  // Use LOCAL date (device timezone) — SportMonks timestamps are UTC
+  const dateStr = utcStringToLocalDateStr(fixture.starting_at);
 
   // season_id can be missing — fall back to the league's current season from our config
   const rawSeasonId: number = fixture.season_id || leagueConfig?.currentSeasonId || 0;
@@ -269,27 +306,29 @@ const STAT_TYPE_NAMES: Record<number, string> = {
   // General / Ataque
   [SM_STAT_TYPES.BALL_POSSESSION]:            'Posesión',
   [SM_STAT_TYPES.GOALS]:                      'Goles',
-  [SM_STAT_TYPES.GOAL_ATTEMPTS]:              'Tiros totales',
-  [SM_STAT_TYPES.SHOTS_ON_TARGET]:            'Tiros a puerta',
-  [SM_STAT_TYPES.SHOTS_BLOCKED]:              'Tiros bloqueados',
+  [SM_STAT_TYPES.GOAL_ATTEMPTS]:              'Total remates',
+  [SM_STAT_TYPES.SHOTS_ON_TARGET]:            'Remates al arco',
+  [SM_STAT_TYPES.SHOTS_BLOCKED]:              'Remates bloqueados',
   [SM_STAT_TYPES.GOAL_KICKS]:                 'Saques de meta',
+  [SM_STAT_TYPES.OFFSIDES]:                   'Fueras de juego',
   // Creación / Pases
   [SM_STAT_TYPES.ASSISTS]:                    'Asistencias',
   [SM_STAT_TYPES.FREE_KICKS]:                 'Tiros libres',
   [SM_STAT_TYPES.THROWINS]:                   'Saques de banda',
   [SM_STAT_TYPES.SUCCESSFUL_DRIBBLES_PCT]:    'Regates exitosos',
-  [SM_STAT_TYPES.BIG_CHANCES_CREATED]:        'Ocasiones claras creadas',
-  [SM_STAT_TYPES.BIG_CHANCES_MISSED]:         'Ocasiones claras falladas',
+  [SM_STAT_TYPES.BIG_CHANCES_CREATED]:        'Grandes chances',
+  [SM_STAT_TYPES.BIG_CHANCES_MISSED]:         'Chances falladas',
   // xG family
-  [SM_STAT_TYPES.EXPECTED_GOALS]:             'xG (Goles esperados)',
-  [SM_STAT_TYPES.EXPECTED_GOALS_ON_TARGET]:   'xGoT',
-  [SM_STAT_TYPES.NP_EXPECTED_GOALS]:          'npxG',
+  [SM_STAT_TYPES.EXPECTED_GOALS]:             'Goles esperados (xG)',
+  [SM_STAT_TYPES.EXPECTED_GOALS_ON_TARGET]:   'xG al arco (xGoT)',
+  [SM_STAT_TYPES.NP_EXPECTED_GOALS]:          'xG sin penales (npxG)',
   // Defensa
-  [SM_STAT_TYPES.CORNERS]:                    'Córners',
-  [SM_STAT_TYPES.SAVES]:                      'Paradas',
+  [SM_STAT_TYPES.CORNERS]:                    'Saques de esquina',
+  [SM_STAT_TYPES.SAVES]:                      'Salvadas de portero',
   // Disciplina
   [SM_STAT_TYPES.FOULS]:                      'Faltas',
   [SM_STAT_TYPES.YELLOWCARDS]:                'Tarjetas amarillas',
+  [SM_STAT_TYPES.REDCARDS]:                   'Tarjetas rojas',
 };
 
 // Which stat IDs are percentages (displayed with % suffix)
@@ -298,17 +337,40 @@ const PERCENTAGE_STAT_IDS = new Set<number>([
   SM_STAT_TYPES.SUCCESSFUL_DRIBBLES_PCT,
 ]);
 
+// Which stat IDs are decimal (xG family — show 2 decimal places)
+const DECIMAL_STAT_IDS = new Set<number>([
+  SM_STAT_TYPES.EXPECTED_GOALS,
+  SM_STAT_TYPES.EXPECTED_GOALS_ON_TARGET,
+  SM_STAT_TYPES.NP_EXPECTED_GOALS,
+]);
+
 // Category groupings — order matters for display
+// First category = "Estadísticas importantes" always shown at top
 const STAT_CATEGORIES: { name: string; typeIds: number[] }[] = [
   {
-    name: 'Ataque',
+    name: 'Estadísticas importantes',
     typeIds: [
       SM_STAT_TYPES.BALL_POSSESSION,
-      SM_STAT_TYPES.GOALS,
+      SM_STAT_TYPES.EXPECTED_GOALS,
+      SM_STAT_TYPES.GOAL_ATTEMPTS,
+      SM_STAT_TYPES.SHOTS_ON_TARGET,
+      SM_STAT_TYPES.BIG_CHANCES_CREATED,
+      SM_STAT_TYPES.CORNERS,
+      SM_STAT_TYPES.OFFSIDES,
+      SM_STAT_TYPES.REDCARDS,
+    ],
+  },
+  {
+    name: 'Remates',
+    typeIds: [
+      SM_STAT_TYPES.EXPECTED_GOALS,
       SM_STAT_TYPES.GOAL_ATTEMPTS,
       SM_STAT_TYPES.SHOTS_ON_TARGET,
       SM_STAT_TYPES.SHOTS_BLOCKED,
-      SM_STAT_TYPES.GOAL_KICKS,
+      SM_STAT_TYPES.BIG_CHANCES_CREATED,
+      SM_STAT_TYPES.BIG_CHANCES_MISSED,
+      SM_STAT_TYPES.EXPECTED_GOALS_ON_TARGET,
+      SM_STAT_TYPES.NP_EXPECTED_GOALS,
     ],
   },
   {
@@ -316,30 +378,22 @@ const STAT_CATEGORIES: { name: string; typeIds: number[] }[] = [
     typeIds: [
       SM_STAT_TYPES.ASSISTS,
       SM_STAT_TYPES.FREE_KICKS,
+      SM_STAT_TYPES.CORNERS,
       SM_STAT_TYPES.THROWINS,
       SM_STAT_TYPES.SUCCESSFUL_DRIBBLES_PCT,
-      SM_STAT_TYPES.BIG_CHANCES_CREATED,
-      SM_STAT_TYPES.BIG_CHANCES_MISSED,
-    ],
-  },
-  {
-    name: 'Goles Esperados (xG)',
-    typeIds: [
-      SM_STAT_TYPES.EXPECTED_GOALS,
-      SM_STAT_TYPES.EXPECTED_GOALS_ON_TARGET,
-      SM_STAT_TYPES.NP_EXPECTED_GOALS,
     ],
   },
   {
     name: 'Defensa',
     typeIds: [
-      SM_STAT_TYPES.CORNERS,
       SM_STAT_TYPES.SAVES,
+      SM_STAT_TYPES.GOAL_KICKS,
     ],
   },
   {
     name: 'Disciplina',
     typeIds: [
+      SM_STAT_TYPES.REDCARDS,
       SM_STAT_TYPES.FOULS,
       SM_STAT_TYPES.YELLOWCARDS,
     ],
@@ -369,13 +423,15 @@ function mapStatistics(stats: SMStatistic[] | undefined, fixture: SMFixture): Ma
       .filter(id => grouped.has(id))
       .map(id => {
         const vals = grouped.get(id)!;
-        const isPct = PERCENTAGE_STAT_IDS.has(id);
+        const isPct  = PERCENTAGE_STAT_IDS.has(id);
+        const isDec  = DECIMAL_STAT_IDS.has(id);
+        const statType = isPct ? 'percentage' as const : isDec ? 'decimal' as const : 'number' as const;
         return {
           label: STAT_TYPE_NAMES[id],
           home: vals.home,
           away: vals.away,
           unit: isPct ? '%' : undefined,
-          type: isPct ? 'percentage' as const : 'number' as const,
+          type: statType,
         };
       });
     if (items.length > 0) result.push({ category: cat.name, stats: items });
@@ -585,14 +641,25 @@ function mapStandingToLeagueStanding(sg: SMStandingGroup): LeagueStanding {
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Fetch all fixtures for a given date from SportMonks.
+ * Fetch all fixtures for a given LOCAL date.
+ * Queries the UTC date(s) that overlap with the local calendar day, then
+ * filters to keep only fixtures whose local date matches. This ensures
+ * evening matches (e.g. 19:00 Mexico City = next day UTC) appear on the
+ * correct day regardless of the user's timezone.
  */
-export async function getFixturesByDate(date: string): Promise<Match[]> {
+export async function getFixturesByDate(localDate: string): Promise<Match[]> {
   try {
-    // Don't filter by league IDs — fetch ALL fixtures and filter client-side.
-    // With 50+ leagues the filter string is too long and causes API errors.
-    const fixtures = await fetchFixturesByDate(date);
-    return fixtures.map(mapFixtureToMatch);
+    const utcDates = getUtcDatesForLocalDay(localDate);
+    const results = await Promise.all(utcDates.map(d => fetchFixturesByDate(d)));
+    // Flatten + deduplicate (a fixture can appear in both UTC date pages near midnight)
+    const seen = new Set<number>();
+    const unique = results.flat().filter(f => {
+      if (seen.has(f.id)) return false;
+      seen.add(f.id);
+      return true;
+    });
+    // Map and filter to only this local day
+    return unique.map(mapFixtureToMatch).filter(m => m.date === localDate);
   } catch (err) {
     console.warn('[sportsApi] getFixturesByDate failed:', err);
     return [];
@@ -607,12 +674,19 @@ export interface LeagueWithMatches extends League {
   matches: Match[];
 }
 
-export async function getLeaguesByDate(date: string): Promise<LeagueWithMatches[]> {
+export async function getLeaguesByDate(localDate: string): Promise<LeagueWithMatches[]> {
   try {
-    const fixtures = await fetchFixturesByDate(date);
-    if (fixtures.length === 0) return [];
+    const utcDates = getUtcDatesForLocalDay(localDate);
+    const results = await Promise.all(utcDates.map(d => fetchFixturesByDate(d)));
+    const seen = new Set<number>();
+    const unique = results.flat().filter(f => {
+      if (seen.has(f.id)) return false;
+      seen.add(f.id);
+      return true;
+    });
+    if (unique.length === 0) return [];
 
-    const matches = fixtures.map(mapFixtureToMatch);
+    const matches = unique.map(mapFixtureToMatch).filter(m => m.date === localDate);
     const realLeagues: LeagueWithMatches[] = [];
     const leagueMap = new Map<string, LeagueWithMatches>();
     for (const m of matches) {
@@ -1004,8 +1078,42 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
       weather: mapWeather(fixture.weatherreport),
       events: mapEvents(fixture.events, fixture),
       statistics: mapStatistics(fixture.statistics, fixture),
-      homeLineup: mapLineup(fixture.lineups, homeTeam?.id ?? 0, fixture.events),
-      awayLineup: mapLineup(fixture.lineups, awayTeam?.id ?? 0, fixture.events),
+      homeLineup: (() => {
+        const confirmed = fixture.lineups ?? [];
+        const homeHas = confirmed.some(e => e.team_id === (homeTeam?.id ?? 0) && e.type_id === 11);
+        const awayHas = confirmed.some(e => e.team_id === (awayTeam?.id ?? 0) && e.type_id === 11);
+        const useExpected = !homeHas && !awayHas && (fixture.expectedlineups?.length ?? 0) > 0;
+        // formation_field present → starter (11); absent → bench (12)
+        const entries: SMLineupEntry[] = useExpected
+          ? (fixture.expectedlineups ?? []).map(e => ({ ...e, type_id: e.formation_field != null ? 11 : 12 }))
+          : confirmed;
+        // Find coach via fixture.coaches (meta.participant_id links to team)
+        const homeCoach = fixture.coaches?.find(c => c.meta?.participant_id === homeTeam?.id);
+        const homeCoachImg = homeCoach?.image_path?.includes('placeholder') ? undefined : homeCoach?.image_path;
+        return {
+          ...mapLineup(entries, homeTeam?.id ?? 0, fixture.events),
+          isExpected: useExpected,
+          coachImageUrl: homeCoachImg,
+        };
+      })(),
+      awayLineup: (() => {
+        const confirmed = fixture.lineups ?? [];
+        const homeHas = confirmed.some(e => e.team_id === (homeTeam?.id ?? 0) && e.type_id === 11);
+        const awayHas = confirmed.some(e => e.team_id === (awayTeam?.id ?? 0) && e.type_id === 11);
+        const useExpected = !homeHas && !awayHas && (fixture.expectedlineups?.length ?? 0) > 0;
+        // formation_field present → starter (11); absent → bench (12)
+        const entries: SMLineupEntry[] = useExpected
+          ? (fixture.expectedlineups ?? []).map(e => ({ ...e, type_id: e.formation_field != null ? 11 : 12 }))
+          : confirmed;
+        // Find coach via fixture.coaches (meta.participant_id links to team)
+        const awayCoach = fixture.coaches?.find(c => c.meta?.participant_id === awayTeam?.id);
+        const awayCoachImg = awayCoach?.image_path?.includes('placeholder') ? undefined : awayCoach?.image_path;
+        return {
+          ...mapLineup(entries, awayTeam?.id ?? 0, fixture.events),
+          isExpected: useExpected,
+          coachImageUrl: awayCoachImg,
+        };
+      })(),
       tvStations: mapTVStations(fixture.tvstations),
       resultInfo: fixture.result_info ?? undefined,
       odds: mapOdds(fixture.odds),
@@ -1119,6 +1227,7 @@ export interface CupTie {
   aggregate: { home: number; away: number } | null;
   winner: Team | null;
   isCurrentMatch: boolean;   // one of the fixtures is the match being viewed
+  isFinished: boolean;       // ALL legs have been played — safe to show winner
 }
 
 /** A round of the knockout phase (Round of 16, Quarter-finals, etc.) */
@@ -1258,27 +1367,25 @@ function mapTie(fixtures: SMFixture[], currentFixtureId?: string): CupTie {
 
   const aggregate = hasAnyScore ? { home: aggHome, away: aggAway } : null;
 
-  // Determine winner — check participant meta.winner first, then aggregate
+  // Determine winner — ONLY when every leg has been played
   let winner: Team | null = null;
+  const allLegsFinished = legs.length > 0 && legs.every(l => l.status === 'finished');
 
-  // Check if all legs are finished before declaring a winner
-  const allLegsFinished = legs.every(l => l.status === 'finished');
   if (allLegsFinished && aggregate) {
     if (aggregate.home > aggregate.away) winner = homeTeam;
     else if (aggregate.away > aggregate.home) winner = awayTeam;
-    // Equal aggregate → could be pens/ET, don't declare winner without more data
-  }
-
-  // Also try meta.winner on individual fixtures (SM sets this after pens/ET)
-  if (!winner) {
-    for (const fixture of [...fixtures].reverse()) {
-      if (mapStateToStatus(fixture.state_id) !== 'finished') continue;
-      const homeP = getParticipant(fixture, 'home');
-      const awayP = getParticipant(fixture, 'away');
-      if (homeP?.meta?.winner) { winner = mapParticipantToTeam(homeP); break; }
-      if (awayP?.meta?.winner) { winner = mapParticipantToTeam(awayP); break; }
+    // Equal aggregate → could be pens/ET; also check meta.winner on last fixture
+    if (!winner) {
+      for (const fixture of [...fixtures].reverse()) {
+        const homeP = getParticipant(fixture, 'home');
+        const awayP = getParticipant(fixture, 'away');
+        if (homeP?.meta?.winner) { winner = mapParticipantToTeam(homeP); break; }
+        if (awayP?.meta?.winner) { winner = mapParticipantToTeam(awayP); break; }
+      }
     }
   }
+  // ⚠️  Never set winner if any leg is still pending — even if SM shows meta.winner
+  // on the first leg (e.g. 3-0 advantage). The tie isn't official until all legs finish.
 
   return {
     id: fixtures.map(f => f.id).join('-'),
@@ -1288,6 +1395,7 @@ function mapTie(fixtures: SMFixture[], currentFixtureId?: string): CupTie {
     aggregate,
     winner,
     isCurrentMatch: !!currentFixtureId && fixtures.some(f => String(f.id) === currentFixtureId),
+    isFinished: allLegsFinished,
   };
 }
 
@@ -1366,13 +1474,16 @@ export async function getCupBracket(
           const t1 = feeders[i];
           const t2 = i + 1 < feeders.length ? feeders[i + 1] : null;
 
-          // Build team labels from known winners or bracket path
-          const homeTeam = t1.winner
-            ? { ...t1.winner }
+          // Build team labels — only use confirmed winner if the tie is 100% finished
+          const confirmedHome = (t1.isFinished && t1.winner) ? t1.winner : null;
+          const homeTeam = confirmedHome
+            ? { ...confirmedHome }
             : { id: `tbd-${order}-${i}`, name: `Ganador ${abbreviate(t1.homeTeam.name)} vs ${abbreviate(t1.awayTeam.name)}`, shortName: 'TBD', logo: '⚽' };
+
+          const confirmedAway = t2 && t2.isFinished && t2.winner ? t2.winner : null;
           const awayTeam = t2
-            ? (t2.winner
-              ? { ...t2.winner }
+            ? (confirmedAway
+              ? { ...confirmedAway }
               : { id: `tbd-${order}-${i + 1}`, name: `Ganador ${abbreviate(t2.homeTeam.name)} vs ${abbreviate(t2.awayTeam.name)}`, shortName: 'TBD', logo: '⚽' })
             : { id: `tbd-${order}-bye`, name: 'TBD', shortName: 'TBD', logo: '⚽' };
 
@@ -1384,6 +1495,7 @@ export async function getCupBracket(
             aggregate: null,
             winner: null,
             isCurrentMatch: false,
+            isFinished: false,
           });
         }
 
@@ -1494,11 +1606,19 @@ export async function getNews(): Promise<NewsArticle[]> {
 
 /**
  * Match count for date — used by CalendarPicker dots.
+ * Uses local date so counts reflect the user's actual timezone.
  */
-export async function getMatchCountForDate(date: string): Promise<number> {
+export async function getMatchCountForDate(localDate: string): Promise<number> {
   try {
-    const fixtures = await fetchFixturesByDate(date);
-    return fixtures.length || 0;
+    const utcDates = getUtcDatesForLocalDay(localDate);
+    const results = await Promise.all(utcDates.map(d => fetchFixturesByDate(d)));
+    const seen = new Set<number>();
+    const unique = results.flat().filter(f => {
+      if (seen.has(f.id)) return false;
+      seen.add(f.id);
+      return true;
+    });
+    return unique.filter(f => utcStringToLocalDateStr(f.starting_at) === localDate).length;
   } catch {
     return 0;
   }
