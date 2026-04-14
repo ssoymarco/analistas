@@ -11,6 +11,7 @@ import {
   Animated,
   Dimensions,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -24,13 +25,15 @@ import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFixtureDetail } from '../hooks/useFixtureDetail';
 import { useCountdown } from '../hooks/useCountdown';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
-import { EnVivoTab }     from './matchDetail/EnVivoTab';
-import { AlineacionTab } from './matchDetail/AlineacionTab';
-import { TablaTab }      from './matchDetail/TablaTab';
-import { NoticiasTab }   from './matchDetail/NoticiasTab';
+import { getLeagueConfig }  from '../config/leagues';
+import { EnVivoTab }        from './matchDetail/EnVivoTab';
+import { AlineacionTab }    from './matchDetail/AlineacionTab';
+import { TablaTab }         from './matchDetail/TablaTab';
+import { NoticiasTab }      from './matchDetail/NoticiasTab';
+import { EstadisticasTab }  from './matchDetail/EstadisticasTab';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'MatchDetail'>;
-type Tab  = 'previa' | 'alineacion' | 'tabla' | 'noticias';
+type Tab  = 'previa' | 'alineacion' | 'estadisticas' | 'tabla' | 'noticias';
 
 // ── Animation constants ──────────────────────────────────────────────────────
 const HERO_EXPANDED  = 210;
@@ -208,6 +211,7 @@ function TeamBadgeSmall({ name, logo, size = 32 }: { name: string; logo: string;
 // ══════════════════════════════════════════════════════════════════════════════
 
 export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
+  const { t } = useTranslation();
   const { match } = route.params;
   const c         = useThemeColors();
   const { isDark } = useDarkMode();
@@ -225,11 +229,19 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   useEffect(() => { incrementMatchesViewed(match.id); }, [match.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
+  // Determine immediately (without waiting for TablaTab to render) whether this
+  // league is a knockout cup — so the tab always shows the right label upfront.
+  const leagueIsCup = getLeagueConfig(Number(match.leagueId))?.isCup ?? false;
+  const tablaLabel  = leagueIsCup ? t('matchTabs.bracket') : t('matchTabs.standings');
+  // Keep callback for safety (covers leagues not yet tagged as isCup in config)
+  const handleCupDetected = useCallback(() => { /* label already correct */ }, []);
+
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'previa', label: isScheduled ? 'Previa' : isLive ? 'En vivo' : 'Resumen' },
-    { key: 'alineacion', label: 'Alineación' },
-    { key: 'tabla', label: 'Tabla' },
-    { key: 'noticias', label: 'Noticias' },
+    { key: 'previa',        label: isScheduled ? t('matchTabs.preview') : isLive ? t('matchTabs.live') : t('matchTabs.summary') },
+    { key: 'alineacion',   label: t('matchTabs.lineup') },
+    { key: 'estadisticas', label: t('matchTabs.stats') },
+    { key: 'tabla',        label: tablaLabel },
+    { key: 'noticias',     label: t('matchTabs.news') },
   ];
   const [activeTab, setActiveTab] = useState<Tab>('previa');
 
@@ -408,7 +420,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               {/* Center */}
               <View style={scr.centerCol}>
                 {isScheduled ? (
-                  <Text style={[scr.vsText, { color: hTextMuted }]}>VS</Text>
+                  <Text style={[scr.vsText, { color: hTextMuted }]}>{t('common.vs')}</Text>
                 ) : (
                   <>
                     <View style={scr.scoreRow}>
@@ -508,15 +520,16 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           ) : (
             <View style={scr.emptyWrap}>
               <Text style={{ fontSize: 36 }}>📋</Text>
-              <Text style={[scr.emptyText, { color: c.textSecondary }]}>Detalle no disponible</Text>
+              <Text style={[scr.emptyText, { color: c.textSecondary }]}>{t('matches.detailUnavailable')}</Text>
             </View>
           )
         ) : (
           <>
-            {activeTab === 'previa'     && <EnVivoTab     match={match} detail={detail} />}
-            {activeTab === 'alineacion' && <AlineacionTab match={match} detail={detail} />}
-            {activeTab === 'tabla'      && <TablaTab      match={match} detail={detail} />}
-            {activeTab === 'noticias'   && <NoticiasTab   match={match} detail={detail} />}
+            {activeTab === 'previa'        && <EnVivoTab        match={match} detail={detail} />}
+            {activeTab === 'alineacion'   && <AlineacionTab    match={match} detail={detail} />}
+            {activeTab === 'estadisticas' && <EstadisticasTab  match={match} detail={detail} />}
+            {activeTab === 'tabla'        && <TablaTab         match={match} detail={detail} onCupDetected={handleCupDetected} />}
+            {activeTab === 'noticias'     && <NoticiasTab      match={match} detail={detail} />}
           </>
         )}
       </Animated.ScrollView>
@@ -529,7 +542,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           activeOpacity={0.85}
         >
           <UpChevron color="#fff" />
-          <Text style={scr.scrollTopText}>Volver arriba</Text>
+          <Text style={scr.scrollTopText}>{t('matches.scrollToTop')}</Text>
         </TouchableOpacity>
       )}
     </SafeAreaView>

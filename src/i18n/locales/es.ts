@@ -45,6 +45,7 @@ const es = {
     lineup: 'Alineación',
     standings: 'Tabla',
     bracket: 'Clasificación',
+    stats: 'Estadísticas',
     news: 'Noticias',
   },
 

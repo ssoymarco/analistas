@@ -43,6 +43,7 @@ const en: TranslationKeys = {
     lineup: 'Lineup',
     standings: 'Standings',
     bracket: 'Bracket',
+    stats: 'Statistics',
     news: 'News',
   },
 
