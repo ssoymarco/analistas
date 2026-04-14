@@ -12,15 +12,25 @@ import type { Match, MatchDetail, MatchStatCategory } from '../../data/types';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 
-const HOME_COLOR  = '#3b82f6';  // blue
-const AWAY_COLOR  = '#f97316';  // orange
-const HOME_BG     = 'rgba(59,130,246,0.18)';
-const AWAY_BG     = 'rgba(249,115,22,0.18)';
+const HOME_COLOR    = '#3b82f6';   // blue
+const AWAY_COLOR    = '#f97316';   // orange
 
-/** How many stats to show before "Mostrar más" */
-const INITIAL_SHOW = 4;
+// Pill backgrounds — strong (winner) vs subtle (loser)
+const HOME_BG_WIN   = 'rgba(59,130,246,0.22)';
+const HOME_BG_IDLE  = 'rgba(59,130,246,0.07)';
+const AWAY_BG_WIN   = 'rgba(249,115,22,0.22)';
+const AWAY_BG_IDLE  = 'rgba(249,115,22,0.07)';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// Proportion bar fills
+const HOME_FILL     = 'rgba(59,130,246,0.65)';
+const AWAY_FILL     = 'rgba(249,115,22,0.65)';
+const HOME_TRACK    = 'rgba(59,130,246,0.10)';
+const AWAY_TRACK    = 'rgba(249,115,22,0.10)';
+
+const BAR_H         = 4;
+const INITIAL_SHOW  = 4;   // stats visible before "Mostrar más"
+
+// ── Format helper ──────────────────────────────────────────────────────────────
 
 function formatVal(value: number, type?: 'percentage' | 'decimal' | 'number'): string {
   if (type === 'percentage') return `${Math.round(value)}%`;
@@ -37,56 +47,84 @@ interface StatRowProps {
   type?: 'percentage' | 'decimal' | 'number';
   textSecondary: string;
   textPrimary: string;
-  isLast: boolean;
-  border: string;
 }
 
-function StatRow({ label, home, away, type, textSecondary, textPrimary, isLast, border }: StatRowProps) {
+function StatRow({ label, home, away, type, textSecondary, textPrimary }: StatRowProps) {
   const homeWins = home > away;
   const awayWins = away > home;
+  const total    = home + away;
+  const showBar  = total > 0;
+
+  // Bar proportions (fill grows toward center from each side)
+  const homeBar  = showBar ? home / total : 0.5;
+  const awayBar  = showBar ? away / total : 0.5;
 
   const homeStr = formatVal(home, type);
   const awayStr = formatVal(away, type);
 
   return (
-    <View style={[styles.statRow, !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border }]}>
-      {/* Home value */}
-      <View style={styles.valSide}>
-        <View style={[
-          styles.pill,
-          homeWins && { backgroundColor: HOME_BG },
-        ]}>
-          <Text style={[
-            styles.pillText,
-            { color: homeWins ? HOME_COLOR : textPrimary },
-            homeWins && styles.pillTextWin,
+    <View style={styles.statRow}>
+      {/* ── Values row ── */}
+      <View style={styles.valuesRow}>
+
+        {/* Home pill — always shown, stronger when winning */}
+        <View style={styles.valSide}>
+          <View style={[
+            styles.pill,
+            { backgroundColor: homeWins ? HOME_BG_WIN : HOME_BG_IDLE },
           ]}>
-            {homeStr}
-          </Text>
+            <Text style={[
+              styles.pillText,
+              { color: homeWins ? HOME_COLOR : textPrimary },
+              homeWins && styles.pillWin,
+            ]}>
+              {homeStr}
+            </Text>
+          </View>
+        </View>
+
+        {/* Stat label */}
+        <Text style={[styles.statLabel, { color: textSecondary }]} numberOfLines={2}>
+          {label}
+        </Text>
+
+        {/* Away pill — always shown, stronger when winning */}
+        <View style={styles.valSide}>
+          <View style={[
+            styles.pill,
+            styles.pillRight,
+            { backgroundColor: awayWins ? AWAY_BG_WIN : AWAY_BG_IDLE },
+          ]}>
+            <Text style={[
+              styles.pillText,
+              { color: awayWins ? AWAY_COLOR : textPrimary },
+              awayWins && styles.pillWin,
+            ]}>
+              {awayStr}
+            </Text>
+          </View>
         </View>
       </View>
 
-      {/* Stat label */}
-      <Text style={[styles.statLabel, { color: textSecondary }]} numberOfLines={1}>
-        {label}
-      </Text>
+      {/* ── Proportion bar (tug-of-war) ── */}
+      {showBar && (
+        <View style={styles.barRow}>
+          {/* Home side: fill grows from right → toward center */}
+          <View style={[styles.barHalf, { backgroundColor: HOME_TRACK }]}>
+            <View style={{ flex: 1 - homeBar }} />
+            <View style={{ flex: homeBar, backgroundColor: HOME_FILL }} />
+          </View>
 
-      {/* Away value */}
-      <View style={styles.valSide}>
-        <View style={[
-          styles.pill,
-          styles.pillRight,
-          awayWins && { backgroundColor: AWAY_BG },
-        ]}>
-          <Text style={[
-            styles.pillText,
-            { color: awayWins ? AWAY_COLOR : textPrimary },
-            awayWins && styles.pillTextWin,
-          ]}>
-            {awayStr}
-          </Text>
+          {/* Center gap */}
+          <View style={styles.barGap} />
+
+          {/* Away side: fill grows from left → toward center */}
+          <View style={[styles.barHalf, { backgroundColor: AWAY_TRACK }]}>
+            <View style={{ flex: awayBar, backgroundColor: AWAY_FILL }} />
+            <View style={{ flex: 1 - awayBar }} />
+          </View>
         </View>
-      </View>
+      )}
     </View>
   );
 }
@@ -100,25 +138,29 @@ interface SectionProps {
   textSecondary: string;
   textTertiary: string;
   border: string;
+  accent: string;
 }
 
-function StatSection({ category, isFirst, textPrimary, textSecondary, textTertiary, border }: SectionProps) {
+function StatSection({
+  category, isFirst, textPrimary, textSecondary, textTertiary, border, accent,
+}: SectionProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
-  const hasMore = category.stats.length > INITIAL_SHOW;
-  const visibleStats = (hasMore && !expanded)
-    ? category.stats.slice(0, INITIAL_SHOW)
-    : category.stats;
+  const hasMore      = category.stats.length > INITIAL_SHOW;
+  const visibleStats = (hasMore && !expanded) ? category.stats.slice(0, INITIAL_SHOW) : category.stats;
 
   return (
-    <View style={[styles.section, isFirst && styles.sectionFirst]}>
-      {/* Section header */}
-      <Text style={[styles.sectionTitle, { color: textTertiary }]}>
-        {category.category.toUpperCase()}
-      </Text>
+    <View style={[styles.section, isFirst && styles.sectionFirst, { borderTopColor: border }]}>
+      {/* Section header with accent mark */}
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionAccent, { backgroundColor: accent }]} />
+        <Text style={[styles.sectionTitle, { color: textTertiary }]}>
+          {category.category.toUpperCase()}
+        </Text>
+      </View>
 
-      {/* Rows */}
+      {/* Stat rows */}
       {visibleStats.map((stat, idx) => (
         <StatRow
           key={`${stat.label}-${idx}`}
@@ -128,12 +170,10 @@ function StatSection({ category, isFirst, textPrimary, textSecondary, textTertia
           type={stat.type}
           textSecondary={textSecondary}
           textPrimary={textPrimary}
-          isLast={idx === visibleStats.length - 1 && !hasMore}
-          border={border}
         />
       ))}
 
-      {/* Show more / less button */}
+      {/* Expand / collapse */}
       {hasMore && (
         <TouchableOpacity
           onPress={() => setExpanded(v => !v)}
@@ -164,43 +204,48 @@ interface TeamHeaderProps {
 function TeamHeader({ homeName, awayName, homeLogo, awayLogo, textSecondary, border, surface }: TeamHeaderProps) {
   return (
     <View style={[styles.teamHeader, { borderBottomColor: border, backgroundColor: surface }]}>
-      {/* Home team */}
+      {/* Home */}
       <View style={styles.teamSide}>
-        {homeLogo ? (
-          <Image source={{ uri: homeLogo }} style={styles.teamLogo} resizeMode="contain" />
-        ) : (
-          <View style={[styles.teamLogoPlaceholder, { backgroundColor: HOME_BG }]}>
-            <Text style={[styles.teamLogoEmoji, { color: HOME_COLOR }]}>
-              {homeName.charAt(0).toUpperCase()}
-            </Text>
-          </View>
-        )}
-        <Text style={[styles.teamName, { color: HOME_COLOR }]} numberOfLines={1}>{homeName}</Text>
+        {homeLogo
+          ? <Image source={{ uri: homeLogo }} style={styles.teamLogo} resizeMode="contain" />
+          : (
+            <View style={[styles.teamLogoFallback, { backgroundColor: HOME_BG_IDLE }]}>
+              <Text style={[styles.teamLogoInitial, { color: HOME_COLOR }]}>
+                {homeName.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )
+        }
+        <Text style={[styles.teamName, { color: HOME_COLOR }]} numberOfLines={1}>
+          {homeName}
+        </Text>
         <View style={[styles.teamDot, { backgroundColor: HOME_COLOR }]} />
       </View>
 
-      {/* VS */}
-      <Text style={[styles.vs, { color: textSecondary }]}>VS</Text>
+      <Text style={[styles.vsText, { color: textSecondary }]}>VS</Text>
 
-      {/* Away team */}
+      {/* Away */}
       <View style={[styles.teamSide, styles.teamSideRight]}>
         <View style={[styles.teamDot, { backgroundColor: AWAY_COLOR }]} />
-        <Text style={[styles.teamName, { color: AWAY_COLOR }]} numberOfLines={1}>{awayName}</Text>
-        {awayLogo ? (
-          <Image source={{ uri: awayLogo }} style={styles.teamLogo} resizeMode="contain" />
-        ) : (
-          <View style={[styles.teamLogoPlaceholder, { backgroundColor: AWAY_BG }]}>
-            <Text style={[styles.teamLogoEmoji, { color: AWAY_COLOR }]}>
-              {awayName.charAt(0).toUpperCase()}
-            </Text>
-          </View>
-        )}
+        <Text style={[styles.teamName, { color: AWAY_COLOR }]} numberOfLines={1}>
+          {awayName}
+        </Text>
+        {awayLogo
+          ? <Image source={{ uri: awayLogo }} style={styles.teamLogo} resizeMode="contain" />
+          : (
+            <View style={[styles.teamLogoFallback, { backgroundColor: AWAY_BG_IDLE }]}>
+              <Text style={[styles.teamLogoInitial, { color: AWAY_COLOR }]}>
+                {awayName.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )
+        }
       </View>
     </View>
   );
 }
 
-// ── Main Component ────────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 export const EstadisticasTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   match,
@@ -222,7 +267,7 @@ export const EstadisticasTab: React.FC<{ match: Match; detail: MatchDetail }> = 
 
   return (
     <View style={[styles.root, { backgroundColor: c.bg }]}>
-      {/* Team color legend */}
+      {/* Team legend header */}
       <TeamHeader
         homeName={match.homeTeam.shortName || match.homeTeam.name}
         awayName={match.awayTeam.shortName || match.awayTeam.name}
@@ -233,7 +278,7 @@ export const EstadisticasTab: React.FC<{ match: Match; detail: MatchDetail }> = 
         surface={c.surface}
       />
 
-      {/* Stat sections */}
+      {/* Sections */}
       {detail.statistics.map((cat, idx) => (
         <StatSection
           key={idx}
@@ -243,6 +288,7 @@ export const EstadisticasTab: React.FC<{ match: Match; detail: MatchDetail }> = 
           textSecondary={c.textSecondary}
           textTertiary={c.textTertiary}
           border={c.border}
+          accent={c.accent}
         />
       ))}
 
@@ -254,9 +300,7 @@ export const EstadisticasTab: React.FC<{ match: Match; detail: MatchDetail }> = 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
+  root: { flex: 1 },
 
   // ── Team header ──────────────────────────────────────────────────────────────
   teamHeader: {
@@ -274,73 +318,70 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  teamSideRight: {
-    justifyContent: 'flex-end',
-  },
-  teamLogo: {
-    width: 28,
-    height: 28,
-  },
-  teamLogoPlaceholder: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  teamSideRight: { justifyContent: 'flex-end' },
+  teamLogo: { width: 26, height: 26 },
+  teamLogoFallback: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  teamLogoEmoji: {
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  teamName: {
-    fontSize: 13,
-    fontWeight: '700',
-    flex: 1,
-  },
-  teamDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  vs: {
-    fontSize: 11,
-    fontWeight: '700',
-    paddingHorizontal: 12,
-    opacity: 0.5,
-  },
+  teamLogoInitial: { fontSize: 13, fontWeight: '800' },
+  teamName: { fontSize: 13, fontWeight: '700', flex: 1 },
+  teamDot: { width: 5, height: 5, borderRadius: 2.5 },
+  vsText: { fontSize: 10, fontWeight: '700', paddingHorizontal: 10, opacity: 0.4 },
 
   // ── Section ──────────────────────────────────────────────────────────────────
   section: {
     paddingHorizontal: 16,
     paddingTop: 20,
     paddingBottom: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   sectionFirst: {
-    paddingTop: 12,
+    paddingTop: 14,
+    borderTopWidth: 0,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  sectionAccent: {
+    width: 3,
+    height: 13,
+    borderRadius: 1.5,
+    opacity: 0.7,
   },
   sectionTitle: {
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.8,
-    marginBottom: 10,
+    letterSpacing: 0.9,
   },
 
   // ── Stat row ──────────────────────────────────────────────────────────────────
   statRow: {
+    marginBottom: 14,
+  },
+  valuesRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    marginBottom: 7,
   },
   valSide: {
-    width: 80,
+    width: 76,
   },
+
+  // Pill — always present; background changes strength based on winner
   pill: {
-    alignSelf: 'flex-start',
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderRadius: 20,
-    minWidth: 44,
+    minWidth: 42,
     alignItems: 'center',
+    alignSelf: 'flex-start',
   },
   pillRight: {
     alignSelf: 'flex-end',
@@ -349,23 +390,44 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  pillTextWin: {
+  pillWin: {
     fontWeight: '800',
   },
+
+  // Stat name
   statLabel: {
     flex: 1,
     fontSize: 13,
     fontWeight: '400',
     textAlign: 'center',
     paddingHorizontal: 4,
+    lineHeight: 18,
   },
 
-  // ── Show more button ──────────────────────────────────────────────────────────
+  // ── Proportion bar (tug-of-war) ───────────────────────────────────────────────
+  barRow: {
+    flexDirection: 'row',
+    height: BAR_H,
+    borderRadius: BAR_H / 2,
+    overflow: 'hidden',
+  },
+  barHalf: {
+    flex: 1,
+    flexDirection: 'row',
+    height: BAR_H,
+  },
+  barGap: {
+    width: 2,
+    height: BAR_H,
+    backgroundColor: 'transparent',
+  },
+
+  // ── Show more ─────────────────────────────────────────────────────────────────
   showMoreBtn: {
     alignItems: 'center',
     paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
     marginTop: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   showMoreText: {
     fontSize: 12,
@@ -380,16 +442,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 64,
   },
-  emptyEmoji: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  emptyText: {
-    fontSize: 15,
-    fontWeight: '500',
-  },
+  emptyEmoji: { fontSize: 48, marginBottom: 12 },
+  emptyText: { fontSize: 15, fontWeight: '500' },
 
-  bottomSpacer: {
-    height: 32,
-  },
+  bottomSpacer: { height: 32 },
 });

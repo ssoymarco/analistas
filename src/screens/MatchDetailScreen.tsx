@@ -10,6 +10,7 @@ import {
   Image,
   Animated,
   Dimensions,
+  ScrollView,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { haptics } from '../utils/haptics';
@@ -245,25 +246,33 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   ];
   const [activeTab, setActiveTab] = useState<Tab>('previa');
 
-  // ── Sliding tab indicator ─────────────────────────────────────────────────
-  const screenWidth = Dimensions.get('window').width;
-  const TAB_COUNT = TABS.length;
-  const tabWidth = screenWidth / TAB_COUNT;
-  const INDICATOR_W = 28;
-  const indicatorX = useRef(new Animated.Value((tabWidth - INDICATOR_W) / 2)).current;
+  // ── Scrollable tab indicator ───────────────────────────────────────────────
+  const screenWidth  = Dimensions.get('window').width;
+  const INDICATOR_W  = 28;
+  const indicatorX   = useRef(new Animated.Value(0)).current;
+  const tabScrollRef = useRef<ScrollView>(null);
+  // Measured positions for each tab (set via onLayout)
+  const tabPositions = useRef<Array<{ x: number; width: number }>>([]);
 
-  const handleTabSwitch = useCallback((key: Tab) => {
+  const handleTabSwitch = useCallback((key: Tab, idx: number) => {
     haptics.selection();
     setActiveTab(key);
-    const idx = TABS.findIndex(t => t.key === key);
-    const target = idx * tabWidth + (tabWidth - INDICATOR_W) / 2;
-    Animated.spring(indicatorX, {
-      toValue: target,
-      useNativeDriver: true,
-      speed: 22,
-      bounciness: 5,
-    }).start();
-  }, [TABS, tabWidth, indicatorX]); // eslint-disable-line react-hooks/exhaustive-deps
+    const pos = tabPositions.current[idx];
+    if (pos) {
+      // Slide indicator to center of this tab
+      Animated.spring(indicatorX, {
+        toValue: pos.x + (pos.width - INDICATOR_W) / 2,
+        useNativeDriver: true,
+        speed: 22,
+        bounciness: 5,
+      }).start();
+      // Auto-scroll the tab bar so the active tab is centered
+      tabScrollRef.current?.scrollTo({
+        x: Math.max(0, pos.x - screenWidth / 2 + pos.width / 2),
+        animated: true,
+      });
+    }
+  }, [indicatorX, screenWidth]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Animated hero ──────────────────────────────────────────────────────────
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -473,30 +482,50 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           </Animated.View>
         </Animated.View>
 
-        {/* ── Tab bar with sliding indicator ── */}
+        {/* ── Tab bar — horizontal scroll with sliding underline ── */}
         <View style={[scr.tabBarWrap, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
-          {TABS.map(t => {
-            const active = activeTab === t.key;
-            return (
-              <TouchableOpacity
-                key={t.key}
-                style={scr.tabBtn}
-                onPress={() => handleTabSwitch(t.key)}
-                activeOpacity={0.7}
-              >
-                <Text style={[
-                  scr.tabText,
-                  { color: active ? c.accent : c.textTertiary },
-                  active && { fontWeight: '700' },
-                ]}>{t.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-          {/* Sliding indicator */}
-          <Animated.View style={[
-            scr.tabIndicator,
-            { backgroundColor: c.accent, transform: [{ translateX: indicatorX }] },
-          ]} />
+          <ScrollView
+            ref={tabScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            bounces={false}
+            contentContainerStyle={scr.tabBarContent}
+          >
+            {TABS.map((t, idx) => {
+              const active = activeTab === t.key;
+              return (
+                <TouchableOpacity
+                  key={t.key}
+                  style={scr.tabBtn}
+                  onPress={() => handleTabSwitch(t.key, idx)}
+                  onLayout={(e) => {
+                    tabPositions.current[idx] = {
+                      x: e.nativeEvent.layout.x,
+                      width: e.nativeEvent.layout.width,
+                    };
+                    // Position indicator under the default active tab (index 0)
+                    if (idx === 0) {
+                      indicatorX.setValue(
+                        e.nativeEvent.layout.x + (e.nativeEvent.layout.width - INDICATOR_W) / 2,
+                      );
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    scr.tabText,
+                    { color: active ? c.accent : c.textTertiary },
+                    active && { fontWeight: '700' },
+                  ]}>{t.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+            {/* Sliding underline — inside ScrollView so it scrolls with tabs */}
+            <Animated.View style={[
+              scr.tabIndicator,
+              { backgroundColor: c.accent, transform: [{ translateX: indicatorX }] },
+            ]} />
+          </ScrollView>
         </View>
       </Animated.View>
 
@@ -682,16 +711,17 @@ const scr = StyleSheet.create({
     marginTop: 1,
   },
 
-  // Tab bar
+  // Tab bar — scrollable
   tabBarWrap: {
-    flexDirection: 'row',
     borderBottomWidth: 1,
-    position: 'relative' as const,
+  },
+  tabBarContent: {
+    flexDirection: 'row' as const,
   },
   tabBtn: {
-    flex: 1,
-    alignItems: 'center',
+    paddingHorizontal: 18,
     paddingVertical: 12,
+    alignItems: 'center' as const,
   },
   tabText: { fontSize: 13, fontWeight: '600' },
   tabIndicator: {
