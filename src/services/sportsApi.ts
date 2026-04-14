@@ -580,7 +580,9 @@ function mapStandingToLeagueStanding(sg: SMStandingGroup): LeagueStanding {
  */
 export async function getFixturesByDate(date: string): Promise<Match[]> {
   try {
-    const fixtures = await fetchFixturesByDate(date, LEAGUE_IDS);
+    // Don't filter by league IDs — fetch ALL fixtures and filter client-side.
+    // With 50+ leagues the filter string is too long and causes API errors.
+    const fixtures = await fetchFixturesByDate(date);
     return fixtures.map(mapFixtureToMatch);
   } catch (err) {
     console.warn('[sportsApi] getFixturesByDate failed:', err);
@@ -598,7 +600,7 @@ export interface LeagueWithMatches extends League {
 
 export async function getLeaguesByDate(date: string): Promise<LeagueWithMatches[]> {
   try {
-    const fixtures = await fetchFixturesByDate(date, LEAGUE_IDS);
+    const fixtures = await fetchFixturesByDate(date);
     if (fixtures.length === 0) return [];
 
     const matches = fixtures.map(mapFixtureToMatch);
@@ -1141,7 +1143,7 @@ export async function getNews(): Promise<NewsArticle[]> {
  */
 export async function getMatchCountForDate(date: string): Promise<number> {
   try {
-    const fixtures = await fetchFixturesByDate(date, LEAGUE_IDS);
+    const fixtures = await fetchFixturesByDate(date);
     return fixtures.length || 0;
   } catch {
     return 0;
