@@ -1191,52 +1191,114 @@ export function getSearchableLeagues(): SearchableLeague[] {
 }
 
 /** Fetches all teams from available leagues for local search */
+// ── Popular Teams (hardcoded for instant onboarding, sorted by global popularity) ──
+
+const POPULAR_TEAMS: SearchableTeam[] = [
+  // Liga MX — México (first for Mexican market)
+  { id: 2789, name: 'Club América', shortName: 'AME', logo: 'https://cdn.sportmonks.com/images/soccer/teams/21/2789.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2790, name: 'Chivas Guadalajara', shortName: 'CHI', logo: 'https://cdn.sportmonks.com/images/soccer/teams/22/2790.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2791, name: 'Cruz Azul', shortName: 'CAZ', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/2791.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2794, name: 'Tigres UANL', shortName: 'TIG', logo: 'https://cdn.sportmonks.com/images/soccer/teams/26/2794.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2793, name: 'Monterrey', shortName: 'MTY', logo: 'https://cdn.sportmonks.com/images/soccer/teams/25/2793.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2796, name: 'Pumas UNAM', shortName: 'PUM', logo: 'https://cdn.sportmonks.com/images/soccer/teams/28/2796.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2795, name: 'Santos Laguna', shortName: 'SAN', logo: 'https://cdn.sportmonks.com/images/soccer/teams/27/2795.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2792, name: 'Toluca', shortName: 'TOL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/24/2792.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  // Europe — Top clubs
+  { id: 3468, name: 'Real Madrid', shortName: 'RMA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/12/3468.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  { id: 83, name: 'Barcelona', shortName: 'BAR', logo: 'https://cdn.sportmonks.com/images/soccer/teams/19/83.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  { id: 9, name: 'Manchester City', shortName: 'MCI', logo: 'https://cdn.sportmonks.com/images/soccer/teams/9/9.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
+  { id: 14, name: 'Manchester United', shortName: 'MUN', logo: 'https://cdn.sportmonks.com/images/soccer/teams/14/14.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
+  { id: 8, name: 'Liverpool', shortName: 'LIV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/8.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
+  { id: 18, name: 'Arsenal', shortName: 'ARS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/18.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
+  { id: 503, name: 'Bayern München', shortName: 'BAY', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/503.png', leagueName: 'Bundesliga', leagueId: 82, seasonId: 25646 },
+  { id: 489, name: 'Juventus', shortName: 'JUV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/9/489.png', leagueName: 'Serie A', leagueId: 384, seasonId: 25533 },
+  { id: 3468, name: 'AC Milan', shortName: 'MIL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/17/497.png', leagueName: 'Serie A', leagueId: 384, seasonId: 25533 },
+  { id: 85, name: 'Paris Saint-Germain', shortName: 'PSG', logo: 'https://cdn.sportmonks.com/images/soccer/teams/21/85.png', leagueName: 'Ligue 1', leagueId: 301, seasonId: 25651 },
+  // Americas — Other
+  { id: 7177, name: 'Inter Miami', shortName: 'MIA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/25/7177.png', leagueName: 'MLS', leagueId: 779, seasonId: 26720 },
+  { id: 77, name: 'Boca Juniors', shortName: 'BOC', logo: 'https://cdn.sportmonks.com/images/soccer/teams/13/77.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
+  { id: 78, name: 'River Plate', shortName: 'RIV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/14/78.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
+  { id: 121, name: 'Flamengo', shortName: 'FLA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/25/121.png', leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
+  // Saudi Arabia
+  { id: 2932, name: 'Al-Nassr', shortName: 'NAS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/12/2932.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
+  { id: 2931, name: 'Al-Hilal', shortName: 'HIL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/2931.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
+];
+
+// ── Popular Players (hardcoded for instant onboarding) ──
+
+const POPULAR_PLAYERS: SearchablePlayer[] = [
+  // Global stars
+  { id: 93392, name: 'Lionel Messi', image: 'https://cdn.sportmonks.com/images/soccer/players/24/93392.png' },
+  { id: 85668, name: 'Cristiano Ronaldo', image: 'https://cdn.sportmonks.com/images/soccer/players/20/85668.png' },
+  { id: 159583, name: 'Erling Haaland', image: 'https://cdn.sportmonks.com/images/soccer/players/15/159583.png' },
+  { id: 163637, name: 'Kylian Mbappé', image: 'https://cdn.sportmonks.com/images/soccer/players/21/163637.png' },
+  { id: 316264, name: 'Jude Bellingham', image: 'https://cdn.sportmonks.com/images/soccer/players/24/316264.png' },
+  { id: 284909, name: 'Vinícius Júnior', image: 'https://cdn.sportmonks.com/images/soccer/players/13/284909.png' },
+  { id: 370498, name: 'Lamine Yamal', image: 'https://cdn.sportmonks.com/images/soccer/players/18/370498.png' },
+  { id: 159584, name: 'Florian Wirtz', image: 'https://cdn.sportmonks.com/images/soccer/players/16/159584.png' },
+  { id: 153357, name: 'Pedri', image: 'https://cdn.sportmonks.com/images/soccer/players/13/153357.png' },
+  { id: 37572, name: 'Mohamed Salah', image: 'https://cdn.sportmonks.com/images/soccer/players/20/37572.png' },
+  // Mexico stars
+  { id: 162396, name: 'Santiago Giménez', image: 'https://cdn.sportmonks.com/images/soccer/players/12/162396.png' },
+  { id: 110137, name: 'Raúl Jiménez', image: 'https://cdn.sportmonks.com/images/soccer/players/25/110137.png' },
+  { id: 163535, name: 'Julián Quiñones', image: 'https://cdn.sportmonks.com/images/soccer/players/19/163535.png' },
+  { id: 85966, name: 'Guillermo Ochoa', image: 'https://cdn.sportmonks.com/images/soccer/players/14/85966.png' },
+  { id: 37557, name: 'Hirving Lozano', image: 'https://cdn.sportmonks.com/images/soccer/players/5/37557.png' },
+];
+
+/**
+ * Returns popular teams instantly (hardcoded), then optionally loads more from API.
+ * First batch = instant. Subsequent batches loaded on demand via loadMoreTeams().
+ */
 export async function getSearchableTeams(): Promise<SearchableTeam[]> {
+  // Return popular teams instantly — no API call needed
+  return POPULAR_TEAMS;
+}
+
+/**
+ * Load more teams from a specific set of leagues (called when user taps "Ver más").
+ * Uses parallel requests for speed.
+ */
+export async function loadMoreTeams(leagueConfigs: typeof AVAILABLE_LEAGUES): Promise<SearchableTeam[]> {
   const teams: SearchableTeam[] = [];
-  for (const league of AVAILABLE_LEAGUES) {
-    const seasonId = league.currentSeasonId;
-    if (!seasonId) continue;
-    try {
-      const smTeams = await fetchTeamsBySeasonId(seasonId);
-      for (const t of smTeams) {
-        teams.push({
-          id: t.id,
-          name: t.name,
-          shortName: t.short_code || t.name.slice(0, 3).toUpperCase(),
-          logo: t.image_path || '⚽',
-          leagueName: league.name,
-          leagueId: league.id,
-          seasonId,
-        });
-      }
-    } catch (err) {
-      console.warn(`[sportsApi] getSearchableTeams failed for ${league.name}:`, err);
+  const batches = [];
+
+  // Parallel: fetch up to 5 leagues simultaneously
+  for (let i = 0; i < leagueConfigs.length; i += 5) {
+    const batch = leagueConfigs.slice(i, i + 5);
+    batches.push(
+      Promise.all(
+        batch.filter(l => l.currentSeasonId).map(async (league) => {
+          try {
+            const smTeams = await fetchTeamsBySeasonId(league.currentSeasonId!);
+            return smTeams.map(t => ({
+              id: t.id,
+              name: t.name,
+              shortName: t.short_code || t.name.slice(0, 3).toUpperCase(),
+              logo: t.image_path || '⚽',
+              leagueName: league.name,
+              leagueId: league.id,
+              seasonId: league.currentSeasonId!,
+            }));
+          } catch {
+            return [] as SearchableTeam[];
+          }
+        })
+      )
+    );
+  }
+
+  for (const batch of batches) {
+    const results = await batch;
+    for (const leagueTeams of results) {
+      teams.push(...leagueTeams);
     }
   }
+
   return teams;
 }
 
-/** Fetches top scorers from available leagues as searchable players */
+/** Returns popular players instantly (hardcoded) */
 export async function getSearchablePlayers(): Promise<SearchablePlayer[]> {
-  const players: SearchablePlayer[] = [];
-  const seenIds = new Set<number>();
-  for (const league of AVAILABLE_LEAGUES) {
-    const seasonId = league.currentSeasonId;
-    if (!seasonId) continue;
-    try {
-      const scorers = await fetchTopScorers(seasonId);
-      for (const ts of scorers) {
-        if (!ts.player || seenIds.has(ts.player_id)) continue;
-        seenIds.add(ts.player_id);
-        players.push({
-          id: ts.player_id,
-          name: ts.player.display_name || ts.player.common_name || ts.player.name,
-          image: ts.player.image_path || undefined,
-        });
-      }
-    } catch (err) {
-      console.warn(`[sportsApi] getSearchablePlayers failed for ${league.name}:`, err);
-    }
-  }
-  return players;
+  return POPULAR_PLAYERS;
 }

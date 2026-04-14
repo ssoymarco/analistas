@@ -495,7 +495,7 @@ async function fetchAllPages<T>(
   let hasMore = true;
 
   while (hasMore) {
-    const qs = buildQueryString({ api_token: API_TOKEN, page: String(page), ...params });
+    const qs = buildQueryString({ api_token: API_TOKEN, page: String(page), per_page: '150', ...params });
     const rawUrl = `${BASE_URL}/${endpoint}?${qs}`;
     const url = proxyUrl(rawUrl);
 
@@ -533,10 +533,10 @@ export async function fetchFixturesByDate(date: string, leagueIds?: string): Pro
   return fetchAllPages<SMFixture>(`fixtures/date/${date}`, params);
 }
 
-/** GET /fixtures/{id} — full detail with all available includes */
+/** GET /fixtures/{id} — full detail with ALL available includes (Pro plan) */
 export async function fetchFixtureById(id: number): Promise<SMFixture> {
   return fetchApi<SMFixture>(`fixtures/${id}`, {
-    include: 'participants;scores;events;statistics;lineups.player;venue;league;referees.referee;tvstations.tvstation;weatherreport',
+    include: 'participants;scores;events;statistics;lineups.player;venue;league;referees.referee;tvstations.tvstation;weatherreport;odds;predictions',
   });
 }
 

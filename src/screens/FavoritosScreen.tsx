@@ -512,9 +512,9 @@ export const FavoritosScreen: React.FC = () => {
           style={st.chipsScroll}
           contentContainerStyle={st.chipsContent}
         >
-          {selectedChips.map(item => (
+          {selectedChips.map((item, idx) => (
             <TouchableOpacity
-              key={item.id}
+              key={`chip_${item.id}_${idx}`}
               style={[st.chip, { backgroundColor: c.accentDim, borderColor: c.accent + '44' }]}
               onPress={() => { haptics.medium(); config.toggle(item); }}
               activeOpacity={0.8}
