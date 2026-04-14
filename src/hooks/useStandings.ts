@@ -22,12 +22,10 @@ export function useStandings(seasonId: number | null): UseStandingsResult {
 
   useEffect(() => {
     if (!seasonId || seasonId <= 0) {
-      console.warn('[useStandings] invalid seasonId:', seasonId, '— skipping fetch');
       setStandings([]);
       setLoading(false);
       return;
     }
-    console.log('[useStandings] fetching standings for seasonId:', seasonId);
 
     setLoading(true);
     setError(null);
