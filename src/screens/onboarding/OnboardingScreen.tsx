@@ -53,7 +53,7 @@ const i18n = {
     ],
   },
   welcome: {
-    label: 'BIENVENIDO',
+    label: 'TE DAMOS LA BIENVENIDA',
     tagline: 'Tu experiencia como analista\nempieza ahora',
     cta: 'Empezar',
     defaultName: 'ANALISTA',
@@ -784,7 +784,7 @@ const LeaguesStep: React.FC<{
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, paddingBottom: 80 }}>
       {leagues.map(league => (
         <LeagueCard
           key={league.id}
@@ -1113,7 +1113,7 @@ const CONFETTI_COLS = ['#10b981','#fbbf24','#3b82f6','#f97316','#ef4444','#8b5cf
 
 // Golden-ratio spacing gives well-distributed deterministic X positions
 const _PHI = 1.61803398875;
-const PARTICLES = Array.from({ length: 28 }, (_, i) => ({
+const PARTICLES = Array.from({ length: 56 }, (_, i) => ({
   id: i,
   x: (((i * _PHI) % 1) * SCREEN_W),
   color: CONFETTI_COLS[i % CONFETTI_COLS.length],
@@ -1318,14 +1318,16 @@ const WelcomeAnimation: React.FC<{ userName: string; onComplete: () => void }> =
 
       {/* Central content */}
       <Animated.View style={[wl.content, { opacity: titleOp, transform: [{ scale: titleScale }] }]}>
+        {/* Analistas logo */}
         <View style={wl.logoWrap}>
           <View style={[wl.logoBall, { borderColor: GREEN }]}>
-            <Text style={wl.logoEmoji}>⚽</Text>
+            <Text style={{ fontSize: 18, fontWeight: '900', color: GREEN, letterSpacing: -0.5 }}>A</Text>
           </View>
         </View>
 
-        <Text style={wl.welcomeLabel}>{i18n.welcome.label}</Text>
+        {/* Name first, then welcome */}
         <Text style={[wl.nameText, { color: GREEN }]}>{displayName}</Text>
+        <Text style={wl.welcomeLabel}>{i18n.welcome.label}</Text>
 
         <View style={[wl.divider, { backgroundColor: GREEN }]} />
 

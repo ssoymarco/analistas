@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, RefreshControl, PanResponder } from 'react-native';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { StreakModal } from '../components/StreakModal';
 import { SkeletonPartidos } from '../components/Skeleton';
@@ -91,6 +91,29 @@ export const PartidosScreen: React.FC = () => {
     setActiveTab('todos');
   }, []);
 
+  // ── Swipe left/right to change date ─────────────────────────────────────
+  const shiftDate = useCallback((days: number) => {
+    setSelectedDate(prev => {
+      const d = new Date(prev + 'T12:00:00');
+      d.setDate(d.getDate() + days);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    });
+    setActiveTab('todos');
+  }, []);
+
+  const swipeRef = useRef({ startX: 0, handled: false });
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > 30 && Math.abs(gs.dy) < 40,
+      onPanResponderGrant: (_, gs) => { swipeRef.current = { startX: gs.x0, handled: false }; },
+      onPanResponderRelease: (_, gs) => {
+        if (swipeRef.current.handled) return;
+        if (gs.dx < -60) { swipeRef.current.handled = true; shiftDate(1); }   // swipe left → tomorrow
+        if (gs.dx > 60)  { swipeRef.current.handled = true; shiftDate(-1); }  // swipe right → yesterday
+      },
+    })
+  ).current;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -168,6 +191,7 @@ export const PartidosScreen: React.FC = () => {
       <FilterTabs activeTab={activeTab} onTabChange={setActiveTab} liveCounts={liveCount} totalCount={totalCount} finishedCount={finishedCount} />
 
       <ScrollView
+        {...panResponder.panHandlers}
         style={{ flex: 1, backgroundColor: c.bg }}
         contentContainerStyle={{ paddingTop: 8 }}
         showsVerticalScrollIndicator={false}
