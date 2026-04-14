@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useEffect } from 'react';
+import { navigationRef } from '../utils/navigationRef';
 import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -386,7 +387,7 @@ export const AppNavigator: React.FC = () => {
 
   return (
     <Animated.View style={{ flex: 1, opacity: mainFade }}>
-      <NavigationContainer theme={navTheme}>
+      <NavigationContainer ref={navigationRef} theme={navTheme}>
         <MainTabs />
       </NavigationContainer>
     </Animated.View>

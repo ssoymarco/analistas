@@ -19,6 +19,8 @@ import { useFavorites } from '../contexts/FavoritesContext';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPerfil } from '../components/Skeleton';
 import { StreakModal } from '../components/StreakModal';
+import { EditProfileModal } from '../components/EditProfileModal';
+import { scheduleLocalNotification } from '../services/notifications';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getInitials(name: string) {
@@ -205,6 +207,7 @@ export const PerfilScreen: React.FC = () => {
   const [selectedLang, setSelectedLang] = useState('es');
   const [streakModalVisible, setStreakModalVisible] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  const [editProfileVisible, setEditProfileVisible] = useState(false);
   const [codeModalVisible, setCodeModalVisible] = useState(false);
   const [aboutModalVisible, setAboutModalVisible] = useState(false);
   const [langModalVisible, setLangModalVisible] = useState(false);
@@ -214,11 +217,63 @@ export const PerfilScreen: React.FC = () => {
 
   const displayName = user?.name ?? 'Visitante';
   const displayEmail = user?.email ?? '';
-  const displayUsername = isAuthenticated ? '@' + (user?.name?.toLowerCase().replace(/\s+/g, '.') ?? 'analista') : '';
+  const displayUsername = isAuthenticated
+    ? '@' + (user?.username ?? user?.name?.toLowerCase().replace(/\s+/g, '.') ?? 'analista')
+    : '';
   const initials = getInitials(displayName);
   const currentLang = LANGUAGES.find(l => l.id === selectedLang);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => { setShowNameInHeader(e.nativeEvent.contentOffset.y > 90); }, []);
+
+  // ── Dev-only: triple-tap streak card → fire test notification ───────────────
+  const devTapCount = React.useRef(0);
+  const devTapTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleDevTap = __DEV__
+    ? () => {
+        devTapCount.current += 1;
+        if (devTapTimer.current) clearTimeout(devTapTimer.current);
+        devTapTimer.current = setTimeout(() => { devTapCount.current = 0; }, 600);
+        if (devTapCount.current >= 3) {
+          devTapCount.current = 0;
+          Alert.alert('🔔 Test Notificación', 'Elige el tipo:', [
+            {
+              text: '⚽ Gol',
+              onPress: () => scheduleLocalNotification({
+                type: 'goal', matchId: 'test-001',
+                homeTeam: 'Real Madrid', awayTeam: 'Barcelona',
+                homeScore: 1, awayScore: 0,
+                scorerName: 'Vinícius Jr.', minute: 23, teamSide: 'home',
+              }, 3),
+            },
+            {
+              text: '📣 Inicio',
+              onPress: () => scheduleLocalNotification({
+                type: 'matchStart', matchId: 'test-001',
+                homeTeam: 'Real Madrid', awayTeam: 'Barcelona',
+                league: 'LaLiga', kickoffUtc: new Date(Date.now() + 5 * 60_000).toISOString(),
+              }, 3),
+            },
+            {
+              text: '📋 Alineaciones',
+              onPress: () => scheduleLocalNotification({
+                type: 'lineups', matchId: 'test-001',
+                homeTeam: 'Real Madrid', awayTeam: 'Barcelona',
+                league: 'LaLiga', homeFormation: '4-3-3', awayFormation: '4-2-3-1',
+              }, 3),
+            },
+            {
+              text: '🏆 Resultado final',
+              onPress: () => scheduleLocalNotification({
+                type: 'finalResult', matchId: 'test-001',
+                homeTeam: 'Real Madrid', awayTeam: 'Barcelona',
+                homeScore: 2, awayScore: 1, league: 'LaLiga',
+              }, 3),
+            },
+            { text: 'Cancelar', style: 'cancel' },
+          ]);
+        }
+      }
+    : undefined;
   const handleLogout = () => { haptics.heavy(); setLogoutModalVisible(false); logout(); resetOnboarding(); };
 
   const handleShare = useCallback(async () => {
@@ -300,12 +355,16 @@ export const PerfilScreen: React.FC = () => {
               )}
               {isAuthenticated && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}>
-                  <Text style={{ fontSize: 10, color: c.textTertiary }}>📅 Analistas · Miembro desde Marzo 2026</Text>
+                  <Text style={{ fontSize: 10, color: c.textTertiary }}>
+                  📅 Analistas · Miembro desde {user?.createdAt
+                    ? user.createdAt.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
+                    : 'hoy'}
+                </Text>
                 </View>
               )}
             </View>
             {isAuthenticated && (
-              <TouchableOpacity style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', alignItems: 'center', justifyContent: 'center', marginTop: 2 }} activeOpacity={0.7}>
+              <TouchableOpacity style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', alignItems: 'center', justifyContent: 'center', marginTop: 2 }} activeOpacity={0.7} onPress={() => setEditProfileVisible(true)}>
                 <Text style={{ fontSize: 14 }}>✏️</Text>
               </TouchableOpacity>
             )}
@@ -321,7 +380,7 @@ export const PerfilScreen: React.FC = () => {
           <TouchableOpacity
             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.bg, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 10, marginTop: 16 }}
             activeOpacity={0.8}
-            onPress={() => setStreakModalVisible(true)}
+            onPress={() => { handleDevTap?.(); setStreakModalVisible(true); }}
           >
             <Text style={{ fontSize: 14 }}>🔥</Text>
             <View style={{ flex: 1 }}>
@@ -440,6 +499,9 @@ export const PerfilScreen: React.FC = () => {
         c={c}
         isDark={isDark}
       />
+
+      {/* Edit Profile */}
+      <EditProfileModal visible={editProfileVisible} onClose={() => setEditProfileVisible(false)} />
 
       {/* Logout */}
       <Modal visible={logoutModalVisible} transparent animationType="fade" onRequestClose={() => setLogoutModalVisible(false)}>

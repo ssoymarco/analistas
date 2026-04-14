@@ -6,7 +6,7 @@ const KEYS = {
   teams:         'analistas_fav_teams',
   leagues:       'analistas_fav_leagues',
   players:       'analistas_fav_players',
-  notifications: 'analistas_notif_prefs',
+  notifications: 'analistas_onboarding_notif_prefs',
 } as const;
 
 const DEFAULT_NOTIFS: Record<string, boolean> = {

@@ -1,0 +1,55 @@
+/**
+ * authGoogle.ts
+ *
+ * Google Sign-In via expo-auth-session + Firebase credential.
+ * Works in Expo Go (browser-based OAuth flow).
+ *
+ * Flow:
+ *  1. Open Google OAuth in the system browser via expo-auth-session
+ *  2. Receive id_token back via redirect
+ *  3. Create Firebase GoogleAuthProvider credential
+ *  4. signInWithCredential(auth, credential) → Firebase user
+ */
+
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
+import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { auth } from './firebase';
+
+// Required: warms up the browser on Android for faster auth
+WebBrowser.maybeCompleteAuthSession();
+
+// Client IDs from Firebase Console / GoogleService-Info.plist
+// iOS Client ID: from GoogleService-Info.plist → CLIENT_ID
+const IOS_CLIENT_ID =
+  '562270448336-mpuuee0qov1j96eea9g5idh6b0eh79m3.apps.googleusercontent.com';
+
+// Web Client ID: Firebase Console → Authentication → Sign-in method
+// → Google → Web SDK configuration → Web client ID
+// TODO: Fill this in from Firebase Console if needed for Android / web
+const WEB_CLIENT_ID = IOS_CLIENT_ID; // fallback until web client is configured
+
+export function useGoogleAuth() {
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    iosClientId: IOS_CLIENT_ID,
+    webClientId: WEB_CLIENT_ID,
+  });
+
+  const signInWithGoogle = async (): Promise<void> => {
+    const result = await promptAsync();
+
+    if (result.type !== 'success') {
+      if (result.type === 'cancel') throw new Error('cancelled');
+      throw new Error('Google sign-in failed');
+    }
+
+    const { id_token } = result.params;
+    if (!id_token) throw new Error('No id_token received from Google');
+
+    const credential = GoogleAuthProvider.credential(id_token);
+    await signInWithCredential(auth, credential);
+    // After this, onAuthStateChanged in AuthContext fires with the real Firebase user
+  };
+
+  return { signInWithGoogle, googleAuthReady: !!request };
+}

@@ -8,7 +8,7 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import {
   View, Text, StyleSheet, Animated, TouchableOpacity, FlatList, ScrollView,
   TextInput, Image, Dimensions, Platform, StatusBar, ActivityIndicator,
-  Keyboard, Easing, KeyboardAvoidingView,
+  Keyboard, Easing, KeyboardAvoidingView, Alert,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,9 +18,12 @@ import { useOnboarding } from '../../contexts/OnboardingContext';
 import { useFavorites } from '../../contexts/FavoritesContext';
 import { useAuth } from '../../contexts/AuthContext';
 import type { AuthMethod } from '../../contexts/AuthContext';
+import { useGoogleAuth } from '../../services/authGoogle';
 import { getSearchableTeams, getSearchableLeagues, getSearchablePlayers } from '../../services/sportsApi';
 import { normalize } from '../../utils/normalize';
 import type { SearchableTeam, SearchableLeague, SearchablePlayer } from '../../services/sportsApi';
+import { requestPermissionsAndGetToken } from '../../services/notifications';
+import { useNotificationPrefs } from '../../contexts/NotificationPrefsContext';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const TOTAL_STEPS = 6;
@@ -1045,13 +1048,6 @@ const PresentacionStep: React.FC<{
               borderColor={c.border}
               onPress={() => onLogin('google')}
             />
-            <SocialButton
-              icon={<FacebookIcon />}
-              label="Continuar con Facebook"
-              bg="#1877F2"
-              textColor="#fff"
-              onPress={() => onLogin('facebook')}
-            />
           </View>
 
           {/* Guest */}
@@ -1375,6 +1371,8 @@ export const OnboardingScreen: React.FC = () => {
     toggleFollowPlayer, isFollowingPlayer,
   } = useFavorites();
   const { login } = useAuth();
+  const { signInWithGoogle } = useGoogleAuth();
+  const { setPushToken, setPermissionStatus } = useNotificationPrefs();
 
   // Step state
   const [step, setStep] = useState(0);
@@ -1461,8 +1459,25 @@ export const OnboardingScreen: React.FC = () => {
   const goNext = useCallback(() => {
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+
+    // Step 4 = Notifications step. Request OS permission when the user presses
+    // CONTINUAR. Fire-and-forget: we advance regardless of outcome — the system
+    // sheet appears on top of the next step.
+    if (step === 4) {
+      requestPermissionsAndGetToken()
+        .then(token => {
+          if (token) {
+            setPushToken(token);
+            setPermissionStatus('granted');
+          } else {
+            setPermissionStatus('denied');
+          }
+        })
+        .catch(() => { setPermissionStatus('denied'); });
+    }
+
     if (step < TOTAL_STEPS - 1) animateTransition(step + 1);
-  }, [step, animateTransition]);
+  }, [step, animateTransition, setPushToken, setPermissionStatus]);
 
   const goBack = useCallback(() => {
     Keyboard.dismiss();
@@ -1475,20 +1490,38 @@ export const OnboardingScreen: React.FC = () => {
   }, [animateTransition]);
 
   // ── Finish ──────────────────────────────────────────────────────────────
-  const finishOnboarding = useCallback((method?: AuthMethod) => {
+  const finishOnboarding = useCallback(async (method?: AuthMethod) => {
     // Sync to FavoritesContext
     selectedTeams.forEach(id => { if (!isFollowingTeam(id)) toggleFollowTeam(id); });
     selectedLeagues.forEach(id => { if (!isFollowingLeague(id)) toggleFollowLeague(id); });
     selectedPlayers.forEach(id => { if (!isFollowingPlayer(id)) toggleFollowPlayer(id); });
-    // Login
-    if (method && method !== 'guest') {
-      login(method);
-    } else {
-      login('guest');
+
+    const pendingName = userName.trim() || undefined;
+
+    try {
+      if (method === 'google') {
+        // Store the display name for onAuthStateChanged to pick up, then trigger OAuth
+        login('google', pendingName);
+        await signInWithGoogle();
+      } else if (method === 'apple') {
+        Alert.alert(
+          'Apple Sign-In',
+          'Apple Sign-In requiere un dev build. Por ahora puedes continuar como invitado.',
+          [{ text: 'OK' }],
+        );
+        return;
+      } else {
+        // Guest
+        await login('guest', pendingName);
+      }
+      setShowPersonalizing(true);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg !== 'cancelled') {
+        Alert.alert('Error al iniciar sesión', 'No se pudo completar el inicio de sesión. Intenta de nuevo.');
+      }
     }
-    // Show personalizing → then welcome animation
-    setShowPersonalizing(true);
-  }, [selectedTeams, selectedLeagues, selectedPlayers, isFollowingTeam, isFollowingLeague, isFollowingPlayer, toggleFollowTeam, toggleFollowLeague, toggleFollowPlayer, login]);
+  }, [selectedTeams, selectedLeagues, selectedPlayers, userName, isFollowingTeam, isFollowingLeague, isFollowingPlayer, toggleFollowTeam, toggleFollowLeague, toggleFollowPlayer, login, signInWithGoogle]);
 
   // ── Step metadata ───────────────────────────────────────────────────────
   const stepMeta: Record<number, { title: string; subtitle: string }> = {
