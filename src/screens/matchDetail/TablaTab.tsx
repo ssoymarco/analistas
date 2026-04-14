@@ -10,6 +10,7 @@ import { useStandings } from '../../hooks/useStandings';
 import type { Match, MatchDetail, LeagueStanding } from '../../data/types';
 import { SkeletonLeagueDetail } from '../../components/Skeleton';
 import type { PartidosStackParamList } from '../../navigation/AppNavigator';
+import { getLeagueConfig } from '../../config/leagues';
 
 // ── Dynamic imports ──────────────────────────────────────────────────────────
 let ViewShot: any = null;
@@ -139,14 +140,17 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const tableRef = useRef<any>(null);
 
-  // Use match.seasonId first, fallback to league config
-  const leagueConfig = (() => {
-    try {
-      const { getLeagueConfig: getLc } = require('../../config/leagues');
-      return getLc(Number(match.leagueId));
-    } catch { return null; }
-  })();
-  const seasonId = match.seasonId ?? leagueConfig?.currentSeasonId ?? null;
+  // Resolve seasonId: use match.seasonId if truthy, else fallback to league config
+  const leagueConfig = getLeagueConfig(Number(match.leagueId));
+  const seasonId = (match.seasonId && match.seasonId > 0)
+    ? match.seasonId
+    : (leagueConfig?.currentSeasonId ?? null);
+
+  console.log('[TablaTab] leagueId:', match.leagueId,
+    '| match.seasonId:', match.seasonId,
+    '| config.seasonId:', leagueConfig?.currentSeasonId,
+    '| resolved:', seasonId);
+
   const { standings, loading, error } = useStandings(seasonId);
 
   const homeId = match.homeTeam.id;

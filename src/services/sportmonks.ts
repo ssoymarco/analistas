@@ -550,10 +550,12 @@ export async function fetchLivescores(): Promise<SMFixture[]> {
 
 /** GET /standings/seasons/{seasonId}?include=participant;details */
 export async function fetchStandings(seasonId: number): Promise<SMStandingGroup[]> {
+  console.log('[sportmonks] fetchStandings called for seasonId:', seasonId);
   // Standings don't paginate like fixtures — use direct fetchApi
   const data = await fetchApi<SMStandingGroup[]>(`standings/seasons/${seasonId}`, {
     include: 'participant;details',
   });
+  console.log('[sportmonks] fetchStandings response type:', typeof data, 'isArray:', Array.isArray(data), 'length:', Array.isArray(data) ? data.length : 'N/A');
   return Array.isArray(data) ? data : [];
 }
 
