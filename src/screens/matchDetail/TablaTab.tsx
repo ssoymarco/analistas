@@ -139,8 +139,14 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const tableRef = useRef<any>(null);
 
-  const seasonId = match.seasonId ?? null;
-  console.log('[TablaTab] match.seasonId:', match.seasonId, '→ seasonId:', seasonId);
+  // Use match.seasonId first, fallback to league config
+  const leagueConfig = (() => {
+    try {
+      const { getLeagueConfig: getLc } = require('../../config/leagues');
+      return getLc(Number(match.leagueId));
+    } catch { return null; }
+  })();
+  const seasonId = match.seasonId ?? leagueConfig?.currentSeasonId ?? null;
   const { standings, loading, error } = useStandings(seasonId);
 
   const homeId = match.homeTeam.id;
