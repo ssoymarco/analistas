@@ -140,6 +140,7 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
   const tableRef = useRef<any>(null);
 
   const seasonId = match.seasonId ?? null;
+  console.log('[TablaTab] match.seasonId:', match.seasonId, '→ seasonId:', seasonId);
   const { standings, loading, error } = useStandings(seasonId);
 
   const homeId = match.homeTeam.id;
