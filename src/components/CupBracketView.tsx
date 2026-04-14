@@ -1,12 +1,8 @@
-// ── CupBracketView v2 — Bracket Tree ──────────────────────────────────────────
-// Horizontal bracket tree for knockout competitions.
-// • Round pills at top for quick navigation
-// • Two-column bracket pairs with connector lines
-// • Compact tie cards: logos, names, aggregate scores
-// • Winner highlighted in green, eliminated teams with strikethrough
-// • Current match highlighted with accent border
-// • Special Final card with trophy icon
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+// ── CupBracketView v3 — Stage-based vertical list with round pills ────────────
+// Shows one stage at a time. Pills navigate between stages.
+// Each stage shows its ties as full-width cards with scores and leg details.
+// Works for any tournament size (from 4-team cups to 64-team qualifiers).
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,144 +10,78 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
-  Dimensions,
 } from 'react-native';
 import { useThemeColors } from '../theme/useTheme';
-import type { CupRound, CupTie } from '../services/sportsApi';
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-const CARD_H = 64;       // height of a tie card
-const CARD_W = 158;      // width of a tie card
-const PAIR_GAP = 6;      // gap between paired ties (within a feeder pair)
-const GROUP_GAP = 20;    // gap between bracket pairs in the first round
-const CONN_W = 30;       // width of connector column between rounds
-const LINE_W = 1.5;      // thickness of bracket lines
-const LINE_COLOR = 'rgba(255,255,255,0.12)';
-const ACCENT_LINE = '#00E096';
+import type { CupRound, CupTie, CupLeg } from '../services/sportsApi';
 
 // ── Team Logo ─────────────────────────────────────────────────────────────────
-const Logo: React.FC<{ uri: string; size?: number }> = ({ uri, size = 18 }) => {
+const Logo: React.FC<{ uri: string; size?: number }> = ({ uri, size = 22 }) => {
   if (uri?.startsWith('http')) {
-    return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: 2 }} resizeMode="contain" />;
+    return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: 3 }} resizeMode="contain" />;
   }
-  return <Text style={{ fontSize: size - 3 }}>{uri || '⚽'}</Text>;
+  return <Text style={{ fontSize: size - 4 }}>{uri || '⚽'}</Text>;
 };
 
-// ── Position Calculator ───────────────────────────────────────────────────────
-// Calculates the Y position of every tie card in the bracket tree.
-// Round 0 (first round): ties grouped in pairs, stacked vertically.
-// Round N: each tie centered between its two feeder ties from round N-1.
-
-interface BracketLayout {
-  /** Y position of each tie: positions[roundIdx][tieIdx] */
-  positions: number[][];
-  /** Total height of the bracket area */
-  totalHeight: number;
-  /** Total width of the bracket area */
-  totalWidth: number;
-}
-
-function calculateLayout(rounds: CupRound[]): BracketLayout {
-  if (rounds.length === 0) return { positions: [], totalHeight: 0, totalWidth: 0 };
-
-  const positions: number[][] = [];
-  const pairH = CARD_H * 2 + PAIR_GAP;
-
-  // ── Round 0 ─────────────────────────────────────────────────────────────────
-  const first: number[] = [];
-  const n = rounds[0].ties.length;
-  for (let i = 0; i < n; i++) {
-    const pair = Math.floor(i / 2);
-    const slot = i % 2;
-    first.push(pair * (pairH + GROUP_GAP) + slot * (CARD_H + PAIR_GAP));
-  }
-  positions.push(first);
-
-  // ── Subsequent rounds ───────────────────────────────────────────────────────
-  for (let r = 1; r < rounds.length; r++) {
-    const prev = positions[r - 1];
-    const curr: number[] = [];
-
-    for (let i = 0; i < rounds[r].ties.length; i++) {
-      const topIdx = i * 2;
-      const botIdx = i * 2 + 1;
-
-      if (topIdx < prev.length && botIdx < prev.length) {
-        const topCenter = prev[topIdx] + CARD_H / 2;
-        const botCenter = prev[botIdx] + CARD_H / 2;
-        curr.push((topCenter + botCenter) / 2 - CARD_H / 2);
-      } else if (topIdx < prev.length) {
-        curr.push(prev[topIdx]);
-      } else {
-        curr.push(i * (CARD_H + GROUP_GAP));
-      }
-    }
-    positions.push(curr);
-  }
-
-  // Total height
-  let maxY = 0;
-  for (const rp of positions) {
-    for (const y of rp) {
-      if (y + CARD_H > maxY) maxY = y + CARD_H;
-    }
-  }
-
-  // Total width = sum of round columns + connector columns
-  const totalWidth = rounds.length * CARD_W + (rounds.length - 1) * CONN_W + 32;
-
-  return { positions, totalHeight: maxY + 16, totalWidth };
-}
-
-// ── Bracket Connectors ────────────────────────────────────────────────────────
-// Draws the ┐├┘ bracket lines between two consecutive rounds.
-
-const Connectors: React.FC<{
-  fromYs: number[];
-  toYs: number[];
-  colX: number; // x of the connector column (right edge of left round)
-  highlight?: Set<number>; // indices of feeder pairs that contain the current match
-}> = ({ fromYs, toYs, colX, highlight }) => {
-  const elements: React.ReactElement[] = [];
-  const half = CONN_W / 2;
-
-  for (let i = 0; i < toYs.length; i++) {
-    const topIdx = i * 2;
-    const botIdx = i * 2 + 1;
-    if (topIdx >= fromYs.length) break;
-
-    const topMid = fromYs[topIdx] + CARD_H / 2;
-    const botMid = botIdx < fromYs.length ? fromYs[botIdx] + CARD_H / 2 : topMid;
-    const targetMid = toYs[i] + CARD_H / 2;
-    const color = highlight?.has(i) ? ACCENT_LINE : LINE_COLOR;
-
-    // Horizontal exit from top tie
-    elements.push(<View key={`ht${i}`} style={[bk.lineH, { left: colX, top: topMid - LINE_W / 2, width: half, backgroundColor: color }]} />);
-
-    // Horizontal exit from bottom tie (if different from top)
-    if (botIdx < fromYs.length) {
-      elements.push(<View key={`hb${i}`} style={[bk.lineH, { left: colX, top: botMid - LINE_W / 2, width: half, backgroundColor: color }]} />);
-    }
-
-    // Vertical line connecting top and bottom exits
-    const vTop = Math.min(topMid, botMid);
-    const vBot = Math.max(topMid, botMid);
-    elements.push(<View key={`v${i}`} style={[bk.lineV, { left: colX + half - LINE_W / 2, top: vTop, height: vBot - vTop + LINE_W, backgroundColor: color }]} />);
-
-    // Horizontal line from vertical midpoint to target
-    elements.push(<View key={`ho${i}`} style={[bk.lineH, { left: colX + half, top: targetMid - LINE_W / 2, width: half, backgroundColor: color }]} />);
-  }
-
-  return <>{elements}</>;
-};
-
-// ── Bracket Tie Card ──────────────────────────────────────────────────────────
-
-const BracketTieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
+// ── Stage status badge ────────────────────────────────────────────────────────
+const StageBadge: React.FC<{ isCurrent: boolean; isFinished: boolean; tieCount: number }> = ({
+  isCurrent, isFinished, tieCount,
+}) => {
   const c = useThemeColors();
+  if (isCurrent) {
+    return (
+      <View style={[s.badge, { backgroundColor: 'rgba(0,224,150,0.12)' }]}>
+        <View style={[s.badgeDot, { backgroundColor: '#00E096' }]} />
+        <Text style={[s.badgeText, { color: '#00E096' }]}>EN CURSO · {tieCount} llaves</Text>
+      </View>
+    );
+  }
+  if (isFinished) {
+    return (
+      <View style={[s.badge, { backgroundColor: 'rgba(142,142,147,0.08)' }]}>
+        <Text style={[s.badgeText, { color: '#8E8E93' }]}>FINALIZADO · {tieCount} llaves</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={[s.badge, { backgroundColor: 'rgba(59,130,246,0.08)' }]}>
+      <Text style={[s.badgeText, { color: '#3b82f6' }]}>PRÓXIMO · {tieCount} llaves</Text>
+    </View>
+  );
+};
+
+// ── Leg detail row ────────────────────────────────────────────────────────────
+const LegDetail: React.FC<{ leg: CupLeg; canonicalHomeId: string }> = ({ leg, canonicalHomeId }) => {
+  const c = useThemeColors();
+  const isReversed = leg.homeTeam.id !== canonicalHomeId;
+  const played = leg.homeScore !== null && leg.awayScore !== null;
+  const h = isReversed ? leg.awayScore : leg.homeScore;
+  const a = isReversed ? leg.homeScore : leg.awayScore;
+
+  return (
+    <View style={s.legRow}>
+      <View style={[s.legBullet, { backgroundColor: played ? '#00E096' : c.textTertiary }]} />
+      <Text style={[s.legLabel, { color: c.textTertiary }]}>
+        {leg.legLabel || leg.date.slice(5).replace('-', '/')}
+      </Text>
+      {played ? (
+        <Text style={[s.legScore, { color: c.textSecondary }]}>{h}–{a}</Text>
+      ) : (
+        <Text style={[s.legScore, { color: c.textTertiary }]}>
+          {leg.date.slice(5).replace('-', '/')}
+        </Text>
+      )}
+    </View>
+  );
+};
+
+// ── Tie Card (full-width) ─────────────────────────────────────────────────────
+const TieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
+  const c = useThemeColors();
+  const [expanded, setExpanded] = useState(tie.isCurrentMatch);
   const homeWon = tie.winner?.id === tie.homeTeam.id;
   const awayWon = tie.winner?.id === tie.awayTeam.id;
   const hasAgg = tie.aggregate !== null;
+  const isTwoLeg = tie.legs.length > 1;
   const isTBD = tie.homeTeam.name === 'TBD' && tie.awayTeam.name === 'TBD';
 
   const homeScore = hasAgg ? tie.aggregate!.home : tie.legs[0]?.homeScore;
@@ -160,27 +90,33 @@ const BracketTieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
 
   if (isTBD) {
     return (
-      <View style={[bk.card, { backgroundColor: c.surface, justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={[bk.tbdText, { color: c.textTertiary }]}>Por definir</Text>
+      <View style={[s.tieCard, { backgroundColor: c.surface, borderLeftColor: 'transparent' }]}>
+        <Text style={{ color: c.textTertiary, fontSize: 13, fontStyle: 'italic', textAlign: 'center', paddingVertical: 8 }}>
+          Por definir
+        </Text>
       </View>
     );
   }
 
-  const borderColor = tie.isCurrentMatch ? ACCENT_LINE : 'transparent';
+  const borderColor = tie.isCurrentMatch ? '#00E096' : 'transparent';
 
   return (
-    <View style={[bk.card, { backgroundColor: c.card, borderLeftColor: borderColor, borderLeftWidth: 3 }]}>
+    <TouchableOpacity
+      style={[s.tieCard, { backgroundColor: c.card, borderLeftColor: borderColor }]}
+      activeOpacity={isTwoLeg ? 0.7 : 1}
+      onPress={() => isTwoLeg && setExpanded(e => !e)}
+    >
       {/* Aggregate label */}
-      {hasAgg && (
-        <Text style={[bk.aggLabel, { color: c.textTertiary }]}>Global</Text>
+      {hasAgg && isTwoLeg && (
+        <Text style={[s.aggLabel, { color: c.textTertiary }]}>Global</Text>
       )}
 
-      {/* Home row */}
-      <View style={bk.teamRow}>
-        <Logo uri={tie.homeTeam.logo} size={16} />
+      {/* Home team row */}
+      <View style={s.teamRow}>
+        <Logo uri={tie.homeTeam.logo} />
         <Text
           style={[
-            bk.teamName,
+            s.teamName,
             { color: awayWon ? c.textTertiary : c.textPrimary },
             homeWon && { fontWeight: '800' },
             awayWon && { textDecorationLine: 'line-through' },
@@ -190,20 +126,20 @@ const BracketTieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
           {tie.homeTeam.name}
         </Text>
         <Text style={[
-          bk.score,
-          { color: homeWon ? ACCENT_LINE : hasScore ? c.textPrimary : c.textTertiary },
+          s.scoreNum,
+          { color: homeWon ? '#00E096' : hasScore ? c.textPrimary : c.textTertiary },
           homeWon && { fontWeight: '900' },
         ]}>
           {hasScore ? homeScore : '–'}
         </Text>
       </View>
 
-      {/* Away row */}
-      <View style={bk.teamRow}>
-        <Logo uri={tie.awayTeam.logo} size={16} />
+      {/* Away team row */}
+      <View style={s.teamRow}>
+        <Logo uri={tie.awayTeam.logo} />
         <Text
           style={[
-            bk.teamName,
+            s.teamName,
             { color: homeWon ? c.textTertiary : c.textPrimary },
             awayWon && { fontWeight: '800' },
             homeWon && { textDecorationLine: 'line-through' },
@@ -213,114 +149,71 @@ const BracketTieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
           {tie.awayTeam.name}
         </Text>
         <Text style={[
-          bk.score,
-          { color: awayWon ? ACCENT_LINE : hasScore ? c.textPrimary : c.textTertiary },
+          s.scoreNum,
+          { color: awayWon ? '#00E096' : hasScore ? c.textPrimary : c.textTertiary },
           awayWon && { fontWeight: '900' },
         ]}>
           {hasScore ? awayScore : '–'}
         </Text>
       </View>
-    </View>
-  );
-};
 
-// ── Final Card (special treatment) ────────────────────────────────────────────
-
-const FinalCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
-  const c = useThemeColors();
-  const homeWon = tie.winner?.id === tie.homeTeam.id;
-  const awayWon = tie.winner?.id === tie.awayTeam.id;
-  const hasScore = tie.legs[0]?.homeScore !== null && tie.legs[0]?.homeScore !== undefined;
-  const isTBD = tie.homeTeam.name === 'TBD' || tie.awayTeam.name === 'TBD';
-
-  return (
-    <View style={[bk.finalCard, { backgroundColor: c.card, borderColor: hasScore ? ACCENT_LINE : c.border }]}>
-      <Text style={{ fontSize: 32, marginBottom: 4 }}>🏆</Text>
-      <Text style={[bk.finalTitle, { color: c.textTertiary }]}>FINAL</Text>
-
-      {isTBD ? (
-        <Text style={[bk.tbdText, { color: c.textTertiary, marginTop: 8 }]}>Por definir</Text>
-      ) : (
-        <View style={bk.finalTeams}>
-          {/* Home */}
-          <View style={bk.finalTeamCol}>
-            <Logo uri={tie.homeTeam.logo} size={28} />
-            <Text style={[
-              bk.finalTeamName,
-              { color: awayWon ? c.textTertiary : c.textPrimary },
-              homeWon && { fontWeight: '800' },
-            ]} numberOfLines={2}>
-              {tie.homeTeam.name}
-            </Text>
-            {hasScore && (
-              <Text style={[bk.finalScore, { color: homeWon ? ACCENT_LINE : c.textPrimary }]}>
-                {tie.legs[0]?.homeScore}
-              </Text>
-            )}
-          </View>
-
-          <Text style={[bk.finalVs, { color: c.textTertiary }]}>vs</Text>
-
-          {/* Away */}
-          <View style={bk.finalTeamCol}>
-            <Logo uri={tie.awayTeam.logo} size={28} />
-            <Text style={[
-              bk.finalTeamName,
-              { color: homeWon ? c.textTertiary : c.textPrimary },
-              awayWon && { fontWeight: '800' },
-            ]} numberOfLines={2}>
-              {tie.awayTeam.name}
-            </Text>
-            {hasScore && (
-              <Text style={[bk.finalScore, { color: awayWon ? ACCENT_LINE : c.textPrimary }]}>
-                {tie.legs[0]?.awayScore}
-              </Text>
-            )}
-          </View>
-        </View>
-      )}
-
-      {/* Date */}
-      {tie.legs[0]?.date && (
-        <Text style={[bk.finalDate, { color: c.textTertiary }]}>
-          {tie.legs[0].date}
+      {/* Expand hint for two-legged ties */}
+      {isTwoLeg && hasScore && (
+        <Text style={[s.expandHint, { color: c.textTertiary }]}>
+          {expanded ? '▲ ocultar detalles' : '▼ ver ida y vuelta'}
         </Text>
       )}
-    </View>
+
+      {/* Expanded legs */}
+      {expanded && isTwoLeg && (
+        <View style={[s.legsContainer, { borderTopColor: c.border }]}>
+          {tie.legs.map((leg, idx) => (
+            <LegDetail key={idx} leg={leg} canonicalHomeId={tie.homeTeam.id} />
+          ))}
+        </View>
+      )}
+    </TouchableOpacity>
   );
 };
 
 // ── Round Pills ───────────────────────────────────────────────────────────────
-
 const RoundPills: React.FC<{
   rounds: CupRound[];
-  selected: number;
+  selectedIdx: number;
   onSelect: (idx: number) => void;
-}> = ({ rounds, selected, onSelect }) => {
+}> = ({ rounds, selectedIdx, onSelect }) => {
   const c = useThemeColors();
+  const scrollRef = useRef<ScrollView>(null);
+
+  // Auto-scroll pills to selected
+  useEffect(() => {
+    if (selectedIdx > 0) {
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ x: Math.max(0, selectedIdx * 130 - 60), animated: true });
+      }, 100);
+    }
+  }, [selectedIdx]);
 
   return (
     <ScrollView
+      ref={scrollRef}
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={bk.pillsContent}
+      contentContainerStyle={s.pillsContent}
     >
       {rounds.map((round, idx) => {
-        const active = selected === idx;
+        const active = selectedIdx === idx;
         return (
           <TouchableOpacity
-            key={round.id}
-            style={[
-              bk.pill,
-              { backgroundColor: active ? c.accent : c.surface },
-            ]}
+            key={`${round.id}-${idx}`}
+            style={[s.pill, { backgroundColor: active ? c.accent : c.surface }]}
             onPress={() => onSelect(idx)}
             activeOpacity={0.7}
           >
-            <Text style={[
-              bk.pillText,
-              { color: active ? '#000' : c.textSecondary },
-            ]}>
+            <Text
+              style={[s.pillText, { color: active ? '#000' : c.textSecondary }]}
+              numberOfLines={1}
+            >
               {round.name}
             </Text>
           </TouchableOpacity>
@@ -346,29 +239,24 @@ export const CupBracketView: React.FC<CupBracketViewProps> = ({
   seasonStr,
 }) => {
   const c = useThemeColors();
-  const scrollRef = useRef<ScrollView>(null);
-  const screenW = Dimensions.get('window').width;
 
-  // Find which round contains the current match (for initial scroll + pill)
-  const currentRoundIdx = rounds.findIndex(r => r.ties.some(t => t.isCurrentMatch));
-  const [selectedRound, setSelectedRound] = useState(Math.max(0, currentRoundIdx));
-
-  // Calculate bracket layout
-  const layout = calculateLayout(rounds);
-
-  // Scroll to a round column
-  const scrollToRound = useCallback((idx: number) => {
-    setSelectedRound(idx);
-    const x = idx * (CARD_W + CONN_W);
-    scrollRef.current?.scrollTo({ x: Math.max(0, x - 16), animated: true });
-  }, []);
-
-  // On mount, scroll to the current round
-  useEffect(() => {
-    if (currentRoundIdx > 0) {
-      setTimeout(() => scrollToRound(currentRoundIdx), 300);
+  // Find the round containing the current match, or the last current/unfinished round
+  const currentRoundIdx = (() => {
+    const matchIdx = rounds.findIndex(r => r.ties.some(t => t.isCurrentMatch));
+    if (matchIdx >= 0) return matchIdx;
+    const currentIdx = rounds.findIndex(r => r.isCurrent);
+    if (currentIdx >= 0) return currentIdx;
+    // Default to the last round with scores
+    for (let i = rounds.length - 1; i >= 0; i--) {
+      if (rounds[i].ties.some(t => t.aggregate !== null || t.legs.some(l => l.homeScore !== null))) {
+        return i;
+      }
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    return 0;
+  })();
+
+  const [selectedIdx, setSelectedIdx] = useState(currentRoundIdx);
+  const selectedRound = rounds[selectedIdx];
 
   // ── Empty state ─────────────────────────────────────────────────────────────
   if (rounds.length === 0) {
@@ -382,29 +270,14 @@ export const CupBracketView: React.FC<CupBracketViewProps> = ({
     );
   }
 
-  // Detect final round
-  const finalRoundIdx = rounds.length - 1;
-  const isFinalSingle = rounds[finalRoundIdx]?.ties.length === 1;
-
-  // Find highlight pairs (feeder pairs that contain the current match)
-  const highlightPairs: Set<number>[] = rounds.map(() => new Set());
-  for (let r = 0; r < rounds.length; r++) {
-    for (let t = 0; t < rounds[r].ties.length; t++) {
-      if (rounds[r].ties[t].isCurrentMatch && r > 0) {
-        // Highlight the connector pair in the previous round
-        highlightPairs[r - 1].add(t);
-      }
-    }
-  }
-
   return (
-    <View style={bk.container}>
+    <View style={s.container}>
       {/* Cup header */}
-      <View style={bk.cupHeader}>
+      <View style={s.cupHeader}>
         <Text style={{ fontSize: 24 }}>🏆</Text>
         <View style={{ flex: 1 }}>
-          <Text style={[bk.cupName, { color: c.textPrimary }]}>{leagueName}</Text>
-          <Text style={[bk.cupSeason, { color: c.textTertiary }]}>
+          <Text style={[s.cupName, { color: c.textPrimary }]}>{leagueName}</Text>
+          <Text style={[s.cupSeason, { color: c.textTertiary }]}>
             {seasonStr} · Eliminatoria
           </Text>
         </View>
@@ -413,104 +286,65 @@ export const CupBracketView: React.FC<CupBracketViewProps> = ({
       {/* Round pills */}
       <RoundPills
         rounds={rounds}
-        selected={selectedRound}
-        onSelect={scrollToRound}
+        selectedIdx={selectedIdx}
+        onSelect={setSelectedIdx}
       />
 
-      {/* Bracket tree */}
-      <ScrollView
-        ref={scrollRef}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 16 }}
-      >
-        <View style={{ height: layout.totalHeight, width: layout.totalWidth, position: 'relative' }}>
-          {rounds.map((round, rIdx) => {
-            const colX = rIdx * (CARD_W + CONN_W);
-            const yPositions = layout.positions[rIdx] ?? [];
-
-            return (
-              <React.Fragment key={round.id || rIdx}>
-                {/* Round column label */}
-                <View style={[bk.roundLabel, { left: colX, width: CARD_W }]}>
-                  <Text style={[bk.roundLabelText, { color: c.textTertiary }]}>
-                    {round.name}
-                  </Text>
-                </View>
-
-                {/* Tie cards */}
-                {round.ties.map((tie, tIdx) => {
-                  // Special Final card
-                  if (rIdx === finalRoundIdx && isFinalSingle) {
-                    return (
-                      <View
-                        key={tie.id || tIdx}
-                        style={{
-                          position: 'absolute',
-                          left: colX,
-                          top: (yPositions[tIdx] ?? 0),
-                          width: CARD_W,
-                        }}
-                      >
-                        <FinalCard tie={tie} />
-                      </View>
-                    );
-                  }
-
-                  return (
-                    <View
-                      key={tie.id || tIdx}
-                      style={{
-                        position: 'absolute',
-                        left: colX,
-                        top: (yPositions[tIdx] ?? 0),
-                        width: CARD_W,
-                        height: CARD_H,
-                      }}
-                    >
-                      <BracketTieCard tie={tie} />
-                    </View>
-                  );
-                })}
-
-                {/* Connector lines to next round */}
-                {rIdx < rounds.length - 1 && (
-                  <Connectors
-                    fromYs={yPositions}
-                    toYs={layout.positions[rIdx + 1] ?? []}
-                    colX={colX + CARD_W}
-                    highlight={highlightPairs[rIdx]}
-                  />
-                )}
-              </React.Fragment>
-            );
-          })}
+      {/* Stage header */}
+      {selectedRound && (
+        <View style={s.stageHeader}>
+          <Text style={[s.stageName, { color: c.textPrimary }]}>{selectedRound.name}</Text>
+          <StageBadge
+            isCurrent={selectedRound.isCurrent}
+            isFinished={selectedRound.isFinished}
+            tieCount={selectedRound.ties.length}
+          />
         </View>
-      </ScrollView>
+      )}
 
-      {/* Legend */}
-      <View style={[bk.legend, { borderTopColor: c.border }]}>
-        <View style={bk.legendItem}>
-          <View style={[bk.legendDot, { backgroundColor: ACCENT_LINE }]} />
-          <Text style={[bk.legendText, { color: c.textTertiary }]}>Tu partido</Text>
-        </View>
-        <View style={bk.legendItem}>
-          <View style={[bk.legendLine, { backgroundColor: LINE_COLOR }]} />
-          <Text style={[bk.legendText, { color: c.textTertiary }]}>Bracket</Text>
-        </View>
+      {/* Ties list */}
+      {selectedRound?.ties.map((tie) => (
+        <TieCard key={tie.id} tie={tie} />
+      ))}
+
+      {/* Navigation arrows */}
+      <View style={s.navRow}>
+        {selectedIdx > 0 && (
+          <TouchableOpacity
+            style={[s.navBtn, { backgroundColor: c.surface }]}
+            onPress={() => setSelectedIdx(selectedIdx - 1)}
+            activeOpacity={0.7}
+          >
+            <Text style={[s.navBtnText, { color: c.textSecondary }]}>
+              ← {rounds[selectedIdx - 1]?.name}
+            </Text>
+          </TouchableOpacity>
+        )}
+        <View style={{ flex: 1 }} />
+        {selectedIdx < rounds.length - 1 && (
+          <TouchableOpacity
+            style={[s.navBtn, { backgroundColor: c.surface }]}
+            onPress={() => setSelectedIdx(selectedIdx + 1)}
+            activeOpacity={0.7}
+          >
+            <Text style={[s.navBtnText, { color: c.textSecondary }]}>
+              {rounds[selectedIdx + 1]?.name} →
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
 };
 
 // ── Styles ────────────────────────────────────────────────────────────────────
-const bk = StyleSheet.create({
-  container: { paddingTop: 8, paddingBottom: 16, gap: 12 },
+const s = StyleSheet.create({
+  container: { paddingTop: 8, paddingBottom: 20, gap: 10 },
 
   // Cup header
   cupHeader: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 20, marginBottom: 2,
+    paddingHorizontal: 16, marginBottom: 2,
   },
   cupName: { fontSize: 17, fontWeight: '800' },
   cupSeason: { fontSize: 11, fontWeight: '500', marginTop: 1 },
@@ -520,53 +354,52 @@ const bk = StyleSheet.create({
   pill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   pillText: { fontSize: 12, fontWeight: '700' },
 
-  // Round labels (above each column in the bracket)
-  roundLabel: { position: 'absolute' as const, top: -20 },
-  roundLabelText: { fontSize: 10, fontWeight: '600', textAlign: 'center', letterSpacing: 0.3 },
+  // Stage header
+  stageHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, marginTop: 4,
+  },
+  stageName: { fontSize: 16, fontWeight: '800' },
+
+  // Badge
+  badge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
+  },
+  badgeDot: { width: 5, height: 5, borderRadius: 3 },
+  badgeText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.3 },
 
   // Tie card
-  card: {
-    flex: 1,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    justifyContent: 'center',
-    gap: 1,
+  tieCard: {
+    marginHorizontal: 16,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderLeftWidth: 3,
+    gap: 6,
   },
-  teamRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  teamName: { flex: 1, fontSize: 11, fontWeight: '600' },
-  score: { fontSize: 14, fontWeight: '800', minWidth: 18, textAlign: 'right' },
-  aggLabel: { fontSize: 8, fontWeight: '700', letterSpacing: 0.5, marginBottom: 1 },
-  tbdText: { fontSize: 12, fontWeight: '600', fontStyle: 'italic' },
+  aggLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  teamRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  teamName: { flex: 1, fontSize: 14, fontWeight: '600' },
+  scoreNum: { fontSize: 18, fontWeight: '800', minWidth: 24, textAlign: 'right' },
+  expandHint: { fontSize: 11, textAlign: 'center', marginTop: 4 },
 
-  // Final card
-  finalCard: {
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    gap: 4,
+  // Expanded legs
+  legsContainer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 8, paddingTop: 8, gap: 6,
   },
-  finalTitle: { fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
-  finalTeams: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  finalTeamCol: { alignItems: 'center', gap: 4, flex: 1 },
-  finalTeamName: { fontSize: 11, fontWeight: '600', textAlign: 'center' },
-  finalScore: { fontSize: 22, fontWeight: '900' },
-  finalVs: { fontSize: 12, fontWeight: '600' },
-  finalDate: { fontSize: 10, fontWeight: '500', marginTop: 4 },
+  legRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  legBullet: { width: 6, height: 6, borderRadius: 3 },
+  legLabel: { fontSize: 11, fontWeight: '600', flex: 1 },
+  legScore: { fontSize: 13, fontWeight: '600' },
 
-  // Connector lines (positioned absolutely)
-  lineH: { position: 'absolute' as const, height: LINE_W },
-  lineV: { position: 'absolute' as const, width: LINE_W },
-
-  // Legend
-  legend: {
-    flexDirection: 'row', gap: 20, paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 20,
+  // Navigation arrows
+  navRow: {
+    flexDirection: 'row', paddingHorizontal: 16, marginTop: 8, gap: 8,
   },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  legendDot: { width: 10, height: 10, borderRadius: 5 },
-  legendLine: { width: 20, height: 2, borderRadius: 1 },
-  legendText: { fontSize: 10, fontWeight: '500' },
+  navBtn: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+  },
+  navBtnText: { fontSize: 12, fontWeight: '600' },
 });
