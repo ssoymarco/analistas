@@ -179,6 +179,10 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
         <Text style={[tb.emptyTitle, { color: c.textSecondary }]}>
           {error ? 'Error al cargar la tabla' : 'Tabla no disponible'}
         </Text>
+        {/* DEBUG — remove before release */}
+        <Text style={{ color: '#666', fontSize: 11, marginTop: 12, textAlign: 'center' }}>
+          {'leagueId=' + match.leagueId + ' | seasonId=' + match.seasonId + '\nresolved=' + seasonId + ' | err=' + (error ?? 'none')}
+        </Text>
       </View>
     );
   }
