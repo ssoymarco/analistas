@@ -1350,12 +1350,77 @@ export async function getCupBracket(
 
     // Sort: earliest stage first (Prelim → R16 → QF → SF → Final)
     rounds.sort((a, b) => a.sortOrder - b.sortOrder);
+
+    // ── Infer missing future stages ──────────────────────────────────────────
+    // SportMonks doesn't create stages/fixtures until matchups are known.
+    // For knockout cups: if last stage is QF (4 ties) → add SF (2) + Final (1).
+    // Each inferred tie shows the bracket path ("Ganador X vs Y").
+    const lastRound = rounds[rounds.length - 1];
+    if (lastRound && lastRound.ties.length >= 2) {
+      let feeders = lastRound.ties;
+      let order = lastRound.sortOrder;
+
+      while (feeders.length >= 2) {
+        const nextTies: CupTie[] = [];
+        for (let i = 0; i < feeders.length; i += 2) {
+          const t1 = feeders[i];
+          const t2 = i + 1 < feeders.length ? feeders[i + 1] : null;
+
+          // Build team labels from known winners or bracket path
+          const homeTeam = t1.winner
+            ? { ...t1.winner }
+            : { id: `tbd-${order}-${i}`, name: `Ganador ${abbreviate(t1.homeTeam.name)} vs ${abbreviate(t1.awayTeam.name)}`, shortName: 'TBD', logo: '⚽' };
+          const awayTeam = t2
+            ? (t2.winner
+              ? { ...t2.winner }
+              : { id: `tbd-${order}-${i + 1}`, name: `Ganador ${abbreviate(t2.homeTeam.name)} vs ${abbreviate(t2.awayTeam.name)}`, shortName: 'TBD', logo: '⚽' })
+            : { id: `tbd-${order}-bye`, name: 'TBD', shortName: 'TBD', logo: '⚽' };
+
+          nextTies.push({
+            id: `inferred-${order}-${i}`,
+            homeTeam,
+            awayTeam,
+            legs: [],
+            aggregate: null,
+            winner: null,
+            isCurrentMatch: false,
+          });
+        }
+
+        order++;
+        const n = nextTies.length;
+        const name = n === 1 ? 'Final' : n === 2 ? 'Semifinales' : `1/${n * 2} de Final`;
+
+        rounds.push({
+          id: -order,
+          name,
+          sortOrder: order,
+          isCurrent: false,
+          isFinished: false,
+          ties: nextTies,
+        });
+
+        // Stop after the final (1 tie)
+        if (nextTies.length <= 1) break;
+        feeders = nextTies;
+      }
+    }
+
     return rounds;
 
   } catch (err) {
     console.warn('[sportsApi] getCupBracket failed:', err);
     return [];
   }
+}
+
+/** Abbreviate long team names for bracket path labels */
+function abbreviate(name: string): string {
+  if (name.length <= 12) return name;
+  // Try first word
+  const first = name.split(' ')[0];
+  if (first.length >= 3) return first;
+  return name.slice(0, 12) + '…';
 }
 
 /**

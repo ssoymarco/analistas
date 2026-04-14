@@ -82,6 +82,7 @@ const TieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
   const awayWon = tie.winner?.id === tie.awayTeam.id;
   const hasAgg = tie.aggregate !== null;
   const isTwoLeg = tie.legs.length > 1;
+  const isInferred = tie.id.startsWith('inferred-');
   const isTBD = tie.homeTeam.name === 'TBD' && tie.awayTeam.name === 'TBD';
 
   const homeScore = hasAgg ? tie.aggregate!.home : tie.legs[0]?.homeScore;
@@ -98,14 +99,19 @@ const TieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
     );
   }
 
-  const borderColor = tie.isCurrentMatch ? '#00E096' : 'transparent';
+  const borderColor = tie.isCurrentMatch ? '#00E096' : isInferred ? 'rgba(59,130,246,0.3)' : 'transparent';
+  const cardBg = isInferred ? c.surface : c.card;
 
   return (
     <TouchableOpacity
-      style={[s.tieCard, { backgroundColor: c.card, borderLeftColor: borderColor }]}
+      style={[s.tieCard, { backgroundColor: cardBg, borderLeftColor: borderColor }]}
       activeOpacity={isTwoLeg ? 0.7 : 1}
       onPress={() => isTwoLeg && setExpanded(e => !e)}
     >
+      {/* Inferred label */}
+      {isInferred && (
+        <Text style={[s.inferredLabel, { color: '#3b82f6' }]}>🔮 Proyección</Text>
+      )}
       {/* Aggregate label */}
       {hasAgg && isTwoLeg && (
         <Text style={[s.aggLabel, { color: c.textTertiary }]}>Global</Text>
@@ -379,6 +385,7 @@ const s = StyleSheet.create({
     gap: 6,
   },
   aggLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  inferredLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3, marginBottom: 2 },
   teamRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   teamName: { flex: 1, fontSize: 14, fontWeight: '600' },
   scoreNum: { fontSize: 18, fontWeight: '800', minWidth: 24, textAlign: 'right' },
