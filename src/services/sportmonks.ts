@@ -590,13 +590,12 @@ export async function fetchStandings(seasonId: number): Promise<SMStandingGroup[
  * Uses pagination to handle large seasons. Includes round data for grouping.
  */
 export async function fetchFixturesBySeasonId(seasonId: number): Promise<SMFixture[]> {
-  // SportMonks v3 has no /fixtures/seasons/{id} endpoint.
-  // Use the /fixtures endpoint with fixtureSeasonIds filter instead.
-  return fetchAllPages<SMFixture>('fixtures', {
-    include: 'participants;scores;state;round;stage;venue',
-    filters: `fixtureSeasonIds:${seasonId}`,
-    per_page: '150',
+  // The /fixtures?filters=fixtureSeasonIds:{id} filter is BROKEN in SM v3 (returns wrong data).
+  // Instead, use /seasons/{id}?include=fixtures.* which returns correct data in one call.
+  const season = await fetchApi<{ fixtures?: SMFixture[] }>(`seasons/${seasonId}`, {
+    include: 'fixtures.participants;fixtures.scores;fixtures.state;fixtures.stage',
   });
+  return season.fixtures ?? [];
 }
 
 /** GET /topscorers/seasons/{seasonId}?include=player */
