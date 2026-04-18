@@ -87,24 +87,51 @@ const FINISHED_STATE_IDS = new Set<number>([
   SM_STATE_IDS.FINISHED_PEN,
 ]);
 
+// State IDs that definitively mean "not playing" (postponed, cancelled, etc.)
+const DEAD_STATE_IDS = new Set<number>([
+  SM_STATE_IDS.POSTPONED, SM_STATE_IDS.CANCELLED,
+  SM_STATE_IDS.SUSPENDED,  SM_STATE_IDS.INTERRUPTED,
+  SM_STATE_IDS.ABANDONED,  SM_STATE_IDS.DELETED, SM_STATE_IDS.TBD,
+]);
+
 /**
  * Map a SportMonks state_id to our MatchStatus.
  *
- * Time-based fallback: some LATAM/Asian feeds (e.g. Liga MX) can lag and keep
- * state_id = NOT_STARTED even minutes into the match. If the kick-off is more
- * than 2 minutes in the past but less than 135 min ago, we infer "live" so the
- * UI shows a minute counter instead of the kick-off time.
+ * Time-based fallback: LATAM/Asian feeds (e.g. Liga MX) can lag and keep
+ * state_id = NOT_STARTED (or even 0/undefined) well into the match. If the
+ * kick-off is more than 2 minutes in the past but less than 135 min ago, and
+ * the state is not definitively "dead", we infer "live".
  */
 function mapStateToStatus(stateId: number, startingAt?: string): MatchStatus {
   if (LIVE_STATE_IDS.has(stateId)) return 'live';
   if (FINISHED_STATE_IDS.has(stateId)) return 'finished';
-  // Time-based live inference (only for genuine NOT_STARTED, not postponed/cancelled)
-  if (stateId === SM_STATE_IDS.NOT_STARTED && startingAt) {
+  if (DEAD_STATE_IDS.has(stateId)) return 'scheduled'; // postponed/cancelled → never infer live
+  // Time-based live inference (applies to NOT_STARTED, 0, undefined, or any unexpected id)
+  if (startingAt) {
     const kickoff = new Date(startingAt.replace(' ', 'T') + 'Z');
     const elapsed = (Date.now() - kickoff.getTime()) / 60000;
     if (elapsed > 2 && elapsed < 135) return 'live';
   }
   return 'scheduled';
+}
+
+/**
+ * Re-evaluate live status of already-mapped Match objects.
+ * Used for cache hits: cached Match objects have status baked in at fetch time,
+ * so a match that was "scheduled" when cached may now be "live".
+ */
+function reapplyLiveStatus(matches: Match[]): Match[] {
+  return matches.map(m => {
+    if (m.status !== 'scheduled' || !m.startingAtUtc) return m;
+    const kickoff = new Date(m.startingAtUtc.replace(' ', 'T') + 'Z');
+    const elapsed = (Date.now() - kickoff.getTime()) / 60000;
+    if (elapsed <= 2 || elapsed >= 135) return m;
+    // Infer live — calculate approximate minute
+    let minute = Math.floor(elapsed);
+    if (minute > 50) minute = Math.max(46, minute - 15); // account for HT break
+    minute = Math.max(1, Math.min(minute, 120));
+    return { ...m, status: 'live' as const, time: `${minute}'`, minute };
+  });
 }
 
 /** Human-readable state label for the live indicator (e.g. "1T", "HT", "2T", "ET", "PEN") */
@@ -731,13 +758,15 @@ export async function getFixturesByDate(localDate: string): Promise<Match[]> {
   const ttl = localDate === today ? CacheTTL.fixturesLive : CacheTTL.fixturesStatic;
   try {
     const unique = await fetchFixturesWithLiveState(localDate);
-    const matches = unique.map(mapFixtureToMatch).filter(m => m.date === localDate);
+    const matches = reapplyLiveStatus(
+      unique.map(mapFixtureToMatch).filter(m => m.date === localDate)
+    );
     AppCache.set(cacheKey, matches, ttl);
     return matches;
   } catch (err) {
     console.warn('[sportsApi] getFixturesByDate failed:', err);
     const cached = await AppCache.get<Match[]>(cacheKey);
-    return cached ?? [];
+    return cached ? reapplyLiveStatus(cached) : [];
   }
 }
 
@@ -757,7 +786,9 @@ export async function getLeaguesByDate(localDate: string): Promise<LeagueWithMat
     const unique = await fetchFixturesWithLiveState(localDate);
     if (unique.length === 0) return [];
 
-    const matches = unique.map(mapFixtureToMatch).filter(m => m.date === localDate);
+    const matches = reapplyLiveStatus(
+      unique.map(mapFixtureToMatch).filter(m => m.date === localDate)
+    );
     const realLeagues: LeagueWithMatches[] = [];
     const leagueMap = new Map<string, LeagueWithMatches>();
     for (const m of matches) {
@@ -782,7 +813,14 @@ export async function getLeaguesByDate(localDate: string): Promise<LeagueWithMat
   } catch (err) {
     console.warn('[sportsApi] getLeaguesByDate failed:', err);
     const cached = await AppCache.get<LeagueWithMatches[]>(cacheKey);
-    return cached ?? [];
+    if (cached) {
+      // Re-evaluate live status on cached data (status was baked in at fetch time)
+      return cached.map(league => ({
+        ...league,
+        matches: reapplyLiveStatus(league.matches),
+      }));
+    }
+    return [];
   }
 }
 
