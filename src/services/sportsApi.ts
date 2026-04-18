@@ -87,9 +87,23 @@ const FINISHED_STATE_IDS = new Set<number>([
   SM_STATE_IDS.FINISHED_PEN,
 ]);
 
-function mapStateToStatus(stateId: number): MatchStatus {
+/**
+ * Map a SportMonks state_id to our MatchStatus.
+ *
+ * Time-based fallback: some LATAM/Asian feeds (e.g. Liga MX) can lag and keep
+ * state_id = NOT_STARTED even minutes into the match. If the kick-off is more
+ * than 2 minutes in the past but less than 135 min ago, we infer "live" so the
+ * UI shows a minute counter instead of the kick-off time.
+ */
+function mapStateToStatus(stateId: number, startingAt?: string): MatchStatus {
   if (LIVE_STATE_IDS.has(stateId)) return 'live';
   if (FINISHED_STATE_IDS.has(stateId)) return 'finished';
+  // Time-based live inference (only for genuine NOT_STARTED, not postponed/cancelled)
+  if (stateId === SM_STATE_IDS.NOT_STARTED && startingAt) {
+    const kickoff = new Date(startingAt.replace(' ', 'T') + 'Z');
+    const elapsed = (Date.now() - kickoff.getTime()) / 60000;
+    if (elapsed > 2 && elapsed < 135) return 'live';
+  }
   return 'scheduled';
 }
 
@@ -168,30 +182,31 @@ function getUtcDatesForLocalDay(localDateStr: string): string[] {
 
 // ── Time Display ────────────────────────────────────────────────────────────
 
+/** Elapsed minutes since kick-off, accounting for half-time break when known. */
+function calcElapsed(startingAt: string, stateId: number): number {
+  const kickoff = new Date(startingAt.replace(' ', 'T') + 'Z');
+  let elapsed = Math.floor((Date.now() - kickoff.getTime()) / 60000);
+  if (stateId === SM_STATE_IDS.SECOND_HALF) {
+    // Known 2nd half — subtract the ~15 min HT break
+    elapsed = Math.max(46, elapsed - 15);
+  } else if (stateId === SM_STATE_IDS.NOT_STARTED && elapsed > 50) {
+    // Time-inferred live: if >50 min since kick-off, likely 2nd half
+    elapsed = Math.max(46, elapsed - 15);
+  }
+  return Math.max(1, Math.min(elapsed, 120));
+}
+
 function getTimeDisplay(fixture: SMFixture): string {
-  const status = mapStateToStatus(fixture.state_id);
+  const status = mapStateToStatus(fixture.state_id, fixture.starting_at);
 
   if (status === 'finished') return 'FT';
 
   if (status === 'live') {
-    const state = fixture.state;
-    if (state) {
-      if (fixture.state_id === SM_STATE_IDS.HALF_TIME) return 'HT';
-      // For live, calculate approximate minute from starting_at
-      const kickoff = new Date(fixture.starting_at.replace(' ', 'T') + 'Z');
-      const now = new Date();
-      let elapsed = Math.floor((now.getTime() - kickoff.getTime()) / 60000);
-      if (fixture.state_id === SM_STATE_IDS.SECOND_HALF) {
-        // Account for 15-min half-time break
-        elapsed = Math.max(46, elapsed - 15);
-      }
-      elapsed = Math.max(1, Math.min(elapsed, 120));
-      return `${elapsed}'`;
-    }
-    return 'EN VIVO';
+    if (fixture.state_id === SM_STATE_IDS.HALF_TIME) return 'HT';
+    return `${calcElapsed(fixture.starting_at, fixture.state_id)}'`;
   }
 
-  // Scheduled — show kick-off time in HH:MM
+  // Scheduled — show kick-off time in HH:MM (local time)
   try {
     const dt = new Date(fixture.starting_at.replace(' ', 'T') + 'Z');
     return dt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -201,15 +216,9 @@ function getTimeDisplay(fixture: SMFixture): string {
 }
 
 function getLiveMinute(fixture: SMFixture): number | undefined {
-  if (mapStateToStatus(fixture.state_id) !== 'live') return undefined;
+  if (mapStateToStatus(fixture.state_id, fixture.starting_at) !== 'live') return undefined;
   if (fixture.state_id === SM_STATE_IDS.HALF_TIME) return 45;
-  const kickoff = new Date(fixture.starting_at.replace(' ', 'T') + 'Z');
-  const now = new Date();
-  let elapsed = Math.floor((now.getTime() - kickoff.getTime()) / 60000);
-  if (fixture.state_id === SM_STATE_IDS.SECOND_HALF) {
-    elapsed = Math.max(46, elapsed - 15);
-  }
-  return Math.max(1, Math.min(elapsed, 120));
+  return calcElapsed(fixture.starting_at, fixture.state_id);
 }
 
 // ── Participant Helpers ─────────────────────────────────────────────────────
@@ -233,7 +242,7 @@ function mapParticipantToTeam(p: SMParticipant | undefined): Team {
 function mapFixtureToMatch(fixture: SMFixture): Match {
   const home = getParticipant(fixture, 'home');
   const away = getParticipant(fixture, 'away');
-  const status = mapStateToStatus(fixture.state_id);
+  const status = mapStateToStatus(fixture.state_id, fixture.starting_at);
 
   // league_id can be 0/null/missing on some fixtures — fall back to the included league object's id
   const rawLeagueId: number = fixture.league_id || (fixture.league as any)?.id || 0;
