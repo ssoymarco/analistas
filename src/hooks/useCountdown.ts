@@ -34,7 +34,7 @@ function computeCountdown(startingAtUtc: string): CountdownState {
   return {
     days, hours, minutes, seconds, totalMs,
     isPast: false,
-    isImminent: diff < 10 * 60_000,   // < 10 minutes
+    isImminent: diff < 90_000,          // < 90 seconds
     showCountdown: diff < 24 * 3_600_000, // < 24 hours
   };
 }

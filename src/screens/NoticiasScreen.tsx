@@ -16,6 +16,7 @@ import { getNews } from '../services/sportsApi';
 import type { NewsArticle } from '../data/types';
 import type { NoticiasStackParamList } from '../navigation/AppNavigator';
 import { normalize } from '../utils/normalize';
+import { useTranslation } from 'react-i18next';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -36,10 +37,10 @@ function leagueColor(category: string) {
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 type Tab = 'para-ti' | 'siguiendo' | 'ultimas';
-const TABS: { id: Tab; label: string; emoji: string }[] = [
-  { id: 'para-ti',   label: 'Para ti',   emoji: '⭐' },
-  { id: 'siguiendo', label: 'Siguiendo', emoji: '📻' },
-  { id: 'ultimas',   label: 'Últimas',   emoji: '🔥' },
+const TABS: { id: Tab; labelKey: string; emoji: string }[] = [
+  { id: 'para-ti',   labelKey: 'news.forYou',    emoji: '⭐' },
+  { id: 'siguiendo', labelKey: 'news.following',  emoji: '📻' },
+  { id: 'ultimas',   labelKey: 'news.latest',     emoji: '🔥' },
 ];
 
 // ── League badge ──────────────────────────────────────────────────────────────
@@ -55,6 +56,7 @@ function LeagueBadge({ category }: { category: string }) {
 
 // ── Hero card (featured article) ──────────────────────────────────────────────
 function HeroCard({ article, onPress, c }: { article: NewsArticle; onPress: () => void; c: ReturnType<typeof useThemeColors> }) {
+  const { t } = useTranslation();
   const isRecent = (article.timeAgo ?? 999) <= 90;
   return (
     <AnimatedPressable
@@ -75,7 +77,7 @@ function HeroCard({ article, onPress, c }: { article: NewsArticle; onPress: () =
           <LeagueBadge category={article.category} />
           {isRecent && (
             <View style={styles.breakingPill}>
-              <Text style={styles.breakingText}>⚡ AHORA</Text>
+              <Text style={styles.breakingText}>{t('news.breakingNow')}</Text>
             </View>
           )}
         </View>
@@ -152,6 +154,7 @@ function SectionLabel({ label, emoji, c }: { label: string; emoji?: string; c: R
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 export const NoticiasScreen: React.FC = () => {
+  const { t } = useTranslation();
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<NoticiasStackParamList>>();
@@ -211,7 +214,7 @@ export const NoticiasScreen: React.FC = () => {
 
       {/* Header */}
       <View style={styles.header}>
-        <Text style={[styles.title, { color: c.textPrimary }]}>Noticias</Text>
+        <Text style={[styles.title, { color: c.textPrimary }]}>{t('news.title')}</Text>
       </View>
 
       {/* Tabs */}
@@ -231,7 +234,7 @@ export const NoticiasScreen: React.FC = () => {
             >
               <Text style={styles.tabEmoji}>{tab.emoji}</Text>
               <Text style={[styles.tabLabel, { color: c.textSecondary }, active && { color: '#fff' }]}>
-                {tab.label}
+                {t(tab.labelKey)}
               </Text>
             </TouchableOpacity>
           );
@@ -244,7 +247,7 @@ export const NoticiasScreen: React.FC = () => {
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={[styles.searchInput, { color: c.textPrimary }]}
-            placeholder="Buscar noticias..."
+            placeholder={t('news.searchPlaceholder')}
             placeholderTextColor={c.textTertiary}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -272,8 +275,8 @@ export const NoticiasScreen: React.FC = () => {
         ) : filtered.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>📰</Text>
-            <Text style={[styles.emptyTitle, { color: c.textPrimary }]}>Sin noticias</Text>
-            <Text style={[styles.emptySubtitle, { color: c.textSecondary }]}>Prueba con otra búsqueda</Text>
+            <Text style={[styles.emptyTitle, { color: c.textPrimary }]}>{t('news.noNews')}</Text>
+            <Text style={[styles.emptySubtitle, { color: c.textSecondary }]}>{t('news.tryAnotherSearch')}</Text>
           </View>
         ) : (
           <>
@@ -287,7 +290,7 @@ export const NoticiasScreen: React.FC = () => {
             {/* Stories horizontal scroll */}
             {stories.length > 0 && (
               <View style={styles.section}>
-                <SectionLabel label="MÁS NOTICIAS" emoji="📌" c={c} />
+                <SectionLabel label={t('news.moreNews')} emoji="📌" c={c} />
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -303,7 +306,7 @@ export const NoticiasScreen: React.FC = () => {
             {/* Article list */}
             {rest.length > 0 && (
               <View style={[styles.section, styles.articleList, { backgroundColor: c.card, borderColor: c.border }]}>
-                <SectionLabel label="TODAS LAS NOTICIAS" emoji="📋" c={c} />
+                <SectionLabel label={t('news.allNews')} emoji="📋" c={c} />
                 {rest.map(a => (
                   <ArticleRow key={a.id} article={a} onPress={() => handlePress(a)} c={c} />
                 ))}

@@ -8,12 +8,13 @@ import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTranslation } from 'react-i18next';
 import { SkeletonSearch } from '../components/Skeleton';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import {
-  getSearchableTeams, getSearchablePlayers, getSearchableLeagues,
+  getSearchableTeams, getSearchablePlayers, getSearchableLeagues, getSearchableNationalTeams,
   type SearchableTeam, type SearchablePlayer, type SearchableLeague,
 } from '../services/sportsApi';
 
@@ -45,6 +46,68 @@ interface RecentSearch {
 
 import { normalize } from '../utils/normalize';
 
+/**
+ * Bidirectional country name translations.
+ * Key = normalized English name → value = normalized Spanish name.
+ * Used to match "España" → "spain", "Alemania" → "germany", etc.
+ */
+const COUNTRY_EN_TO_ES: Record<string, string> = {
+  'spain':         'espana',
+  'germany':       'alemania',
+  'france':        'francia',
+  'england':       'inglaterra',
+  'italy':         'italia',
+  'portugal':      'portugal',
+  'netherlands':   'holanda',
+  'belgium':       'belgica',
+  'turkey':        'turquia',
+  'scotland':      'escocia',
+  'denmark':       'dinamarca',
+  'russia':        'rusia',
+  'egypt':         'egipto',
+  'morocco':       'marruecos',
+  'brazil':        'brasil',
+  'colombia':      'colombia',
+  'chile':         'chile',
+  'uruguay':       'uruguay',
+  'paraguay':      'paraguay',
+  'peru':          'peru',
+  'ecuador':       'ecuador',
+  'honduras':      'honduras',
+  'japan':         'japon',
+  'canada':        'canada',
+  'usa':           'estados unidos',
+  'south korea':   'corea',
+  'iran':          'iran',
+  'saudi arabia':  'arabia saudita',
+  'europe':        'europa',
+  'south america': 'sudamerica',
+  'north america': 'norteamerica',
+  'africa':        'africa',
+  'world':         'mundo',
+};
+
+/** Reverse map: normalized Spanish → normalized English */
+const COUNTRY_ES_TO_EN: Record<string, string> = Object.fromEntries(
+  Object.entries(COUNTRY_EN_TO_ES).map(([en, es]) => [es, en])
+);
+
+/**
+ * Returns true if `query` matches this country name (in English or Spanish).
+ * Handles "España" → matches league with country "Spain", and vice-versa.
+ */
+function matchesCountry(country: string, q: string): boolean {
+  const normCountry = normalize(country);
+  if (normCountry.includes(q)) return true;
+  // Translate query from Spanish to English and retry
+  const qInEn = COUNTRY_ES_TO_EN[q] ?? q;
+  if (normCountry.includes(qInEn)) return true;
+  // Check if the query matches the Spanish version of this country's English name
+  const countryInEs = COUNTRY_EN_TO_ES[normCountry];
+  if (countryInEs && countryInEs.includes(q)) return true;
+  return false;
+}
+
 function highlightMatch(text: string, query: string): React.ReactNode[] {
   if (!query) return [text];
   const normText = normalize(text);
@@ -63,6 +126,7 @@ function highlightMatch(text: string, query: string): React.ReactNode[] {
 export const GlobalSearchScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const inputRef = useRef<TextInput>(null);
 
@@ -78,18 +142,32 @@ export const GlobalSearchScreen: React.FC = () => {
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const [t, p, stored] = await Promise.all([
-        getSearchableTeams().catch(() => []),
+      // Phase 1: load club teams + players instantly (hardcoded data, no API call)
+      const [clubTeams, p, stored] = await Promise.all([
+        getSearchableTeams().catch(() => [] as SearchableTeam[]),
         getSearchablePlayers().catch(() => []),
         AsyncStorage.getItem(RECENT_KEY),
       ]);
       if (!mounted) return;
-      setTeams(t);
+      setTeams(clubTeams);
       setPlayers(p);
       if (stored) {
         try { setRecentSearches(JSON.parse(stored)); } catch { /* ignore */ }
       }
       setLoading(false);
+
+      // Phase 2: load national teams in background (real IDs from SportMonks API)
+      getSearchableNationalTeams().then(nationals => {
+        if (!mounted) return;
+        if (nationals.length > 0) {
+          // Merge: nationals first so they appear at top of "EQUIPOS" section
+          setTeams(prev => {
+            const prevIds = new Set(prev.map(t => t.id));
+            const newNationals = nationals.filter(n => !prevIds.has(n.id));
+            return [...newNationals, ...prev];
+          });
+        }
+      }).catch(() => { /* silently ignore */ });
     })();
     return () => { mounted = false; };
   }, []);
@@ -112,16 +190,18 @@ export const GlobalSearchScreen: React.FC = () => {
     const q = normalize(debouncedQuery);
     const out: SearchResult[] = [];
 
-    // Teams
-    for (const t of teams) {
-      if (normalize(t.name).includes(q) || normalize(t.shortName).includes(q)) {
+    // Teams — match name, shortName, or extra searchTerms (for national teams / aliases)
+    for (const team of teams) {
+      const nameMatch = normalize(team.name).includes(q) || normalize(team.shortName).includes(q);
+      const aliasMatch = team.searchTerms?.some(term => normalize(term).includes(q)) ?? false;
+      if (nameMatch || aliasMatch) {
         out.push({
-          id: `team-${t.id}`,
+          id: `team-${team.id}`,
           type: 'team',
-          name: t.name,
-          subtitle: t.leagueName,
-          image: t.logo.startsWith('http') ? t.logo : undefined,
-          data: t,
+          name: team.name,
+          subtitle: team.leagueName,
+          image: team.logo.startsWith('http') ? team.logo : undefined,
+          data: team,
         });
       }
     }
@@ -133,22 +213,22 @@ export const GlobalSearchScreen: React.FC = () => {
           id: `player-${p.id}`,
           type: 'player',
           name: p.name,
-          subtitle: p.teamName || 'Jugador',
+          subtitle: p.teamName ?? '',
           image: p.image?.startsWith('http') ? p.image : undefined,
           data: p,
         });
       }
     }
 
-    // Leagues
+    // Leagues — match name or country (bilingual: Spain ↔ España, Brazil ↔ Brasil, etc.)
     for (const l of leagues) {
-      if (normalize(l.name).includes(q) || normalize(l.country).includes(q)) {
+      if (normalize(l.name).includes(q) || matchesCountry(l.country, q)) {
         out.push({
           id: `league-${l.id}`,
           type: 'league',
           name: l.name,
           subtitle: l.country,
-          image: undefined,
+          image: l.image,
           data: l,
         });
       }
@@ -163,11 +243,11 @@ export const GlobalSearchScreen: React.FC = () => {
     const teamResults = results.filter(r => r.type === 'team');
     const playerResults = results.filter(r => r.type === 'player');
     const leagueResults = results.filter(r => r.type === 'league');
-    if (teamResults.length > 0)   sections.push({ title: 'EQUIPOS', icon: '🏟', data: teamResults });
-    if (playerResults.length > 0) sections.push({ title: 'JUGADORES', icon: '⚽', data: playerResults });
-    if (leagueResults.length > 0) sections.push({ title: 'LIGAS', icon: '🏆', data: leagueResults });
+    if (teamResults.length > 0)   sections.push({ title: t('search.sectionTeams'), icon: '🏟', data: teamResults });
+    if (playerResults.length > 0) sections.push({ title: t('search.sectionPlayers'), icon: '⚽', data: playerResults });
+    if (leagueResults.length > 0) sections.push({ title: t('search.sectionLeagues'), icon: '🏆', data: leagueResults });
     return sections;
-  }, [results]);
+  }, [results, t]);
 
   // ── Trending items ────────────────────────────────────────────────────────
   const trending = useMemo<SearchResult[]>(() => {
@@ -177,31 +257,34 @@ export const GlobalSearchScreen: React.FC = () => {
     let ti = 0, pi = 0;
     while (items.length < maxItems && (ti < teams.length || pi < players.length)) {
       if (ti < teams.length) {
-        const t = teams[ti++];
-        items.push({
-          id: `team-${t.id}`,
-          type: 'team',
-          name: t.name,
-          subtitle: 'Equipo',
-          image: t.logo.startsWith('http') ? t.logo : undefined,
-          data: t,
-        });
+        const team = teams[ti++];
+        // Skip national teams from trending (they belong in search, not trending)
+        if (team.leagueName !== 'Selección Nacional') {
+          items.push({
+            id: `team-${team.id}`,
+            type: 'team',
+            name: team.name,
+            subtitle: team.leagueName,
+            image: team.logo.startsWith('http') ? team.logo : undefined,
+            data: team,
+          });
+        }
       }
       if (items.length >= maxItems) break;
       if (pi < players.length) {
-        const p = players[pi++];
+        const player = players[pi++];
         items.push({
-          id: `player-${p.id}`,
+          id: `player-${player.id}`,
           type: 'player',
-          name: p.name,
-          subtitle: 'Jugador',
-          image: p.image?.startsWith('http') ? p.image : undefined,
-          data: p,
+          name: player.name,
+          subtitle: player.teamName || t('search.labelPlayer'),
+          image: player.image?.startsWith('http') ? player.image : undefined,
+          data: player,
         });
       }
     }
     return items;
-  }, [teams, players]);
+  }, [teams, players, t]);
 
   // ── Navigate to result ────────────────────────────────────────────────────
   const handleResultPress = useCallback((item: SearchResult) => {
@@ -243,7 +326,7 @@ export const GlobalSearchScreen: React.FC = () => {
       navigation.navigate('LeagueDetail', {
         leagueId: l.id,
         leagueName: l.name,
-        leagueLogo: l.flag,
+        leagueLogo: l.image,
         seasonId: l.seasonId,
       });
     }
@@ -301,7 +384,12 @@ export const GlobalSearchScreen: React.FC = () => {
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
-  const renderAvatar = (image: string | undefined, type: SearchResultType, size = 40) => {
+  const renderAvatar = (
+    image: string | undefined,
+    type: SearchResultType,
+    size = 40,
+    fallbackIcon?: string,
+  ) => {
     if (image) {
       return (
         <Image
@@ -315,7 +403,7 @@ export const GlobalSearchScreen: React.FC = () => {
         />
       );
     }
-    const icon = type === 'team' ? '🏟' : type === 'player' ? '👤' : '🏆';
+    const icon = fallbackIcon ?? (type === 'team' ? '🏟' : type === 'player' ? '👤' : '🏆');
     return (
       <View style={[s.avatarPlaceholder, {
         width: size, height: size,
@@ -327,8 +415,13 @@ export const GlobalSearchScreen: React.FC = () => {
     );
   };
 
-  const renderTypeLabel = (type: SearchResultType) => {
-    const label = type === 'team' ? 'Equipo' : type === 'player' ? 'Jugador' : 'Liga';
+  const renderTypeLabel = (type: SearchResultType, subtitle?: string) => {
+    const isNational = type === 'team' && subtitle === 'Selección Nacional';
+    const label = isNational
+      ? t('search.labelNational')
+      : type === 'team' ? t('search.labelTeam')
+      : type === 'player' ? t('search.labelPlayer')
+      : t('search.labelLeague');
     return (
       <Text style={[s.typeLabel, { color: typeLabelColor }]}>{label}</Text>
     );
@@ -383,7 +476,7 @@ export const GlobalSearchScreen: React.FC = () => {
           <TextInput
             ref={inputRef}
             style={[s.input, { color: c.textPrimary }]}
-            placeholder="Equipos, jugadores, ligas..."
+            placeholder={t('search.placeholder')}
             placeholderTextColor={c.textTertiary}
             value={query}
             onChangeText={setQuery}
@@ -402,7 +495,7 @@ export const GlobalSearchScreen: React.FC = () => {
       {/* ── Subtitle ── */}
       <View style={[s.subtitleRow, { borderBottomColor: c.border }]}>
         <Text style={[s.subtitleText, { color: c.textTertiary }]}>
-          Busca equipos, jugadores, ligas y noticias
+          {t('search.subtitle')}
         </Text>
       </View>
 
@@ -413,9 +506,9 @@ export const GlobalSearchScreen: React.FC = () => {
         results.length === 0 ? (
           <View style={s.emptyWrap}>
             <Text style={{ fontSize: 40 }}>🔍</Text>
-            <Text style={[s.emptyTitle, { color: c.textPrimary }]}>Sin resultados</Text>
+            <Text style={[s.emptyTitle, { color: c.textPrimary }]}>{t('search.noResults')}</Text>
             <Text style={[s.emptySubtitle, { color: c.textSecondary }]}>
-              No se encontraron resultados para "{debouncedQuery}"
+              {t('search.noResultsFor', { query: debouncedQuery })}
             </Text>
           </View>
         ) : (
@@ -443,7 +536,12 @@ export const GlobalSearchScreen: React.FC = () => {
                       onPress={() => handleResultPress(item)}
                       activeOpacity={0.7}
                     >
-                      {renderAvatar(item.image, item.type)}
+                      {renderAvatar(
+                        item.image,
+                        item.type,
+                        40,
+                        item.type === 'league' ? (item.data as SearchableLeague).flag : undefined,
+                      )}
                       <View style={s.resultInfo}>
                         <Text style={[s.resultName, { color: c.textPrimary }]} numberOfLines={1}>
                           {parts.map((part, i) =>
@@ -458,7 +556,7 @@ export const GlobalSearchScreen: React.FC = () => {
                           {item.subtitle}
                         </Text>
                       </View>
-                      {renderTypeLabel(item.type)}
+                      {renderTypeLabel(item.type, item.subtitle)}
                       <ChevronRight />
                     </TouchableOpacity>
                   );
@@ -481,10 +579,10 @@ export const GlobalSearchScreen: React.FC = () => {
                 <View>
                   <View style={[s.sectionHeader, { borderBottomColor: c.border }]}>
                     <Text style={{ fontSize: 13 }}>🕐</Text>
-                    <Text style={[s.sectionTitle, { color: c.textTertiary }]}>RECIENTES</Text>
+                    <Text style={[s.sectionTitle, { color: c.textTertiary }]}>{t('search.sectionRecent')}</Text>
                     <View style={{ flex: 1 }} />
                     <TouchableOpacity onPress={clearRecent} activeOpacity={0.7}>
-                      <Text style={[s.clearAllText, { color: c.accent }]}>Borrar</Text>
+                      <Text style={[s.clearAllText, { color: c.accent }]}>{t('search.clearAll')}</Text>
                     </TouchableOpacity>
                   </View>
                   {recentSearches.map((item) => (
@@ -521,7 +619,7 @@ export const GlobalSearchScreen: React.FC = () => {
                 <View>
                   <View style={[s.sectionHeader, { borderBottomColor: c.border }]}>
                     <Text style={{ fontSize: 13 }}>📈</Text>
-                    <Text style={[s.sectionTitle, { color: c.textTertiary }]}>TENDENCIAS</Text>
+                    <Text style={[s.sectionTitle, { color: c.textTertiary }]}>{t('search.sectionTrending')}</Text>
                   </View>
                   {trending.map((item, idx) => (
                     <TouchableOpacity

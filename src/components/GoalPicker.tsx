@@ -5,8 +5,8 @@
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
-  Animated, Easing,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  Animated, Easing, type NativeSyntheticEvent, type NativeScrollEvent,
 } from 'react-native';
 import { useThemeColors } from '../theme/useTheme';
 import { haptics } from '../utils/haptics';
@@ -34,7 +34,7 @@ export const GoalPicker: React.FC<GoalPickerProps> = ({
   cardWidth,
 }) => {
   const c = useThemeColors();
-  const listRef = useRef<FlatList>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const [activeIndex, setActiveIndex] = useState(2); // start at "2"
   const confirmScale = useRef(new Animated.Value(0)).current;
   const locked = selected != null;
@@ -44,7 +44,7 @@ export const GoalPicker: React.FC<GoalPickerProps> = ({
   const sidePad = (innerWidth - CELL_W) / 2;
 
   // ── Scroll snap detection ─────────────────────────────────────────────────
-  const handleMomentumEnd = useCallback((e: any) => {
+  const handleMomentumEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const offsetX = e.nativeEvent.contentOffset.x;
     const idx = Math.round(offsetX / SNAP_INTERVAL);
     const clamped = Math.max(0, Math.min(idx, GOAL_OPTIONS.length - 1));
@@ -77,38 +77,12 @@ export const GoalPicker: React.FC<GoalPickerProps> = ({
   const totalVotes = Object.values(counts).reduce((a, b) => a + b, 0);
   const pct = (v: string) => totalVotes > 0 ? Math.round(((counts[v] || 0) / totalVotes) * 100) : 0;
 
-  // ── Render each number cell ───────────────────────────────────────────────
-  const renderCell = useCallback(({ item, index }: { item: string; index: number }) => {
-    const isCenter = locked
-      ? item === selected
-      : index === activeIndex;
-    const isSelectedResult = locked && item === selected;
-
-    return (
-      <View style={[gs.cell, { width: CELL_W, marginRight: CELL_GAP }]}>
-        <View style={[
-          gs.circle,
-          { borderColor: isCenter ? c.accent : c.border },
-          isCenter && { backgroundColor: c.accent + '15', transform: [{ scale: 1.15 }] },
-          isSelectedResult && { backgroundColor: c.accent + '25', borderWidth: 2 },
-        ]}>
-          <Text style={[
-            gs.number,
-            { color: isCenter ? c.accent : c.textTertiary },
-            isCenter && { fontWeight: '900', fontSize: 22 },
-          ]}>
-            {item}
-          </Text>
-        </View>
-        {/* Post-vote: percentage below each number */}
-        {locked && (
-          <Text style={[gs.cellPct, { color: isSelectedResult ? c.accent : c.textTertiary }]}>
-            {pct(item)}%
-          </Text>
-        )}
-      </View>
-    );
-  }, [activeIndex, locked, selected, c, counts, totalVotes]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Scroll to initial position on mount
+  useEffect(() => {
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({ x: 2 * SNAP_INTERVAL, animated: false });
+    }, 50);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <View style={gs.wrapper}>
@@ -119,11 +93,8 @@ export const GoalPicker: React.FC<GoalPickerProps> = ({
           <View style={[gs.indicator, { backgroundColor: c.accent + '20', left: sidePad - 4, width: CELL_W + 8 }]} />
         )}
 
-        <FlatList
-          ref={listRef}
-          data={GOAL_OPTIONS}
-          renderItem={renderCell}
-          keyExtractor={item => item}
+        <ScrollView
+          ref={scrollRef}
           horizontal
           showsHorizontalScrollIndicator={false}
           snapToInterval={SNAP_INTERVAL}
@@ -131,13 +102,35 @@ export const GoalPicker: React.FC<GoalPickerProps> = ({
           scrollEnabled={!locked}
           onMomentumScrollEnd={handleMomentumEnd}
           contentContainerStyle={{ paddingHorizontal: sidePad }}
-          getItemLayout={(_, index) => ({
-            length: CELL_W + CELL_GAP,
-            offset: (CELL_W + CELL_GAP) * index,
-            index,
+        >
+          {GOAL_OPTIONS.map((item, index) => {
+            const isCenter = locked ? item === selected : index === activeIndex;
+            const isSelectedResult = locked && item === selected;
+            return (
+              <View key={item} style={[gs.cell, { width: CELL_W, marginRight: CELL_GAP }]}>
+                <View style={[
+                  gs.circle,
+                  { borderColor: isCenter ? c.accent : c.border },
+                  isCenter && { backgroundColor: c.accent + '15', transform: [{ scale: 1.15 }] },
+                  isSelectedResult && { backgroundColor: c.accent + '25', borderWidth: 2 },
+                ]}>
+                  <Text style={[
+                    gs.number,
+                    { color: isCenter ? c.accent : c.textTertiary },
+                    isCenter && { fontWeight: '900', fontSize: 22 },
+                  ]}>
+                    {item}
+                  </Text>
+                </View>
+                {locked && (
+                  <Text style={[gs.cellPct, { color: isSelectedResult ? c.accent : c.textTertiary }]}>
+                    {pct(item)}%
+                  </Text>
+                )}
+              </View>
+            );
           })}
-          initialScrollIndex={2}
-        />
+        </ScrollView>
       </View>
 
       {/* Confirm button (pre-vote) */}

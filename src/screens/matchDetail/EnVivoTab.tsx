@@ -8,6 +8,7 @@ import {
   ScrollView, Dimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
 import { haptics } from '../../utils/haptics';
 import { AnimatedPressable } from '../../components/AnimatedPressable';
@@ -246,8 +247,9 @@ async function saveVote(
 }
 
 // ── Predictions carousel (6 interactive polls) ─────────────────────────────
-const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
+export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const [activeDot, setActiveDot] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -283,6 +285,9 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
   const pct = (n: number, total: number) => total > 0 ? Math.round((n / total) * 100) : 0;
 
   // Helper: render a binary option button (compact, full-width)
+  // NOTE: Uses plain TouchableOpacity instead of AnimatedPressable because
+  // Animated.View with flex:1 + transform inside a flex-row has a known iOS
+  // rendering bug where content becomes invisible (height collapses to 0).
   const BinaryBtn = ({ pollKey, optKey, label, sub }: {
     pollKey: PollKey; optKey: string; label: string; sub: string;
   }) => {
@@ -292,13 +297,12 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
     const percentage = pct(counts[pollKey][optKey] || 0, total);
 
     return (
-      <AnimatedPressable
+      <TouchableOpacity
         style={[
           pc.optBtn,
           { borderColor: isSelected ? c.accent : c.border, backgroundColor: isSelected ? c.accent + '12' : c.surface },
         ]}
-        scaleValue={0.95}
-        haptic="none"
+        activeOpacity={0.7}
         onPress={() => handleVote(pollKey, optKey)}
         disabled={voted}
       >
@@ -307,7 +311,7 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
         {voted && (
           <Text style={[pc.optPct, { color: isSelected ? c.accent : c.textTertiary }]}>{percentage}%</Text>
         )}
-      </AnimatedPressable>
+      </TouchableOpacity>
     );
   };
 
@@ -318,17 +322,17 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
   const VoteCountText = ({ pollKey }: { pollKey: PollKey }) => {
     const total = pollTotal(pollKey);
     if (!votes[pollKey] || total === 0) return null;
-    return <Text style={[pc.totalVotes, { color: c.textTertiary }]}>{total} {total === 1 ? 'voto' : 'votos'}</Text>;
+    return <Text style={[pc.totalVotes, { color: c.textTertiary }]}>{t('predictions.vote', { count: total })}</Text>;
   };
 
   const cards = [
     // ── Card 1: ¿Quién ganará? ──────────────────────────────────────────────
     <View key="winner" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={[pc.question, { color: c.textPrimary }]}>¿Quién crees que ganará?</Text>
+      <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.whoWillWin')}</Text>
       <View style={pc.optionsRow}>
         {[
           { key: '1', label: '1', sub: match.homeTeam.shortName },
-          { key: 'X', label: 'X', sub: 'Empate' },
+          { key: 'X', label: 'X', sub: t('predictions.draw') },
           { key: '2', label: '2', sub: match.awayTeam.shortName },
         ].map(opt => {
           const voted = votes.winner != null;
@@ -336,14 +340,13 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
           const total = pollTotal('winner');
           const percentage = pct(counts.winner[opt.key] || 0, total);
           return (
-            <AnimatedPressable
+            <TouchableOpacity
               key={opt.key}
               style={[
                 pc.optBtn,
                 { borderColor: isSelected ? c.accent : c.border, backgroundColor: isSelected ? c.accent + '12' : c.surface },
               ]}
-              scaleValue={0.93}
-              haptic="none"
+              activeOpacity={0.7}
               onPress={() => handleVote('winner', opt.key)}
               disabled={voted}
             >
@@ -352,7 +355,7 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
               {voted && (
                 <Text style={[pc.optPct, { color: isSelected ? c.accent : c.textTertiary }]}>{percentage}%</Text>
               )}
-            </AnimatedPressable>
+            </TouchableOpacity>
           );
         })}
       </View>
@@ -361,7 +364,7 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
 
     // ── Card 2: ¿Cuántos goles? ─────────────────────────────────────────────
     <View key="goals" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={[pc.question, { color: c.textPrimary }]}>¿Cuántos goles habrá?</Text>
+      <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.howManyGoals')}</Text>
       <GoalPicker
         selected={votes.goals}
         onSelect={(val) => handleVote('goals', val)}
@@ -372,40 +375,40 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
 
     // ── Card 3: Corners ─────────────────────────────────────────────────────
     <View key="corners" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={[pc.question, { color: c.textPrimary }]}>¿Más o menos de 8.5 corners?</Text>
+      <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.cornersQuestion')}</Text>
       <View style={pc.optionsRow}>
-        <BinaryBtn pollKey="corners" optKey="+8.5" label="+8.5" sub="Más corners" />
-        <BinaryBtn pollKey="corners" optKey="-8.5" label="-8.5" sub="Menos corners" />
+        <BinaryBtn pollKey="corners" optKey="+8.5" label="+8.5" sub={t('predictions.moreCorners')} />
+        <BinaryBtn pollKey="corners" optKey="-8.5" label="-8.5" sub={t('predictions.lessCorners')} />
       </View>
       <VoteCountText pollKey="corners" />
     </View>,
 
     // ── Card 4: Ambos anotan ────────────────────────────────────────────────
     <View key="btts" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={[pc.question, { color: c.textPrimary }]}>¿Ambos equipos anotarán?</Text>
+      <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.bothScore')}</Text>
       <View style={pc.optionsRow}>
-        <BinaryBtn pollKey="bothScore" optKey="si" label="Sí" sub="Ambos anotan" />
-        <BinaryBtn pollKey="bothScore" optKey="no" label="No" sub="Al menos uno no" />
+        <BinaryBtn pollKey="bothScore" optKey="si" label={t('predictions.yes')} sub={t('predictions.bothScoreYes')} />
+        <BinaryBtn pollKey="bothScore" optKey="no" label={t('predictions.no')} sub={t('predictions.bothScoreNo')} />
       </View>
       <VoteCountText pollKey="bothScore" />
     </View>,
 
     // ── Card 5: Tarjeta roja ────────────────────────────────────────────────
     <View key="red" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={[pc.question, { color: c.textPrimary }]}>¿Habrá tarjeta roja?</Text>
+      <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.redCard')}</Text>
       <View style={pc.optionsRow}>
-        <BinaryBtn pollKey="redCard" optKey="si" label="Sí" sub="Habrá roja" />
-        <BinaryBtn pollKey="redCard" optKey="no" label="No" sub="Sin rojas" />
+        <BinaryBtn pollKey="redCard" optKey="si" label={t('predictions.yes')} sub={t('predictions.redCardYes')} />
+        <BinaryBtn pollKey="redCard" optKey="no" label={t('predictions.no')} sub={t('predictions.redCardNo')} />
       </View>
       <VoteCountText pollKey="redCard" />
     </View>,
 
     // ── Card 6: Primer gol ──────────────────────────────────────────────────
     <View key="first" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={[pc.question, { color: c.textPrimary }]}>¿Quién anota primero?</Text>
+      <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.firstScorer')}</Text>
       <View style={pc.optionsRow}>
-        <BinaryBtn pollKey="firstScorer" optKey="home" label={match.homeTeam.shortName} sub="Local" />
-        <BinaryBtn pollKey="firstScorer" optKey="away" label={match.awayTeam.shortName} sub="Visitante" />
+        <BinaryBtn pollKey="firstScorer" optKey="home" label={match.homeTeam.shortName} sub={t('predictions.home')} />
+        <BinaryBtn pollKey="firstScorer" optKey="away" label={match.awayTeam.shortName} sub={t('predictions.away')} />
       </View>
       <VoteCountText pollKey="firstScorer" />
     </View>,
@@ -416,7 +419,7 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
       {/* Header */}
       <View style={pc.headerRow}>
         <View style={[pc.headerBar, { backgroundColor: c.accent }]} />
-        <Text style={[pc.headerTitle, { color: c.textPrimary }]}>PREDICCIONES</Text>
+        <Text style={[pc.headerTitle, { color: c.textPrimary }]}>{t('predictions.title')}</Text>
         <Text style={[pc.headerLeague, { color: c.textTertiary }]}>  · {match.league}</Text>
         <View style={{ flex: 1 }} />
         <View style={pc.dots}>
@@ -430,7 +433,7 @@ const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
         </View>
         <Text style={[pc.counter, { color: c.textTertiary }]}>{answeredCount}/{TOTAL_POLLS}</Text>
       </View>
-      <Text style={[pc.hintText, { color: c.textTertiary }]}>Desliza para más  →</Text>
+      <Text style={[pc.hintText, { color: c.textTertiary }]}>{t('predictions.swipeForMore')}</Text>
 
       {/* Carousel */}
       <ScrollView
@@ -521,6 +524,7 @@ const pc = StyleSheet.create({
 // ── Poll Results (live/finished) — shows locked voting results ───────────────
 const PollResultsSection: React.FC<{ match: Match }> = ({ match }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const [votes, setVotes] = useState<VoteState>({});
   const [counts, setCounts] = useState<VoteCounts>(defaultCounts);
   const [loaded, setLoaded] = useState(false);
@@ -549,10 +553,10 @@ const PollResultsSection: React.FC<{ match: Match }> = ({ match }) => {
   }> = [
     {
       key: 'winner',
-      question: '¿Quién gana?',
+      question: t('predictions.whoWins'),
       options: [
         { key: '1', label: match.homeTeam.shortName },
-        { key: 'X', label: 'Empate' },
+        { key: 'X', label: t('predictions.draw') },
         { key: '2', label: match.awayTeam.shortName },
       ],
       barColor: '#3b82f6',
@@ -562,36 +566,39 @@ const PollResultsSection: React.FC<{ match: Match }> = ({ match }) => {
     },
     {
       key: 'goals',
-      question: '¿Cuántos goles?',
-      options: GOAL_OPTIONS.map(k => ({ key: k, label: `${k} gol${k === '1' ? '' : 'es'}` })),
+      question: t('predictions.howManyGoalsShort'),
+      options: GOAL_OPTIONS.map(k => ({
+        key: k,
+        label: k === '6+' ? '6+' : t('predictions.goalLabel', { count: Number(k) }),
+      })),
       barColor: '#f59e0b',
       actual: isFinished ? (totalGoals >= 6 ? '6+' : String(totalGoals)) : null,
-      resultText: isFinished ? `Resultado: ${totalGoals} ${totalGoals === 1 ? 'gol' : 'goles'}` : undefined,
+      resultText: isFinished ? t('predictions.goalResult', { count: totalGoals }) : undefined,
     },
     {
       key: 'corners',
-      question: 'Corners: ¿Más o menos de 8.5?',
+      question: t('predictions.cornersShort'),
       options: [{ key: '+8.5', label: '+8.5' }, { key: '-8.5', label: '-8.5' }],
       barColor: '#8b5cf6',
       actual: null, // corners stat not available in Match type
     },
     {
       key: 'bothScore',
-      question: '¿Ambos equipos anotaron?',
-      options: [{ key: 'si', label: 'Sí' }, { key: 'no', label: 'No' }],
+      question: t('predictions.bothScoreResult'),
+      options: [{ key: 'si', label: t('predictions.yes') }, { key: 'no', label: t('predictions.no') }],
       barColor: '#06b6d4',
       actual: isFinished ? (match.homeScore > 0 && match.awayScore > 0 ? 'si' : 'no') : null,
     },
     {
       key: 'redCard',
-      question: '¿Tarjeta roja?',
-      options: [{ key: 'si', label: 'Sí' }, { key: 'no', label: 'No' }],
+      question: t('predictions.redCardResult'),
+      options: [{ key: 'si', label: t('predictions.yes') }, { key: 'no', label: t('predictions.no') }],
       barColor: '#ef4444',
       actual: null, // would need match events data
     },
     {
       key: 'firstScorer',
-      question: '¿Quién anotó primero?',
+      question: t('predictions.firstScorerResult'),
       options: [
         { key: 'home', label: match.homeTeam.shortName },
         { key: 'away', label: match.awayTeam.shortName },
@@ -613,12 +620,12 @@ const PollResultsSection: React.FC<{ match: Match }> = ({ match }) => {
     <View style={[pr.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <View style={pr.header}>
         <Text style={{ fontSize: 16 }}>📊</Text>
-        <Text style={[pr.title, { color: c.textPrimary }]}>Predicciones de la comunidad</Text>
+        <Text style={[pr.title, { color: c.textPrimary }]}>{t('predictions.communityPredictions')}</Text>
         <View style={{ flex: 1 }} />
         <View style={[pr.lockBadge, { backgroundColor: c.surface }]}>
           <Text style={{ fontSize: 10 }}>🔒</Text>
           <Text style={[pr.lockText, { color: c.textTertiary }]}>
-            {isFinished ? 'Finalizado' : 'En juego'}
+            {isFinished ? t('predictions.finished') : t('predictions.inPlay')}
           </Text>
         </View>
       </View>
@@ -655,7 +662,7 @@ const PollResultsSection: React.FC<{ match: Match }> = ({ match }) => {
                 );
               })}
             </View>
-            <Text style={[pr.voteCount, { color: c.textTertiary }]}>{total} votos</Text>
+            <Text style={[pr.voteCount, { color: c.textTertiary }]}>{t('predictions.vote', { count: total })}</Text>
             {poll.resultText && (
               <Text style={[pr.actualResult, { color: c.textTertiary }]}>{poll.resultText}</Text>
             )}
@@ -691,9 +698,10 @@ const pr = StyleSheet.create({
   actualResult: { fontSize: 11, fontWeight: '600', textAlign: 'center', marginTop: 2 },
 });
 
-// ── AI Predictions (SportMonks) ──────────────────────────────────────────────
-const AIPredictionsSection: React.FC<{ predictions: MatchPrediction[]; match: Match }> = ({ predictions, match }) => {
+// ── AI Predictions ────────────────────────────────────────────────────────────
+export const AIPredictionsSection: React.FC<{ predictions: MatchPrediction[]; match: Match }> = ({ predictions, match }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   if (!predictions || predictions.length === 0) return null;
 
   return (
@@ -704,8 +712,8 @@ const AIPredictionsSection: React.FC<{ predictions: MatchPrediction[]; match: Ma
           <Text style={{ fontSize: 12 }}>🤖</Text>
         </View>
         <View>
-          <Text style={[ai.title, { color: c.textPrimary }]}>Predicción IA</Text>
-          <Text style={[ai.subtitle, { color: c.textTertiary }]}>Modelo predictivo de SportMonks</Text>
+          <Text style={[ai.title, { color: c.textPrimary }]}>{t('lineup.predictionTitle')}</Text>
+          <Text style={[ai.subtitle, { color: c.textTertiary }]}>{t('lineup.predictionSubtitle')}</Text>
         </View>
       </View>
 
@@ -784,7 +792,7 @@ const AIPredictionsSection: React.FC<{ predictions: MatchPrediction[]; match: Ma
       {/* Disclaimer */}
       <View style={[ai.footer, { borderTopColor: c.border }]}>
         <Text style={[ai.disclaimer, { color: c.textTertiary }]}>
-          Basado en análisis estadístico. No constituye asesoría de apuestas.
+          {t('predictions.disclaimer')}
         </Text>
       </View>
     </View>
@@ -1074,6 +1082,7 @@ const fm = StyleSheet.create({
 // ── Match info card ──────────────────────────────────────────────────────────
 const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match, detail }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
 
   type InfoRow = { icon: string; iconBg: string; label: string; sublabel?: string; rightText?: string };
   const rows: InfoRow[] = [];
@@ -1139,7 +1148,7 @@ const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match,
         <Text style={[mi.title, { color: c.textPrimary }]}>Información del partido</Text>
         <View style={{ flex: 1 }} />
         <Text style={[mi.round, { color: c.textTertiary }]}>
-          {seasonStr ? `Jornada · ${seasonStr}` : 'Jornada'}
+          {seasonStr ? `${t('matches.matchday')} · ${seasonStr}` : t('matches.matchday')}
         </Text>
       </View>
 

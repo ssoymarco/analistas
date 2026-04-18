@@ -11,12 +11,16 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { SkeletonPlayerDetail } from '../components/Skeleton';
 import { useDarkMode } from '../contexts/DarkModeContext';
@@ -119,6 +123,7 @@ const sb = StyleSheet.create({
 
 const ResumenTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const { info, currentStats } = data;
   const st = currentStats;
@@ -133,33 +138,33 @@ const ResumenTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
               <Text style={[rt.ratingValue, { color: ratingColor(st.rating) }]}>{st.rating.toFixed(1)}</Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[rt.ratingTitle, { color: c.textPrimary }]}>Rating de temporada</Text>
+              <Text style={[rt.ratingTitle, { color: c.textPrimary }]}>{t('player.seasonRating')}</Text>
               <Text style={[rt.ratingSubtitle, { color: c.textTertiary }]}>
-                Basado en {st.appearances} partidos disputados
+                {t('player.basedOnAppearances', { count: st.appearances })}
               </Text>
             </View>
           </View>
 
           <View style={rt.barsWrap}>
-            <StatBar label="Goles" value={st.goals} max={Math.max(st.goals, 30)} color="#3b82f6" />
-            <StatBar label="Asistencias" value={st.assists} max={Math.max(st.assists, 20)} color="#f97316" />
-            <StatBar label="Partidos" value={st.appearances} max={38} color="#3b82f6" />
-            <StatBar label="Minutos" value={st.minutesPlayed} max={3420} color="#3b82f6" suffix="'" />
+            <StatBar label={t('player.goals')} value={st.goals} max={Math.max(st.goals, 30)} color="#3b82f6" />
+            <StatBar label={t('player.assists')} value={st.assists} max={Math.max(st.assists, 20)} color="#f97316" />
+            <StatBar label={t('player.appearances')} value={st.appearances} max={38} color="#3b82f6" />
+            <StatBar label={t('player.minutes')} value={st.minutesPlayed} max={3420} color="#3b82f6" suffix="'" />
           </View>
         </View>
       )}
 
       {/* ── Personal Information Card ── */}
       <View style={[rt.card, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Text style={[rt.sectionTitle, { color: c.textPrimary }]}>Información personal</Text>
+        <Text style={[rt.sectionTitle, { color: c.textPrimary }]}>{t('player.personalInfo')}</Text>
         <View style={rt.infoGrid}>
           {[
-            { label: 'Nacionalidad', value: `${info.nationalityFlag} ${info.nationality}` },
-            { label: 'Edad', value: info.age > 0 ? `${info.age} años` : '-' },
-            { label: 'Altura', value: info.height },
-            { label: 'Peso', value: info.weight },
-            { label: 'Posición', value: info.position },
-            { label: 'Dorsal', value: data.jerseyNumber > 0 ? `#${data.jerseyNumber}` : '-' },
+            { label: t('player.nationality'), value: `${info.nationalityFlag} ${info.nationality}` },
+            { label: t('player.age'), value: info.age > 0 ? t('player.ageValue', { age: info.age }) : '-' },
+            { label: t('player.height'), value: info.height },
+            { label: t('player.weight'), value: info.weight },
+            { label: t('player.position'), value: info.position },
+            { label: t('player.jersey'), value: data.jerseyNumber > 0 ? t('player.jerseyNumber', { number: data.jerseyNumber }) : '-' },
           ].map((item, i) => (
             <View key={i} style={[rt.infoCell, { backgroundColor: c.surface, borderColor: c.border }]}>
               <Text style={[rt.infoCellLabel, { color: c.textTertiary }]}>{item.label}</Text>
@@ -172,22 +177,22 @@ const ResumenTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
       {/* ── Additional Stats Card (if available) ── */}
       {st && (st.tackles > 0 || st.passes > 0 || st.dribbles > 0 || st.saves > 0) && (
         <View style={[rt.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[rt.sectionTitle, { color: c.textPrimary }]}>Rendimiento</Text>
+          <Text style={[rt.sectionTitle, { color: c.textPrimary }]}>{t('player.performance')}</Text>
           <View style={rt.perfGrid}>
             {[
-              st.shotsTotal > 0 && { label: 'Tiros', value: st.shotsTotal, sub: `${st.shotsOnTarget} a puerta` },
-              st.passes > 0 && { label: 'Pases', value: st.passes, sub: `${st.keyPasses} clave` },
-              st.tackles > 0 && { label: 'Tackles', value: st.tackles },
-              st.interceptions > 0 && { label: 'Intercepciones', value: st.interceptions },
-              st.dribbles > 0 && { label: 'Regates', value: st.dribbles },
-              st.duelsWon > 0 && { label: 'Duelos ganados', value: st.duelsWon },
-              st.aerialWon > 0 && { label: 'Duelos aéreos', value: st.aerialWon },
-              st.crosses > 0 && { label: 'Centros', value: st.crosses },
-              st.clearances > 0 && { label: 'Despejes', value: st.clearances },
-              st.foulsDrawn > 0 && { label: 'Faltas recibidas', value: st.foulsDrawn },
+              st.shotsTotal > 0 && { label: t('player.shots'), value: st.shotsTotal, sub: t('player.shotsOnTarget', { count: st.shotsOnTarget }) },
+              st.passes > 0 && { label: t('player.passes'), value: st.passes, sub: t('player.keyPasses', { count: st.keyPasses }) },
+              st.tackles > 0 && { label: t('player.tackles'), value: st.tackles },
+              st.interceptions > 0 && { label: t('player.interceptions'), value: st.interceptions },
+              st.dribbles > 0 && { label: t('player.dribbles'), value: st.dribbles },
+              st.duelsWon > 0 && { label: t('player.duelsWon'), value: st.duelsWon },
+              st.aerialWon > 0 && { label: t('player.aerialDuels'), value: st.aerialWon },
+              st.crosses > 0 && { label: t('player.crosses'), value: st.crosses },
+              st.clearances > 0 && { label: t('player.clearances'), value: st.clearances },
+              st.foulsDrawn > 0 && { label: t('player.foulsDrawn'), value: st.foulsDrawn },
               // GK-specific
-              st.saves > 0 && { label: 'Atajadas', value: st.saves },
-              st.cleanSheets > 0 && { label: 'Portería imbatida', value: st.cleanSheets },
+              st.saves > 0 && { label: t('player.saves'), value: st.saves },
+              st.cleanSheets > 0 && { label: t('player.cleanSheets'), value: st.cleanSheets },
             ].filter(Boolean).map((item: any, i) => (
               <View key={i} style={[rt.perfRow, { borderTopColor: c.border }]}>
                 <View>
@@ -289,13 +294,14 @@ const rt = StyleSheet.create({
 
 const EstadisticasTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const st = data.currentStats;
 
   if (!st) {
     return (
       <View style={et.outer}>
         <View style={[et.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[et.empty, { color: c.textTertiary }]}>Sin estadísticas disponibles</Text>
+          <Text style={[et.empty, { color: c.textTertiary }]}>{t('player.noStats')}</Text>
         </View>
       </View>
     );
@@ -305,12 +311,12 @@ const EstadisticasTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
 
   // Main stat cards
   const mainStats = [
-    { emoji: '⚽', value: st.goals, label: 'Goles' },
-    { emoji: '🅰️', value: st.assists, label: 'Asistencias' },
-    { emoji: '🏟️', value: st.appearances, label: 'Partidos' },
-    { emoji: '⏱️', value: `${st.minutesPlayed}'`, label: 'Minutos' },
-    { emoji: '🟨', value: st.yellowCards, label: 'T. Amarillas' },
-    { emoji: '🟥', value: st.redCards, label: 'T. Rojas' },
+    { emoji: '⚽', value: st.goals, label: t('player.goals') },
+    { emoji: '🅰️', value: st.assists, label: t('player.assists') },
+    { emoji: '🏟️', value: st.appearances, label: t('player.appearances') },
+    { emoji: '⏱️', value: `${st.minutesPlayed}'`, label: t('player.minutes') },
+    { emoji: '🟨', value: st.yellowCards, label: t('player.yellowCards') },
+    { emoji: '🟥', value: st.redCards, label: t('player.redCards') },
   ];
 
   // Penalties
@@ -319,10 +325,10 @@ const EstadisticasTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
   // Per-90 stats
   const mins = st.minutesPlayed || 1;
   const per90 = [
-    { label: 'Goles / 90', value: ((st.goals / mins) * 90).toFixed(2) },
-    { label: 'Asistencias / 90', value: ((st.assists / mins) * 90).toFixed(2) },
-    { label: 'G+A / 90', value: (((st.goals + st.assists) / mins) * 90).toFixed(2) },
-    { label: 'Minutos / Gol', value: st.goals > 0 ? Math.round(mins / st.goals).toString() : '-' },
+    { label: t('player.goalsPer90'), value: ((st.goals / mins) * 90).toFixed(2) },
+    { label: t('player.assistsPer90'), value: ((st.assists / mins) * 90).toFixed(2) },
+    { label: t('player.gaPer90'), value: (((st.goals + st.assists) / mins) * 90).toFixed(2) },
+    { label: t('player.minutesPerGoal'), value: st.goals > 0 ? Math.round(mins / st.goals).toString() : '-' },
   ];
 
   // Defensive stats
@@ -335,7 +341,7 @@ const EstadisticasTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
     <View style={et.outer}>
       {/* Season header */}
       <View style={[et.card, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Text style={[et.seasonTitle, { color: c.textPrimary }]}>Temporada {seasonLabel}</Text>
+        <Text style={[et.seasonTitle, { color: c.textPrimary }]}>{t('player.season', { season: seasonLabel })}</Text>
         <View style={et.grid}>
           {mainStats.map((s, i) => (
             <View key={i} style={[et.statCell, { backgroundColor: c.surface }]}>
@@ -350,7 +356,7 @@ const EstadisticasTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
       {/* Per 90 stats */}
       {st.minutesPlayed > 0 && (
         <View style={[et.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[et.sectionTitle, { color: c.textPrimary }]}>Promedios por 90 min</Text>
+          <Text style={[et.sectionTitle, { color: c.textPrimary }]}>{t('player.averagesPer90')}</Text>
           {per90.map((s, i) => (
             <View key={i} style={[et.avgRow, { borderTopColor: c.border }]}>
               <Text style={[et.avgLabel, { color: c.textSecondary }]}>{s.label}</Text>
@@ -363,14 +369,14 @@ const EstadisticasTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
       {/* Offensive breakdown */}
       {(st.shotsTotal > 0 || st.dribbles > 0 || st.offsides > 0) && (
         <View style={[et.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[et.sectionTitle, { color: c.textPrimary }]}>Ataque</Text>
+          <Text style={[et.sectionTitle, { color: c.textPrimary }]}>{t('player.attack')}</Text>
           {[
-            st.shotsTotal > 0 && { label: 'Tiros totales', value: st.shotsTotal },
-            st.shotsOnTarget > 0 && { label: 'Tiros a puerta', value: st.shotsOnTarget },
-            st.dribbles > 0 && { label: 'Regates exitosos', value: st.dribbles },
-            st.crosses > 0 && { label: 'Centros', value: st.crosses },
-            st.offsides > 0 && { label: 'Fueras de juego', value: st.offsides },
-            hasPens && { label: 'Penales (anotados/fallados)', value: `${st.penScored}/${st.penMissed}` },
+            st.shotsTotal > 0 && { label: t('player.shots'), value: st.shotsTotal },
+            st.shotsOnTarget > 0 && { label: t('player.shotsOnTarget', { count: st.shotsOnTarget }), value: st.shotsOnTarget },
+            st.dribbles > 0 && { label: t('player.dribbles'), value: st.dribbles },
+            st.crosses > 0 && { label: t('player.crosses'), value: st.crosses },
+            st.offsides > 0 && { label: t('player.offsides'), value: st.offsides },
+            hasPens && { label: t('player.penalties'), value: `${st.penScored}/${st.penMissed}` },
           ].filter(Boolean).map((s: any, i) => (
             <View key={i} style={[et.avgRow, { borderTopColor: c.border }]}>
               <Text style={[et.avgLabel, { color: c.textSecondary }]}>{s.label}</Text>
@@ -383,10 +389,10 @@ const EstadisticasTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
       {/* Passing */}
       {st.passes > 0 && (
         <View style={[et.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[et.sectionTitle, { color: c.textPrimary }]}>Pases</Text>
+          <Text style={[et.sectionTitle, { color: c.textPrimary }]}>{t('player.passesSection')}</Text>
           {[
-            { label: 'Pases totales', value: st.passes },
-            st.keyPasses > 0 && { label: 'Pases clave', value: st.keyPasses },
+            { label: t('player.passes'), value: st.passes },
+            st.keyPasses > 0 && { label: t('player.keyPasses', { count: st.keyPasses }), value: st.keyPasses },
           ].filter(Boolean).map((s: any, i) => (
             <View key={i} style={[et.avgRow, { borderTopColor: c.border }]}>
               <Text style={[et.avgLabel, { color: c.textSecondary }]}>{s.label}</Text>
@@ -399,14 +405,14 @@ const EstadisticasTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
       {/* Defensive */}
       {hasDefensive && (
         <View style={[et.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[et.sectionTitle, { color: c.textPrimary }]}>Defensa</Text>
+          <Text style={[et.sectionTitle, { color: c.textPrimary }]}>{t('player.defense')}</Text>
           {[
-            st.tackles > 0 && { label: 'Tackles', value: st.tackles },
-            st.interceptions > 0 && { label: 'Intercepciones', value: st.interceptions },
-            st.clearances > 0 && { label: 'Despejes', value: st.clearances },
-            st.duelsWon > 0 && { label: 'Duelos ganados', value: st.duelsWon },
-            st.aerialWon > 0 && { label: 'Duelos aéreos', value: st.aerialWon },
-            st.foulsCommitted > 0 && { label: 'Faltas cometidas', value: st.foulsCommitted },
+            st.tackles > 0 && { label: t('player.tackles'), value: st.tackles },
+            st.interceptions > 0 && { label: t('player.interceptions'), value: st.interceptions },
+            st.clearances > 0 && { label: t('player.clearances'), value: st.clearances },
+            st.duelsWon > 0 && { label: t('player.duelsWon'), value: st.duelsWon },
+            st.aerialWon > 0 && { label: t('player.aerialDuels'), value: st.aerialWon },
+            st.foulsCommitted > 0 && { label: t('player.foulsCommitted'), value: st.foulsCommitted },
           ].filter(Boolean).map((s: any, i) => (
             <View key={i} style={[et.avgRow, { borderTopColor: c.border }]}>
               <Text style={[et.avgLabel, { color: c.textSecondary }]}>{s.label}</Text>
@@ -419,10 +425,10 @@ const EstadisticasTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
       {/* GK */}
       {hasGK && (
         <View style={[et.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[et.sectionTitle, { color: c.textPrimary }]}>Portero</Text>
+          <Text style={[et.sectionTitle, { color: c.textPrimary }]}>{t('player.goalkeeper')}</Text>
           {[
-            { label: 'Atajadas', value: st.saves },
-            { label: 'Portería imbatida', value: st.cleanSheets },
+            { label: t('player.saves'), value: st.saves },
+            { label: t('player.cleanSheets'), value: st.cleanSheets },
           ].map((s, i) => (
             <View key={i} style={[et.avgRow, { borderTopColor: c.border }]}>
               <Text style={[et.avgLabel, { color: c.textSecondary }]}>{s.label}</Text>
@@ -467,13 +473,14 @@ const et = StyleSheet.create({
 
 const HistorialTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const { seasonHistory } = data;
 
   if (seasonHistory.length === 0) {
     return (
       <View style={ht.outer}>
         <View style={[ht.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[ht.empty, { color: c.textTertiary }]}>Sin historial disponible</Text>
+          <Text style={[ht.empty, { color: c.textTertiary }]}>{t('player.noHistory')}</Text>
         </View>
       </View>
     );
@@ -483,11 +490,11 @@ const HistorialTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
     <View style={ht.outer}>
       {/* Season history table */}
       <View style={[ht.card, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Text style={[ht.sectionTitle, { color: c.textPrimary }]}>Temporadas recientes</Text>
+        <Text style={[ht.sectionTitle, { color: c.textPrimary }]}>{t('player.recentSeasons')}</Text>
 
         {/* Table header */}
         <View style={[ht.headerRow, { borderBottomColor: c.border }]}>
-          <Text style={[ht.colSeason, ht.headerText, { color: c.textTertiary }]}>TEMPORADA</Text>
+          <Text style={[ht.colSeason, ht.headerText, { color: c.textTertiary }]}>{t('player.seasonHeader')}</Text>
           <Text style={[ht.colNum, ht.headerText, { color: c.textTertiary }]}>PJ</Text>
           <Text style={[ht.colNum, ht.headerText, { color: c.textTertiary }]}>G</Text>
           <Text style={[ht.colNum, ht.headerText, { color: c.textTertiary }]}>A</Text>
@@ -523,14 +530,14 @@ const HistorialTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
         );
         return (
           <View style={[ht.card, { backgroundColor: c.card, borderColor: c.border }]}>
-            <Text style={[ht.sectionTitle, { color: c.textPrimary }]}>Totales de carrera</Text>
+            <Text style={[ht.sectionTitle, { color: c.textPrimary }]}>{t('player.careerTotals')}</Text>
             {[
-              { label: 'Partidos jugados', value: totals.apps },
-              { label: 'Goles', value: totals.goals },
-              { label: 'Asistencias', value: totals.assists },
-              { label: 'Minutos jugados', value: `${totals.mins.toLocaleString()}'` },
-              { label: 'Tarjetas amarillas', value: totals.yellows },
-              { label: 'Tarjetas rojas', value: totals.reds },
+              { label: t('player.matchesPlayed'), value: totals.apps },
+              { label: t('player.goalsShort'), value: totals.goals },
+              { label: t('player.assists'), value: totals.assists },
+              { label: t('player.minutesPlayedLabel'), value: `${totals.mins.toLocaleString()}'` },
+              { label: t('player.yellowCardsLong'), value: totals.yellows },
+              { label: t('player.redCardsLong'), value: totals.reds },
             ].map((s, i) => (
               <View key={i} style={[ht.totalRow, { borderTopColor: c.border }]}>
                 <Text style={[ht.totalLabel, { color: c.textSecondary }]}>{s.label}</Text>
@@ -580,6 +587,7 @@ const ht = StyleSheet.create({
 export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
   const { playerId, playerName, playerImage, teamName, teamLogo, jerseyNumber } = route.params;
   const c = useThemeColors();
+  const { t } = useTranslation();
   const { isDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const { isFollowingPlayer, toggleFollowPlayer } = useFavorites();
@@ -590,9 +598,9 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
 
   // ── Tabs ──
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'resumen', label: 'Resumen' },
-    { key: 'estadisticas', label: 'Estadísticas' },
-    { key: 'historial', label: 'Historial' },
+    { key: 'resumen', label: t('player.summaryTab') },
+    { key: 'estadisticas', label: t('player.statsTab') },
+    { key: 'historial', label: t('player.historyTab') },
   ];
   const [activeTab, setActiveTab] = useState<Tab>('resumen');
 
@@ -627,12 +635,12 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
   const heroStats = useMemo(() => {
     if (!st) return [];
     const items: { value: string; label: string; color?: string }[] = [];
-    items.push({ value: String(st.goals), label: 'Goles' });
-    items.push({ value: String(st.assists), label: 'Asist.' });
-    items.push({ value: String(st.appearances), label: 'PJ' });
-    if (st.rating > 0) items.push({ value: st.rating.toFixed(1), label: 'Rating', color: ratingColor(st.rating) });
+    items.push({ value: String(st.goals), label: t('player.goalsShort') });
+    items.push({ value: String(st.assists), label: t('player.assistsShort') });
+    items.push({ value: String(st.appearances), label: t('player.matchesShort') });
+    if (st.rating > 0) items.push({ value: st.rating.toFixed(1), label: t('player.ratingLabel'), color: ratingColor(st.rating) });
     return items;
-  }, [st]);
+  }, [st, t]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
@@ -733,7 +741,7 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
                 { color: hText },
                 isFollowing && { color: '#fff' },
               ]}>
-                {isFollowing ? '✓ Siguiendo' : '+ Seguir'}
+                {isFollowing ? t('player.following') : t('player.follow')}
               </Text>
             </TouchableOpacity>
 
@@ -753,23 +761,30 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
 
         {/* ── Tab bar (sticky on scroll) ── */}
         <View style={[ps.tabBar, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
-          {TABS.map(tab => {
-            const active = activeTab === tab.key;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                onPress={() => setActiveTab(tab.key)}
-                style={[ps.tab, active && { borderBottomColor: c.accent }]}
-                activeOpacity={0.7}
-              >
-                <Text style={[
-                  ps.tabText,
-                  { color: active ? c.accent : c.textTertiary },
-                  active && { fontWeight: '700' },
-                ]}>{tab.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
+          <ScrollView
+            horizontal
+            scrollEnabled={false}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ flexDirection: 'row', width: SCREEN_WIDTH }}
+          >
+            {TABS.map(tab => {
+              const active = activeTab === tab.key;
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  onPress={() => setActiveTab(tab.key)}
+                  style={[ps.tab, { width: SCREEN_WIDTH / TABS.length }, active && { borderBottomColor: c.accent }]}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    ps.tabText,
+                    { color: active ? c.accent : c.textTertiary },
+                    active && { fontWeight: '700' },
+                  ]}>{tab.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
 
         {/* ── Tab content ── */}
@@ -778,7 +793,7 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
         ) : !data ? (
           <View style={{ alignItems: 'center', paddingTop: 80, gap: 10 }}>
             <Text style={{ fontSize: 36 }}>👤</Text>
-            <Text style={{ fontSize: 14, color: c.textSecondary }}>Jugador no disponible</Text>
+            <Text style={{ fontSize: 14, color: c.textSecondary }}>{t('player.unavailable')}</Text>
           </View>
         ) : (
           <View style={{ paddingTop: 12 }}>

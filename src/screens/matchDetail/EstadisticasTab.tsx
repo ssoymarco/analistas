@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Image,
+  Animated,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
@@ -197,6 +198,135 @@ function TeamHeader({
   );
 }
 
+// ── Skeleton stats preview ────────────────────────────────────────────────────
+
+const SKELETON_ROWS = [0.72, 0.45, 0.61, 0.38, 0.55, 0.80];
+const SKELETON_SECTIONS = [
+  { width: 96 },
+  { width: 72 },
+];
+
+function SkeletonSection({ border, card, shimmer }: { border: string; card: string; shimmer: Animated.Value }) {
+  return (
+    <View style={[styles.card, { backgroundColor: card, borderColor: border, marginBottom: 0 }]}>
+      <View style={[styles.cardHeader, { borderBottomColor: border }]}>
+        <View style={[styles.sectionAccent, { backgroundColor: border }]} />
+        <Animated.View style={{ width: 80, height: 9, borderRadius: 4, backgroundColor: border, opacity: shimmer }} />
+      </View>
+      <View style={[styles.cardBody, { paddingTop: 4 }]}>
+        {SKELETON_ROWS.slice(0, 3).map((ratio, i) => (
+          <View key={i} style={[styles.statRow, i < 2 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border }]}>
+            <View style={styles.valuesRow}>
+              {/* left pill */}
+              <Animated.View style={{ width: 40, height: 28, borderRadius: 14, backgroundColor: HOME_BG_IDLE, opacity: shimmer }} />
+              {/* center label */}
+              <Animated.View style={{ flex: 1, height: 9, borderRadius: 4, backgroundColor: border, marginHorizontal: 12, opacity: shimmer }} />
+              {/* right pill */}
+              <Animated.View style={{ width: 40, height: 28, borderRadius: 14, backgroundColor: AWAY_BG_IDLE, opacity: shimmer }} />
+            </View>
+            <View style={styles.barRow}>
+              <View style={[styles.barHalf, { backgroundColor: HOME_TRACK }]}>
+                <View style={{ flex: 1 - ratio }} />
+                <Animated.View style={{ flex: ratio, backgroundColor: HOME_FILL, opacity: shimmer }} />
+              </View>
+              <View style={styles.barGap} />
+              <View style={[styles.barHalf, { backgroundColor: AWAY_TRACK }]}>
+                <Animated.View style={{ flex: 1 - ratio, backgroundColor: AWAY_FILL, opacity: shimmer }} />
+                <View style={{ flex: ratio }} />
+              </View>
+            </View>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ── Stats empty state ─────────────────────────────────────────────────────────
+
+function StatsEmptyState({ match }: { match: Match }) {
+  const c  = useThemeColors();
+  const { t } = useTranslation();
+  const shimmer = useRef(new Animated.Value(0.35)).current;
+
+  // Shimmer pulse — only for scheduled/live
+  useEffect(() => {
+    if (match.status === 'finished') return;
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmer, { toValue: 0.85, duration: 900, useNativeDriver: true }),
+        Animated.timing(shimmer, { toValue: 0.35, duration: 900, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [match.status, shimmer]);
+
+  const isScheduled = match.status === 'scheduled';
+  const isLive      = match.status === 'live';
+  const isFinished  = match.status === 'finished';
+
+  const emoji   = isScheduled ? '📊' : isLive ? '⚡' : '📉';
+  const title   = isScheduled
+    ? t('stats.emptyScheduled')
+    : isLive
+    ? t('stats.emptyLive')
+    : t('stats.emptyFinished');
+  const sub     = isScheduled
+    ? t('stats.emptyScheduledSub')
+    : isLive
+    ? t('stats.emptyLiveSub')
+    : t('stats.emptyFinishedSub');
+
+  return (
+    <View style={styles.emptyWrap}>
+
+      {/* Message card — always first so the user sees it immediately */}
+      <View style={[
+        styles.emptyCard,
+        {
+          backgroundColor: isScheduled
+            ? 'rgba(59,130,246,0.06)'
+            : isLive
+            ? 'rgba(255,69,58,0.06)'
+            : 'rgba(142,142,147,0.08)',
+          borderColor: isScheduled
+            ? 'rgba(59,130,246,0.18)'
+            : isLive
+            ? 'rgba(255,69,58,0.18)'
+            : c.border,
+        },
+      ]}>
+        <Text style={styles.emptyCardEmoji}>{emoji}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.emptyCardTitle, { color: c.textPrimary }]}>{title}</Text>
+          <Text style={[styles.emptyCardSub, { color: c.textSecondary }]}>{sub}</Text>
+        </View>
+      </View>
+
+      {/* Category chips — only for scheduled to preview what's coming */}
+      {isScheduled && (
+        <View style={styles.chipsRow}>
+          {(['⚽ Posesión', '🎯 Tiros', '🛡️ Defensa', '🟨 Disciplina'] as const).map((chip, i) => (
+            <View key={i} style={[styles.chip, { backgroundColor: c.card, borderColor: c.border }]}>
+              <Text style={[styles.chipText, { color: c.textTertiary }]}>{chip}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Skeleton preview below the message — only for scheduled/live */}
+      {!isFinished && (
+        <View style={[styles.skeletonWrap, { gap: 8 }]}>
+          <SkeletonSection border={c.border} card={c.card} shimmer={shimmer} />
+          <SkeletonSection border={c.border} card={c.card} shimmer={shimmer} />
+        </View>
+      )}
+
+    </View>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export const EstadisticasTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ match, detail }) => {
@@ -204,12 +334,7 @@ export const EstadisticasTab: React.FC<{ match: Match; detail: MatchDetail }> = 
   const { t } = useTranslation();
 
   if (!detail.statistics || detail.statistics.length === 0) {
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyEmoji}>📊</Text>
-        <Text style={[styles.emptyText, { color: c.textSecondary }]}>{t('stats.noStats')}</Text>
-      </View>
-    );
+    return <StatsEmptyState match={match} />;
   }
 
   return (
@@ -331,7 +456,33 @@ const styles = StyleSheet.create({
   showMoreText: { fontSize: 12, fontWeight: '600', letterSpacing: 0.3 },
 
   // ── Empty state ───────────────────────────────────────────────────────────────
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 64 },
-  emptyEmoji: { fontSize: 48, marginBottom: 12 },
-  emptyText: { fontSize: 15, fontWeight: '500' },
+  emptyWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    gap: 10,
+    paddingBottom: 32,
+  },
+  skeletonWrap: { opacity: 0.6 },
+
+  emptyCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  emptyCardEmoji: { fontSize: 28 },
+  emptyCardTitle: { fontSize: 14, fontWeight: '700', lineHeight: 20, marginBottom: 4 },
+  emptyCardSub:   { fontSize: 12, fontWeight: '400', lineHeight: 17, opacity: 0.7 },
+
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  chipText: { fontSize: 12, fontWeight: '500' },
 });

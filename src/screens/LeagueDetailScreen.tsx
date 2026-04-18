@@ -11,12 +11,16 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { SkeletonLeagueDetail } from '../components/Skeleton';
 import { useDarkMode } from '../contexts/DarkModeContext';
@@ -30,6 +34,9 @@ import type {
   LeagueFixture,
 } from '../hooks/useLeagueDetail';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
+import { getLeagueConfig } from '../config/leagues';
+import type { LeagueZone } from '../config/leagues';
+import type { Match, MatchStatus } from '../data/types';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'LeagueDetail'>;
 type Tab = 'clasificacion' | 'goleadores' | 'equipos' | 'calendario';
@@ -68,8 +75,15 @@ function ChevronRight({ color, size = 12 }: { color: string; size?: number }) {
   );
 }
 
-// ── Zone colors (same as TablaTab) ─────────────────────────────────────────
-function getZoneColor(position: number, totalTeams: number): string | null {
+// ── Zone colors ────────────────────────────────────────────────────────────
+function getZoneColor(position: number, totalTeams: number, zones?: LeagueZone[]): string | null {
+  if (zones) {
+    for (const z of zones) {
+      if (position >= z.from && position <= z.to) return z.color;
+    }
+    return null;
+  }
+  // Generic European fallback for unconfigured leagues
   if (position === 1) return '#fbbf24'; // Champion (gold)
   if (position <= 4)  return '#3b82f6'; // Champions League
   if (position <= 6)  return '#f97316'; // Europa League
@@ -86,10 +100,10 @@ const TeamLogo: React.FC<{ logo: string; size?: number }> = ({ logo, size = 22 }
 };
 
 // ── Format date ────────────────────────────────────────────────────────────
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string, t: (key: string, opts?: any) => any): string {
   const d = new Date(dateStr);
   const day = d.getDate();
-  const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const months = t('dates.monthsAbbr', { returnObjects: true }) as string[];
   return `${day} ${months[d.getMonth()]}`;
 }
 
@@ -104,14 +118,30 @@ function formatTime(dateStr: string): string {
 
 const ClasificacionTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const { standings } = data;
+
+  // Zones: use per-league config if available, else generic fallback legend
+  const leagueZones = getLeagueConfig(data.leagueId)?.zones;
+
+  // Build legend from only the zones that actually appear in the current standings
+  const activeLegendZones: LeagueZone[] = leagueZones
+    ? leagueZones.filter(z =>
+        standings.some(row => row.position >= z.from && row.position <= z.to),
+      )
+    : [
+        { label: t('league.zones.champion'),       color: '#fbbf24', from: 1, to: 1 },
+        { label: t('league.zones.championsLeague'), color: '#3b82f6', from: 2, to: 4 },
+        { label: t('league.zones.europaLeague'),    color: '#f97316', from: 5, to: 6 },
+        { label: t('league.zones.relegation'),      color: '#ef4444', from: 99, to: 99 },
+      ];
 
   if (standings.length === 0) {
     return (
       <View style={cl.outer}>
         <View style={[cl.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[cl.empty, { color: c.textTertiary }]}>Clasificación no disponible</Text>
+          <Text style={[cl.empty, { color: c.textTertiary }]}>{t('league.standingsUnavailable')}</Text>
         </View>
       </View>
     );
@@ -128,7 +158,7 @@ const ClasificacionTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
           <Text style={[cl.hPos, { color: c.textTertiary }]}>#</Text>
           <View style={{ width: 26 }} />
           <View style={cl.nameWrap}>
-            <Text style={[cl.hText, { color: c.textTertiary }]}>EQUIPO</Text>
+            <Text style={[cl.hText, { color: c.textTertiary }]}>{t('league.teamHeader')}</Text>
           </View>
           <Text style={[cl.hNum, { color: c.textTertiary }]}>J</Text>
           <Text style={[cl.hNum, { color: c.textTertiary }]}>G</Text>
@@ -140,7 +170,7 @@ const ClasificacionTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
         </View>
 
         {standings.map((row, idx) => {
-          const zoneColor = getZoneColor(row.position, totalTeams);
+          const zoneColor = getZoneColor(row.position, totalTeams, leagueZones);
           const gd = row.goalDifference > 0 ? `+${row.goalDifference}` : `${row.goalDifference}`;
           const gdColor = row.goalDifference > 0 ? '#10b981' : row.goalDifference < 0 ? '#ef4444' : c.textTertiary;
           const showGroupDivider = idx > 0 && row.groupId != null && standings[idx - 1].groupId != null && row.groupId !== standings[idx - 1].groupId;
@@ -179,25 +209,17 @@ const ClasificacionTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
         })}
       </View>
 
-      {/* Zone legend */}
-      <View style={cl.legend}>
-        <View style={cl.legendItem}>
-          <View style={[cl.legendBar, { backgroundColor: '#fbbf24' }]} />
-          <Text style={[cl.legendText, { color: c.textTertiary }]}>Campeón</Text>
+      {/* Zone legend — dynamic per league */}
+      {activeLegendZones.length > 0 && (
+        <View style={cl.legend}>
+          {activeLegendZones.map(zone => (
+            <View key={zone.label} style={cl.legendItem}>
+              <View style={[cl.legendBar, { backgroundColor: zone.color }]} />
+              <Text style={[cl.legendText, { color: c.textTertiary }]}>{zone.label}</Text>
+            </View>
+          ))}
         </View>
-        <View style={cl.legendItem}>
-          <View style={[cl.legendBar, { backgroundColor: '#3b82f6' }]} />
-          <Text style={[cl.legendText, { color: c.textTertiary }]}>Champions League</Text>
-        </View>
-        <View style={cl.legendItem}>
-          <View style={[cl.legendBar, { backgroundColor: '#f97316' }]} />
-          <Text style={[cl.legendText, { color: c.textTertiary }]}>Europa League</Text>
-        </View>
-        <View style={cl.legendItem}>
-          <View style={[cl.legendBar, { backgroundColor: '#ef4444' }]} />
-          <Text style={[cl.legendText, { color: c.textTertiary }]}>Descenso</Text>
-        </View>
-      </View>
+      )}
 
       <View style={{ height: 16 }} />
     </View>
@@ -246,6 +268,7 @@ const cl = StyleSheet.create({
 
 const GoleadoresTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const { topScorers } = data;
 
@@ -253,7 +276,7 @@ const GoleadoresTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
     return (
       <View style={gs.outer}>
         <View style={[gs.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[gs.empty, { color: c.textTertiary }]}>Sin datos de goleadores</Text>
+          <Text style={[gs.empty, { color: c.textTertiary }]}>{t('league.noScorers')}</Text>
         </View>
       </View>
     );
@@ -262,16 +285,16 @@ const GoleadoresTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
   return (
     <View style={gs.outer}>
       <View style={[gs.card, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Text style={[gs.title, { color: c.textPrimary }]}>Goleadores</Text>
+        <Text style={[gs.title, { color: c.textPrimary }]}>{t('league.scorersTitle')}</Text>
 
         {/* Header */}
         <View style={[gs.headerRow, { borderBottomColor: c.border }]}>
           <Text style={[gs.hPos, { color: c.textTertiary }]}>#</Text>
           <View style={{ width: 32 }} />
           <View style={gs.hNameWrap}>
-            <Text style={[gs.hText, { color: c.textTertiary }]}>JUGADOR</Text>
+            <Text style={[gs.hText, { color: c.textTertiary }]}>{t('league.playerHeader')}</Text>
           </View>
-          <Text style={[gs.hGoals, { color: c.textTertiary }]}>GOLES</Text>
+          <Text style={[gs.hGoals, { color: c.textTertiary }]}>{t('league.goalsHeader')}</Text>
         </View>
 
         {topScorers.map((scorer, i) => {
@@ -365,6 +388,7 @@ const gs = StyleSheet.create({
 
 const EquiposTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const { isFollowingTeam, toggleFollowTeam } = useFavorites();
   const { teams } = data;
@@ -373,7 +397,7 @@ const EquiposTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
     return (
       <View style={eq.outer}>
         <View style={[eq.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[eq.empty, { color: c.textTertiary }]}>Sin equipos disponibles</Text>
+          <Text style={[eq.empty, { color: c.textTertiary }]}>{t('league.noTeams')}</Text>
         </View>
       </View>
     );
@@ -382,7 +406,7 @@ const EquiposTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
   return (
     <View style={eq.outer}>
       <View style={[eq.card, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Text style={[eq.title, { color: c.textPrimary }]}>Equipos ({teams.length})</Text>
+        <Text style={[eq.title, { color: c.textPrimary }]}>{t('league.teamsTitle', { count: teams.length })}</Text>
 
         <View style={eq.grid}>
           {teams.map(team => {
@@ -465,19 +489,66 @@ const eq = StyleSheet.create({
   followText: { fontSize: 16, fontWeight: '800' },
 });
 
+// ── Converter: LeagueFixture → Match (for MatchDetail navigation) ────────────
+function fixtureToMatch(f: LeagueFixture, leagueName: string, leagueLogo: string): Match {
+  const s = f.stateShort;
+  const status: MatchStatus =
+    ['FT', 'AET', 'FT_PEN'].includes(s) ? 'finished' :
+    ['1H', '2H', 'HT', 'ET', 'PEN'].includes(s) ? 'live' :
+    'scheduled';
+
+  // Display time: "HH:MM" for upcoming, state label for live, "FT" for finished
+  const d = new Date(f.date);
+  const timeStr = status === 'finished' ? 'FT'
+    : status === 'live' ? s
+    : `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+
+  return {
+    id: String(f.id),
+    homeTeam: {
+      id: String(f.homeTeamId),
+      name: f.homeTeamName,
+      shortName: f.homeTeamName.slice(0, 3).toUpperCase(),
+      logo: f.homeTeamLogo,
+    },
+    awayTeam: {
+      id: String(f.awayTeamId),
+      name: f.awayTeamName,
+      shortName: f.awayTeamName.slice(0, 3).toUpperCase(),
+      logo: f.awayTeamLogo,
+    },
+    homeScore: f.homeScore ?? 0,
+    awayScore: f.awayScore ?? 0,
+    status,
+    time: timeStr,
+    league: leagueName,
+    leagueLogo,
+    leagueId: String(f.leagueId),
+    date: f.date.slice(0, 10),
+    seasonId: f.seasonId,
+    startingAtUtc: f.date,
+  };
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // TAB: Calendario
 // ══════════════════════════════════════════════════════════════════════════════
 
 const CalendarioTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
   const c = useThemeColors();
-  const { fixtures } = data;
+  const { t } = useTranslation();
+  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
+  const { fixtures, leagueName, leagueLogo } = data;
+
+  const handleFixturePress = (fix: LeagueFixture) => {
+    navigation.push('MatchDetail', { match: fixtureToMatch(fix, leagueName, leagueLogo) });
+  };
 
   if (fixtures.length === 0) {
     return (
       <View style={ca.outer}>
         <View style={[ca.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[ca.empty, { color: c.textTertiary }]}>Sin partidos recientes o próximos</Text>
+          <Text style={[ca.empty, { color: c.textTertiary }]}>{t('league.noFixtures')}</Text>
         </View>
       </View>
     );
@@ -494,9 +565,9 @@ const CalendarioTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
       {/* Upcoming / Live */}
       {(upcoming.length > 0 || notStarted.length > 0) && (
         <View style={[ca.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[ca.sectionTitle, { color: c.textPrimary }]}>Próximos partidos</Text>
+          <Text style={[ca.sectionTitle, { color: c.textPrimary }]}>{t('league.upcomingFixtures')}</Text>
           {[...upcoming, ...notStarted.filter(f => !upcoming.includes(f))].slice(0, 10).map((fix, i) => (
-            <FixtureRow key={`${fix.id}-${i}`} fixture={fix} />
+            <FixtureRow key={`${fix.id}-${i}`} fixture={fix} onPress={() => handleFixturePress(fix)} />
           ))}
         </View>
       )}
@@ -504,9 +575,9 @@ const CalendarioTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
       {/* Recent results */}
       {past.length > 0 && (
         <View style={[ca.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[ca.sectionTitle, { color: c.textPrimary }]}>Resultados recientes</Text>
+          <Text style={[ca.sectionTitle, { color: c.textPrimary }]}>{t('league.recentResults')}</Text>
           {past.slice(0, 10).map((fix, i) => (
-            <FixtureRow key={`${fix.id}-${i}`} fixture={fix} />
+            <FixtureRow key={`${fix.id}-${i}`} fixture={fix} onPress={() => handleFixturePress(fix)} />
           ))}
         </View>
       )}
@@ -516,18 +587,23 @@ const CalendarioTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
   );
 };
 
-const FixtureRow: React.FC<{ fixture: LeagueFixture }> = ({ fixture: f }) => {
+const FixtureRow: React.FC<{ fixture: LeagueFixture; onPress?: () => void }> = ({ fixture: f, onPress }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const isFinished = f.stateShort === 'FT';
   const isLive = ['1H', '2H', 'HT', 'ET', 'PEN'].includes(f.stateShort);
 
   return (
-    <View style={[ca.fixtureRow, { borderTopColor: c.border }]}>
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={onPress}
+      style={[ca.fixtureRow, { borderTopColor: c.border }]}
+    >
       {/* Date/Time */}
       <View style={ca.dateCol}>
-        <Text style={[ca.dateText, { color: c.textTertiary }]}>{formatDate(f.date)}</Text>
+        <Text style={[ca.dateText, { color: c.textTertiary }]}>{formatDate(f.date, t)}</Text>
         <Text style={[ca.timeText, { color: isLive ? '#ef4444' : c.textTertiary }]}>
-          {isLive ? 'EN VIVO' : isFinished ? 'FT' : formatTime(f.date)}
+          {isLive ? t('league.live') : isFinished ? 'FT' : formatTime(f.date)}
         </Text>
       </View>
 
@@ -555,7 +631,10 @@ const FixtureRow: React.FC<{ fixture: LeagueFixture }> = ({ fixture: f }) => {
           <Text style={[ca.scorePlaceholder, { color: c.textTertiary }]}>-</Text>
         </View>
       )}
-    </View>
+
+      {/* Chevron — indicates row is tappable */}
+      <ChevronRight color={c.textTertiary} size={12} />
+    </TouchableOpacity>
   );
 };
 
@@ -586,6 +665,7 @@ const ca = StyleSheet.create({
 export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   const { leagueId, leagueName, leagueLogo, seasonId } = route.params;
   const c = useThemeColors();
+  const { t } = useTranslation();
   const { isDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const { isFollowingLeague, toggleFollowLeague } = useFavorites();
@@ -596,10 +676,10 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
 
   // ── Tabs ──
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'clasificacion', label: 'Clasificación' },
-    { key: 'goleadores', label: 'Goleadores' },
-    { key: 'equipos', label: 'Equipos' },
-    { key: 'calendario', label: 'Calendario' },
+    { key: 'clasificacion', label: t('league.standingsTab') },
+    { key: 'goleadores', label: t('league.scorersTab') },
+    { key: 'equipos', label: t('league.teamsTab') },
+    { key: 'calendario', label: t('league.calendarTab') },
   ];
   const [activeTab, setActiveTab] = useState<Tab>('clasificacion');
 
@@ -616,7 +696,9 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
 
   // ── Display values ──
   const displayName = data?.leagueName || leagueName;
-  const displayLogo = data?.leagueLogo || leagueLogo || '';
+  const displayLogo = data?.leagueLogo
+    || leagueLogo
+    || (leagueId ? `https://cdn.sportmonks.com/images/soccer/leagues/${leagueId}.png` : '');
   const displayFlag = data?.countryFlag || '';
   const displayCountry = data?.country || '';
   const displaySeason = data?.seasonName || '';
@@ -710,8 +792,8 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
           {/* Stats strip */}
           <View style={s.statsStrip}>
             {[
-              { label: 'Equipos', value: teamsCount },
-              { label: 'Jornadas', value: data?.standings[0]?.played || '-' },
+              { label: t('league.teamsLabel'), value: teamsCount },
+              { label: t('league.matchdaysLabel'), value: data?.standings[0]?.played || '-' },
             ].map((st, i) => (
               <View key={i} style={s.statItem}>
                 <Text style={[s.statValue, { color: hText }]}>{st.value}</Text>
@@ -735,28 +817,36 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
               s.followText,
               { color: isFollowing ? '#fff' : hText },
             ]}>
-              {isFollowing ? '✓ Siguiendo' : 'Seguir liga'}
+              {isFollowing ? t('league.followingLeague') : t('league.followLeague')}
             </Text>
           </TouchableOpacity>
         </View>
 
         {/* ── Tab bar (sticky) ── */}
         <View style={[s.tabBar, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
-          {TABS.map(tab => {
-            const active = activeTab === tab.key;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                style={[s.tab, active && { borderBottomColor: c.accent, borderBottomWidth: 2 }]}
-                onPress={() => setActiveTab(tab.key)}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.tabText, { color: active ? c.accent : c.textTertiary }]}>
-                  {tab.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+          <ScrollView
+            horizontal
+            scrollEnabled={false}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ flexDirection: 'row', width: SCREEN_WIDTH }}
+          >
+            {TABS.map(tab => {
+              const active = activeTab === tab.key;
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  style={[s.tab, { width: SCREEN_WIDTH / TABS.length },
+                    active && { borderBottomColor: c.accent, borderBottomWidth: 2 }]}
+                  onPress={() => setActiveTab(tab.key)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[s.tabText, { color: active ? c.accent : c.textTertiary }]}>
+                    {tab.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
 
         {/* ── Tab content ── */}
@@ -769,7 +859,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
             null
           ) : (
             <View style={s.loadingWrap}>
-              <Text style={[s.loadingText, { color: c.textTertiary }]}>Sin datos disponibles</Text>
+              <Text style={[s.loadingText, { color: c.textTertiary }]}>{t('league.noData')}</Text>
             </View>
           )}
         </View>

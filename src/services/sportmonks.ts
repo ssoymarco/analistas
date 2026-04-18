@@ -595,6 +595,17 @@ export async function fetchLivescores(): Promise<SMFixture[]> {
   });
 }
 
+/**
+ * GET /livescores/latest — only fixtures updated in the last 10 seconds.
+ * Much lighter than /livescores: returns nothing when nothing changed.
+ * Recommended by SportMonks for 10-second polling intervals.
+ */
+export async function fetchLivescoresLatest(): Promise<SMFixture[]> {
+  return fetchApi<SMFixture[]>('livescores/latest', {
+    include: 'participants;scores;state',
+  });
+}
+
 /** GET /standings/seasons/{seasonId}?include=participant;details */
 export async function fetchStandings(seasonId: number): Promise<SMStandingGroup[]> {
   // Standings don't paginate like fixtures — use direct fetchApi

@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { navigationRef } from '../utils/navigationRef';
 import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -272,6 +273,7 @@ const TAB_ICONS: Record<string, (color: string, focused: boolean) => React.React
 
 function MainTabs() {
   const c = useThemeColors();
+  const { t } = useTranslation();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -312,11 +314,11 @@ function MainTabs() {
       <Tab.Screen
         name="Partidos"
         component={PartidosNavigator}
-        options={{ tabBarLabel: 'Partidos' }}
+        options={{ tabBarLabel: t('nav.matches') }}
       />
-      <Tab.Screen name="Favoritos" component={FavoritosNavigator} />
-      <Tab.Screen name="Noticias"  component={NoticiasNavigator} />
-      <Tab.Screen name="Perfil"    component={PerfilNavigator} />
+      <Tab.Screen name="Favoritos" component={FavoritosNavigator} options={{ tabBarLabel: t('nav.favorites') }} />
+      <Tab.Screen name="Noticias"  component={NoticiasNavigator}  options={{ tabBarLabel: t('nav.news') }} />
+      <Tab.Screen name="Perfil"    component={PerfilNavigator}     options={{ tabBarLabel: t('nav.profile') }} />
     </Tab.Navigator>
   );
 }

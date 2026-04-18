@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
+import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import type { ColorPalette } from '../theme/colors';
@@ -35,53 +36,52 @@ interface Plan {
   savings?: string;
 }
 
-const PLANS: Plan[] = [
-  {
-    id: 'titular',
-    name: 'TITULAR',
-    subtitle: 'Plan anual',
-    price: '$80',
-    period: '/año',
-    monthly: '≈ $6.67 al mes',
-    badge: '★ MEJOR PRECIO',
-    benefits: [
-      'Sin publicidad en toda la app',
-      'Velocidad máxima garantizada',
-      'Ícono de app personalizable (4 diseños)',
-      'Estadísticas avanzadas exclusivas',
-    ],
-    savings: 'Ahorras $40/año 🚀',
-  },
-  {
-    id: 'revulsivo',
-    name: 'REVULSIVO',
-    subtitle: 'Plan mensual',
-    price: '$10',
-    period: '/mes',
-    monthly: 'Sin anuncios',
-  },
-  {
-    id: 'banca',
-    name: 'BANCA',
-    subtitle: 'Plan gratuito',
-    price: 'Gratis',
-    period: '',
-    monthly: 'Con anuncios',
-  },
-];
+function buildPlans(t: (key: string) => string): Plan[] {
+  return [
+    {
+      id: 'titular',
+      name: t('subscription.starter'),
+      subtitle: t('subscription.annualPlan'),
+      price: '$80',
+      period: t('subscription.perYear'),
+      monthly: t('subscription.monthlyPrice'),
+      badge: t('subscription.bestPrice'),
+      benefits: [
+        t('subscription.benefits.noAds'),
+        t('subscription.benefits.detailedStats'),
+        t('subscription.benefits.customIcon'),
+        t('subscription.benefits.exclusiveContent'),
+      ],
+      savings: t('subscription.savingsText'),
+    },
+    {
+      id: 'revulsivo',
+      name: t('subscription.revulsive'),
+      subtitle: t('subscription.monthlyPlan'),
+      price: '$10',
+      period: t('subscription.perMonth'),
+      monthly: t('subscription.noAds'),
+    },
+    {
+      id: 'banca',
+      name: t('subscription.bench'),
+      subtitle: t('subscription.freePlan'),
+      price: t('subscription.free'),
+      period: '',
+      monthly: t('subscription.withAds'),
+    },
+  ];
+}
 
-const BENEFITS = [
-  { emoji: '🚫', title: 'Sin publicidad', desc: 'Los jerseys se ven mejor sin publicidad. Tu app también.' },
-  { emoji: '⚡', title: 'Velocidad máxima', desc: 'Tu app volará. Sin anuncios que la frenen.' },
-  { emoji: '📊', title: 'Estadísticas avanzadas', desc: 'Datos de élite directo de las ligas. Solo para titulares.' },
-  { emoji: '📱', title: 'Ícono personalizable', desc: 'Elige entre 4 diseños exclusivos. Sé diferente.' },
-];
+// Benefits are built inside the component via buildBenefits() to access t()
+const BENEFIT_EMOJIS = ['🚫', '⚡', '📊', '📱'];
 
-const APP_ICONS = [
-  { id: 'clasico', name: 'CLÁSICO', bg: '#1a2e1a', border: GREEN, emoji: '⚽', accent: GREEN },
-  { id: 'blanco', name: 'BLANCO', bg: '#f0f0f0', border: '#d4d4d4', emoji: '⚽', accent: '#374151' },
-  { id: 'noche', name: 'NOCHE', bg: '#111111', border: '#333333', emoji: '⚽', accent: '#9ca3af' },
-  { id: 'oro', name: 'ORO', bg: '#2a2210', border: '#b8860b', emoji: '⚽', accent: GOLD },
+// Icon metadata — names resolved via t() in the component
+const APP_ICONS_META = [
+  { id: 'clasico', nameKey: 'classic', bg: '#1a2e1a', border: GREEN, emoji: '⚽', accent: GREEN },
+  { id: 'blanco', nameKey: 'white',   bg: '#f0f0f0', border: '#d4d4d4', emoji: '⚽', accent: '#374151' },
+  { id: 'noche',  nameKey: 'night',   bg: '#111111', border: '#333333', emoji: '⚽', accent: '#9ca3af' },
+  { id: 'oro',    nameKey: 'gold',    bg: '#2a2210', border: '#b8860b', emoji: '⚽', accent: GOLD },
 ];
 
 // ── Sub-components ───────────────────────────────────────────────────────────
@@ -128,7 +128,7 @@ function BenefitCard({ emoji, title, desc, c, isDark, delay }: {
 }
 
 function IconOption({ icon, selected, locked, onPress, c, isDark }: {
-  icon: typeof APP_ICONS[0]; selected: boolean; locked: boolean;
+  icon: { id: string; name: string; bg: string; border: string; emoji: string; accent: string }; selected: boolean; locked: boolean;
   onPress: () => void; c: ColorPalette; isDark: boolean;
 }) {
   return (
@@ -188,6 +188,20 @@ export const HazteTitularScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const navigation = useNavigation();
+  const { t } = useTranslation();
+
+  // Build translated data
+  const PLANS = buildPlans(t);
+  const BENEFITS = [
+    { emoji: '🚫', title: t('subscription.benefits.noAds'), desc: 'Los jerseys se ven mejor sin publicidad. Tu app tambi\u00e9n.' },
+    { emoji: '⚡', title: t('subscription.benefits.detailedStats'), desc: 'Tu app volar\u00e1. Sin anuncios que la frenen.' },
+    { emoji: '📊', title: t('subscription.benefits.exclusiveContent'), desc: 'Datos de \u00e9lite directo de las ligas. Solo para titulares.' },
+    { emoji: '📱', title: t('subscription.benefits.customIcon'), desc: 'Elige entre 4 dise\u00f1os exclusivos. S\u00e9 diferente.' },
+  ];
+  const APP_ICONS = APP_ICONS_META.map(m => ({
+    ...m,
+    name: t(`subscription.iconOptions.${m.nameKey}`),
+  }));
 
   const [selectedPlan, setSelectedPlan] = useState<PlanId>('titular');
   const [selectedIcon, setSelectedIcon] = useState('clasico');
@@ -217,9 +231,9 @@ export const HazteTitularScreen: React.FC = () => {
     }
     // TODO: RevenueCat integration
     Alert.alert(
-      'Próximamente',
-      `La suscripción "${plan.name}" estará disponible cuando lancemos la app. ¡Gracias por tu interés!`,
-      [{ text: 'Entendido' }],
+      t('common.comingSoon'),
+      t('subscription.comingSoonAlert', { plan: plan.name }),
+      [{ text: 'OK' }],
     );
   }, [selectedPlan, navigation]);
 
@@ -254,7 +268,7 @@ export const HazteTitularScreen: React.FC = () => {
         >
           <BackArrow color={c.textSecondary} />
         </TouchableOpacity>
-        <Text style={{ flex: 1, textAlign: 'center', fontSize: 16, fontWeight: '700', color: c.textPrimary }}>Hazte Titular</Text>
+        <Text style={{ flex: 1, textAlign: 'center', fontSize: 16, fontWeight: '700', color: c.textPrimary }}>{t('subscription.title')}</Text>
         <View style={{ width: 36 }} />
       </View>
 
@@ -394,7 +408,7 @@ export const HazteTitularScreen: React.FC = () => {
               backgroundColor: GREEN, borderRadius: 10,
               paddingHorizontal: 10, paddingVertical: 4,
             }}>
-              <Text style={{ fontSize: 9, fontWeight: '800', color: '#fff', letterSpacing: 0.5 }}>★ MEJOR PRECIO</Text>
+              <Text style={{ fontSize: 9, fontWeight: '800', color: '#fff', letterSpacing: 0.5 }}>{t('subscription.bestPrice')}</Text>
             </View>
 
             {/* Radio + header */}
@@ -402,16 +416,16 @@ export const HazteTitularScreen: React.FC = () => {
               <View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                   <Text style={{ fontSize: 12, color: GREEN }}>⚽</Text>
-                  <Text style={{ fontSize: 11, fontWeight: '800', color: GREEN, letterSpacing: 1 }}>TITULAR</Text>
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: GREEN, letterSpacing: 1 }}>{t('subscription.starter')}</Text>
                 </View>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: c.textPrimary }}>Plan anual</Text>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: c.textPrimary }}>{t('subscription.annualPlan')}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                   <Text style={{ fontSize: 32, fontWeight: '900', color: c.textPrimary }}>$80</Text>
-                  <Text style={{ fontSize: 14, color: c.textTertiary }}>/año</Text>
+                  <Text style={{ fontSize: 14, color: c.textTertiary }}>{t('subscription.perYear')}</Text>
                 </View>
-                <Text style={{ fontSize: 11, color: c.textTertiary }}>≈ $6.67 al mes</Text>
+                <Text style={{ fontSize: 11, color: c.textTertiary }}>{t('subscription.monthlyPrice')}</Text>
               </View>
             </View>
 
@@ -443,7 +457,7 @@ export const HazteTitularScreen: React.FC = () => {
                   borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginTop: 12,
                 }}>
                   <Text style={{ fontSize: 12, color: c.textTertiary }}>vs plan mensual</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '800', color: GREEN }}>Ahorras $40/año 🚀</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: GREEN }}>{t('subscription.savingsText')}</Text>
                 </View>
               </View>
             )}
@@ -480,10 +494,10 @@ export const HazteTitularScreen: React.FC = () => {
 
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 }}>
                 <Text style={{ fontSize: 11 }}>⚡</Text>
-                <Text style={{ fontSize: 9, fontWeight: '800', color: c.textTertiary, letterSpacing: 0.5 }}>REVULSIVO</Text>
+                <Text style={{ fontSize: 9, fontWeight: '800', color: c.textTertiary, letterSpacing: 0.5 }}>{t('subscription.revulsive')}</Text>
               </View>
               <Text style={{ fontSize: 26, fontWeight: '900', color: c.textPrimary }}>$10</Text>
-              <Text style={{ fontSize: 12, color: c.textTertiary }}>/mes · Sin anuncios</Text>
+              <Text style={{ fontSize: 12, color: c.textTertiary }}>{t('subscription.perMonth')} · {t('subscription.noAds')}</Text>
             </TouchableOpacity>
 
             {/* Banca */}
@@ -515,10 +529,10 @@ export const HazteTitularScreen: React.FC = () => {
 
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 }}>
                 <Text style={{ fontSize: 11 }}>🪑</Text>
-                <Text style={{ fontSize: 9, fontWeight: '800', color: c.textTertiary, letterSpacing: 0.5 }}>BANCA</Text>
+                <Text style={{ fontSize: 9, fontWeight: '800', color: c.textTertiary, letterSpacing: 0.5 }}>{t('subscription.bench')}</Text>
               </View>
-              <Text style={{ fontSize: 22, fontWeight: '900', color: c.textPrimary }}>Gratis</Text>
-              <Text style={{ fontSize: 12, color: c.textTertiary }}>Con anuncios</Text>
+              <Text style={{ fontSize: 22, fontWeight: '900', color: c.textPrimary }}>{t('subscription.free')}</Text>
+              <Text style={{ fontSize: 12, color: c.textTertiary }}>{t('subscription.withAds')}</Text>
             </TouchableOpacity>
           </View>
         </View>

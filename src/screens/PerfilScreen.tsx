@@ -21,6 +21,9 @@ import { SkeletonPerfil } from '../components/Skeleton';
 import { StreakModal } from '../components/StreakModal';
 import { EditProfileModal } from '../components/EditProfileModal';
 import { scheduleLocalNotification } from '../services/notifications';
+import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
+import { useTranslation } from 'react-i18next';
+import i18n, { LANGUAGE_STORAGE_KEY } from '../i18n';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getInitials(name: string) {
@@ -136,8 +139,97 @@ function CenterModal({ visible, onClose, c, children }: {
   );
 }
 
+// ── Modo Estadio Card ────────────────────────────────────────────────────────
+const ESTADIO_DELAYS = [1, 2, 5, 10] as const;
+
+function ModoEstadioCard({ c, isDark }: { c: ColorPalette; isDark: boolean }) {
+  const { t } = useTranslation();
+  const { prefs, togglePref, setEstadioDelay } = useNotificationPrefs();
+  const { estadioMode, estadioDelay } = prefs;
+
+  const accentGreen = '#00E096';
+  const activeGreenBg = 'rgba(0,224,150,0.12)';
+  const activeBorder = 'rgba(0,224,150,0.3)';
+
+  return (
+    <View style={{ marginHorizontal: 16, marginTop: 20, borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: estadioMode ? activeBorder : c.border, backgroundColor: c.card }}>
+      {/* Header strip */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12, gap: 10 }}>
+        <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: estadioMode ? activeGreenBg : (isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)'), alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontSize: 20 }}>🏟️</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: c.textPrimary }}>{t('estadioMode.title')}</Text>
+            <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: 'rgba(0,224,150,0.18)', borderWidth: 1, borderColor: 'rgba(0,224,150,0.3)' }}>
+              <Text style={{ fontSize: 9, fontWeight: '800', color: accentGreen, letterSpacing: 0.8 }}>{t('estadioMode.badge')}</Text>
+            </View>
+          </View>
+          <Text style={{ fontSize: 11, color: estadioMode ? accentGreen : c.textTertiary, marginTop: 1, fontWeight: estadioMode ? '600' : '400' }}>
+            {estadioMode ? t('estadioMode.enabled') : t('estadioMode.subtitle')}
+          </Text>
+        </View>
+        <CustomToggle
+          value={estadioMode}
+          onToggle={() => { haptics.medium(); togglePref('estadioMode'); }}
+          activeColor={accentGreen}
+          icon="🏟️"
+        />
+      </View>
+
+      {/* Description */}
+      <View style={{ paddingHorizontal: 16, paddingBottom: estadioMode ? 0 : 14 }}>
+        <Text style={{ fontSize: 12, color: c.textTertiary, lineHeight: 17 }}>
+          {t('estadioMode.description')}
+        </Text>
+      </View>
+
+      {/* Delay selector — visible only when mode is active */}
+      {estadioMode && (
+        <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 14 }}>
+          <View style={{ height: 1, backgroundColor: c.border, marginBottom: 14 }} />
+          <Text style={{ fontSize: 11, fontWeight: '600', color: c.textTertiary, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 }}>
+            {t('estadioMode.delay')}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {ESTADIO_DELAYS.map(mins => {
+              const active = estadioDelay === mins;
+              return (
+                <TouchableOpacity
+                  key={mins}
+                  style={{
+                    flex: 1, paddingVertical: 9, borderRadius: 12, alignItems: 'center',
+                    backgroundColor: active ? accentGreen : (isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)'),
+                    borderWidth: 1,
+                    borderColor: active ? accentGreen : c.border,
+                  }}
+                  onPress={() => { haptics.selection(); setEstadioDelay(mins); }}
+                  activeOpacity={0.75}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: active ? '#000' : c.textSecondary }}>
+                    {t('estadioMode.delayMinutes', { count: mins })}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Pre-match note */}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 12, padding: 10, borderRadius: 10, backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}>
+            <Text style={{ fontSize: 12 }}>💡</Text>
+            <Text style={{ fontSize: 11, color: c.textTertiary, lineHeight: 15, flex: 1 }}>
+              {t('estadioMode.preMatchNote')}
+            </Text>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
 // ── Promo Banner ─────────────────────────────────────────────────────────────
 function PromoBanner({ onPress }: { onPress?: () => void }) {
+  const { t } = useTranslation();
   return (
     <TouchableOpacity style={{ marginHorizontal: 16, marginTop: 20, borderRadius: 16, backgroundColor: '#0d2b1a', overflow: 'hidden', padding: 16 }} activeOpacity={0.9} onPress={onPress}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
@@ -146,31 +238,31 @@ function PromoBanner({ onPress }: { onPress?: () => void }) {
             <View style={{ width: 18, height: 18, borderRadius: 3, backgroundColor: '#dc2626', alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: 10, fontWeight: '900', color: '#fff' }}>▼</Text>
             </View>
-            <Text style={{ fontSize: 11, fontWeight: '800', color: '#ef4444', letterSpacing: 1 }}>SUPLENTE</Text>
+            <Text style={{ fontSize: 11, fontWeight: '800', color: '#ef4444', letterSpacing: 1 }}>{t('profile.substitute')}</Text>
           </View>
           <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.05)', marginVertical: 4 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <View style={{ width: 18, height: 18, borderRadius: 3, backgroundColor: '#22c55e', alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: 10, fontWeight: '900', color: '#fff' }}>▲</Text>
             </View>
-            <Text style={{ fontSize: 11, fontWeight: '800', color: '#4ade80', letterSpacing: 1 }}>TITULAR</Text>
+            <Text style={{ fontSize: 11, fontWeight: '800', color: '#4ade80', letterSpacing: 1 }}>{t('profile.starter')}</Text>
           </View>
         </View>
         <View style={{ flex: 1 }}>
           <View style={{ alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: 'rgba(251,191,36,0.2)', borderWidth: 1, borderColor: 'rgba(251,191,36,0.25)', marginBottom: 4 }}>
-            <Text style={{ fontSize: 9, fontWeight: '800', color: '#fbbf24', letterSpacing: 1 }}>👑 PREMIUM</Text>
+            <Text style={{ fontSize: 9, fontWeight: '800', color: '#fbbf24', letterSpacing: 1 }}>{t('profile.premium')}</Text>
           </View>
-          <Text style={{ fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: -0.2 }}>Es hora del cambio</Text>
-          <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>Sal de la banca y juega con todo</Text>
+          <Text style={{ fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: -0.2 }}>{t('profile.promoTitle')}</Text>
+          <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>{t('profile.promoSubtitle')}</Text>
         </View>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: 'rgba(34,197,94,0.2)', borderWidth: 1, borderColor: 'rgba(52,211,153,0.3)' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Text style={{ fontSize: 14 }}>⚡</Text>
-          <Text style={{ fontSize: 12, fontWeight: '700', color: '#fff' }}>Subir de nivel</Text>
+          <Text style={{ fontSize: 12, fontWeight: '700', color: '#fff' }}>{t('profile.levelUp')}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Text style={{ fontSize: 10, fontWeight: '600', color: 'rgba(52,211,153,0.6)' }}>Ver planes</Text>
+          <Text style={{ fontSize: 10, fontWeight: '600', color: 'rgba(52,211,153,0.6)' }}>{t('profile.seePlans')}</Text>
           <Text style={{ fontSize: 12, color: '#34d399' }}>→</Text>
         </View>
       </View>
@@ -182,14 +274,16 @@ function PromoBanner({ onPress }: { onPress?: () => void }) {
 const LANGUAGES = [
   { id: 'es', flag: '🇲🇽', name: 'Español' },
   { id: 'en', flag: '🇺🇸', name: 'English' },
+  { id: 'pt', flag: '🇧🇷', name: 'Português (BR)' },
   { id: 'fr', flag: '🇫🇷', name: 'Français' },
-  { id: 'pt', flag: '🇧🇷', name: 'Português' },
+  { id: 'de', flag: '🇩🇪', name: 'Deutsch' },
   { id: 'it', flag: '🇮🇹', name: 'Italiano' },
-  { id: 'ar', flag: '🇸🇦', name: 'عربي' },
+  { id: 'tr', flag: '🇹🇷', name: 'Türkçe' },
 ];
 
 // ══════════════════════════════════════════════════════════════════════════════
 export const PerfilScreen: React.FC = () => {
+  const { t } = useTranslation();
   const c = useThemeColors();
   const { isDark, toggleDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PerfilStackParamList>>();
@@ -204,7 +298,7 @@ export const PerfilScreen: React.FC = () => {
   const [showNameInHeader, setShowNameInHeader] = useState(false);
   const [timeFormat, setTimeFormat] = useState<'24h' | '12h'>('24h');
   const [momiosEnabled, setMomiosEnabled] = useState(true);
-  const [selectedLang, setSelectedLang] = useState('es');
+  const [selectedLang, setSelectedLang] = useState(i18n.language || 'es');
   const [streakModalVisible, setStreakModalVisible] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
@@ -235,7 +329,7 @@ export const PerfilScreen: React.FC = () => {
         devTapTimer.current = setTimeout(() => { devTapCount.current = 0; }, 600);
         if (devTapCount.current >= 3) {
           devTapCount.current = 0;
-          Alert.alert('🔔 Test Notificación', 'Elige el tipo:', [
+          Alert.alert(t('profile.testNotification'), 'Elige el tipo:', [
             {
               text: '⚽ Gol',
               onPress: () => scheduleLocalNotification({
@@ -269,7 +363,7 @@ export const PerfilScreen: React.FC = () => {
                 homeScore: 2, awayScore: 1, league: 'LaLiga',
               }, 3),
             },
-            { text: 'Cancelar', style: 'cancel' },
+            { text: t('common.cancel'), style: 'cancel' },
           ]);
         }
       }
@@ -288,20 +382,20 @@ export const PerfilScreen: React.FC = () => {
   }, []);
 
   const handleClearCache = useCallback(() => {
-    Alert.alert('Borrar caché', '¿Estás seguro? Se eliminarán datos temporales. Tu cuenta y favoritos no se verán afectados.', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Borrar', style: 'destructive', onPress: async () => {
-        try { await AsyncStorage.multiRemove(['analistas_fixtures_cache', 'analistas_news_cache']); Alert.alert('Listo', 'Caché eliminado correctamente.'); } catch { Alert.alert('Error', 'No se pudo borrar el caché.'); }
+    Alert.alert(t('profile.clearCache'), t('profile.clearCacheConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('profile.clearCache'), style: 'destructive', onPress: async () => {
+        try { await AsyncStorage.multiRemove(['analistas_fixtures_cache', 'analistas_news_cache']); Alert.alert(t('common.done'), t('profile.cacheCleared')); } catch { Alert.alert(t('common.error'), t('profile.cacheClearError')); }
       }},
     ]);
-  }, []);
+  }, [t]);
 
   const handleRedeemCode = useCallback(() => {
     if (!redeemCode.trim()) return;
     haptics.success();
-    Alert.alert('Código ingresado', `El código "${redeemCode}" será validado próximamente.`);
+    Alert.alert(t('profile.codeEntered'), t('profile.codeEnteredBody', { code: redeemCode }));
     setCodeModalVisible(false); setRedeemCode('');
-  }, [redeemCode]);
+  }, [redeemCode, t]);
 
   const userCardBg = isDark ? '#161b27' : '#ffffff';
 
@@ -315,7 +409,7 @@ export const PerfilScreen: React.FC = () => {
           <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(168,85,247,0.15)', alignItems: 'center', justifyContent: 'center' }}>
             <Text style={{ fontSize: 14 }}>👤</Text>
           </View>
-          <Text style={{ fontSize: 18, fontWeight: '800', color: c.textPrimary }}>Perfil</Text>
+          <Text style={{ fontSize: 18, fontWeight: '800', color: c.textPrimary }}>{t('profile.title')}</Text>
           {showNameInHeader && isAuthenticated && (
             <>
               <Text style={{ fontSize: 15, color: c.textTertiary }}> · </Text>
@@ -345,7 +439,7 @@ export const PerfilScreen: React.FC = () => {
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ fontSize: 16, fontWeight: '700', color: c.textPrimary }}>{displayName}</Text>
               {isAuthenticated && <Text style={{ fontSize: 14, fontWeight: '500', color: '#60a5fa', marginTop: 1 }}>{displayUsername}</Text>}
-              {!isAuthenticated && <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 2 }}>Inicia sesión para más funciones</Text>}
+              {!isAuthenticated && <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 2 }}>{t('profile.loginPrompt')}</Text>}
               {isAuthenticated && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(245,158,11,0.1)', borderWidth: 1, borderColor: 'rgba(245,158,11,0.2)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}>
@@ -372,7 +466,7 @@ export const PerfilScreen: React.FC = () => {
 
           {!isAuthenticated && (
             <TouchableOpacity style={{ backgroundColor: c.accent, paddingHorizontal: 28, paddingVertical: 11, borderRadius: 20, alignSelf: 'center', marginTop: 12 }} onPress={resetOnboarding} activeOpacity={0.8}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Iniciar sesión</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('profile.signIn')}</Text>
             </TouchableOpacity>
           )}
 
@@ -384,10 +478,10 @@ export const PerfilScreen: React.FC = () => {
           >
             <Text style={{ fontSize: 14 }}>🔥</Text>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 12, color: c.textTertiary }}>Racha activa</Text>
+              <Text style={{ fontSize: 12, color: c.textTertiary }}>{t('profile.streakActive')}</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#ff7a00' }}>{streakDays} {streakDays === 1 ? 'día' : 'días'} 🔥</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#ff7a00' }}>{t('streak.days', { count: streakDays })} 🔥</Text>
               <Text style={{ fontSize: 18, color: c.textTertiary }}>›</Text>
             </View>
           </TouchableOpacity>
@@ -396,9 +490,9 @@ export const PerfilScreen: React.FC = () => {
         {/* Stats */}
         <View style={{ flexDirection: 'row', backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, marginTop: 16, borderWidth: isDark ? 0 : 1, borderColor: c.border, overflow: 'hidden' }}>
           {[
-            { icon: '⭐', value: String(totalFavorites), label: 'Favoritos', color: '#facc15' },
-            { icon: '👁', value: String(matchesViewed), label: 'Partidos vistos', color: '#60a5fa' },
-            { icon: '📖', value: String(newsRead), label: 'Noticias leídas', color: '#a78bfa' },
+            { icon: '⭐', value: String(totalFavorites), label: t('favorites.count'), color: '#facc15' },
+            { icon: '👁', value: String(matchesViewed), label: t('matches.matchesViewed'), color: '#60a5fa' },
+            { icon: '📖', value: String(newsRead), label: t('news.newsRead'), color: '#a78bfa' },
           ].map((stat, idx) => (
             <React.Fragment key={idx}>
               {idx > 0 && <View style={{ width: 1, backgroundColor: c.border, marginVertical: 12 }} />}
@@ -418,29 +512,29 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 20 }}>👤</Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Estás en modo visitante</Text>
-              <Text style={{ fontSize: 12, color: '#bfdbfe', marginTop: 2 }}>Crea una cuenta para guardar tu progreso</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('profile.guestMode')}</Text>
+              <Text style={{ fontSize: 12, color: '#bfdbfe', marginTop: 2 }}>{t('profile.guestModeSub')}</Text>
             </View>
             <View style={{ backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6 }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#1d4ed8' }}>Registrarse</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#1d4ed8' }}>{t('profile.register')}</Text>
             </View>
           </TouchableOpacity>
         )}
 
         {/* Ajustes */}
-        <SectionHeader label="Ajustes" c={c} />
+        <SectionHeader label={t('profile.settings')} c={c} />
         <View style={{ backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
-          <MenuRow c={c} emoji="🔔" label="Notificaciones" iconBg="rgba(249,115,22,0.15)" />
-          <MenuRow c={c} emoji={isDark ? '🌙' : '☀️'} label="Apariencia" sublabel={isDark ? 'Modo oscuro' : 'Modo claro'} iconBg={isDark ? 'rgba(99,102,241,0.15)' : 'rgba(234,179,8,0.15)'} rightElement={<CustomToggle value={isDark} onToggle={toggleDark} activeColor={isDark ? '#6366f1' : '#eab308'} icon={isDark ? '🌙' : '☀️'} />} />
-          <MenuRow c={c} emoji="🕐" label="Formato de hora" sublabel={timeFormat === '24h' ? '14:30' : '2:30 PM'} iconBg="rgba(6,182,212,0.15)" rightElement={
+          <MenuRow c={c} emoji="🔔" label={t('profile.notifications')} iconBg="rgba(249,115,22,0.15)" />
+          <MenuRow c={c} emoji={isDark ? '🌙' : '☀️'} label={t('profile.appearance')} sublabel={isDark ? t('profile.darkMode') : t('profile.lightMode')} iconBg={isDark ? 'rgba(99,102,241,0.15)' : 'rgba(234,179,8,0.15)'} rightElement={<CustomToggle value={isDark} onToggle={toggleDark} activeColor={isDark ? '#6366f1' : '#eab308'} icon={isDark ? '🌙' : '☀️'} />} />
+          <MenuRow c={c} emoji="🕐" label={t('profile.timeFormat')} sublabel={timeFormat === '24h' ? '14:30' : '2:30 PM'} iconBg="rgba(6,182,212,0.15)" rightElement={
             <TouchableOpacity style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: 'rgba(6,182,212,0.15)', borderWidth: 1, borderColor: 'rgba(6,182,212,0.2)' }} onPress={() => { haptics.selection(); setTimeFormat(f => f === '24h' ? '12h' : '24h'); }} activeOpacity={0.7}>
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#06b6d4' }}>{timeFormat}</Text>
             </TouchableOpacity>
           } />
-          <MenuRow c={c} emoji="📱" label="Ícono de la app" sublabel="Exclusivo para titulares" iconBg="rgba(168,85,247,0.15)" onPress={() => navigation.navigate('HazteTitular', { source: 'icon' })} />
-          <MenuRow c={c} emoji="🎁" label="Canjea un código" iconBg="rgba(236,72,153,0.15)" onPress={() => setCodeModalVisible(true)} />
-          <MenuRow c={c} emoji="👥" label="Invitar amigos" sublabel="Comparte Analistas" iconBg="rgba(99,102,241,0.15)" onPress={handleShare} />
-          <MenuRow c={c} emoji="📊" label="Momios" sublabel={momiosEnabled ? 'Contenido de apuestas visible' : 'Contenido de apuestas oculto'} iconBg="rgba(16,185,129,0.15)" rightElement={<CustomToggle value={momiosEnabled} onToggle={() => {
+          <MenuRow c={c} emoji="📱" label={t('profile.appIcon')} sublabel={t('profile.appIconSub')} iconBg="rgba(168,85,247,0.15)" onPress={() => navigation.navigate('HazteTitular', { source: 'icon' })} />
+          <MenuRow c={c} emoji="🎁" label={t('profile.redeemCode')} iconBg="rgba(236,72,153,0.15)" onPress={() => setCodeModalVisible(true)} />
+          <MenuRow c={c} emoji="👥" label={t('profile.inviteFriends')} sublabel={t('profile.shareApp')} iconBg="rgba(99,102,241,0.15)" onPress={handleShare} />
+          <MenuRow c={c} emoji="📊" label={t('profile.odds')} sublabel={momiosEnabled ? t('profile.oddsVisible') : t('profile.oddsHidden')} iconBg="rgba(16,185,129,0.15)" rightElement={<CustomToggle value={momiosEnabled} onToggle={() => {
             if (momiosEnabled) {
               // Trying to turn OFF → requires premium
               navigation.navigate('HazteTitular', { source: 'momios' });
@@ -448,21 +542,23 @@ export const PerfilScreen: React.FC = () => {
               setMomiosEnabled(true);
             }
           }} activeColor="#10b981" icon={momiosEnabled ? '📊' : '🔒'} />} />
-          <MenuRow c={c} emoji="🗑️" label="Borrar caché" sublabel="Liberar espacio" iconBg="rgba(239,68,68,0.1)" isLast onPress={handleClearCache} />
+          <MenuRow c={c} emoji="🗑️" label={t('profile.clearCache')} sublabel={t('profile.freeSpace')} iconBg="rgba(239,68,68,0.1)" isLast onPress={handleClearCache} />
         </View>
+
+        <ModoEstadioCard c={c} isDark={isDark} />
 
         <PromoBanner onPress={() => navigation.navigate('HazteTitular', { source: 'promo' })} />
 
         {/* Información */}
-        <SectionHeader label="Información" c={c} />
+        <SectionHeader label={t('profile.information')} c={c} />
         <View style={{ backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
-          <MenuRow c={c} emoji="ℹ️" label="Sobre Analistas" sublabel="Conoce la app" iconBg="rgba(59,130,246,0.15)" onPress={() => setAboutModalVisible(true)} />
-          <MenuRow c={c} emoji="⭐" label="Califica la app" sublabel="Ayúdanos con tu opinión" iconBg="rgba(234,179,8,0.15)" onPress={handleRateApp} />
-          <MenuRow c={c} emoji="❓" label="Centro de ayuda" iconBg="rgba(14,165,233,0.15)" />
-          <MenuRow c={c} emoji="✉️" label="Contáctanos" iconBg="rgba(20,184,166,0.15)" onPress={handleContact} />
-          <MenuRow c={c} emoji="🛡️" label="Política de privacidad" iconBg="rgba(34,197,94,0.15)" onPress={() => setPrivacyModalVisible(true)} />
-          <MenuRow c={c} emoji="📄" label="Términos y condiciones" iconBg="rgba(107,114,128,0.15)" onPress={() => setTermsModalVisible(true)} />
-          <MenuRow c={c} emoji="🌐" label="Idioma · Language" sublabel={`${currentLang?.flag ?? ''} ${currentLang?.name ?? ''}`} iconBg="rgba(59,130,246,0.15)" accent isLast onPress={() => setLangModalVisible(true)} />
+          <MenuRow c={c} emoji="ℹ️" label={t('profile.aboutApp')} sublabel={t('profile.aboutAppSub')} iconBg="rgba(59,130,246,0.15)" onPress={() => setAboutModalVisible(true)} />
+          <MenuRow c={c} emoji="⭐" label={t('profile.rateApp')} sublabel={t('profile.rateSub')} iconBg="rgba(234,179,8,0.15)" onPress={handleRateApp} />
+          <MenuRow c={c} emoji="❓" label={t('profile.helpCenter')} iconBg="rgba(14,165,233,0.15)" />
+          <MenuRow c={c} emoji="✉️" label={t('profile.contactUs')} iconBg="rgba(20,184,166,0.15)" onPress={handleContact} />
+          <MenuRow c={c} emoji="🛡️" label={t('profile.privacy')} iconBg="rgba(34,197,94,0.15)" onPress={() => setPrivacyModalVisible(true)} />
+          <MenuRow c={c} emoji="📄" label={t('profile.terms')} iconBg="rgba(107,114,128,0.15)" onPress={() => setTermsModalVisible(true)} />
+          <MenuRow c={c} emoji="🌐" label={t('profile.language')} sublabel={`${currentLang?.flag ?? ''} ${currentLang?.name ?? ''}`} iconBg="rgba(59,130,246,0.15)" accent isLast onPress={() => setLangModalVisible(true)} />
         </View>
 
         {/* Cerrar sesión */}
@@ -470,7 +566,7 @@ export const PerfilScreen: React.FC = () => {
           <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 13 }} activeOpacity={0.7} onPress={() => isAuthenticated ? setLogoutModalVisible(true) : (logout(), resetOnboarding())}>
             <IconCircle emoji="→" bg="rgba(239,68,68,0.1)" />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 14, fontWeight: '500', color: '#ef4444' }}>{isAuthenticated ? 'Cerrar sesión' : 'Salir'}</Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: '#ef4444' }}>{isAuthenticated ? t('profile.logout') : t('profile.exit')}</Text>
               {isAuthenticated && displayEmail ? <Text style={{ fontSize: 11, color: c.textTertiary, marginTop: 1 }}>{displayEmail}</Text> : null}
             </View>
             <Text style={{ fontSize: 22, color: 'rgba(239,68,68,0.5)' }}>›</Text>
@@ -480,8 +576,8 @@ export const PerfilScreen: React.FC = () => {
         {/* Footer */}
         <View style={{ alignItems: 'center', marginTop: 24, gap: 2 }}>
           <Text style={{ fontSize: 12, color: c.textTertiary, fontWeight: '500' }}>⚽ Analistas</Text>
-          <Text style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)' }}>Versión 1.0.0 · © 2026</Text>
-          <Text style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', marginTop: 2 }}>Hecho en México 🇲🇽</Text>
+          <Text style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)' }}>{t('profile.version', { version: '1.0.0', year: '2026' })}</Text>
+          <Text style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', marginTop: 2 }}>{t('profile.madeIn')}</Text>
         </View>
         <View style={{ height: 32 }} />
       </ScrollView>
@@ -510,13 +606,13 @@ export const PerfilScreen: React.FC = () => {
             <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: 'rgba(239,68,68,0.1)', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
               <Text style={{ fontSize: 24 }}>🚪</Text>
             </View>
-            <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, textAlign: 'center' }}>¿Cerrar sesión?</Text>
-            <Text style={{ fontSize: 12, color: c.textTertiary, textAlign: 'center', marginTop: 8, lineHeight: 18, paddingHorizontal: 8 }}>Cerrarás la sesión de {displayName}. Podrás volver a entrar cuando quieras.</Text>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, textAlign: 'center' }}>{t('profile.logoutTitle')}</Text>
+            <Text style={{ fontSize: 12, color: c.textTertiary, textAlign: 'center', marginTop: 8, lineHeight: 18, paddingHorizontal: 8 }}>{t('profile.logoutBody', { name: displayName })}</Text>
             <TouchableOpacity style={{ width: '100%', backgroundColor: '#ef4444', borderRadius: 16, paddingVertical: 14, alignItems: 'center', marginTop: 16 }} onPress={handleLogout} activeOpacity={0.8}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Sí, cerrar sesión</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('profile.logoutConfirm')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={{ width: '100%', backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', borderRadius: 16, paddingVertical: 12, alignItems: 'center', marginTop: 8 }} onPress={() => setLogoutModalVisible(false)} activeOpacity={0.8}>
-              <Text style={{ fontSize: 14, fontWeight: '500', color: c.textTertiary }}>Cancelar</Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: c.textTertiary }}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -524,21 +620,21 @@ export const PerfilScreen: React.FC = () => {
 
       {/* Canjea un código */}
       <CenterModal visible={codeModalVisible} onClose={() => { setCodeModalVisible(false); setRedeemCode(''); }} c={c}>
-        <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 6 }}>Canjea un código</Text>
-        <Text style={{ fontSize: 12, color: c.textTertiary, marginBottom: 20, lineHeight: 18 }}>Ingresa un código promocional para desbloquear beneficios exclusivos.</Text>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 6 }}>{t('profile.codeTitle')}</Text>
+        <Text style={{ fontSize: 12, color: c.textTertiary, marginBottom: 20, lineHeight: 18 }}>{t('profile.codeSubtitle')}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surface, borderRadius: 14, paddingHorizontal: 14, height: 48, borderWidth: 1, borderColor: c.border }}>
           <Text style={{ fontSize: 16 }}>🎁</Text>
-          <TextInput style={{ flex: 1, fontSize: 14, fontWeight: '600', color: c.textPrimary, letterSpacing: 1 }} placeholder="EJ: TITULAR2026" placeholderTextColor={c.textTertiary} value={redeemCode} onChangeText={setRedeemCode} autoCapitalize="characters" autoCorrect={false} />
+          <TextInput style={{ flex: 1, fontSize: 14, fontWeight: '600', color: c.textPrimary, letterSpacing: 1 }} placeholder={t('profile.codePlaceholder')} placeholderTextColor={c.textTertiary} value={redeemCode} onChangeText={setRedeemCode} autoCapitalize="characters" autoCorrect={false} />
         </View>
         <TouchableOpacity style={{ backgroundColor: redeemCode.trim() ? c.accent : c.surface, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 16 }} onPress={handleRedeemCode} activeOpacity={0.8} disabled={!redeemCode.trim()}>
-          <Text style={{ fontSize: 14, fontWeight: '700', color: redeemCode.trim() ? '#fff' : c.textTertiary }}>Canjear código</Text>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: redeemCode.trim() ? '#fff' : c.textTertiary }}>{t('profile.codeRedeem')}</Text>
         </TouchableOpacity>
       </CenterModal>
 
       {/* Sobre Analistas */}
       <BottomSheet visible={aboutModalVisible} onClose={() => setAboutModalVisible(false)} c={c}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }}>
-          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 20 }}>Sobre Analistas</Text>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 20 }}>{t('profile.aboutTitle')}</Text>
           <View style={{ alignItems: 'center', marginBottom: 20 }}>
             <View style={{ width: 72, height: 72, borderRadius: 20, backgroundColor: isDark ? '#1a2332' : '#eef2ff', alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
               <Text style={{ fontSize: 36 }}>⚽</Text>
@@ -574,11 +670,17 @@ export const PerfilScreen: React.FC = () => {
 
       {/* Idioma */}
       <CenterModal visible={langModalVisible} onClose={() => setLangModalVisible(false)} c={c}>
-        <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 16 }}>Selecciona un idioma</Text>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 16 }}>{t('profile.selectLanguage')}</Text>
         {LANGUAGES.map((lang, idx) => {
           const isActive = selectedLang === lang.id;
           return (
-            <TouchableOpacity key={lang.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderTopWidth: idx > 0 ? 1 : 0, borderTopColor: c.border }} onPress={() => { setSelectedLang(lang.id); setLangModalVisible(false); }} activeOpacity={0.7}>
+            <TouchableOpacity key={lang.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderTopWidth: idx > 0 ? 1 : 0, borderTopColor: c.border }} onPress={() => {
+                haptics.selection();
+                setSelectedLang(lang.id);
+                i18n.changeLanguage(lang.id);
+                AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, lang.id).catch(() => {});
+                setLangModalVisible(false);
+              }} activeOpacity={0.7}>
               <Text style={{ fontSize: 22 }}>{lang.flag}</Text>
               <Text style={[{ fontSize: 15, color: c.textPrimary, fontWeight: '500' }, isActive && { color: c.accent, fontWeight: '700' }]}>{lang.name}</Text>
               {isActive && <Text style={{ marginLeft: 'auto', fontSize: 16, color: c.accent }}>✓</Text>}
@@ -590,7 +692,7 @@ export const PerfilScreen: React.FC = () => {
       {/* Política de privacidad */}
       <BottomSheet visible={privacyModalVisible} onClose={() => setPrivacyModalVisible(false)} c={c}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }}>
-          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 16 }}>Política de privacidad</Text>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 16 }}>{t('profile.privacyTitle')}</Text>
           <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 16 }}>Última actualización: 1 de enero de 2026</Text>
           {[
             { title: '1. Información que recopilamos', body: 'Recopilamos información que nos proporcionas directamente, como tu nombre, dirección de correo electrónico y preferencias de equipos cuando creas una cuenta. También recopilamos datos de uso de forma automática, como los partidos que consultas y las noticias que lees.' },
@@ -611,7 +713,7 @@ export const PerfilScreen: React.FC = () => {
       {/* Términos y condiciones */}
       <BottomSheet visible={termsModalVisible} onClose={() => setTermsModalVisible(false)} c={c}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }}>
-          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 16 }}>Términos y condiciones</Text>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 16 }}>{t('profile.termsTitle')}</Text>
           <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 16 }}>Última actualización: 1 de enero de 2026</Text>
           {[
             { title: '1. Aceptación', body: 'Al utilizar Analistas, aceptas estos términos y condiciones en su totalidad. Si no estás de acuerdo, no utilices la aplicación.' },

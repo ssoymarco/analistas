@@ -65,7 +65,7 @@ export const AnimatedPressable: React.FC<AnimatedPressableProps> = ({
   }, [onPress, haptic]);
 
   return (
-    <Animated.View style={[style, { transform: [{ scale }], overflow: 'hidden' }]}>
+    <Animated.View style={[style, { transform: [{ scale }] }]}>
       <TouchableOpacity
         onPress={handlePress}
         onPressIn={handlePressIn}

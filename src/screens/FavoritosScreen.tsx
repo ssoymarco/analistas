@@ -29,6 +29,7 @@ import type {
 } from '../services/sportsApi';
 import type { FavoritosStackParamList } from '../navigation/AppNavigator';
 import { normalize } from '../utils/normalize';
+import { useTranslation } from 'react-i18next';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -139,16 +140,16 @@ const POPULAR_PLAYERS: FavItem[] = [
 
 // ── Tab config ───────────────────────────────────────────────────────────────
 
-const TABS: { id: Tab; label: string; emoji: string }[] = [
-  { id: 'equipos',    label: 'Equipos',    emoji: '🏟️' },
-  { id: 'ligas',      label: 'Ligas',      emoji: '🏆' },
-  { id: 'jugadores',  label: 'Jugadores',  emoji: '⚽' },
+const TABS: { id: Tab; labelKey: string; emoji: string }[] = [
+  { id: 'equipos',    labelKey: 'favorites.teams',    emoji: '🏟️' },
+  { id: 'ligas',      labelKey: 'favorites.leagues',      emoji: '🏆' },
+  { id: 'jugadores',  labelKey: 'favorites.players',  emoji: '⚽' },
 ];
 
-const SEARCH_PLACEHOLDERS: Record<Tab, string> = {
-  equipos:   'Buscar equipos...',
-  ligas:     'Buscar ligas o torneos...',
-  jugadores: 'Buscar jugadores...',
+const SEARCH_PLACEHOLDER_KEYS: Record<Tab, string> = {
+  equipos:   'favorites.searchTeams',
+  ligas:     'favorites.searchLeagues',
+  jugadores: 'favorites.searchPlayers',
 };
 
 const INITIAL_VISIBLE = 10;
@@ -188,6 +189,7 @@ const av = StyleSheet.create({
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const FavoritosScreen: React.FC = () => {
+  const { t } = useTranslation();
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<FavoritosStackParamList>>();
@@ -416,17 +418,17 @@ export const FavoritosScreen: React.FC = () => {
       {/* ── Header ── */}
       <View style={st.header}>
         <View style={st.headerLeft}>
-          <Text style={st.headerStar}>★</Text>
+          <Text style={st.headerStar}>⭐</Text>
           <View>
-            <Text style={[st.headerTitle, { color: c.textPrimary }]}>Favoritos</Text>
+            <Text style={[st.headerTitle, { color: c.textPrimary }]}>{t('favorites.title')}</Text>
             <Text style={[st.headerSub, { color: c.textSecondary }]}>
-              {totalCount} favorito{totalCount !== 1 ? 's' : ''} seleccionado{totalCount !== 1 ? 's' : ''}
+              {t('favorites.selected', { count: totalCount })}
             </Text>
           </View>
         </View>
         {totalCount > 0 && (
           <View style={[st.headerBadge, { backgroundColor: '#fbbf24' }]}>
-            <Text style={st.headerBadgeStar}>★</Text>
+            <Text style={st.headerBadgeStar}>⭐</Text>
             <Text style={st.headerBadgeNum}>{totalCount}</Text>
           </View>
         )}
@@ -450,7 +452,7 @@ export const FavoritosScreen: React.FC = () => {
             >
               <Text style={st.tabEmoji}>{tab.emoji}</Text>
               <Text style={[st.tabLabel, { color: c.textSecondary }, active && { color: '#fff' }]}>
-                {tab.label}
+                {t(tab.labelKey)}
               </Text>
               {count > 0 && (
                 <View style={[st.tabCount, active ? { backgroundColor: c.accent } : { backgroundColor: c.border }]}>
@@ -470,7 +472,7 @@ export const FavoritosScreen: React.FC = () => {
           <Text style={st.searchIcon}>🔍</Text>
           <TextInput
             style={[st.searchInput, { color: c.textPrimary }]}
-            placeholder={SEARCH_PLACEHOLDERS[activeTab]}
+            placeholder={t(SEARCH_PLACEHOLDER_KEYS[activeTab])}
             placeholderTextColor={c.textTertiary}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -525,10 +527,10 @@ export const FavoritosScreen: React.FC = () => {
             <View style={st.listHeader}>
               <View style={st.listHeaderLeft}>
                 <Text style={st.listHeaderIcon}>⚡</Text>
-                <Text style={[st.listHeaderTitle, { color: c.textSecondary }]}>LOS MÁS SEGUIDOS</Text>
+                <Text style={[st.listHeaderTitle, { color: c.textSecondary }]}>{t('favorites.mostFollowed')}</Text>
               </View>
               <Text style={[st.listHeaderCount, { color: c.textTertiary }]}>
-                {Math.min(visibleCount, filteredItems.length)} de {filteredItems.length}
+                {t('favorites.ofCount', { visible: Math.min(visibleCount, filteredItems.length), total: filteredItems.length })}
               </Text>
             </View>
           ) : null
@@ -641,7 +643,7 @@ const st = StyleSheet.create({
     paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8,
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerStar: { fontSize: 26, color: '#fbbf24' },
+  headerStar: { fontSize: 26 },
   headerTitle: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
   headerSub: { fontSize: 12, fontWeight: '500', marginTop: 1 },
   headerBadge: {

@@ -25,9 +25,11 @@ import { useUserStats } from '../contexts/UserStatsContext';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFixtureDetail } from '../hooks/useFixtureDetail';
 import { useCountdown } from '../hooks/useCountdown';
+import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { getLeagueConfig }  from '../config/leagues';
 import { EnVivoTab }        from './matchDetail/EnVivoTab';
+import { PreviewTab }      from './matchDetail/PreviewTab';
 import { AlineacionTab }    from './matchDetail/AlineacionTab';
 import { TablaTab }         from './matchDetail/TablaTab';
 import { NoticiasTab }      from './matchDetail/NoticiasTab';
@@ -37,7 +39,7 @@ type Props = NativeStackScreenProps<PartidosStackParamList, 'MatchDetail'>;
 type Tab  = 'previa' | 'alineacion' | 'estadisticas' | 'tabla' | 'noticias';
 
 // ── Animation constants ──────────────────────────────────────────────────────
-const HERO_EXPANDED  = 210;
+const HERO_EXPANDED  = 175;
 const HERO_COMPACT   = 64;
 const COLLAPSE_RANGE = 110;
 const SCROLL_TOP_THRESHOLD = 400;
@@ -223,8 +225,37 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const isFinished  = match.status === 'finished';
   const isScheduled = match.status === 'scheduled';
 
-  const { detail, loading } = useFixtureDetail(match.id, match.homeTeam.id, match.awayTeam.id);
+  const { detail, loading } = useFixtureDetail(match.id, match.homeTeam.id, match.awayTeam.id, match.status);
   const { incrementMatchesViewed } = useUserStats();
+  const {
+    prefs,
+    toggleMatchEstadio, isMatchEstadio,
+  } = useNotificationPrefs();
+  // When global is ON: being in the set means "excluded for this match" (off)
+  // When global is OFF: being in the set means "enabled for this match" (on)
+  const matchEstadioActive = prefs.estadioMode
+    ? !isMatchEstadio(match.id)
+    : isMatchEstadio(match.id);
+  const countdown = useCountdown(isScheduled ? match.startingAtUtc : undefined);
+
+  // ── Local seconds clock ────────────────────────────────────────────────────
+  // SportMonks only provides the minute, not seconds. We simulate seconds
+  // locally: reset to 0 each time match.minute advances, then count up at 1 Hz.
+  const [localSeconds, setLocalSeconds] = useState(0);
+  const prevMinuteRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!isLive || match.stateLabel === 'HT') { setLocalSeconds(0); return; }
+    if (match.minute !== prevMinuteRef.current) {
+      prevMinuteRef.current = match.minute;
+      setLocalSeconds(0);
+    }
+    const id = setInterval(() => setLocalSeconds(s => Math.min(s + 1, 59)), 1000);
+    return () => clearInterval(id);
+  }, [isLive, match.minute, match.stateLabel]);
+  // Formatted live clock: "48:23'" — falls back to match.time if no minute
+  const liveClock = isLive && match.stateLabel !== 'HT' && match.minute != null
+    ? `${match.minute}:${String(localSeconds).padStart(2, '0')}'`
+    : null;
 
   // Track match view (once per unique match)
   useEffect(() => { incrementMatchesViewed(match.id); }, [match.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -298,6 +329,28 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     extrapolate: 'clamp',
   });
 
+  // ── Modo Estadio toast ─────────────────────────────────────────────────────
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const toastTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [toastActivating, setToastActivating] = useState(true);
+
+  const showEstadioToast = useCallback((activating: boolean) => {
+    setToastActivating(activating);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    Animated.sequence([
+      Animated.timing(toastOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+      Animated.delay(3000),
+      Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start();
+    toastTimer.current = setTimeout(() => {}, 3600);
+  }, [toastOpacity]);
+
+  const handleToggleEstadio = useCallback(() => {
+    haptics.medium();
+    toggleMatchEstadio(match.id);          // always flip set membership
+    showEstadioToast(!matchEstadioActive); // toast = what the NEW state will be
+  }, [match.id, toggleMatchEstadio, matchEstadioActive, showEstadioToast]);
+
   // ── "Volver arriba" FAB ────────────────────────────────────────────────────
   const [showScrollTop, setShowScrollTop] = useState(false);
   const handleScroll = useCallback((e: any) => {
@@ -355,17 +408,29 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               leagueId: Number(match.leagueId) || 0,
               leagueName: match.league,
               seasonId: match.seasonId,
+              leagueLogo: `https://cdn.sportmonks.com/images/soccer/leagues/${match.leagueId}.png`,
             })}
           >
             <Text style={[scr.navLeague, { color: hText }]} numberOfLines={1}>
               <Text style={[scr.navLeagueBold, { color: hText }]}>{match.league}</Text>
               {'  '}
-              <Text style={[scr.navRound, { color: hTextSoft }]}>·  Jornada</Text>
+              <Text style={[scr.navRound, { color: hTextSoft }]}>·  {t('matches.matchday')}</Text>
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={[scr.navBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7}>
             <BellIcon size={18} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              scr.navBtn,
+              matchEstadioActive && { backgroundColor: 'rgba(0,224,150,0.18)', borderWidth: 1, borderColor: 'rgba(0,224,150,0.35)' },
+              !matchEstadioActive && { backgroundColor: hBtnBg },
+            ]}
+            onPress={handleToggleEstadio}
+            activeOpacity={0.7}
+          >
+            <Text style={{ fontSize: 15, opacity: matchEstadioActive ? 1 : 0.5 }}>🏟️</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[scr.navBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7}>
             <ShareNodeIcon color={hText} size={16} />
@@ -383,8 +448,8 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 <View style={scr.liveDot} />
                 <Text style={scr.livePillText}>
                   {match.stateLabel === 'HT'
-                    ? 'DESCANSO'
-                    : `EN VIVO · ${match.minute ?? match.time}'`}
+                    ? t('matchStatus.halfTimeLong')
+                    : `EN VIVO · ${liveClock ?? `${match.minute ?? match.time}'`}`}
                 </Text>
               </View>
             )}
@@ -429,7 +494,27 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               {/* Center */}
               <View style={scr.centerCol}>
                 {isScheduled ? (
-                  <Text style={[scr.vsText, { color: hTextMuted }]}>{t('common.vs')}</Text>
+                  <>
+                    <Text style={[scr.vsText, { color: hTextMuted }]}>{t('common.vs')}</Text>
+                    {/* Compact countdown below VS */}
+                    {countdown && !countdown.isPast && (
+                      <View style={scr.countdownWrap}>
+                        {countdown.isImminent ? (
+                          <Text style={[scr.countdownImminent, { color: c.emerald }]}>
+                            ¡Por comenzar!
+                          </Text>
+                        ) : countdown.showCountdown ? (
+                          <Text style={[scr.countdownText, { color: c.emerald }]}>
+                            {String(countdown.hours).padStart(2,'0')}:{String(countdown.minutes).padStart(2,'0')}:{String(countdown.seconds).padStart(2,'0')}
+                          </Text>
+                        ) : (
+                          <Text style={[scr.countdownDays, { color: hTextSoft }]}>
+                            {countdown.days}d {String(countdown.hours).padStart(2,'0')}h
+                          </Text>
+                        )}
+                      </View>
+                    )}
+                  </>
                 ) : (
                   <>
                     <View style={scr.scoreRow}>
@@ -477,7 +562,13 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               <TeamBadgeSmall name={match.awayTeam.name} logo={match.awayTeam.logo} size={32} />
             </View>
             <Text style={[scr.compactDate, { color: hTextSoft }]}>
-              {isFinished ? 'Finalizado' : displayDate}
+              {isLive
+                ? match.stateLabel === 'HT'
+                  ? t('matchStatus.halfTimeLong')
+                  : liveClock ?? `${match.minute ?? match.time}'`
+                : isFinished
+                ? 'Finalizado'
+                : displayDate}
             </Text>
           </Animated.View>
         </Animated.View>
@@ -554,7 +645,8 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           )
         ) : (
           <>
-            {activeTab === 'previa'        && <EnVivoTab        match={match} detail={detail} />}
+            {activeTab === 'previa' && isScheduled && <PreviewTab    match={match} detail={detail} />}
+            {activeTab === 'previa' && !isScheduled && <EnVivoTab     match={match} detail={detail} />}
             {activeTab === 'alineacion'   && <AlineacionTab    match={match} detail={detail} />}
             {activeTab === 'estadisticas' && <EstadisticasTab  match={match} detail={detail} />}
             {activeTab === 'tabla'        && <TablaTab         match={match} detail={detail} onCupDetected={handleCupDetected} />}
@@ -562,6 +654,29 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           </>
         )}
       </Animated.ScrollView>
+
+      {/* ── Modo Estadio toast ── */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute', bottom: 24, left: 20, right: 20,
+          opacity: toastOpacity,
+          backgroundColor: isDark ? 'rgba(20,20,20,0.96)' : 'rgba(30,30,30,0.94)',
+          borderRadius: 16,
+          paddingVertical: 12, paddingHorizontal: 16,
+          flexDirection: 'row', alignItems: 'center', gap: 12,
+          borderWidth: 1,
+          borderColor: toastActivating ? 'rgba(0,224,150,0.35)' : 'rgba(255,255,255,0.08)',
+          shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 8,
+        }}
+      >
+        <Text style={{ fontSize: 22 }}>🏟️</Text>
+        <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', color: toastActivating ? '#00E096' : '#fff' }}>
+          {toastActivating
+            ? t('estadioMode.toastActivated', { delay: prefs.estadioDelay })
+            : t('estadioMode.toastDeactivated')}
+        </Text>
+      </Animated.View>
 
       {/* ── "Volver arriba" FAB ── */}
       {showScrollTop && (
@@ -677,6 +792,10 @@ const scr = StyleSheet.create({
     fontSize: 24, fontWeight: '800', color: 'rgba(255,255,255,0.35)',
     letterSpacing: 2,
   },
+  countdownWrap: { alignItems: 'center', marginTop: 4 },
+  countdownText: { fontSize: 15, fontWeight: '700', letterSpacing: 1 },
+  countdownImminent: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
+  countdownDays: { fontSize: 12, fontWeight: '600', opacity: 0.7 },
   scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   score: { fontSize: 36, fontWeight: '900', color: '#fff', lineHeight: 42 },
   scoreDash: { fontSize: 22, fontWeight: '300', color: 'rgba(255,255,255,0.4)', lineHeight: 42 },

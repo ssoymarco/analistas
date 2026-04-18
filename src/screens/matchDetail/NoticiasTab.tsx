@@ -1,6 +1,7 @@
 // ── Noticias Tab — placeholder for match-related news ────────────────────────
 import React from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
 import type { Match, MatchDetail } from '../../data/types';
 
@@ -61,6 +62,7 @@ const NewsCard: React.FC<{
 // ── Main component ──────────────────────────────────────────────────────────
 export const NoticiasTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ match }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
 
   return (
     <View style={s.outer}>
@@ -68,7 +70,7 @@ export const NoticiasTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ m
       <View style={[s.infoBanner, { backgroundColor: c.surface, borderColor: c.border }]}>
         <Text style={{ fontSize: 16 }}>📰</Text>
         <Text style={[s.infoText, { color: c.textSecondary }]}>
-          Noticias relacionadas con {match.homeTeam.shortName} y {match.awayTeam.shortName}
+          {t('news.relatedNews', { teams: `${match.homeTeam.shortName} y ${match.awayTeam.shortName}` })}
         </Text>
       </View>
 

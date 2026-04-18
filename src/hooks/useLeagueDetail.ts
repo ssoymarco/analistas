@@ -313,16 +313,31 @@ export function useLeagueDetail(
 
         // 3. Map data — dedup standings for multi-stage leagues
         const standings = deduplicateStandings(standingsRaw);
-        const teams = teamsRaw.map(mapTeam).sort((a, b) => a.name.localeCompare(b.name));
+
+        // Filter out placeholder entries (e.g. "1st ranked" used in bracket draws)
+        const realTeams = teamsRaw.filter(p => !p.placeholder);
+        // Fall back to deriving teams from standings when the API returns no real teams
+        const mappedTeams: LeagueTeam[] = realTeams.length > 0
+          ? realTeams.map(mapTeam)
+          : standings.map(s => ({
+              id: s.teamId,
+              name: s.teamName,
+              shortCode: s.teamShortCode,
+              logo: s.teamLogo,
+            }));
+        const teams = mappedTeams.sort((a, b) => a.name.localeCompare(b.name));
 
         // Build team lookup for top scorers
         const teamLookup = new Map<number, { name: string; logo: string }>();
         for (const t of teams) teamLookup.set(t.id, { name: t.name, logo: t.logo });
-        // Also add from standings
+        // Also add from standings (covers cases where teams tab is empty)
         for (const s of standings) teamLookup.set(s.teamId, { name: s.teamName, logo: s.teamLogo });
 
         // Only goals (type_id=208 is goals in topscorers endpoint)
-        const topScorers = topScorersRaw
+        // Fall back to all entries if the season uses a different type_id mapping
+        const goalScorers = topScorersRaw.filter(ts => ts.type_id === 208);
+        const scorersSource = goalScorers.length > 0 ? goalScorers : topScorersRaw;
+        const topScorers = scorersSource
           .map((ts, i) => {
             const row = mapTopScorer(ts, i);
             const team = teamLookup.get(ts.participant_id);

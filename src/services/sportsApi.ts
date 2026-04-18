@@ -4,6 +4,8 @@
 // Components import ONLY from this file — never from sportmonks.ts directly.
 // If the API is down or returns an error, we fall back to mock data.
 
+import { AppCache, CacheTTL } from './cache';
+
 import type {
   Match,
   MatchStatus,
@@ -62,6 +64,7 @@ import {
   type SMRound,
   type SMStage,
   fetchFixturesBySeasonId,
+  fetchLivescoresLatest,
 } from './sportmonks';
 
 import type { NewsArticle } from '../data/types';
@@ -257,6 +260,7 @@ function mapFixtureToMatch(fixture: SMFixture): Match {
     minute: getLiveMinute(fixture),
     stateLabel: mapStateLabel(fixture.state_id),
     league: fixture.league?.name ?? leagueConfig?.name ?? 'Unknown',
+    leagueLogo: fixture.league?.image_path || undefined,
     leagueId: rawLeagueId > 0 ? String(rawLeagueId) : '',
     date: dateStr,
     isFavorite: false,
@@ -278,7 +282,7 @@ function mapEventType(typeId: number): MatchEventType {
     case SM_EVENT_TYPES.RED_CARD: return 'red';
     case SM_EVENT_TYPES.SUBSTITUTION: return 'sub';
     case SM_EVENT_TYPES.VAR: return 'var';
-    default: return 'goal'; // fallback
+    default: return 'goal'; // filtered out before this is reached
   }
 }
 
@@ -287,17 +291,37 @@ function mapEventTeam(event: SMEvent, fixture: SMFixture): 'home' | 'away' {
   return event.participant_id === home?.id ? 'home' : 'away';
 }
 
+/** Set of known SportMonks type_ids we want to display */
+const KNOWN_EVENT_TYPE_IDS = new Set<number>(Object.values(SM_EVENT_TYPES));
+
 function mapEvents(events: SMEvent[] | undefined, fixture: SMFixture): MatchEvent[] {
   if (!events) return [];
-  return events.map(e => ({
-    id: String(e.id),
-    minute: e.minute,
-    addedTime: e.extra_minute ?? undefined,
-    type: mapEventType(e.type_id),
-    team: mapEventTeam(e, fixture),
-    player: e.player_name,
-    relatedPlayer: e.related_player_name ?? undefined,
-  }));
+
+  // 1. Drop unknown type_ids — SportMonks sends internal aggregate / cup-tie
+  //    events with undocumented IDs that would otherwise fall into the default
+  //    branch and show up as phantom goals.
+  // 2. Deduplicate: same player + same minute + same type → keep first.
+  //    Two-legged ties sometimes duplicate the same goal with slightly different
+  //    records (e.g. aggregate tracking entries at a nearby minute).
+  const seen = new Set<string>();
+
+  return events
+    .filter(e => KNOWN_EVENT_TYPE_IDS.has(e.type_id))
+    .filter(e => {
+      const key = `${e.player_id}:${e.minute}:${e.type_id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map(e => ({
+      id: String(e.id),
+      minute: e.minute,
+      addedTime: e.extra_minute ?? undefined,
+      type: mapEventType(e.type_id),
+      team: mapEventTeam(e, fixture),
+      player: e.player_name,
+      relatedPlayer: e.related_player_name ?? undefined,
+    }));
 }
 
 // ── Statistics Mapper ───────────────────────────────────────────────────────
@@ -641,6 +665,51 @@ function mapStandingToLeagueStanding(sg: SMStandingGroup): LeagueStanding {
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
+ * Fetch all fixtures for a local date, merging live state from /livescores.
+ *
+ * Layer 1 — /fixtures/date/{date}: base list (may have cached/stale state_id).
+ * Layer 2 — /livescores:           real-time state override for any match in progress.
+ *
+ * Returns deduplicated SMFixture[] with live state merged in.
+ */
+async function fetchFixturesWithLiveState(localDate: string): Promise<SMFixture[]> {
+  const utcDates = getUtcDatesForLocalDay(localDate);
+
+  // Fetch date-based fixtures + livescores in parallel
+  const [dateResults, liveFixtures] = await Promise.all([
+    Promise.all(utcDates.map(d => fetchFixturesByDate(d))),
+    fetchLivescores().catch(() => [] as SMFixture[]),
+  ]);
+
+  // Flatten + deduplicate (a fixture can appear in both UTC date pages near midnight)
+  const seen = new Set<number>();
+  const unique = dateResults.flat().filter(f => {
+    if (seen.has(f.id)) return false;
+    seen.add(f.id);
+    return true;
+  });
+
+  // Override with /livescores data where available (authoritative real-time source)
+  if (liveFixtures.length > 0) {
+    const liveById = new Map<number, SMFixture>();
+    for (const lf of liveFixtures) liveById.set(lf.id, lf);
+
+    return unique.map(f => {
+      const live = liveById.get(f.id);
+      if (!live) return f;
+      return {
+        ...f,
+        state_id: live.state_id,
+        state: live.state ?? f.state,
+        scores: live.scores ?? f.scores,
+      };
+    });
+  }
+
+  return unique;
+}
+
+/**
  * Fetch all fixtures for a given LOCAL date.
  * Queries the UTC date(s) that overlap with the local calendar day, then
  * filters to keep only fixtures whose local date matches. This ensures
@@ -648,21 +717,18 @@ function mapStandingToLeagueStanding(sg: SMStandingGroup): LeagueStanding {
  * correct day regardless of the user's timezone.
  */
 export async function getFixturesByDate(localDate: string): Promise<Match[]> {
+  const cacheKey = `fixtures_${localDate}`;
+  const today = new Date().toISOString().slice(0, 10);
+  const ttl = localDate === today ? CacheTTL.fixturesLive : CacheTTL.fixturesStatic;
   try {
-    const utcDates = getUtcDatesForLocalDay(localDate);
-    const results = await Promise.all(utcDates.map(d => fetchFixturesByDate(d)));
-    // Flatten + deduplicate (a fixture can appear in both UTC date pages near midnight)
-    const seen = new Set<number>();
-    const unique = results.flat().filter(f => {
-      if (seen.has(f.id)) return false;
-      seen.add(f.id);
-      return true;
-    });
-    // Map and filter to only this local day
-    return unique.map(mapFixtureToMatch).filter(m => m.date === localDate);
+    const unique = await fetchFixturesWithLiveState(localDate);
+    const matches = unique.map(mapFixtureToMatch).filter(m => m.date === localDate);
+    AppCache.set(cacheKey, matches, ttl);
+    return matches;
   } catch (err) {
     console.warn('[sportsApi] getFixturesByDate failed:', err);
-    return [];
+    const cached = await AppCache.get<Match[]>(cacheKey);
+    return cached ?? [];
   }
 }
 
@@ -675,15 +741,11 @@ export interface LeagueWithMatches extends League {
 }
 
 export async function getLeaguesByDate(localDate: string): Promise<LeagueWithMatches[]> {
+  const cacheKey = `leagues_${localDate}`;
+  const today = new Date().toISOString().slice(0, 10);
+  const ttl = localDate === today ? CacheTTL.fixturesLive : CacheTTL.fixturesStatic;
   try {
-    const utcDates = getUtcDatesForLocalDay(localDate);
-    const results = await Promise.all(utcDates.map(d => fetchFixturesByDate(d)));
-    const seen = new Set<number>();
-    const unique = results.flat().filter(f => {
-      if (seen.has(f.id)) return false;
-      seen.add(f.id);
-      return true;
-    });
+    const unique = await fetchFixturesWithLiveState(localDate);
     if (unique.length === 0) return [];
 
     const matches = unique.map(mapFixtureToMatch).filter(m => m.date === localDate);
@@ -696,7 +758,8 @@ export async function getLeaguesByDate(localDate: string): Promise<LeagueWithMat
           id: m.leagueId,
           name: m.league,
           country: config?.country ?? '',
-          logo: config?.flag ?? '⚽',
+          // Prefer official SM image URL; fall back to emoji flag from config
+          logo: m.leagueLogo || config?.flag || '⚽',
           matches: [],
         };
         leagueMap.set(m.leagueId, lw);
@@ -705,10 +768,12 @@ export async function getLeaguesByDate(localDate: string): Promise<LeagueWithMat
       leagueMap.get(m.leagueId)!.matches.push(m);
     }
 
+    AppCache.set(cacheKey, realLeagues, ttl);
     return realLeagues;
   } catch (err) {
     console.warn('[sportsApi] getLeaguesByDate failed:', err);
-    return [];
+    const cached = await AppCache.get<LeagueWithMatches[]>(cacheKey);
+    return cached ?? [];
   }
 }
 
@@ -724,6 +789,26 @@ export async function getLiveFixtures(): Promise<Match[]> {
     console.warn('[sportsApi] getLiveFixtures failed:', err);
     return [];
   }
+}
+
+/**
+ * Fetches only the fixtures that changed in the last 10 seconds and returns
+ * a Map<fixtureId, {homeScore, awayScore, status}> for quick state merging.
+ *
+ * Returns an empty Map when nothing changed — callers can skip re-renders.
+ * Cost: 1 API call per poll vs 4–6 calls for a full date fetch.
+ */
+export async function fetchLatestLivescoreUpdates(): Promise<Map<number, Pick<Match, 'homeScore' | 'awayScore' | 'status'>>> {
+  const latest = await fetchLivescoresLatest();
+  const map = new Map<number, Pick<Match, 'homeScore' | 'awayScore' | 'status'>>();
+  for (const f of latest) {
+    map.set(f.id, {
+      homeScore: getGoals(f.scores, 'home'),
+      awayScore: getGoals(f.scores, 'away'),
+      status: mapStateToStatus(f.state_id),
+    });
+  }
+  return map;
 }
 
 // ── Referee Mapper ──────────────────────────────────────────────────────────
@@ -1138,11 +1223,19 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
       },
     };
 
+    // Pick TTL based on match status
+    const detailTtl =
+      match.status === 'finished' ? CacheTTL.detailFinished :
+      match.status === 'live'     ? CacheTTL.detailLive :
+                                    CacheTTL.detailScheduled;
+    AppCache.set(`fixture_detail_${id}`, { match, detail }, detailTtl);
+
     console.log('[sportsApi] getFixtureDetail OK for', id);
     return { match, detail };
   } catch (err) {
     console.warn('[sportsApi] getFixtureDetail FAILED for id=' + id + ':', err instanceof Error ? err.message : err);
-    return null;
+    const cached = await AppCache.get<{ match: Match; detail: Partial<MatchDetail> }>(`fixture_detail_${id}`);
+    return cached ?? null;
   }
 }
 
@@ -1160,17 +1253,31 @@ export async function getStandings(seasonId: number): Promise<LeagueStanding[]> 
 
     if (data.length === 0) return [];
 
-    // ── Step 1: Deduplicate by team — keep the latest stage per team ─────────
-    // Leagues like the Danish Superliga have multiple stages:
-    //   Stage A (regular season, 22 games) → Stage B (playoffs, 26+ games)
-    // Each team appears once per stage; we want the most recent one.
+    // ── Step 1: Deduplicate by team — keep the stage with actual data ──────────
+    // Some leagues (e.g. Argentine Liga Profesional) return multiple stages where
+    // the newer stage has all zeros (0 GP, 0 pts) — a future/placeholder stage.
+    // Prefer the stage where the team has actually played (GP > 0).
+    // Among stages with real data, prefer the one with the higher stage_id.
+    const getPlayed = (sg: SMStandingGroup) =>
+      (sg.details ?? []).find(d => d.type_id === 129)?.value ?? 0;
+
     const byTeam = new Map<number, SMStandingGroup>();
     for (const sg of data) {
       if (!sg.participant_id) continue;
       const existing = byTeam.get(sg.participant_id);
-      if (!existing || sg.stage_id > existing.stage_id) {
+      if (!existing) {
+        byTeam.set(sg.participant_id, sg);
+        continue;
+      }
+      const existingPlayed = getPlayed(existing);
+      const newPlayed      = getPlayed(sg);
+      // Prefer entry with real data; if both have data, take the newer stage
+      if (existingPlayed === 0 && newPlayed > 0) {
+        byTeam.set(sg.participant_id, sg);
+      } else if (existingPlayed > 0 && newPlayed > 0 && sg.stage_id > existing.stage_id) {
         byTeam.set(sg.participant_id, sg);
       }
+      // If existing has data and new doesn't → keep existing (no-op)
     }
 
     const deduplicated = Array.from(byTeam.values());
@@ -1191,14 +1298,17 @@ export async function getStandings(seasonId: number): Promise<LeagueStanding[]> 
     });
 
     // ── Step 3: Map to LeagueStanding with sequential global positions ───────
-    return deduplicated.map((sg, idx) => ({
+    const result = deduplicated.map((sg, idx) => ({
       ...mapStandingToLeagueStanding(sg),
       position: isMultiGroup ? idx + 1 : sg.position,
       groupId: isMultiGroup ? (sg.group_id ?? null) : null,
     }));
+    AppCache.set(`standings_${seasonId}`, result, CacheTTL.standings);
+    return result;
   } catch (err) {
     console.warn('[sportsApi] getStandings failed:', err);
-    return [];
+    const cached = await AppCache.get<LeagueStanding[]>(`standings_${seasonId}`);
+    return cached ?? [];
   }
 }
 
@@ -1548,9 +1658,10 @@ export interface TopScorer {
 }
 
 export async function getTopScorers(seasonId: number): Promise<TopScorer[]> {
+  const cacheKey = `scorers_${seasonId}`;
   try {
     const data = await fetchTopScorers(seasonId);
-    return data.map(ts => ({
+    const result = data.map(ts => ({
       playerId: ts.player_id,
       playerName: ts.player?.display_name ?? ts.player?.name ?? `Player ${ts.player_id}`,
       playerImage: ts.player?.image_path ?? '',
@@ -1558,9 +1669,12 @@ export async function getTopScorers(seasonId: number): Promise<TopScorer[]> {
       teamId: ts.participant_id,
       position: ts.position,
     }));
+    AppCache.set(cacheKey, result, CacheTTL.standings);
+    return result;
   } catch (err) {
     console.warn('[sportsApi] getTopScorers failed:', err);
-    return [];
+    const cached = await AppCache.get<TopScorer[]>(cacheKey);
+    return cached ?? [];
   }
 }
 
@@ -1568,18 +1682,22 @@ export async function getTopScorers(seasonId: number): Promise<TopScorer[]> {
  * Fetch H2H between two teams.
  */
 export async function getH2HFixtures(teamId1: number, teamId2: number): Promise<H2HResult[]> {
+  const cacheKey = `h2h_${teamId1}_${teamId2}`;
   try {
     const fixtures = await fetchH2H(teamId1, teamId2);
-    return fixtures.map(f => ({
+    const result = fixtures.map(f => ({
       date: f.starting_at.split(' ')[0],
       homeScore: getGoals(f.scores, 'home'),
       awayScore: getGoals(f.scores, 'away'),
       competition: f.league?.name ?? '',
       venue: '',
     }));
+    AppCache.set(cacheKey, result, CacheTTL.h2h);
+    return result;
   } catch (err) {
     console.warn('[sportsApi] getH2HFixtures failed:', err);
-    return [];
+    const cached = await AppCache.get<H2HResult[]>(cacheKey);
+    return cached ?? [];
   }
 }
 
@@ -1634,6 +1752,8 @@ export interface SearchableTeam {
   leagueName: string;
   leagueId: number;
   seasonId?: number;
+  /** Extra search terms (English names, alternate spellings) for cross-language matching */
+  searchTerms?: string[];
 }
 
 export interface SearchablePlayer {
@@ -1652,6 +1772,7 @@ export interface SearchableLeague {
   name: string;
   country: string;
   flag: string;
+  image: string;       // SportMonks CDN logo URL
   seasonId?: number;
 }
 
@@ -1662,6 +1783,7 @@ export function getSearchableLeagues(): SearchableLeague[] {
     name: l.name,
     country: l.country,
     flag: l.flag,
+    image: `https://cdn.sportmonks.com/images/soccer/leagues/${l.id}.png`,
     seasonId: l.currentSeasonId ?? undefined,
   }));
 }
@@ -1703,6 +1825,7 @@ const POPULAR_TEAMS: SearchableTeam[] = [
   // Saudi Arabia
   { id: 2506,   name: 'Al Nassr',             shortName: 'ANA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/10/2506.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
   { id: 7011,   name: 'Al Hilal',             shortName: 'ALH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/3/7011.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
+
 ];
 
 // ── Popular Players (hardcoded for instant onboarding) ──
@@ -1782,4 +1905,125 @@ export async function loadMoreTeams(leagueConfigs: typeof AVAILABLE_LEAGUES): Pr
 /** Returns popular players instantly (hardcoded) */
 export async function getSearchablePlayers(): Promise<SearchablePlayer[]> {
   return POPULAR_PLAYERS;
+}
+
+// ── National Teams ────────────────────────────────────────────────────────────
+
+/**
+ * Maps FIFA 3-letter codes to Spanish display names and search aliases.
+ * Covers the most important nations for World Cup 2026 and our app's audience.
+ * New national teams added automatically as competitions are added to SportMonks.
+ */
+const NATIONAL_TEAM_DISPLAY: Record<string, { name: string; searchTerms: string[] }> = {
+  // CONCACAF — Sede del Mundial 2026
+  MEX: { name: 'México',          searchTerms: ['mexico', 'seleccion mexicana', 'tri', 'el tri'] },
+  USA: { name: 'Estados Unidos',  searchTerms: ['united states', 'usa', 'usmnt', 'estados unidos'] },
+  CAN: { name: 'Canadá',          searchTerms: ['canada'] },
+  CRC: { name: 'Costa Rica',      searchTerms: ['costa rica', 'ticos'] },
+  PAN: { name: 'Panamá',          searchTerms: ['panama'] },
+  HON: { name: 'Honduras',        searchTerms: ['honduras', 'catrachos', 'bicolor'] },
+  JAM: { name: 'Jamaica',         searchTerms: ['jamaica', 'reggae boyz'] },
+  SLV: { name: 'El Salvador',     searchTerms: ['el salvador', 'cuscatlecos'] },
+  GUA: { name: 'Guatemala',       searchTerms: ['guatemala'] },
+  HAI: { name: 'Haití',           searchTerms: ['haiti', 'grenadiers'] },
+  CUB: { name: 'Cuba',            searchTerms: ['cuba'] },
+  TRI: { name: 'Trinidad y Tobago', searchTerms: ['trinidad', 'tobago', 'soca warriors'] },
+  // América del Sur
+  ARG: { name: 'Argentina',       searchTerms: ['argentina', 'albiceleste'] },
+  BRA: { name: 'Brasil',          searchTerms: ['brazil', 'brasil', 'canarinha', 'verde amarela'] },
+  COL: { name: 'Colombia',        searchTerms: ['colombia', 'cafeteros'] },
+  URU: { name: 'Uruguay',         searchTerms: ['uruguay', 'charruas', 'celeste'] },
+  CHI: { name: 'Chile',           searchTerms: ['chile', 'roja'] },
+  PER: { name: 'Perú',            searchTerms: ['peru'] },
+  ECU: { name: 'Ecuador',         searchTerms: ['ecuador'] },
+  PAR: { name: 'Paraguay',        searchTerms: ['paraguay', 'albirroja'] },
+  BOL: { name: 'Bolivia',         searchTerms: ['bolivia', 'verde'] },
+  VEN: { name: 'Venezuela',       searchTerms: ['venezuela', 'vinotinto'] },
+  // Europa
+  ESP: { name: 'España',          searchTerms: ['spain', 'espana', 'furia roja', 'la roja'] },
+  FRA: { name: 'Francia',         searchTerms: ['france', 'les bleus'] },
+  GER: { name: 'Alemania',        searchTerms: ['germany', 'alemania', 'deutschland', 'mannschaft'] },
+  ENG: { name: 'Inglaterra',      searchTerms: ['england', 'three lions'] },
+  POR: { name: 'Portugal',        searchTerms: ['portugal', 'selecao'] },
+  NED: { name: 'Países Bajos',    searchTerms: ['netherlands', 'holland', 'holanda', 'oranje'] },
+  BEL: { name: 'Bélgica',         searchTerms: ['belgium', 'belgica', 'red devils'] },
+  ITA: { name: 'Italia',          searchTerms: ['italy', 'italia', 'azzurri'] },
+  SUI: { name: 'Suiza',           searchTerms: ['switzerland', 'suiza', 'suisse'] },
+  CRO: { name: 'Croacia',         searchTerms: ['croatia', 'croacia', 'vatreni'] },
+  SRB: { name: 'Serbia',          searchTerms: ['serbia'] },
+  DEN: { name: 'Dinamarca',       searchTerms: ['denmark', 'dinamarca'] },
+  AUT: { name: 'Austria',         searchTerms: ['austria'] },
+  SCO: { name: 'Escocia',         searchTerms: ['scotland', 'escocia'] },
+  POL: { name: 'Polonia',         searchTerms: ['poland', 'polonia'] },
+  UKR: { name: 'Ucrania',         searchTerms: ['ukraine', 'ucrania'] },
+  TUR: { name: 'Turquía',         searchTerms: ['turkey', 'turquia'] },
+  SWE: { name: 'Suecia',          searchTerms: ['sweden', 'suecia'] },
+  NOR: { name: 'Noruega',         searchTerms: ['norway', 'noruega'] },
+  GRE: { name: 'Grecia',          searchTerms: ['greece', 'grecia'] },
+  // África
+  MAR: { name: 'Marruecos',       searchTerms: ['morocco', 'marruecos', 'atlas lions'] },
+  SEN: { name: 'Senegal',         searchTerms: ['senegal', 'lions of teranga'] },
+  NGA: { name: 'Nigeria',         searchTerms: ['nigeria', 'super eagles'] },
+  GHA: { name: 'Ghana',           searchTerms: ['ghana', 'black stars'] },
+  CMR: { name: 'Camerún',         searchTerms: ['cameroon', 'camerun', 'lions indomables'] },
+  CIV: { name: 'Costa de Marfil', searchTerms: ['ivory coast', 'cote divoire', 'costa marfil'] },
+  EGY: { name: 'Egipto',          searchTerms: ['egypt', 'egipto', 'pharaohs'] },
+  // Asia
+  JPN: { name: 'Japón',           searchTerms: ['japan', 'japon', 'samurai blue'] },
+  KOR: { name: 'Corea del Sur',   searchTerms: ['south korea', 'corea', 'taeguk warriors'] },
+  SAU: { name: 'Arabia Saudita',  searchTerms: ['saudi arabia', 'arabia saudita', 'saudi', 'arabia'] },
+  IRN: { name: 'Irán',            searchTerms: ['iran', 'team melli'] },
+  AUS: { name: 'Australia',       searchTerms: ['australia', 'socceroos'] },
+  QAT: { name: 'Catar',           searchTerms: ['qatar', 'catar'] },
+};
+
+/** In-memory cache so the API is only called once per session */
+let _nationalTeamsCache: SearchableTeam[] | null = null;
+
+/**
+ * Loads national teams from competitions we already have in SportMonks.
+ * Uses CONCACAF Nations League + Amistosos Internacionales as data sources.
+ * Results are cached in memory for the app session.
+ * When new competitions (e.g., FIFA World Cup) are added to the app config,
+ * their teams appear automatically — no code changes needed.
+ */
+export async function getSearchableNationalTeams(): Promise<SearchableTeam[]> {
+  if (_nationalTeamsCache) return _nationalTeamsCache;
+
+  // Competitions where national teams participate (use seasonId from our config)
+  const NATIONAL_SOURCES: { seasonId: number; leagueName: string }[] = [
+    { seasonId: 27491, leagueName: 'CONCACAF Nations League' },  // leagueId: 1741
+    { seasonId: 26758, leagueName: 'Amistosos Internacionales' }, // leagueId: 1082
+  ];
+
+  const seen = new Set<number>();
+  const teams: SearchableTeam[] = [];
+
+  await Promise.allSettled(
+    NATIONAL_SOURCES.map(async ({ seasonId }) => {
+      try {
+        const smTeams = await fetchTeamsBySeasonId(seasonId);
+        for (const t of smTeams) {
+          if (seen.has(t.id) || !t.short_code) continue;
+          seen.add(t.id);
+          const code = t.short_code.toUpperCase();
+          const display = NATIONAL_TEAM_DISPLAY[code];
+          teams.push({
+            id: t.id,
+            name: display?.name ?? t.name,
+            shortName: code,
+            logo: t.image_path || '',
+            leagueName: 'Selección Nacional',
+            leagueId: 0,
+            searchTerms: display?.searchTerms,
+          });
+        }
+      } catch {
+        // Silently skip unavailable sources
+      }
+    })
+  );
+
+  _nationalTeamsCache = teams;
+  return teams;
 }

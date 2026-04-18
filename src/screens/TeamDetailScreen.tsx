@@ -21,6 +21,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import ViewShot, { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
+import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFavorites } from '../contexts/FavoritesContext';
@@ -56,8 +57,13 @@ function ShareIcon({ color, size = 18 }: { color: string; size?: number }) {
 
 // ── Form badges ──────────────────────────────────────────────────────────────
 const FormBadges: React.FC<{ form: FormEntry[] }> = ({ form }) => {
+  const { t } = useTranslation();
   const colors = { W: '#10b981', D: '#f59e0b', L: '#ef4444' };
-  const labels = { W: 'G', D: 'E', L: 'P' }; // Ganado, Empate, Pérdida
+  const labels: Record<string, string> = {
+    W: t('team.formLabels.W'),
+    D: t('team.formLabels.D'),
+    L: t('team.formLabels.L'),
+  };
   return (
     <View style={{ flexDirection: 'row', gap: 3 }}>
       {form.map((f, i) => (
@@ -79,6 +85,7 @@ const FormBadges: React.FC<{ form: FormEntry[] }> = ({ form }) => {
 
 const ResumenTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const { info, recentMatches, squad } = data;
 
@@ -88,13 +95,13 @@ const ResumenTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
     <View style={{ paddingHorizontal: 16, gap: 12 }}>
       {/* Info card */}
       <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Text style={[s.cardTitle, { color: c.textPrimary }]}>Información</Text>
+        <Text style={[s.cardTitle, { color: c.textPrimary }]}>{t('team.info')}</Text>
         {[
-          { icon: '🏟️', label: 'Estadio', value: info.venueName },
-          ...(info.venueCapacity > 0 ? [{ icon: '💺', label: 'Capacidad', value: info.venueCapacity.toLocaleString() }] : []),
-          ...(info.founded > 0 ? [{ icon: '📅', label: 'Fundado', value: String(info.founded) }] : []),
-          ...(info.coach ? [{ icon: '👔', label: 'Director técnico', value: info.coach }] : []),
-          ...(info.leagueName ? [{ icon: '🏆', label: 'Liga', value: info.leagueName }] : []),
+          { icon: '🏟️', label: t('team.stadium'), value: info.venueName },
+          ...(info.venueCapacity > 0 ? [{ icon: '💺', label: t('team.capacity'), value: info.venueCapacity.toLocaleString() }] : []),
+          ...(info.founded > 0 ? [{ icon: '📅', label: t('team.founded'), value: String(info.founded) }] : []),
+          ...(info.coach ? [{ icon: '👔', label: t('team.coach'), value: info.coach }] : []),
+          ...(info.leagueName ? [{ icon: '🏆', label: t('team.league'), value: info.leagueName }] : []),
         ].map((row, i) => (
           <View key={i} style={[s.infoRow, { borderTopColor: c.border }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
@@ -109,7 +116,7 @@ const ResumenTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
       {/* Recent matches */}
       {recentMatches.length > 0 && (
         <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[s.cardTitle, { color: c.textPrimary }]}>Partidos recientes</Text>
+          <Text style={[s.cardTitle, { color: c.textPrimary }]}>{t('matches.recentMatches')}</Text>
           {recentMatches.filter(m => m.isFinished).slice(0, 3).map((m, i) => (
             <View key={i} style={[s.matchRow, { borderTopColor: c.border }]}>
               <View style={s.matchTeam}>
@@ -146,7 +153,7 @@ const ResumenTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
       {/* Top players */}
       {topPlayers.length > 0 && (
         <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[s.cardTitle, { color: c.textPrimary }]}>Jugadores destacados</Text>
+          <Text style={[s.cardTitle, { color: c.textPrimary }]}>{t('team.featuredPlayers')}</Text>
           {topPlayers.map((p, i) => (
             <TouchableOpacity
               key={i}
@@ -186,15 +193,16 @@ const ResumenTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
 // TAB: Plantilla
 // ══════════════════════════════════════════════════════════════════════════════
 
-const POSITION_GROUPS: { label: string; posId: number }[] = [
-  { label: 'PORTEROS', posId: 24 },
-  { label: 'DEFENSAS', posId: 25 },
-  { label: 'MEDIOCAMPISTAS', posId: 26 },
-  { label: 'DELANTEROS', posId: 27 },
+const POSITION_GROUPS: { labelKey: string; posId: number }[] = [
+  { labelKey: 'team.positions.goalkeepers', posId: 24 },
+  { labelKey: 'team.positions.defenders', posId: 25 },
+  { labelKey: 'team.positions.midfielders', posId: 26 },
+  { labelKey: 'team.positions.forwards', posId: 27 },
 ];
 
 const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
 
   return (
@@ -205,7 +213,7 @@ const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
 
         return (
           <View key={group.posId}>
-            <Text style={[s.sectionLabel, { color: c.textTertiary }]}>{group.label}</Text>
+            <Text style={[s.sectionLabel, { color: c.textTertiary }]}>{t(group.labelKey)}</Text>
             <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
               {players.map((p, i) => (
                 <TouchableOpacity
@@ -231,7 +239,7 @@ const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
                   <View style={{ flex: 1, gap: 1 }}>
                     <Text style={[s.squadName, { color: c.textPrimary }]}>{p.displayName}</Text>
                     <Text style={[s.squadMeta, { color: c.textTertiary }]}>
-                      {p.age > 0 ? `${p.age} años` : ''}
+                      {p.age > 0 ? t('team.ageYears', { age: p.age }) : ''}
                     </Text>
                   </View>
                   {p.isCaptain && (
@@ -328,6 +336,7 @@ function MatchFixtureCard({
 
 const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const [showAll, setShowAll] = useState(false);
 
@@ -339,7 +348,7 @@ const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
     return (
       <View style={{ alignItems: 'center', paddingTop: 60 }}>
         <Text style={{ fontSize: 40, marginBottom: 12 }}>📋</Text>
-        <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>Sin partidos disponibles</Text>
+        <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>{t('matches.noMatchesAvailable')}</Text>
       </View>
     );
   }
@@ -372,10 +381,10 @@ const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
           activeOpacity={0.7}
         >
           <BackArrow color={c.accent} />
-          <Text style={{ fontSize: 13, fontWeight: '700', color: c.accent }}>Volver al resumen</Text>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: c.accent }}>{t('team.backToSummary')}</Text>
         </TouchableOpacity>
         <Text style={[s.sectionLabel, { color: c.textTertiary }]}>
-          TODOS LOS PARTIDOS ({allSorted.length})
+          {t('team.allMatches', { count: allSorted.length })}
         </Text>
         {allSorted.map(m => (
           <MatchFixtureCard key={m.id} m={m} c={c} onPress={() => goToMatch(m)} />
@@ -390,7 +399,7 @@ const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
       {/* Previous matches (oldest first → top of list) */}
       {previousMatches.length > 0 && (
         <>
-          <Text style={[s.sectionLabel, { color: c.textTertiary }]}>ANTERIORES</Text>
+          <Text style={[s.sectionLabel, { color: c.textTertiary }]}>{t('team.previous')}</Text>
           {previousMatches.map(m => (
             <MatchFixtureCard key={m.id} m={m} c={c} onPress={() => goToMatch(m)} />
           ))}
@@ -400,15 +409,15 @@ const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
       {/* Last match (highlighted — center) */}
       {lastMatch && (
         <>
-          <Text style={[s.sectionLabel, { color: c.textTertiary, marginTop: 8 }]}>ÚLTIMO PARTIDO</Text>
-          <MatchFixtureCard m={lastMatch} highlight c={c} label="ÚLTIMO" onPress={() => goToMatch(lastMatch)} />
+          <Text style={[s.sectionLabel, { color: c.textTertiary, marginTop: 8 }]}>{t('team.lastMatch')}</Text>
+          <MatchFixtureCard m={lastMatch} highlight c={c} label={t('team.lastMatchLabel')} onPress={() => goToMatch(lastMatch)} />
         </>
       )}
 
       {/* Upcoming matches (below) */}
       {nextMatches.length > 0 && (
         <>
-          <Text style={[s.sectionLabel, { color: c.textTertiary, marginTop: 8 }]}>PRÓXIMOS</Text>
+          <Text style={[s.sectionLabel, { color: c.textTertiary, marginTop: 8 }]}>{t('matches.upcoming')}</Text>
           {nextMatches.map(m => (
             <MatchFixtureCard key={m.id} m={m} c={c} onPress={() => goToMatch(m)} />
           ))}
@@ -423,7 +432,7 @@ const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
           activeOpacity={0.7}
         >
           <Text style={[s.verTodosText, { color: c.accent }]}>
-            Ver todos los partidos ({data.recentMatches.length})
+            {t('team.viewAllMatches', { count: data.recentMatches.length })}
           </Text>
         </TouchableOpacity>
       )}
@@ -439,6 +448,7 @@ const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
 
 const TablaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const { isDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const tableRef = useRef<any>(null);
@@ -457,10 +467,10 @@ const TablaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
       if (isAvailable) {
         await Sharing.shareAsync(uri, {
           mimeType: 'image/png',
-          dialogTitle: 'Compartir tabla de posiciones',
+          dialogTitle: t('team.shareStandings'),
         });
       } else {
-        Alert.alert('Compartir', 'La función de compartir no está disponible en este dispositivo.');
+        Alert.alert(t('common.share'), t('team.shareUnavailable'));
       }
     } catch (err) {
       console.warn('[TablaTab] share failed:', err);
@@ -473,7 +483,7 @@ const TablaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
     return (
       <View style={{ alignItems: 'center', paddingTop: 60 }}>
         <Text style={{ fontSize: 40, marginBottom: 12 }}>🏆</Text>
-        <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>Sin tabla disponible</Text>
+        <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>{t('team.noStandings')}</Text>
       </View>
     );
   }
@@ -494,7 +504,7 @@ const TablaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
               <Image source={{ uri: data.info.logo }} style={{ width: 20, height: 20, borderRadius: 10 }} />
             )}
             <Text style={{ fontSize: 14, fontWeight: '700', color: c.textPrimary }}>
-              {data.info.leagueName || 'Tabla de posiciones'}
+              {data.info.leagueName || t('team.standingsTitle')}
             </Text>
           </View>
           <Text style={{ fontSize: 10, fontWeight: '600', color: c.textTertiary }}>Analistas App</Text>
@@ -504,7 +514,7 @@ const TablaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
           {/* Header */}
           <View style={[s.tableHeader, { backgroundColor: c.surface }]}>
             <Text style={[s.thPos, { color: c.textTertiary }]}></Text>
-            <Text style={[s.thTeam, { color: c.textTertiary }]}>EQUIPO</Text>
+            <Text style={[s.thTeam, { color: c.textTertiary }]}>{t('league.teamHeader')}</Text>
             <Text style={[s.thStat, { color: c.textTertiary }]}>J</Text>
             <Text style={[s.thStat, { color: c.textTertiary }]}>G</Text>
             <Text style={[s.thStat, { color: c.textTertiary }]}>E</Text>
@@ -516,7 +526,7 @@ const TablaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
             const teamIdNum = Number(st.team.id);
             return (
               <TouchableOpacity
-                key={st.team.id}
+                key={`${st.position}-${st.team.id}`}
                 activeOpacity={0.6}
                 onPress={() => {
                   if (!isNaN(teamIdNum) && teamIdNum > 0 && teamIdNum !== data.info.id) {
@@ -559,7 +569,7 @@ const TablaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
       {/* Share section */}
       <View style={{ alignItems: 'center', marginTop: 20, gap: 8 }}>
         <Text style={{ fontSize: 13, color: c.textTertiary, textAlign: 'center' }}>
-          Comparte esta tabla con tus amigos.
+          {t('team.shareTablePrompt')}
         </Text>
         <TouchableOpacity
           onPress={handleShare}
@@ -572,7 +582,7 @@ const TablaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
           ) : (
             <>
               <ShareIcon color="#111" size={14} />
-              <Text style={s.shareButtonText}>Compartir</Text>
+              <Text style={s.shareButtonText}>{t('common.share')}</Text>
             </>
           )}
         </TouchableOpacity>
@@ -590,6 +600,7 @@ const TablaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
 export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
   const { teamId, teamName, teamLogo, seasonId } = route.params;
   const c = useThemeColors();
+  const { t } = useTranslation();
   const { isDark } = useDarkMode();
   const navigation = useNavigation();
   const { isFollowingTeam, toggleFollowTeam } = useFavorites();
@@ -616,10 +627,10 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
   const hLogoBg    = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)';
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'resumen', label: 'Resumen' },
-    { key: 'plantilla', label: 'Plantilla' },
-    { key: 'partidos', label: 'Partidos' },
-    { key: 'tabla', label: 'Tabla' },
+    { key: 'resumen', label: t('team.summaryTab') },
+    { key: 'plantilla', label: t('team.squadTab') },
+    { key: 'partidos', label: t('team.matchesTab') },
+    { key: 'tabla', label: t('team.standingsTab') },
   ];
 
   return (
@@ -721,7 +732,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
               activeOpacity={0.8}
             >
               <Text style={[hs.followText, { color: hText }, isFollowing && { color: isDark ? '#111' : '#fff' }]}>
-                {isFollowing ? '✓ Siguiendo' : '+ Seguir'}
+                {isFollowing ? t('team.following') : t('team.follow')}
               </Text>
             </TouchableOpacity>
 
@@ -730,16 +741,16 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
               <View style={hs.statsStrip}>
                 <View style={hs.statItem}>
                   <Text style={[hs.statValue, { color: hText }]}>#{data.teamStanding.position}</Text>
-                  <Text style={[hs.statLabel, { color: hTextSoft }]}>POSICIÓN</Text>
+                  <Text style={[hs.statLabel, { color: hTextSoft }]}>{t('team.positionLabel')}</Text>
                 </View>
                 <View style={hs.statItem}>
                   <Text style={[hs.statValue, { color: hText }]}>{data.teamStanding.points}</Text>
-                  <Text style={[hs.statLabel, { color: hTextSoft }]}>PUNTOS</Text>
+                  <Text style={[hs.statLabel, { color: hTextSoft }]}>{t('team.pointsLabel')}</Text>
                 </View>
                 {data.form.length > 0 && (
                   <View style={hs.statItem}>
                     <FormBadges form={data.form} />
-                    <Text style={[hs.statLabel, { color: hTextSoft }]}>FORMA</Text>
+                    <Text style={[hs.statLabel, { color: hTextSoft }]}>{t('team.formLabel')}</Text>
                   </View>
                 )}
               </View>
@@ -774,7 +785,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
         ) : error && !data ? (
           <View style={{ alignItems: 'center', paddingTop: 80, gap: 10, paddingHorizontal: 20 }}>
             <Text style={{ fontSize: 40 }}>⚠️</Text>
-            <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>Error cargando equipo</Text>
+            <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>{t('team.errorLoading')}</Text>
             <Text style={{ fontSize: 12, color: c.textTertiary, textAlign: 'center' }}>{error}</Text>
           </View>
         ) : data ? (

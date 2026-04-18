@@ -6,6 +6,7 @@ import React, { useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Modal, Animated, Platform,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import type { ColorPalette } from '../theme/colors';
 
 // ── Toggle (self-contained so StreakModal has no external deps) ───────────────
@@ -30,41 +31,37 @@ function Toggle({ value, onToggle, activeColor, icon }: {
 }
 
 // ── Data ─────────────────────────────────────────────────────────────────────
-export const STREAK_MILESTONES = [
-  { days: 3,   emoji: '🌱', name: 'Primer brote',   desc: '¡Ya diste el primer paso, sigue así!', color: '#4ade80' },
-  { days: 7,   emoji: '🔥', name: 'En llamas',       desc: 'Una semana sin fallar. ¡Verdadero hincha!', color: '#ff7a00' },
-  { days: 14,  emoji: '⚡', name: 'Electrizante',    desc: 'Tu compromiso con el fútbol habla por sí solo.', color: '#facc15' },
-  { days: 30,  emoji: '🏆', name: 'Campeón',         desc: 'Un mes entero. No eres un aficionado cualquiera.', color: '#60a5fa' },
-  { days: 60,  emoji: '💎', name: 'Diamante',        desc: '60 días sin parar. Eres un analista de élite.', color: '#a78bfa' },
-  { days: 100, emoji: '👑', name: 'Leyenda',         desc: 'Triple dígito. Tu pasión no tiene límites.', color: '#f472b6' },
-  { days: 365, emoji: '🏟️', name: 'Inmortal',       desc: 'Un año entero. Eres historia viva del fútbol.', color: '#34d399' },
-];
+// Static milestone metadata (emoji, days, color). Names & descriptions are
+// injected via i18n inside the component — see getStreakMilestones().
+const MILESTONE_META = [
+  { days: 3,   emoji: '🌱', nameKey: 'firstSprout',   descKey: 'firstSproutDesc',   color: '#4ade80' },
+  { days: 7,   emoji: '🔥', nameKey: 'onFire',        descKey: 'onFireDesc',        color: '#ff7a00' },
+  { days: 14,  emoji: '⚡', nameKey: 'electrifying',   descKey: 'electrifyingDesc',  color: '#facc15' },
+  { days: 30,  emoji: '🏆', nameKey: 'champion',      descKey: 'championDesc',      color: '#60a5fa' },
+  { days: 60,  emoji: '💎', nameKey: 'diamond',       descKey: 'diamondDesc',       color: '#a78bfa' },
+  { days: 100, emoji: '👑', nameKey: 'legend',        descKey: 'legendDesc',        color: '#f472b6' },
+  { days: 365, emoji: '🏟️', nameKey: 'immortal',     descKey: 'immortalDesc',      color: '#34d399' },
+] as const;
 
-function getStreakQuote(days: number): { quote: string; sub: string } {
-  if (days < 3) return {
-    quote: '"El fútbol se vive mejor cada día."',
-    sub: 'Abre la app diario y descubre más.',
-  };
-  if (days < 7) return {
-    quote: '"Tu equipo juega aunque tú no lo veas."',
-    sub: 'Pero los verdaderos hinchas nunca faltan.',
-  };
-  if (days < 14) return {
-    quote: '"La constancia define al verdadero fan."',
-    sub: 'Una semana seguida no es casualidad.',
-  };
-  if (days < 30) return {
-    quote: '"Estar al día es una forma de respeto al deporte."',
-    sub: 'Tu dedicación marca la diferencia.',
-  };
-  if (days < 100) return {
-    quote: '"No eres cualquier aficionado. Eres un Analista."',
-    sub: 'Un mes entero demuestra quién eres.',
-  };
-  return {
-    quote: '"Tu pasión por el fútbol no tiene límites."',
-    sub: 'Aquí está la prueba de tu compromiso.',
-  };
+/** Build the milestones array with translated names/descriptions. */
+function getStreakMilestones(t: (key: string) => string) {
+  return MILESTONE_META.map(m => ({
+    days: m.days,
+    emoji: m.emoji,
+    color: m.color,
+    name: t(`streak.milestones.${m.nameKey}`),
+    desc: t(`streak.milestones.${m.descKey}`),
+  }));
+}
+
+/** Re-export for external consumers that still reference STREAK_MILESTONES. */
+export { MILESTONE_META as STREAK_MILESTONES_META };
+
+function getStreakQuote(days: number, quotes: { quote: string; desc: string }[]): { quote: string; sub: string } {
+  // Map day thresholds to quote indices (0–5)
+  const idx = days < 3 ? 0 : days < 7 ? 1 : days < 14 ? 2 : days < 30 ? 3 : days < 100 ? 4 : 5;
+  const q = quotes[idx] ?? quotes[quotes.length - 1];
+  return { quote: q.quote, sub: q.desc };
 }
 
 const HEADER_MAX = 200;
@@ -83,9 +80,14 @@ export interface StreakModalProps {
 }
 
 export function StreakModal({ visible, onClose, streakDays, streakNotifyEnabled, onToggleNotify, c, isDark }: StreakModalProps) {
+  const { t } = useTranslation();
   const scrollY = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.7)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  // Translated data
+  const STREAK_MILESTONES = getStreakMilestones(t);
+  const streakQuotes = t('streak.quotes', { returnObjects: true }) as { quote: string; desc: string }[];
 
   useEffect(() => {
     if (visible) {
@@ -128,7 +130,7 @@ export function StreakModal({ visible, onClose, streakDays, streakNotifyEnabled,
     ? Math.min(1, (streakDays - progressBase) / (progressTarget - progressBase))
     : 1;
 
-  const quote = getStreakQuote(streakDays);
+  const quote = getStreakQuote(streakDays, streakQuotes);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -170,7 +172,7 @@ export function StreakModal({ visible, onClose, streakDays, streakNotifyEnabled,
                 <Text style={{ fontSize: 50 }}>🔥</Text>
                 <Text style={{ fontSize: 60, fontWeight: '900', color: accent, lineHeight: 68, marginTop: -6 }}>{streakDays}</Text>
                 <Text style={{ fontSize: 16, fontWeight: '700', color: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.5)', marginTop: 2 }}>
-                  {streakDays === 1 ? 'día de racha' : 'días de racha'}
+                  {streakDays === 1 ? t('streak.daySingular') : t('streak.dayPlural')}
                 </Text>
               </Animated.View>
             </Animated.View>
@@ -185,7 +187,7 @@ export function StreakModal({ visible, onClose, streakDays, streakNotifyEnabled,
               <Text style={{ fontSize: 24 }}>🔥</Text>
               <Text style={{ fontSize: 24, fontWeight: '900', color: accent }}>{streakDays}</Text>
               <Text style={{ fontSize: 15, fontWeight: '600', color: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.4)' }}>
-                {streakDays === 1 ? 'día de racha' : 'días de racha'}
+                {streakDays === 1 ? t('streak.daySingular') : t('streak.dayPlural')}
               </Text>
             </Animated.View>
           </Animated.View>
@@ -210,11 +212,11 @@ export function StreakModal({ visible, onClose, streakDays, streakNotifyEnabled,
                 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: c.textPrimary }}>Siguiente logro</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: c.textPrimary }}>{t('streak.nextAchievement')}</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
                         <Text style={{ fontSize: 14 }}>{nextMilestone.emoji}</Text>
                         <Text style={{ fontSize: 12, color: c.textSecondary }}>
-                          "{nextMilestone.name}" · faltan <Text style={{ fontWeight: '700', color: accent }}>{nextMilestone.days - streakDays} días</Text>
+                          "{nextMilestone.name}" · {t('streak.daysRemaining', { count: nextMilestone.days - streakDays })}
                         </Text>
                       </View>
                     </View>
@@ -231,9 +233,9 @@ export function StreakModal({ visible, onClose, streakDays, streakNotifyEnabled,
                     <View style={{ height: '100%', borderRadius: 3, backgroundColor: nextMilestone.color, width: `${Math.max(2, Math.round(progressPct * 100))}%` }} />
                   </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-                    <Text style={{ fontSize: 10, color: c.textTertiary }}>{progressBase} días</Text>
+                    <Text style={{ fontSize: 10, color: c.textTertiary }}>{progressBase} {t('streak.days')}</Text>
                     <Text style={{ fontSize: 10, fontWeight: '700', color: accent }}>{Math.round(progressPct * 100)}%</Text>
-                    <Text style={{ fontSize: 10, color: c.textTertiary }}>{nextMilestone.days} días</Text>
+                    <Text style={{ fontSize: 10, color: c.textTertiary }}>{nextMilestone.days} {t('streak.days')}</Text>
                   </View>
                 </View>
               </View>
@@ -241,7 +243,7 @@ export function StreakModal({ visible, onClose, streakDays, streakNotifyEnabled,
 
             {/* TUS LOGROS */}
             <View style={{ paddingTop: 20 }}>
-              <Text style={{ fontSize: 10, fontWeight: '700', color: c.textTertiary, letterSpacing: 1.5, paddingHorizontal: 20, marginBottom: 12 }}>TUS LOGROS</Text>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: c.textTertiary, letterSpacing: 1.5, paddingHorizontal: 20, marginBottom: 12 }}>{t('streak.yourAchievements')}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}>
                 {STREAK_MILESTONES.map(m => {
                   const achieved = streakDays >= m.days;
@@ -264,7 +266,7 @@ export function StreakModal({ visible, onClose, streakDays, streakNotifyEnabled,
                         <Text style={{ fontSize: 22, opacity: achieved ? 1 : 0.25 }}>{m.emoji}</Text>
                       </View>
                       <Text style={{ fontSize: 12, fontWeight: '800', color: achieved ? m.color : c.textTertiary, marginBottom: 2 }}>
-                        {m.days} días
+                        {m.days} {t('streak.days')}
                       </Text>
                       <Text style={{ fontSize: 9, color: achieved ? c.textSecondary : c.textTertiary, textAlign: 'center' }} numberOfLines={1}>
                         {m.name}
@@ -309,8 +311,8 @@ export function StreakModal({ visible, onClose, streakDays, streakNotifyEnabled,
                   <Text style={{ fontSize: 18 }}>🔔</Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: c.textPrimary }}>¡No rompas la racha!</Text>
-                  <Text style={{ fontSize: 11, color: c.textTertiary, marginTop: 2 }}>Te avisaremos si estás a punto de perderla para que entres a activarla.</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: c.textPrimary }}>{t('streak.dontBreakStreak')}</Text>
+                  <Text style={{ fontSize: 11, color: c.textTertiary, marginTop: 2 }}>{t('streak.streakNotification')}</Text>
                 </View>
                 <Toggle value={streakNotifyEnabled} onToggle={() => onToggleNotify(!streakNotifyEnabled)} activeColor={accent} icon="🔔" />
               </View>
@@ -325,7 +327,7 @@ export function StreakModal({ visible, onClose, streakDays, streakNotifyEnabled,
                 }}
                 onPress={onClose} activeOpacity={0.7}
               >
-                <Text style={{ fontSize: 14, fontWeight: '600', color: c.textTertiary }}>Cerrar</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: c.textTertiary }}>{t('common.close')}</Text>
               </TouchableOpacity>
             </View>
           </Animated.ScrollView>

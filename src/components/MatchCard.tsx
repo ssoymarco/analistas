@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Animated,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { AnimatedPressable } from './AnimatedPressable';
 import type { Match } from '../data/types';
@@ -33,6 +34,7 @@ interface MatchCardProps {
 
 export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
 
   const isLive      = match.status === 'live';
   const isFinished  = match.status === 'finished';
@@ -77,7 +79,11 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
               </Text>
             </View>
           )}
-          {isLive && <Text style={s.liveMin}>{match.time}</Text>}
+          {isLive && (
+            <Text style={s.liveMin}>
+              {match.stateLabel === 'HT' ? t('matchStatus.halfTime') : match.time}
+            </Text>
+          )}
           {isFinished && <Text style={[s.ftLabel, { color: c.textTertiary }]}>Final</Text>}
         </View>
 

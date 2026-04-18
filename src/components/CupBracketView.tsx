@@ -11,6 +11,7 @@ import {
   ScrollView,
   StyleSheet,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import type { CupRound, CupTie, CupLeg } from '../services/sportsApi';
 
@@ -27,24 +28,25 @@ const StageBadge: React.FC<{ isCurrent: boolean; isFinished: boolean; tieCount: 
   isCurrent, isFinished, tieCount,
 }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   if (isCurrent) {
     return (
       <View style={[s.badge, { backgroundColor: 'rgba(0,224,150,0.12)' }]}>
         <View style={[s.badgeDot, { backgroundColor: '#00E096' }]} />
-        <Text style={[s.badgeText, { color: '#00E096' }]}>EN CURSO · {tieCount} llaves</Text>
+        <Text style={[s.badgeText, { color: '#00E096' }]}>{t('cup.inProgress', { count: tieCount })}</Text>
       </View>
     );
   }
   if (isFinished) {
     return (
       <View style={[s.badge, { backgroundColor: 'rgba(142,142,147,0.08)' }]}>
-        <Text style={[s.badgeText, { color: '#8E8E93' }]}>FINALIZADO · {tieCount} llaves</Text>
+        <Text style={[s.badgeText, { color: '#8E8E93' }]}>{t('cup.finished', { count: tieCount })}</Text>
       </View>
     );
   }
   return (
     <View style={[s.badge, { backgroundColor: 'rgba(59,130,246,0.08)' }]}>
-      <Text style={[s.badgeText, { color: '#3b82f6' }]}>PRÓXIMO · {tieCount} llaves</Text>
+      <Text style={[s.badgeText, { color: '#3b82f6' }]}>{t('cup.next', { count: tieCount })}</Text>
     </View>
   );
 };
@@ -77,6 +79,7 @@ const LegDetail: React.FC<{ leg: CupLeg; canonicalHomeId: string }> = ({ leg, ca
 // ── Tie Card (full-width) ─────────────────────────────────────────────────────
 const TieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(tie.isCurrentMatch);
   const homeWon = tie.winner?.id === tie.homeTeam.id;
   const awayWon = tie.winner?.id === tie.awayTeam.id;
@@ -93,7 +96,7 @@ const TieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
     return (
       <View style={[s.tieCard, { backgroundColor: c.surface, borderLeftColor: 'transparent' }]}>
         <Text style={{ color: c.textTertiary, fontSize: 13, fontStyle: 'italic', textAlign: 'center', paddingVertical: 8 }}>
-          Por definir
+          {t('cup.toBeDefined')}
         </Text>
       </View>
     );
@@ -110,11 +113,11 @@ const TieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
     >
       {/* Inferred label */}
       {isInferred && (
-        <Text style={[s.inferredLabel, { color: '#3b82f6' }]}>🔮 Proyección</Text>
+        <Text style={[s.inferredLabel, { color: '#3b82f6' }]}>{`🔮 ${t('cup.projection')}`}</Text>
       )}
       {/* Aggregate label */}
       {hasAgg && isTwoLeg && (
-        <Text style={[s.aggLabel, { color: c.textTertiary }]}>Global</Text>
+        <Text style={[s.aggLabel, { color: c.textTertiary }]}>{t('cup.global')}</Text>
       )}
 
       {/* Home team row */}
@@ -166,7 +169,7 @@ const TieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
       {/* Expand hint for two-legged ties */}
       {isTwoLeg && hasScore && (
         <Text style={[s.expandHint, { color: c.textTertiary }]}>
-          {expanded ? '▲ ocultar detalles' : '▼ ver ida y vuelta'}
+          {expanded ? t('cup.hideDetails') : t('cup.showDetails')}
         </Text>
       )}
 
@@ -245,6 +248,7 @@ export const CupBracketView: React.FC<CupBracketViewProps> = ({
   seasonStr,
 }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
 
   // Find the round containing the current match, or the last current/unfinished round
   const currentRoundIdx = (() => {
@@ -270,7 +274,7 @@ export const CupBracketView: React.FC<CupBracketViewProps> = ({
       <View style={{ alignItems: 'center', paddingTop: 40, gap: 10 }}>
         <Text style={{ fontSize: 36 }}>🏆</Text>
         <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>
-          Bracket no disponible
+          {t('cup.bracketUnavailable')}
         </Text>
       </View>
     );
@@ -284,7 +288,7 @@ export const CupBracketView: React.FC<CupBracketViewProps> = ({
         <View style={{ flex: 1 }}>
           <Text style={[s.cupName, { color: c.textPrimary }]}>{leagueName}</Text>
           <Text style={[s.cupSeason, { color: c.textTertiary }]}>
-            {seasonStr} · Eliminatoria
+            {seasonStr} · {t('cup.elimination')}
           </Text>
         </View>
       </View>

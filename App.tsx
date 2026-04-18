@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { I18nextProvider } from 'react-i18next';
+import i18n, { applyStoredLanguage } from './src/i18n';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { DarkModeProvider } from './src/contexts/DarkModeContext';
 import { AuthProvider } from './src/contexts/AuthContext';
@@ -8,6 +10,8 @@ import { FavoritesProvider } from './src/contexts/FavoritesContext';
 import { NotificationPrefsProvider } from './src/contexts/NotificationPrefsContext';
 import { OnboardingProvider } from './src/contexts/OnboardingContext';
 import { UserStatsProvider } from './src/contexts/UserStatsContext';
+import { NetworkProvider } from './src/contexts/NetworkContext';
+import { OfflineBanner } from './src/components/OfflineBanner';
 import { initialize } from './src/services/notifications';
 import { navigateToMatch } from './src/utils/navigationRef';
 import type { NotificationPayload } from './src/services/notifications';
@@ -82,6 +86,9 @@ export default function App() {
   const notifResponseListener = useRef<Notifications.Subscription | null>(null);
 
   useEffect(() => {
+    // Restore user's saved language preference (overrides device default).
+    applyStoredLanguage().catch(() => {});
+
     // Bootstrap: configure foreground handler + Android channel (no permissions yet).
     initialize().catch(() => {});
 
@@ -105,20 +112,25 @@ export default function App() {
   }, []);
 
   return (
-    <SafeAreaProvider>
-      <DarkModeProvider>
-        <AuthProvider>
-          <OnboardingProvider>
-            <NotificationPrefsProvider>
-              <FavoritesProvider>
-                <UserStatsProvider>
-                  <AppNavigator />
-                </UserStatsProvider>
-              </FavoritesProvider>
-            </NotificationPrefsProvider>
-          </OnboardingProvider>
-        </AuthProvider>
-      </DarkModeProvider>
-    </SafeAreaProvider>
+    <I18nextProvider i18n={i18n}>
+      <SafeAreaProvider>
+        <NetworkProvider>
+          <DarkModeProvider>
+            <AuthProvider>
+              <OnboardingProvider>
+                <NotificationPrefsProvider>
+                  <FavoritesProvider>
+                    <UserStatsProvider>
+                      <AppNavigator />
+                      <OfflineBanner />
+                    </UserStatsProvider>
+                  </FavoritesProvider>
+                </NotificationPrefsProvider>
+              </OnboardingProvider>
+            </AuthProvider>
+          </DarkModeProvider>
+        </NetworkProvider>
+      </SafeAreaProvider>
+    </I18nextProvider>
   );
 }

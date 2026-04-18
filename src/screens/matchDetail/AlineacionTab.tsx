@@ -12,6 +12,7 @@ import {
   Image,
   Dimensions,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
 import { useDarkMode } from '../../contexts/DarkModeContext';
 import type { Match, MatchDetail, LineupPlayer } from '../../data/types';
@@ -202,6 +203,7 @@ function positionColor(pos: string): string {
 
 export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ match, detail }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const { isDark } = useDarkMode();
   const captureRef = useRef<any>(null);
   const theme = isDark ? DARK_PITCH : LIGHT_PITCH;
@@ -219,7 +221,10 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   const [benchTeam, setBenchTeam] = useState<'home' | 'away'>('home');
   const activeBench = benchTeam === 'home' ? homeBench : awayBench;
 
-  // Is lineup confirmed? (if match is live or finished, it's confirmed)
+  // Lineup state:
+  // • scheduled → always "Analistas IA" (covers both expectedlineups and probable lineups)
+  // • live/finished → "Confirmada"
+  const isExpected  = match.status === 'scheduled';
   const isConfirmed = match.status !== 'scheduled';
 
   const handleShare = async () => {
@@ -228,7 +233,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
       const uri: string = await captureRef.current.capture();
       if (!Sharing) return;
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Compartir alineación' });
+        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: t('lineup.shareLineup') });
       }
     } catch {}
   };
@@ -237,9 +242,9 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
     return (
       <View style={ms.empty}>
         <Text style={{ fontSize: 40, marginBottom: 12 }}>🏟️</Text>
-        <Text style={[ms.emptyText, { color: c.textSecondary }]}>Sin alineaciones disponibles</Text>
+        <Text style={[ms.emptyText, { color: c.textSecondary }]}>{t('lineup.noLineup')}</Text>
         <Text style={[ms.emptySubText, { color: c.textTertiary }]}>
-          Las alineaciones se publicarán 1 hora antes del partido
+          {t('lineup.availableSoon')}
         </Text>
       </View>
     );
@@ -285,16 +290,20 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
       {/* ── Confirmation banner ── */}
       <View style={[
         ms.banner,
-        isConfirmed
+        isExpected
+          ? { backgroundColor: 'rgba(139,92,246,0.12)', borderColor: 'rgba(139,92,246,0.3)' }
+          : isConfirmed
           ? { backgroundColor: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.3)' }
           : { backgroundColor: 'rgba(202,138,4,0.12)', borderColor: 'rgba(202,138,4,0.3)' },
       ]}>
-        <Text style={{ fontSize: 14 }}>{isConfirmed ? '✅' : 'ℹ️'}</Text>
+        <Text style={{ fontSize: 14 }}>
+          {isExpected ? '🤖' : isConfirmed ? '✅' : 'ℹ️'}
+        </Text>
         <Text style={[
           ms.bannerText,
-          { color: isConfirmed ? '#10b981' : '#ca8a04' },
+          { color: isExpected ? '#8b5cf6' : isConfirmed ? '#10b981' : '#ca8a04' },
         ]}>
-          {isConfirmed ? 'Alineación confirmada' : 'Alineación probable — pendiente de confirmación'}
+          {isExpected ? t('lineup.aiPrediction') : isConfirmed ? t('lineup.confirmed') : t('lineup.probable')}
         </Text>
       </View>
 
@@ -330,7 +339,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
 
       {/* ── Share section ── */}
       <Text style={[ms.shareHint, { color: c.textTertiary }]}>
-        Comparte la alineación o envíasela a un amigo
+        {t('lineup.shareHint')}
       </Text>
       {!!(ViewShot && Sharing) && (
         <TouchableOpacity
@@ -349,7 +358,11 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
         {/* Home coach */}
         <View style={[ms.coachCard, { backgroundColor: c.card, borderColor: HOME_COLOR + '40' }]}>
           <View style={[ms.coachAvatarWrap, { borderColor: HOME_COLOR + '60' }]}>
-            <Text style={{ fontSize: 28 }}>👨‍💼</Text>
+            {detail.homeLineup.coachImageUrl ? (
+              <Image source={{ uri: detail.homeLineup.coachImageUrl }} style={ms.coachPhoto} />
+            ) : (
+              <Text style={{ fontSize: 28 }}>👨‍💼</Text>
+            )}
           </View>
           <Text style={[ms.coachName, { color: c.textPrimary }]} numberOfLines={1}>
             {detail.homeLineup.coach || 'DT'}
@@ -372,7 +385,11 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
         {/* Away coach */}
         <View style={[ms.coachCard, { backgroundColor: c.card, borderColor: AWAY_COLOR + '40' }]}>
           <View style={[ms.coachAvatarWrap, { borderColor: AWAY_COLOR + '60' }]}>
-            <Text style={{ fontSize: 28 }}>👨‍💼</Text>
+            {detail.awayLineup.coachImageUrl ? (
+              <Image source={{ uri: detail.awayLineup.coachImageUrl }} style={ms.coachPhoto} />
+            ) : (
+              <Text style={{ fontSize: 28 }}>👨‍💼</Text>
+            )}
           </View>
           <Text style={[ms.coachName, { color: c.textPrimary }]} numberOfLines={1}>
             {detail.awayLineup.coach || 'DT'}
@@ -393,54 +410,63 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
         </View>
       </View>
 
-      {/* ── Bench / Suplentes ── */}
-      <Text style={[ms.sectionTitle, { color: c.textTertiary }]}>BANCA / SUPLENTES</Text>
+      {/* ── Bench / Suplentes — hidden for AI predictions (only starting XI matters) ── */}
+      {!isExpected && (
+        <>
+          <Text style={[ms.sectionTitle, { color: c.textTertiary }]}>BANCA / SUPLENTES</Text>
 
-      {/* Segmented toggle */}
-      <View style={[ms.segmented, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <TouchableOpacity
-          style={[ms.segBtn, benchTeam === 'home' && { backgroundColor: c.accent }]}
-          onPress={() => setBenchTeam('home')}
-          activeOpacity={0.7}
-        >
-          <View style={[ms.segDot, { backgroundColor: HOME_COLOR }]} />
-          <Text style={[ms.segText, { color: benchTeam === 'home' ? '#fff' : c.textTertiary }]}>
-            {match.homeTeam.shortName}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[ms.segBtn, benchTeam === 'away' && { backgroundColor: c.accent }]}
-          onPress={() => setBenchTeam('away')}
-          activeOpacity={0.7}
-        >
-          <View style={[ms.segDot, { backgroundColor: AWAY_COLOR }]} />
-          <Text style={[ms.segText, { color: benchTeam === 'away' ? '#fff' : c.textTertiary }]}>
-            {match.awayTeam.shortName}
-          </Text>
-        </TouchableOpacity>
-      </View>
+          {/* Segmented toggle */}
+          <View style={[ms.segmented, { backgroundColor: c.surface, borderColor: c.border }]}>
+            <TouchableOpacity
+              style={[ms.segBtn, benchTeam === 'home' && { backgroundColor: c.accent }]}
+              onPress={() => setBenchTeam('home')}
+              activeOpacity={0.7}
+            >
+              <View style={[ms.segDot, { backgroundColor: HOME_COLOR }]} />
+              <Text style={[ms.segText, { color: benchTeam === 'home' ? '#fff' : c.textTertiary }]}>
+                {match.homeTeam.shortName}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[ms.segBtn, benchTeam === 'away' && { backgroundColor: c.accent }]}
+              onPress={() => setBenchTeam('away')}
+              activeOpacity={0.7}
+            >
+              <View style={[ms.segDot, { backgroundColor: AWAY_COLOR }]} />
+              <Text style={[ms.segText, { color: benchTeam === 'away' ? '#fff' : c.textTertiary }]}>
+                {match.awayTeam.shortName}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-      {/* Bench list */}
-      <View style={[ms.benchList, { backgroundColor: c.card, borderColor: c.border }]}>
-        {activeBench.length === 0 ? (
-          <View style={{ padding: 20, alignItems: 'center' }}>
-            <Text style={{ color: c.textTertiary, fontSize: 13 }}>Sin suplentes disponibles</Text>
+          {/* Bench list */}
+          <View style={[ms.benchList, { backgroundColor: c.card, borderColor: c.border }]}>
+            {activeBench.length === 0 ? (
+              <View style={{ padding: 20, alignItems: 'center' }}>
+                <Text style={{ color: c.textTertiary, fontSize: 13 }}>Sin suplentes disponibles</Text>
+              </View>
+            ) : activeBench.map((p, i) => (
+              <View key={p.id} style={[ms.benchRow, i > 0 && { borderTopWidth: 1, borderTopColor: c.border }]}>
+                {/* Player photo or number badge */}
+                {p.imageUrl ? (
+                  <Image source={{ uri: p.imageUrl }} style={ms.benchPhoto} />
+                ) : (
+                  <View style={[ms.benchNum, { backgroundColor: benchTeam === 'home' ? HOME_COLOR : AWAY_COLOR }]}>
+                    <Text style={ms.benchNumText}>{p.number}</Text>
+                  </View>
+                )}
+                <Text style={[ms.benchName, { color: c.textPrimary }]} numberOfLines={1}>{p.name || p.shortName}</Text>
+                <View style={[ms.benchPosBadge, { backgroundColor: positionColor(p.positionShort) + '20' }]}>
+                  <Text style={[ms.benchPosText, { color: positionColor(p.positionShort) }]}>{p.positionShort}</Text>
+                </View>
+                {p.nationalityFlag ? (
+                  <Text style={{ fontSize: 16 }}>{p.nationalityFlag}</Text>
+                ) : null}
+              </View>
+            ))}
           </View>
-        ) : activeBench.map((p, i) => (
-          <View key={p.id} style={[ms.benchRow, i > 0 && { borderTopWidth: 1, borderTopColor: c.border }]}>
-            <View style={[ms.benchNum, { backgroundColor: benchTeam === 'home' ? HOME_COLOR : AWAY_COLOR }]}>
-              <Text style={ms.benchNumText}>{p.number}</Text>
-            </View>
-            <Text style={[ms.benchName, { color: c.textPrimary }]} numberOfLines={1}>{p.name || p.shortName}</Text>
-            <View style={[ms.benchPosBadge, { backgroundColor: positionColor(p.positionShort) + '20' }]}>
-              <Text style={[ms.benchPosText, { color: positionColor(p.positionShort) }]}>{p.positionShort}</Text>
-            </View>
-            {p.nationalityFlag ? (
-              <Text style={{ fontSize: 16 }}>{p.nationalityFlag}</Text>
-            ) : null}
-          </View>
-        ))}
-      </View>
+        </>
+      )}
 
       <View style={{ height: 20 }} />
     </View>
@@ -540,6 +566,7 @@ const ms = StyleSheet.create({
   },
   coachBadgeText: { fontSize: 10, fontWeight: '700', color: '#fff' },
   coachTeam: { fontSize: 12, fontWeight: '500', textAlign: 'center' },
+  coachPhoto: { width: 52, height: 52, borderRadius: 26 },
 
   // Segmented toggle
   segmented: {
@@ -564,6 +591,7 @@ const ms = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   benchNumText: { fontSize: 12, fontWeight: '800', color: '#fff' },
+  benchPhoto: { width: 32, height: 32, borderRadius: 16 },
   benchName: { flex: 1, fontSize: 14, fontWeight: '600' },
   benchPosBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   benchPosText: { fontSize: 10, fontWeight: '700' },

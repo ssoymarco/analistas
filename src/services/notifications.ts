@@ -208,6 +208,31 @@ export async function scheduleLocalNotification(
 }
 
 /**
+ * Returns the delay in seconds to use when scheduling a notification.
+ *
+ * 🏟️ Modo Estadio: delays live-event notifications so they don't spoil
+ * goals for users watching on TV.
+ *
+ * Pre-match notifications (matchStart, lineups) are NEVER delayed —
+ * they're informational and arrive before the action starts.
+ *
+ * @param estadioMode   Whether Modo Estadio is enabled
+ * @param estadioDelay  Configured delay in minutes
+ * @param type          Notification type
+ */
+export function getNotificationDelay(
+  estadioMode: boolean,
+  estadioDelayMinutes: number,
+  type: NotificationPayload['type'],
+): number {
+  // Pre-match info → always immediate (5 s default for local notification)
+  if (type === 'matchStart' || type === 'lineups') return 5;
+  // Live events (goals, red cards, final result) → apply Modo Estadio delay
+  if (estadioMode) return estadioDelayMinutes * 60;
+  return 5;
+}
+
+/**
  * Cancel all scheduled local notifications for a given matchId.
  * Called when the user mutes a match.
  */

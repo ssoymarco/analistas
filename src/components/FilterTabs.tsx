@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { haptics } from '../utils/haptics';
 
@@ -13,13 +14,6 @@ interface FilterTabsProps {
   finishedCount?: number;
 }
 
-const TABS: { key: FilterTab; label: string; emoji: string }[] = [
-  { key: 'todos',       label: 'Todos',       emoji: '⚽' },
-  { key: 'vivo',        label: 'En vivo',     emoji: '🔴' },
-  { key: 'finalizados', label: 'Finalizados', emoji: '🏁' },
-  { key: 'proximos',    label: 'Próximos',    emoji: '🕐' },
-];
-
 export const FilterTabs: React.FC<FilterTabsProps> = ({
   activeTab,
   onTabChange,
@@ -28,6 +22,14 @@ export const FilterTabs: React.FC<FilterTabsProps> = ({
   finishedCount = 0,
 }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
+
+  const TABS: { key: FilterTab; label: string; emoji: string }[] = useMemo(() => [
+    { key: 'todos',       label: t('filters.all'),      emoji: '⚽' },
+    { key: 'vivo',        label: t('filters.live'),     emoji: '🔴' },
+    { key: 'finalizados', label: t('filters.finished'), emoji: '🏁' },
+    { key: 'proximos',    label: t('filters.upcoming'), emoji: '🕐' },
+  ], [t]);
 
   const getCount = (key: FilterTab): number | null => {
     if (key === 'todos' && totalCount > 0) return totalCount;

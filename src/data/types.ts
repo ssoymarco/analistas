@@ -22,6 +22,7 @@ export interface Match {
   time: string;           // display time: "20:00", "45'", "FT"
   minute?: number;        // live minute
   league: string;         // display name
+  leagueLogo?: string;    // URL from SM image_path, or undefined if not available
   leagueId: string;
   date: string;           // ISO "YYYY-MM-DD"
   isFavorite?: boolean;

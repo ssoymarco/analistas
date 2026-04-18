@@ -2,8 +2,9 @@
 // Auto-detects competition type:
 //   • League (round-robin) → standings table with zone bars
 //   • Cup (knockout)       → bracket view with ties/legs/aggregate
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../../theme/useTheme';
@@ -13,7 +14,7 @@ import { CupBracketView } from '../../components/CupBracketView';
 import type { Match, MatchDetail, LeagueStanding } from '../../data/types';
 import { SkeletonLeagueDetail } from '../../components/Skeleton';
 import type { PartidosStackParamList } from '../../navigation/AppNavigator';
-import { getLeagueConfig, getLeagueConfigByName } from '../../config/leagues';
+import { getLeagueConfig, getLeagueConfigByName, type LeagueZone } from '../../config/leagues';
 
 // ── Dynamic imports ──────────────────────────────────────────────────────────
 let ViewShot: any = null;
@@ -22,7 +23,17 @@ try { ViewShot = require('react-native-view-shot').default; } catch {}
 try { Sharing   = require('expo-sharing'); } catch {}
 
 // ── Zone colors ──────────────────────────────────────────────────────────────
-function getZoneColor(position: number, totalTeams: number): string | null {
+/**
+ * Returns the zone color for a given position.
+ * When league-specific `zones` are provided they take precedence over the
+ * generic European fallback (CL/EL/Relegation).
+ */
+function getZoneColor(position: number, totalTeams: number, zones?: LeagueZone[]): string | null {
+  if (zones && zones.length > 0) {
+    const z = zones.find(z => position >= z.from && position <= z.to);
+    return z?.color ?? null;
+  }
+  // Generic European fallback
   if (position === 1) return '#fbbf24'; // Campeón (gold)
   if (position <= 4)  return '#3b82f6'; // Champions League
   if (position <= 6)  return '#f97316'; // Europa League
@@ -59,10 +70,11 @@ const StandingRow: React.FC<{
   isHome: boolean;
   isAway: boolean;
   totalTeams: number;
-}> = ({ row, isHome, isAway, totalTeams }) => {
+  zones?: LeagueZone[];
+}> = ({ row, isHome, isAway, totalTeams, zones }) => {
   const c = useThemeColors();
 
-  const zoneColor = getZoneColor(row.position, totalTeams);
+  const zoneColor = getZoneColor(row.position, totalTeams, zones);
   const isHighlighted = isHome || isAway;
 
   const rowBg = isHome
@@ -138,15 +150,26 @@ const HeaderRow: React.FC = () => {
 };
 
 // ── Main component ───────────────────────────────────────────────────────────
-export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ match }) => {
+interface TablaTabProps {
+  match: Match;
+  detail: MatchDetail;
+  /** Called once when the competition is detected as a knockout cup */
+  onCupDetected?: () => void;
+}
+
+export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const tableRef = useRef<any>(null);
+  const cupNotified = useRef(false);
 
-  // ── Season ID resolution (triple fallback) ──────────────────────────────────
+  // ── League config + zones ────────────────────────────────────────────────────
   const leagueConfig =
     (match.leagueId ? getLeagueConfig(Number(match.leagueId)) : undefined)
     ?? (match.league ? getLeagueConfigByName(match.league) : undefined);
+
+  const leagueZones = leagueConfig?.zones;
 
   const seasonId: number | null =
     (match.seasonId && match.seasonId > 0) ? match.seasonId
@@ -155,15 +178,30 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
   // ── Standings (league competitions) ─────────────────────────────────────────
   const { standings, loading: standingsLoading, error: standingsError } = useStandings(seasonId);
 
-  // ── Cup bracket (knockout competitions — when standings are empty) ────────────
-  // We detect "cup" automatically: if standings return [] after loading → it's knockout.
-  const isCup = !standingsLoading && !standingsError && standings.length === 0;
+  // ── Cup bracket logic ────────────────────────────────────────────────────────
+  // A competition is a "cup" if:
+  //   (a) explicitly marked isCup in leagues config (UCL, UEL, CONCACAF, etc.), OR
+  //   (b) standings return [] after loading (auto-detection fallback)
+  // For config-marked cups we fetch bracket immediately (no need to wait for standings).
+  const leagueIsCupConfig = leagueConfig?.isCup ?? false;
+  const isCupFromStandings = !standingsLoading && !standingsError && standings.length === 0;
+  const isCup = leagueIsCupConfig || isCupFromStandings;
+
   const { rounds, loading: bracketLoading } = useCupBracket(
     isCup ? seasonId : null,
     match.id,
   );
 
-  const loading = standingsLoading || (isCup && bracketLoading);
+  // Notify parent once when cup is confirmed so it can rename the tab
+  useEffect(() => {
+    if (isCup && !cupNotified.current) {
+      cupNotified.current = true;
+      onCupDetected?.();
+    }
+  }, [isCup, onCupDetected]);
+
+  // Config-marked cups skip the standings wait; auto-detected cups still need it
+  const loading = (leagueIsCupConfig ? false : standingsLoading) || (isCup && bracketLoading);
 
   const homeId = match.homeTeam.id;
   const awayId = match.awayTeam.id;
@@ -173,7 +211,7 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
     try {
       const uri = await tableRef.current.capture();
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Compartir tabla' });
+        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: t('common.share') });
       }
     } catch (e) {
       console.warn('Share failed', e);
@@ -241,29 +279,42 @@ export const TablaTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ matc
               isHome={row.team.id === homeId}
               isAway={row.team.id === awayId}
               totalTeams={standings.length}
+              zones={leagueZones}
             />
           </React.Fragment>
         ))}
       </View>
 
-      {/* Zone legend */}
+      {/* Zone legend — dynamic per league, fallback for European generic */}
       <View style={tb.legend}>
-        <View style={tb.legendItem}>
-          <View style={[tb.legendBar, { backgroundColor: '#fbbf24' }]} />
-          <Text style={[tb.legendText, { color: c.textTertiary }]}>Campeón</Text>
-        </View>
-        <View style={tb.legendItem}>
-          <View style={[tb.legendBar, { backgroundColor: '#3b82f6' }]} />
-          <Text style={[tb.legendText, { color: c.textTertiary }]}>Champions League</Text>
-        </View>
-        <View style={tb.legendItem}>
-          <View style={[tb.legendBar, { backgroundColor: '#f97316' }]} />
-          <Text style={[tb.legendText, { color: c.textTertiary }]}>Europa League</Text>
-        </View>
-        <View style={tb.legendItem}>
-          <View style={[tb.legendBar, { backgroundColor: '#ef4444' }]} />
-          <Text style={[tb.legendText, { color: c.textTertiary }]}>Descenso</Text>
-        </View>
+        {leagueZones && leagueZones.length > 0
+          ? leagueZones.map((z, i) => (
+              <View key={i} style={tb.legendItem}>
+                <View style={[tb.legendBar, { backgroundColor: z.color }]} />
+                <Text style={[tb.legendText, { color: c.textTertiary }]}>{z.label}</Text>
+              </View>
+            ))
+          : (
+            <>
+              <View style={tb.legendItem}>
+                <View style={[tb.legendBar, { backgroundColor: '#fbbf24' }]} />
+                <Text style={[tb.legendText, { color: c.textTertiary }]}>Campeón</Text>
+              </View>
+              <View style={tb.legendItem}>
+                <View style={[tb.legendBar, { backgroundColor: '#3b82f6' }]} />
+                <Text style={[tb.legendText, { color: c.textTertiary }]}>Champions League</Text>
+              </View>
+              <View style={tb.legendItem}>
+                <View style={[tb.legendBar, { backgroundColor: '#f97316' }]} />
+                <Text style={[tb.legendText, { color: c.textTertiary }]}>Europa League</Text>
+              </View>
+              <View style={tb.legendItem}>
+                <View style={[tb.legendBar, { backgroundColor: '#ef4444' }]} />
+                <Text style={[tb.legendText, { color: c.textTertiary }]}>Descenso</Text>
+              </View>
+            </>
+          )
+        }
       </View>
     </>
   );

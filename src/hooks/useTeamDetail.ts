@@ -3,13 +3,12 @@ import { useState, useEffect, useRef } from 'react';
 import {
   fetchTeamById,
   fetchSquad,
-  fetchStandings,
   fetchTeamRecentFixtures,
   type SMTeam,
   type SMSquadPlayer,
-  type SMStandingGroup,
   type SMFixture,
 } from '../services/sportmonks';
+import { getStandings } from '../services/sportsApi';
 import type { LeagueStanding } from '../data/types';
 
 // ── Public types ────────────────────────────────────────────────────────────
@@ -159,10 +158,10 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
         const leagueId = seasons.find(s => s.id === effectiveSeasonId)?.league_id ?? 0;
 
         // Fetch all data in parallel
-        const [squadData, recentData, standingsData] = await Promise.all([
+        const [squadData, recentData, standings] = await Promise.all([
           effectiveSeasonId ? fetchSquad(effectiveSeasonId, teamId).catch(() => [] as SMSquadPlayer[]) : Promise.resolve([] as SMSquadPlayer[]),
           fetchTeamRecentFixtures(teamId).catch(() => [] as SMFixture[]),
-          effectiveSeasonId ? fetchStandings(effectiveSeasonId).catch(() => [] as SMStandingGroup[]) : Promise.resolve([] as SMStandingGroup[]),
+          effectiveSeasonId ? getStandings(effectiveSeasonId).catch(() => [] as LeagueStanding[]) : Promise.resolve([] as LeagueStanding[]),
         ]);
 
         if (!mounted.current) return;
@@ -239,37 +238,6 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
             result,
           };
         });
-
-        // Map standings
-        const standings: LeagueStanding[] = standingsData
-          .map(sg => {
-            const p = sg.participant;
-            const details = sg.details ?? [];
-            const findDetail = (typeId: number) => details.find(d => d.type_id === typeId)?.value ?? 0;
-            // SM standing detail type_ids (verified April 2026):
-            // 129=GP, 130=W, 131=D, 132=L, 133=GF, 134=GA, 179=GD
-            const played = findDetail(129);
-            const won    = findDetail(130);
-            const drawn  = findDetail(131);
-            const lost   = findDetail(132);
-            const gf     = findDetail(133);
-            const ga     = findDetail(134);
-            const gd     = findDetail(179) || (gf - ga);
-
-            return {
-              position: sg.position,
-              team: {
-                id: String(sg.participant_id),
-                name: p?.name ?? 'Unknown',
-                shortName: p?.short_code ?? 'UNK',
-                logo: p?.image_path ?? '',
-              },
-              played, won, drawn, lost,
-              goalsFor: gf, goalsAgainst: ga, goalDifference: gd,
-              points: sg.points,
-            };
-          })
-          .sort((a, b) => a.position - b.position);
 
         const teamStanding = standings.find(s => s.team.id === String(teamId)) ?? null;
 

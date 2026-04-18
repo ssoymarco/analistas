@@ -1,5 +1,7 @@
-import React, { useRef, useCallback, useEffect } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, FlatList, StyleSheet, Dimensions } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useThemeColors } from '../theme/useTheme';
 import { haptics } from '../utils/haptics';
 
@@ -10,12 +12,6 @@ const ITEM_WIDTH    = 100;
 // How many "extra" days to generate in each direction for virtual infinite scroll
 const BUFFER_DAYS   = 120;
 const CENTER_INDEX  = BUFFER_DAYS; // "today" sits at this index
-
-const DAY_NAMES_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-const MONTH_NAMES_SHORT = [
-  'ene', 'feb', 'mar', 'abr', 'may', 'jun',
-  'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
-];
 
 function isoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -37,19 +33,24 @@ export interface DateItem {
 
 function buildDateItem(offset: number): DateItem {
   const d = dateFromOffset(offset);
-  const dayName = DAY_NAMES_SHORT[d.getDay()];
+  const daysShort = i18n.t('dates.daysShort', { returnObjects: true }) as string[];
+  const monthsShort = i18n.t('dates.monthsShort', { returnObjects: true }) as string[];
+  const dayName = daysShort[d.getDay()];
   let label: string;
-  if (offset === 0) label = 'Hoy';
-  else if (offset === -1) label = 'Ayer';
-  else if (offset === 1) label = 'Mañana';
-  else label = `${d.getDate()} ${MONTH_NAMES_SHORT[d.getMonth()]}`;
+  if (offset === 0) label = i18n.t('dates.today');
+  else if (offset === -1) label = i18n.t('dates.yesterday');
+  else if (offset === 1) label = i18n.t('dates.tomorrow');
+  else label = `${d.getDate()} ${monthsShort[d.getMonth()]}`;
   return { label, dayName, date: isoDate(d), offset };
 }
 
-// Pre-generate all date items
-const ALL_DATES: DateItem[] = [];
-for (let i = -BUFFER_DAYS; i <= BUFFER_DAYS; i++) {
-  ALL_DATES.push(buildDateItem(i));
+/** Build all date items — called inside the component so it reacts to language changes */
+function buildAllDates(): DateItem[] {
+  const items: DateItem[] = [];
+  for (let i = -BUFFER_DAYS; i <= BUFFER_DAYS; i++) {
+    items.push(buildDateItem(i));
+  }
+  return items;
 }
 
 interface DateNavigatorProps {
@@ -71,7 +72,11 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
 }) => {
   const flatRef = useRef<FlatList>(null);
   const c = useThemeColors();
+  const { t, i18n: i18nInstance } = useTranslation();
   const hasScrolledInitial = useRef(false);
+
+  // Rebuild date items when language changes
+  const ALL_DATES = useMemo(() => buildAllDates(), [i18nInstance.language]);
 
   // Find selected index
   const selectedIndex = ALL_DATES.findIndex(d => d.date === selectedDate);
@@ -133,7 +138,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
         {/* Match count */}
         {count !== undefined && count > 0 && (
           <Text style={[s.matchCount, { color: isSelected ? c.emerald : c.textTertiary }]}>
-            {count} partidos
+            {t('dates.matchCount', { count })}
           </Text>
         )}
       </TouchableOpacity>
@@ -178,19 +183,16 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
 
 // ── Full date label helper (exported for PartidosScreen) ─────────────────────
 
-const MONTH_NAMES_FULL = [
-  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-];
-const DAY_NAMES_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-
 export function formatFullDate(dateStr: string): string {
   const d = new Date(dateStr + 'T12:00:00');
-  const dayName = DAY_NAMES_FULL[d.getDay()];
+  const daysFull = i18n.t('dates.daysFull', { returnObjects: true }) as string[];
+  const monthsFull = i18n.t('dates.monthsFull', { returnObjects: true }) as string[];
+  const of = i18n.t('dates.of');
+  const dayName = daysFull[d.getDay()];
   const dayNum  = d.getDate();
-  const month   = MONTH_NAMES_FULL[d.getMonth()];
+  const month   = monthsFull[d.getMonth()];
   const year    = d.getFullYear();
-  return `${dayName}, ${dayNum} De ${month} De ${year}`;
+  return `${dayName}, ${dayNum} ${of} ${month} ${of} ${year}`;
 }
 
 /** Check if a date string is "today" */

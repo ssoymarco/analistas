@@ -12,6 +12,7 @@ import {
   StyleSheet, Pressable,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { useAuth } from '../contexts/AuthContext';
 import { haptics } from '../utils/haptics';
@@ -26,6 +27,7 @@ type UsernameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
 export const EditProfileModal: React.FC<Props> = ({ visible, onClose }) => {
   const c = useThemeColors();
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const { user, updateProfile, checkUsernameAvailable } = useAuth();
 
   const [name, setName]               = useState(user?.name ?? '');
@@ -92,7 +94,7 @@ export const EditProfileModal: React.FC<Props> = ({ visible, onClose }) => {
     } catch (err: unknown) {
       haptics.error();
       const msg = err instanceof Error ? err.message : 'error';
-      setError(msg === 'username_taken' ? 'Ese @username ya está en uso' : 'Error al guardar. Intenta de nuevo.');
+      setError(msg === 'username_taken' ? t('editProfileModal.usernameInUse') : t('editProfileModal.saveError'));
     } finally {
       setIsSaving(false);
     }
@@ -106,9 +108,9 @@ export const EditProfileModal: React.FC<Props> = ({ visible, onClose }) => {
 
   const statusText = () => {
     if (usernameStatus === 'checking') return '...';
-    if (usernameStatus === 'available') return '✓ Disponible';
-    if (usernameStatus === 'taken') return '✗ No disponible';
-    if (usernameStatus === 'invalid') return 'Mín. 3 caracteres (letras, números, . _)';
+    if (usernameStatus === 'available') return t('common.available');
+    if (usernameStatus === 'taken') return t('common.unavailable');
+    if (usernameStatus === 'invalid') return t('editProfileModal.usernameHint');
     return '';
   };
 
@@ -125,29 +127,29 @@ export const EditProfileModal: React.FC<Props> = ({ visible, onClose }) => {
           <View style={[s.handle, { backgroundColor: c.border }]} />
 
           {/* Title */}
-          <Text style={[s.title, { color: c.textPrimary }]}>Editar perfil</Text>
+          <Text style={[s.title, { color: c.textPrimary }]}>{t('editProfileModal.title')}</Text>
 
           {/* Name field */}
-          <Text style={[s.label, { color: c.textSecondary }]}>Nombre</Text>
+          <Text style={[s.label, { color: c.textSecondary }]}>{t('editProfileModal.nameLabel')}</Text>
           <TextInput
             style={[s.input, { backgroundColor: c.card, color: c.textPrimary, borderColor: c.border }]}
             value={name}
             onChangeText={setName}
-            placeholder="Tu nombre"
+            placeholder={t('editProfileModal.namePlaceholder')}
             placeholderTextColor={c.textTertiary}
             autoCapitalize="words"
             maxLength={40}
           />
 
           {/* Username field */}
-          <Text style={[s.label, { color: c.textSecondary }]}>Username</Text>
+          <Text style={[s.label, { color: c.textSecondary }]}>{t('editProfileModal.usernameLabel')}</Text>
           <View style={[s.usernameRow, { backgroundColor: c.card, borderColor: c.border }]}>
             <Text style={[s.atSign, { color: c.textTertiary }]}>@</Text>
             <TextInput
               style={[s.usernameInput, { color: c.textPrimary }]}
               value={username}
               onChangeText={handleUsernameChange}
-              placeholder="tu_username"
+              placeholder={t('editProfileModal.usernamePlaceholder')}
               placeholderTextColor={c.textTertiary}
               autoCapitalize="none"
               autoCorrect={false}
@@ -176,13 +178,13 @@ export const EditProfileModal: React.FC<Props> = ({ visible, onClose }) => {
           >
             {isSaving
               ? <ActivityIndicator color="#000" />
-              : <Text style={[s.saveBtnText, { color: canSave ? '#000' : c.textTertiary }]}>Guardar</Text>
+              : <Text style={[s.saveBtnText, { color: canSave ? '#000' : c.textTertiary }]}>{t('common.save')}</Text>
             }
           </TouchableOpacity>
 
           {/* Cancel */}
           <TouchableOpacity onPress={onClose} style={s.cancelBtn} activeOpacity={0.7}>
-            <Text style={[s.cancelText, { color: c.textSecondary }]}>Cancelar</Text>
+            <Text style={[s.cancelText, { color: c.textSecondary }]}>{t('common.cancel')}</Text>
           </TouchableOpacity>
 
         </View>
