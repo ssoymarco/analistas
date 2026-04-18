@@ -221,11 +221,13 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const scrollRef  = useRef<any>(null);
 
-  const isLive      = match.status === 'live';
-  const isFinished  = match.status === 'finished';
-  const isScheduled = match.status === 'scheduled';
+  const { detail, liveMatch, loading } = useFixtureDetail(match.id, match.homeTeam.id, match.awayTeam.id, match.status);
+  // Prefer the API-fresh match (real score, correct minute) over the prop (may be time-inferred)
+  const displayMatch = liveMatch ?? match;
 
-  const { detail, loading } = useFixtureDetail(match.id, match.homeTeam.id, match.awayTeam.id, match.status);
+  const isLive      = displayMatch.status === 'live';
+  const isFinished  = displayMatch.status === 'finished';
+  const isScheduled = displayMatch.status === 'scheduled';
   const { incrementMatchesViewed } = useUserStats();
   const {
     prefs,
@@ -372,10 +374,10 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const hBtnBg         = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.07)';
   const hCapsuleBg     = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)';
 
-  // ── Display values ─────────────────────────────────────────────────────────
-  const displayTime = match.time;
-  const displayDate = match.date;
-  const compactScoreText = isScheduled ? match.time : `${match.homeScore} - ${match.awayScore}`;
+  // ── Display values — use liveMatch (API-fresh) when available ─────────────
+  const displayTime = displayMatch.time;
+  const displayDate = displayMatch.date;
+  const compactScoreText = isScheduled ? displayMatch.time : `${displayMatch.homeScore} - ${displayMatch.awayScore}`;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
@@ -518,12 +520,12 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 ) : (
                   <>
                     <View style={scr.scoreRow}>
-                      <Text style={[scr.score, { color: hText }]}>{match.homeScore}</Text>
+                      <Text style={[scr.score, { color: hText }]}>{displayMatch.homeScore}</Text>
                       <Text style={[scr.scoreDash, { color: hTextMuted }]}>–</Text>
-                      <Text style={[scr.score, { color: hText }]}>{match.awayScore}</Text>
+                      <Text style={[scr.score, { color: hText }]}>{displayMatch.awayScore}</Text>
                     </View>
-                    {match.homeScoreHT !== undefined && match.awayScoreHT !== undefined && (
-                      <Text style={[scr.htLabel, { color: hTextSoft }]}>MT: {match.homeScoreHT}–{match.awayScoreHT}</Text>
+                    {displayMatch.homeScoreHT !== undefined && displayMatch.awayScoreHT !== undefined && (
+                      <Text style={[scr.htLabel, { color: hTextSoft }]}>MT: {displayMatch.homeScoreHT}–{displayMatch.awayScoreHT}</Text>
                     )}
                   </>
                 )}

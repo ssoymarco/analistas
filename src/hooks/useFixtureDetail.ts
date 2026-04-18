@@ -3,7 +3,7 @@
 // user sees score updates, events and stats without needing to pull-to-refresh.
 import { useState, useEffect, useRef } from 'react';
 import { getFixtureDetail } from '../services/sportsApi';
-import type { MatchDetail } from '../data/types';
+import type { Match, MatchDetail } from '../data/types';
 
 /** Re-fetch interval for live matches.
  *  10 s matches SportMonks' own recommended polling cadence for /livescores.
@@ -13,6 +13,8 @@ const LIVE_POLL_MS = 10_000;
 
 interface UseFixtureDetailResult {
   detail: MatchDetail | null;
+  /** Updated Match from the API — has current score, status, minute. Use this for display. */
+  liveMatch: Match | null;
   loading: boolean;
   error: string | null;
 }
@@ -60,9 +62,10 @@ export function useFixtureDetail(
   awayTeamId: string,
   matchStatus?: string,
 ): UseFixtureDetailResult {
-  const [detail, setDetail] = useState<MatchDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]   = useState<string | null>(null);
+  const [detail, setDetail]       = useState<MatchDetail | null>(null);
+  const [liveMatch, setLiveMatch] = useState<Match | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -80,21 +83,24 @@ export function useFixtureDetail(
         if (!mounted.current) return;
         if (!result) {
           setDetail(null);
+          setLiveMatch(null);
           setError('No se pudo cargar el detalle del partido');
         } else {
           setDetail(mapDetail(result));
+          setLiveMatch(result.match); // ← real score + status from API
         }
         setLoading(false);
       })
       .catch(err => {
         if (!mounted.current) return;
         setDetail(null);
+        setLiveMatch(null);
         setError(err instanceof Error ? err.message : 'Error loading match');
         setLoading(false);
       });
   }, [matchId, homeTeamId, awayTeamId]);
 
-  // ── Live polling — silent refresh, no loading spinner ──────────────────────
+  // ── Live polling — silent refresh every 10 s ────────────────────────────────
   useEffect(() => {
     if (matchStatus !== 'live') return;
 
@@ -104,6 +110,7 @@ export function useFixtureDetail(
         const result = await getFixtureDetail(Number(matchId));
         if (!mounted.current || !result) return;
         setDetail(mapDetail(result));
+        setLiveMatch(result.match); // ← keeps score/minute fresh
       } catch {
         // Silently ignore polling errors — user still sees last known data
       }
@@ -112,5 +119,5 @@ export function useFixtureDetail(
     return () => clearInterval(poll);
   }, [matchId, matchStatus]);
 
-  return { detail, loading, error };
+  return { detail, liveMatch, loading, error };
 }
