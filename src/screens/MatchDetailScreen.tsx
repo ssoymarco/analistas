@@ -27,6 +27,7 @@ import { useFixtureDetail } from '../hooks/useFixtureDetail';
 import { useCountdown } from '../hooks/useCountdown';
 import { useLiveTick, computeLiveMinuteSeconds, formatLiveClock } from '../hooks/useLiveTick';
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
+import { useFavorites } from '../contexts/FavoritesContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { getLeagueConfig }  from '../config/leagues';
 import { EnVivoTab }        from './matchDetail/EnVivoTab';
@@ -189,6 +190,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const c         = useThemeColors();
   const { isDark } = useDarkMode();
   const { timeFormat } = useTimeFormat();
+  const { isFollowingTeam, toggleFollowTeam } = useFavorites();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const scrollRef  = useRef<any>(null);
 
@@ -491,7 +493,32 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
 
             {/* Badges row */}
             <View style={scr.badgesRow}>
-              {/* Home */}
+
+              {/* ── Home follow star ── */}
+              {(() => {
+                const following = isFollowingTeam(match.homeTeam.id);
+                return (
+                  <TouchableOpacity
+                    style={[scr.followBtn, {
+                      backgroundColor: following
+                        ? 'rgba(251,191,36,0.18)'
+                        : isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                      borderColor: following
+                        ? 'rgba(251,191,36,0.45)'
+                        : isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.10)',
+                    }]}
+                    onPress={() => { haptics.selection(); toggleFollowTeam(match.homeTeam.id); }}
+                    activeOpacity={0.75}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={{ fontSize: 15, color: following ? '#fbbf24' : hTextMuted }}>
+                      {following ? '★' : '☆'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })()}
+
+              {/* Home team */}
               <TouchableOpacity
                 style={scr.teamCol}
                 activeOpacity={0.6}
@@ -551,7 +578,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 )}
               </View>
 
-              {/* Away */}
+              {/* Away team */}
               <TouchableOpacity
                 style={scr.teamCol}
                 activeOpacity={0.6}
@@ -570,6 +597,30 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 <TeamBadge name={match.awayTeam.name} logo={match.awayTeam.logo} size={80} />
                 <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{match.awayTeam.name}</Text>
               </TouchableOpacity>
+
+              {/* ── Away follow star ── */}
+              {(() => {
+                const following = isFollowingTeam(match.awayTeam.id);
+                return (
+                  <TouchableOpacity
+                    style={[scr.followBtn, {
+                      backgroundColor: following
+                        ? 'rgba(251,191,36,0.18)'
+                        : isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                      borderColor: following
+                        ? 'rgba(251,191,36,0.45)'
+                        : isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.10)',
+                    }]}
+                    onPress={() => { haptics.selection(); toggleFollowTeam(match.awayTeam.id); }}
+                    activeOpacity={0.75}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={{ fontSize: 15, color: following ? '#fbbf24' : hTextMuted }}>
+                      {following ? '★' : '☆'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })()}
             </View>
 
             {/* ── Scorers summary ── */}
@@ -820,9 +871,18 @@ const scr = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
     justifyContent: 'space-between',
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
   },
   teamCol: { flex: 1, alignItems: 'center', gap: 8 },
+  followBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
   teamName: {
     fontSize: 13, fontWeight: '700', color: '#fff',
     textAlign: 'center', lineHeight: 17,
