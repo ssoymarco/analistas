@@ -75,10 +75,12 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
         </View>
 
         {/* Score / Time (center) */}
-        <View style={s.center}>
+        <View style={[s.center, timeFormat === '12h' && { width: 94 }]}>
           {isScheduled ? (
             <View style={[s.timePill, { backgroundColor: c.surface }]}>
-              <Text style={[s.timePillText, { color: c.textSecondary }]}>{formatMatchTime(match.time, timeFormat)}</Text>
+              <Text style={[s.timePillText, { color: c.textSecondary }]} numberOfLines={1}>
+                {formatMatchTime(match.time, timeFormat)}
+              </Text>
             </View>
           ) : (
             <View style={s.scoreRow}>
