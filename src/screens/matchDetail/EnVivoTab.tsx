@@ -5,22 +5,57 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image,
-  ScrollView, Dimensions,
+  ScrollView, Dimensions, Modal, Pressable,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
+import { useDarkMode } from '../../contexts/DarkModeContext';
 import { haptics } from '../../utils/haptics';
 import { AnimatedPressable } from '../../components/AnimatedPressable';
 import { GoalPicker, GOAL_OPTIONS } from '../../components/GoalPicker';
 import type {
   Match, MatchDetail, MatchEvent, H2HResult, TeamFormEntry,
   OddsMarket, MatchPrediction, MissingPlayer, PressureIndex,
+  MatchVenue, MatchReferee, RefereeStats,
 } from '../../data/types';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH   = SCREEN_WIDTH - 72; // prediction card width
 const CARD_GAP     = 10;
+
+// ── Traduce condiciones meteorológicas de la API (siempre en inglés) ──────────
+function translateWeatherDesc(desc: string, t: (key: string) => string): string {
+  const d = desc.toLowerCase().trim();
+  const map: Record<string, string> = {
+    'clear sky':           t('weather.clearSky'),
+    'clear-day':           t('weather.clearDay'),
+    'clear-night':         t('weather.clearNight'),
+    'few clouds':          t('weather.fewClouds'),
+    'partly-cloudy-day':   t('weather.partlyCloudyDay'),
+    'partly-cloudy-night': t('weather.partlyCloudyNight'),
+    'scattered clouds':    t('weather.scatteredClouds'),
+    'broken clouds':       t('weather.brokenClouds'),
+    'overcast clouds':     t('weather.overcastClouds'),
+    'cloudy':              t('weather.cloudy'),
+    'light rain':          t('weather.lightRain'),
+    'moderate rain':       t('weather.moderateRain'),
+    'heavy rain':          t('weather.heavyRain'),
+    'shower rain':         t('weather.showerRain'),
+    'rain':                t('weather.rain'),
+    'thunderstorm':        t('weather.thunderstorm'),
+    'drizzle':             t('weather.drizzle'),
+    'snow':                t('weather.snow'),
+    'sleet':               t('weather.sleet'),
+    'fog':                 t('weather.fog'),
+    'mist':                t('weather.mist'),
+    'haze':                t('weather.haze'),
+    'wind':                t('weather.windy'),
+    'smoke':               t('weather.smoke'),
+    'dust':                t('weather.dust'),
+  };
+  return map[d] ?? desc; // fallback: muestra el string original si no hay traducción
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SHARED SUB-COMPONENTS
@@ -464,9 +499,9 @@ function TeamBadgeMini({ name, logo, color }: { name: string; logo: string; colo
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       {isUrl ? (
-        <Image source={{ uri: logo }} style={{ width: 20, height: 20, borderRadius: 10 }} />
+        <Image source={{ uri: logo }} style={{ width: 20, height: 20, borderRadius: 3 }} />
       ) : (
-        <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: color, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: 20, height: 20, borderRadius: 3, backgroundColor: color, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ fontSize: 8, color: '#fff', fontWeight: '800' }}>{name.slice(0, 1)}</Text>
         </View>
       )}
@@ -1007,12 +1042,13 @@ const h2 = StyleSheet.create({
 // ── Form section ─────────────────────────────────────────────────────────────
 const FormSection: React.FC<{ homeForm?: TeamFormEntry[]; awayForm?: TeamFormEntry[]; match: Match }> = ({ homeForm, awayForm, match }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   if ((!homeForm || homeForm.length === 0) && (!awayForm || awayForm.length === 0)) return null;
 
   const resultColor = (r: 'W' | 'D' | 'L') =>
     r === 'W' ? '#10b981' : r === 'L' ? '#ef4444' : '#f59e0b';
   const resultLabel = (r: 'W' | 'D' | 'L') =>
-    r === 'W' ? 'G' : r === 'L' ? 'P' : 'E';
+    r === 'W' ? t('preview.formWin') : r === 'L' ? t('preview.formLoss') : t('preview.formDraw');
   const calcPoints = (form: TeamFormEntry[]) =>
     form.slice(0, 5).reduce((sum, f) => sum + (f.result === 'W' ? 3 : f.result === 'D' ? 1 : 0), 0);
 
@@ -1035,15 +1071,15 @@ const FormSection: React.FC<{ homeForm?: TeamFormEntry[]; awayForm?: TeamFormEnt
           </View>
         ))}
       </View>
-      <Text style={[fm.points, { color: c.textTertiary }]}>{calcPoints(form)}p</Text>
+      <Text style={[fm.points, { color: c.textTertiary }]}>{t('preview.formPoints', { pts: calcPoints(form) })}</Text>
     </View>
   );
 
   return (
     <View style={[fm.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <View style={fm.header}>
-        <Text style={[fm.title, { color: c.textPrimary }]}>Forma reciente</Text>
-        <Text style={[fm.subtitle, { color: c.textTertiary }]}>Últimos 5 partidos</Text>
+        <Text style={[fm.title, { color: c.textPrimary }]}>{t('preview.form')}</Text>
+        <Text style={[fm.subtitle, { color: c.textTertiary }]}>{t('preview.formLast5')}</Text>
       </View>
       {homeForm && homeForm.length > 0 && renderTeamForm(homeForm, match.homeTeam)}
       {awayForm && awayForm.length > 0 && (
@@ -1068,7 +1104,7 @@ const fm = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 12, gap: 10,
   },
   teamInfo: { flexDirection: 'row', alignItems: 'center', gap: 8, width: 80 },
-  teamLogo: { width: 24, height: 24, borderRadius: 12 },
+  teamLogo: { width: 24, height: 24, borderRadius: 3 },
   teamName: { fontSize: 13, fontWeight: '700' },
   badges: { flex: 1, flexDirection: 'row', justifyContent: 'center', gap: 6 },
   badge: {
@@ -1079,27 +1115,265 @@ const fm = StyleSheet.create({
   points: { fontSize: 13, fontWeight: '600', width: 28, textAlign: 'right' },
 });
 
+// ── Venue Detail Modal ───────────────────────────────────────────────────────
+const VenueDetailModal: React.FC<{
+  venue: MatchVenue | null;
+  visible: boolean;
+  onClose: () => void;
+}> = ({ venue, visible, onClose }) => {
+  const c = useThemeColors();
+  const { t } = useTranslation();
+  const { isDark } = useDarkMode();
+  if (!venue) return null;
+  const sheetBg = isDark ? '#1c1c1e' : '#f2f2f7';
+  const overlayBg = isDark ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.55)';
+
+  const surfaceLabel = () => {
+    const s = (venue.surface ?? '').toLowerCase();
+    if (s.includes('artif')) return t('matchInfo.surfaceArtificial');
+    if (s.includes('hybrid')) return t('matchInfo.surfaceHybrid');
+    return t('matchInfo.surfaceGrass');
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={[vdm.overlay, { backgroundColor: overlayBg }]} onPress={onClose} />
+      <View style={[vdm.sheet, { backgroundColor: sheetBg }]}>
+        <View style={[vdm.handle, { backgroundColor: c.border }]} />
+
+        {/* Venue image */}
+        {!!venue.image && venue.image.startsWith('http') && (
+          <Image source={{ uri: venue.image }} style={vdm.heroImage} resizeMode="cover" />
+        )}
+
+        {/* Icon + name row */}
+        <View style={vdm.heroRow}>
+          <Text style={{ fontSize: 36 }}>🏟️</Text>
+          <View style={vdm.heroInfo}>
+            <Text style={[vdm.venueName, { color: c.textPrimary }]} numberOfLines={2}>
+              {venue.name}
+            </Text>
+            {!!venue.city && (
+              <Text style={[vdm.venueCity, { color: c.textSecondary }]}>📍 {venue.city}</Text>
+            )}
+          </View>
+        </View>
+
+        <View style={[vdm.divider, { backgroundColor: c.border }]} />
+        <Text style={[vdm.sectionTitle, { color: c.textTertiary }]}>
+          {t('matchInfo.venueDetail').toUpperCase()}
+        </Text>
+
+        <View style={[vdm.infoCard, { backgroundColor: c.card, borderColor: c.border }]}>
+          <View style={vdm.infoRow}>
+            <Text style={[vdm.infoLabel, { color: c.textTertiary }]}>{t('matchInfo.capacity')}</Text>
+            <Text style={[vdm.infoValue, { color: c.textPrimary }]}>
+              {venue.capacity > 0 ? venue.capacity.toLocaleString() : '—'}
+            </Text>
+          </View>
+          <View style={[vdm.infoRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
+            <Text style={[vdm.infoLabel, { color: c.textTertiary }]}>{t('matchInfo.surface')}</Text>
+            <Text style={[vdm.infoValue, { color: c.textPrimary }]}>{surfaceLabel()}</Text>
+          </View>
+          {!!venue.attendance && (
+            <View style={[vdm.infoRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
+              <Text style={[vdm.infoLabel, { color: c.textTertiary }]}>Asistencia</Text>
+              <Text style={[vdm.infoValue, { color: c.textPrimary }]}>
+                {venue.attendance.toLocaleString()}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        <TouchableOpacity
+          style={[vdm.closeBtn, { backgroundColor: c.surface, borderColor: c.border }]}
+          onPress={onClose}
+          activeOpacity={0.7}
+        >
+          <Text style={[vdm.closeBtnText, { color: c.textPrimary }]}>{t('common.close')}</Text>
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+};
+
+const vdm = StyleSheet.create({
+  overlay: { ...StyleSheet.absoluteFillObject },
+  sheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 20, paddingBottom: 36, paddingTop: 12,
+  },
+  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
+  heroImage: { width: '100%', height: 160, borderRadius: 16, marginBottom: 16 },
+  heroRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 20 },
+  heroInfo: { flex: 1, gap: 4 },
+  venueName: { fontSize: 22, fontWeight: '800', lineHeight: 26 },
+  venueCity: { fontSize: 14, fontWeight: '500' },
+  divider: { height: 1, marginBottom: 16 },
+  sectionTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 0.8, marginBottom: 10 },
+  infoCard: { borderRadius: 14, borderWidth: 1, marginBottom: 20, overflow: 'hidden' },
+  infoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  infoLabel: { fontSize: 14, fontWeight: '500' },
+  infoValue: { fontSize: 14, fontWeight: '700', textAlign: 'right', flex: 1, marginLeft: 16 },
+  closeBtn: { borderRadius: 14, borderWidth: 1, paddingVertical: 14, alignItems: 'center' },
+  closeBtnText: { fontSize: 15, fontWeight: '700' },
+});
+
+// ── Referee Detail Modal ──────────────────────────────────────────────────────
+const RefereeDetailModal: React.FC<{
+  referee: MatchReferee | null;
+  stats: RefereeStats | undefined;
+  visible: boolean;
+  onClose: () => void;
+}> = ({ referee, stats, visible, onClose }) => {
+  const c = useThemeColors();
+  const { t } = useTranslation();
+  const { isDark } = useDarkMode();
+  if (!referee) return null;
+  const sheetBg = isDark ? '#1c1c1e' : '#f2f2f7';
+  const overlayBg = isDark ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.55)';
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={[rdm.overlay, { backgroundColor: overlayBg }]} onPress={onClose} />
+      <View style={[rdm.sheet, { backgroundColor: sheetBg }]}>
+        <View style={[rdm.handle, { backgroundColor: c.border }]} />
+
+        {/* Photo + name */}
+        <View style={rdm.heroRow}>
+          <View style={[rdm.photoWrap, { borderColor: '#f59e0b60', backgroundColor: c.surface }]}>
+            {referee.imageUrl && referee.imageUrl.startsWith('http') ? (
+              <Image source={{ uri: referee.imageUrl }} style={rdm.photo} resizeMode="cover" />
+            ) : (
+              <Text style={{ fontSize: 40 }}>👤</Text>
+            )}
+          </View>
+          <View style={rdm.heroInfo}>
+            <Text style={[rdm.refName, { color: c.textPrimary }]} numberOfLines={2}>
+              {referee.name}
+            </Text>
+            {!!referee.nationality && (
+              <Text style={[rdm.refNat, { color: c.textSecondary }]}>
+                {referee.flag ? `${referee.flag} ` : ''}{referee.nationality}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        <View style={[rdm.divider, { backgroundColor: c.border }]} />
+        <Text style={[rdm.sectionTitle, { color: c.textTertiary }]}>
+          {t('matchInfo.refereeDetail').toUpperCase()}
+        </Text>
+
+        {stats ? (
+          <View style={rdm.statsGrid}>
+            <View style={[rdm.statCell, { backgroundColor: c.card, borderColor: c.border }]}>
+              <Text style={[rdm.statValue, { color: c.textPrimary }]}>{stats.totalMatches}</Text>
+              <Text style={[rdm.statLabel, { color: c.textTertiary }]}>{t('matchInfo.totalMatches')}</Text>
+            </View>
+            <View style={[rdm.statCell, { backgroundColor: c.card, borderColor: c.border }]}>
+              <Text style={[rdm.statValue, { color: '#facc15' }]}>{stats.yellowCardsPerMatch.toFixed(1)}</Text>
+              <Text style={[rdm.statLabel, { color: c.textTertiary }]}>{t('matchInfo.yellowCardsPerMatch')}</Text>
+            </View>
+            <View style={[rdm.statCell, { backgroundColor: c.card, borderColor: c.border }]}>
+              <Text style={[rdm.statValue, { color: '#ef4444' }]}>{stats.redCardsPerMatch.toFixed(1)}</Text>
+              <Text style={[rdm.statLabel, { color: c.textTertiary }]}>{t('matchInfo.redCardsPerMatch')}</Text>
+            </View>
+            <View style={[rdm.statCell, { backgroundColor: c.card, borderColor: c.border }]}>
+              <Text style={[rdm.statValue, { color: c.textPrimary }]}>{stats.foulsPerMatch.toFixed(1)}</Text>
+              <Text style={[rdm.statLabel, { color: c.textTertiary }]}>{t('matchInfo.foulsPerMatch')}</Text>
+            </View>
+          </View>
+        ) : (
+          <View style={[rdm.infoCard, { backgroundColor: c.card, borderColor: c.border }]}>
+            <View style={rdm.infoRow}>
+              <Text style={[rdm.infoLabel, { color: c.textTertiary }]}>{t('matchInfo.nationality')}</Text>
+              <Text style={[rdm.infoValue, { color: c.textPrimary }]}>
+                {referee.flag ? `${referee.flag} ` : ''}{referee.nationality || '—'}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        <TouchableOpacity
+          style={[rdm.closeBtn, { backgroundColor: c.surface, borderColor: c.border }]}
+          onPress={onClose}
+          activeOpacity={0.7}
+        >
+          <Text style={[rdm.closeBtnText, { color: c.textPrimary }]}>{t('common.close')}</Text>
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+};
+
+const rdm = StyleSheet.create({
+  overlay: { ...StyleSheet.absoluteFillObject },
+  sheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 20, paddingBottom: 36, paddingTop: 12,
+  },
+  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
+  heroRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
+  photoWrap: {
+    width: 80, height: 80, borderRadius: 40,
+    borderWidth: 2, overflow: 'hidden',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  photo: { width: 80, height: 80 },
+  heroInfo: { flex: 1, gap: 4 },
+  refName: { fontSize: 20, fontWeight: '800', lineHeight: 24 },
+  refNat: { fontSize: 14, fontWeight: '500' },
+  divider: { height: 1, marginBottom: 16 },
+  sectionTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 0.8, marginBottom: 10 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
+  statCell: {
+    width: '47%', borderRadius: 14, borderWidth: 1,
+    paddingVertical: 16, alignItems: 'center', gap: 4,
+  },
+  statValue: { fontSize: 24, fontWeight: '900' },
+  statLabel: { fontSize: 10, fontWeight: '600', textAlign: 'center', letterSpacing: 0.3 },
+  infoCard: { borderRadius: 14, borderWidth: 1, marginBottom: 20, overflow: 'hidden' },
+  infoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  infoLabel: { fontSize: 14, fontWeight: '500' },
+  infoValue: { fontSize: 14, fontWeight: '700', textAlign: 'right', flex: 1, marginLeft: 16 },
+  closeBtn: { borderRadius: 14, borderWidth: 1, paddingVertical: 14, alignItems: 'center', marginTop: 4 },
+  closeBtnText: { fontSize: 15, fontWeight: '700' },
+});
+
 // ── Match info card ──────────────────────────────────────────────────────────
 const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match, detail }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
 
-  type InfoRow = { icon: string; iconBg: string; label: string; sublabel?: string; rightText?: string };
+  // Modal state
+  const [venueModal, setVenueModal] = useState(false);
+  const [refereeModal, setRefereeModal] = useState(false);
+
+  type InfoRow = { icon: string; iconBg: string; label: string; sublabel?: string; rightText?: string; onPress?: () => void };
   const rows: InfoRow[] = [];
 
   // Venue
   if (detail.venue?.name) {
+    const vSurface = detail.venue.surface ?? '';
+    const vSurfaceLabel = !vSurface ? '' :
+      vSurface.toLowerCase().includes('artif') ? t('matchInfo.surfaceArtificial') :
+      vSurface.toLowerCase().includes('hybrid') ? t('matchInfo.surfaceHybrid') :
+      t('matchInfo.surfaceGrass');
     rows.push({
       icon: '📍', iconBg: 'rgba(16,185,129,0.15)',
       label: detail.venue.name,
       sublabel: [
         detail.venue.city,
-        detail.venue.surface === 'grass' ? 'Césped natural' : detail.venue.surface,
+        vSurfaceLabel,
       ].filter(Boolean).join(' · '),
       rightText: [
         detail.venue.capacity > 0 ? `Capacidad: ${detail.venue.capacity.toLocaleString()}` : '',
         detail.venue.attendance ? `Asistencia: ${detail.venue.attendance.toLocaleString()}` : '',
       ].filter(Boolean).join('    '),
+      onPress: () => setVenueModal(true),
     });
   }
 
@@ -1109,6 +1383,7 @@ const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match,
       icon: '👤', iconBg: 'rgba(245,158,11,0.15)',
       label: detail.referee.name,
       sublabel: detail.referee.flag ? `${detail.referee.flag} ${detail.referee.nationality}` : detail.referee.nationality,
+      onPress: () => setRefereeModal(true),
     });
   }
 
@@ -1117,7 +1392,7 @@ const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match,
     const w = detail.weather;
     rows.push({
       icon: w.icon || '☀️', iconBg: 'rgba(251,191,36,0.15)',
-      label: `${w.temp}°C · ${w.description}`,
+      label: `${w.temp}°C · ${translateWeatherDesc(w.description, t)}`,
       rightText: [
         w.wind > 0 ? `⇆ ${w.wind} km/h` : '',
         w.humidity > 0 ? `💧 ${w.humidity}%` : '',
@@ -1152,22 +1427,54 @@ const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match,
         </Text>
       </View>
 
-      {rows.map((row, i) => (
-        <View key={i} style={[mi.row, { borderTopColor: c.border }]}>
-          <View style={[mi.iconWrap, { backgroundColor: row.iconBg }]}>
-            <Text style={mi.icon}>{row.icon}</Text>
-          </View>
-          <View style={mi.content}>
-            <Text style={[mi.label, { color: c.textPrimary }]}>{row.label}</Text>
-            {row.sublabel && (
-              <Text style={[mi.sublabel, { color: c.textTertiary }]}>{row.sublabel}</Text>
+      {rows.map((row, i) => {
+        const inner = (
+          <>
+            <View style={[mi.iconWrap, { backgroundColor: row.iconBg }]}>
+              <Text style={mi.icon}>{row.icon}</Text>
+            </View>
+            <View style={mi.content}>
+              <Text style={[mi.label, { color: c.textPrimary }]}>{row.label}</Text>
+              {row.sublabel && (
+                <Text style={[mi.sublabel, { color: c.textTertiary }]}>{row.sublabel}</Text>
+              )}
+              {row.rightText && (
+                <Text style={[mi.rightText, { color: c.textTertiary }]}>{row.rightText}</Text>
+              )}
+            </View>
+            {!!row.onPress && (
+              <Text style={[mi.chevron, { color: c.textTertiary }]}>›</Text>
             )}
-            {row.rightText && (
-              <Text style={[mi.rightText, { color: c.textTertiary }]}>{row.rightText}</Text>
-            )}
+          </>
+        );
+        return row.onPress ? (
+          <TouchableOpacity
+            key={i}
+            style={[mi.row, { borderTopColor: c.border }]}
+            onPress={row.onPress}
+            activeOpacity={0.65}
+          >
+            {inner}
+          </TouchableOpacity>
+        ) : (
+          <View key={i} style={[mi.row, { borderTopColor: c.border }]}>
+            {inner}
           </View>
-        </View>
-      ))}
+        );
+      })}
+
+      {/* Modals */}
+      <VenueDetailModal
+        venue={detail.venue ?? null}
+        visible={venueModal}
+        onClose={() => setVenueModal(false)}
+      />
+      <RefereeDetailModal
+        referee={detail.referee ?? null}
+        stats={detail.refereeStats}
+        visible={refereeModal}
+        onClose={() => setRefereeModal(false)}
+      />
     </View>
   );
 };
@@ -1193,136 +1500,302 @@ const mi = StyleSheet.create({
   label: { fontSize: 15, fontWeight: '700' },
   sublabel: { fontSize: 12, fontWeight: '500' },
   rightText: { fontSize: 11, fontWeight: '500', marginTop: 2 },
+  chevron: { fontSize: 22, fontWeight: '300', lineHeight: 26 },
 });
 
-// ── Pressure Index Area Chart (SportMonks style) ────────────────────────────
+// ── Pressure Index Area Chart ────────────────────────────────────────────────
 //
-// Generates minute-by-minute pressure from match events & aggregate stats,
-// then renders a dual-area chart showing dominance swings over the match.
+// Smooth dual-area chart with Catmull-Rom upsampling + Gaussian blur.
+// Event markers (goals ⚽, red cards 🟥) shown above/below the chart.
 
-const CHART_HEIGHT = 140;
-const HOME_COLOR = '#ef4444';   // red for home (SportMonks style)
-const AWAY_COLOR = '#10b981';   // green/teal for away
+const CHART_H    = 120;
+const MARKER_H   = 22;   // height of goal/card marker rows
+const Y_AXIS_W   = 28;
+const CHART_PAD_R = 14;
+const PI_HOME    = '#ef4444';
+const PI_AWAY    = '#10b981';
 
-/** Build per-minute pressure array from events + aggregate pressure */
+// ── Smooth-curve math ─────────────────────────────────────────────────────────
+
+function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
+  return 0.5 * (
+    (2 * p1) +
+    (-p0 + p2) * t +
+    (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
+    (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t
+  );
+}
+
+/** Upsample a data array to `targetCount` points using Catmull-Rom spline. */
+function upsampleCurve(data: number[], targetCount: number): number[] {
+  const n = data.length;
+  if (n < 2) return data;
+  const out: number[] = [];
+  for (let i = 0; i < targetCount; i++) {
+    const t   = (i / (targetCount - 1)) * (n - 1);
+    const idx = Math.floor(t);
+    const f   = t - idx;
+    const p0  = data[Math.max(0, idx - 1)];
+    const p1  = data[idx];
+    const p2  = data[Math.min(n - 1, idx + 1)];
+    const p3  = data[Math.min(n - 1, idx + 2)];
+    out.push(Math.max(5, Math.min(95, catmullRom(p0, p1, p2, p3, f))));
+  }
+  return out;
+}
+
+/** Gaussian smoothing (radius = half-window size). */
+function gaussianSmooth(data: number[], radius: number): number[] {
+  const sigma = radius / 2.0;
+  const kernel: number[] = [];
+  let ksum = 0;
+  for (let i = -radius; i <= radius; i++) {
+    const w = Math.exp(-(i * i) / (2 * sigma * sigma));
+    kernel.push(w);
+    ksum += w;
+  }
+  return data.map((_, i) =>
+    kernel.reduce((acc, w, j) => {
+      const idx = Math.max(0, Math.min(data.length - 1, i + j - radius));
+      return acc + (w / ksum) * data[idx];
+    }, 0),
+  );
+}
+
+// ── Raw pressure curve (per-minute) ──────────────────────────────────────────
+
 function buildPressureCurve(
   events: MatchEvent[],
   homePressure: number,
   matchMinutes: number,
 ): number[] {
-  const total = Math.max(matchMinutes, 90);
-  const points = new Array(total + 1).fill(50); // start neutral
+  const total   = Math.max(matchMinutes, 90);
+  const points  = new Array<number>(total + 1).fill(50);
+  const impulse = new Array<number>(total + 1).fill(0);
 
-  // Seed from events — goals, shots, corners shift pressure
-  const impulses = new Array(total + 1).fill(0);
   for (const ev of events) {
-    const min = Math.min(ev.minute, total);
+    const min    = Math.min(ev.minute, total);
     const isHome = ev.team === 'home';
-    if (ev.type === 'goal' || ev.type === 'penalty-goal') {
-      impulses[min] += isHome ? 15 : -15;
+    if (ev.type === 'goal' || ev.type === 'penalty-goal' || ev.type === 'own-goal') {
+      impulse[min] += isHome ? 15 : -15;
     } else if (ev.type === 'yellow' || ev.type === 'second-yellow') {
-      impulses[min] += isHome ? -5 : 5; // card hurts
+      impulse[min] += isHome ? -4 : 4;
     } else if (ev.type === 'red') {
-      impulses[min] += isHome ? -12 : 12;
+      impulse[min] += isHome ? -12 : 12;
     }
   }
 
-  // Apply impulses with decay
   let momentum = 0;
   for (let i = 0; i <= total; i++) {
-    momentum = momentum * 0.92 + impulses[i]; // decay + new impulse
+    momentum  = momentum * 0.91 + impulse[i];
     points[i] = 50 + momentum;
   }
 
-  // Blend toward aggregate pressure
   const bias = homePressure - 50;
   for (let i = 0; i <= total; i++) {
-    const t = i / total;
-    points[i] = points[i] * 0.6 + (50 + bias * (0.5 + 0.5 * Math.sin(t * Math.PI * 3 + bias * 0.05))) * 0.4;
-    // Add subtle organic variation
-    points[i] += Math.sin(i * 0.3) * 4 + Math.cos(i * 0.7) * 3;
-    points[i] = Math.max(5, Math.min(95, points[i]));
+    const t     = i / total;
+    const blend = 50 + bias * (0.5 + 0.5 * Math.sin(t * Math.PI * 3 + bias * 0.05));
+    points[i]   = points[i] * 0.6 + blend * 0.4;
+    points[i]  += Math.sin(i * 0.31) * 3.5 + Math.cos(i * 0.68) * 2.5;
+    points[i]   = Math.max(5, Math.min(95, points[i]));
   }
 
   return points;
 }
+
+// ── Event marker helpers ──────────────────────────────────────────────────────
+
+interface PressureMarker { minute: number; icon: string; isOwnGoal?: boolean }
+
+function extractMarkers(
+  events: MatchEvent[],
+  side: 'home' | 'away',
+  totalMin: number,
+): PressureMarker[] {
+  const seen = new Set<string>();
+  const out: PressureMarker[] = [];
+  for (const ev of events) {
+    if (ev.minute > totalMin + 15) continue;
+    const key = `${ev.type}-${ev.minute}-${ev.team}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const isOwnGoal = ev.type === 'own-goal';
+    // Own goal: appears on the CONCEDING team's side (opposite)
+    const displaySide = isOwnGoal
+      ? (ev.team === 'home' ? 'away' : 'home')
+      : ev.team;
+
+    if (displaySide !== side) continue;
+
+    if (ev.type === 'goal' || ev.type === 'penalty-goal') {
+      out.push({ minute: ev.minute, icon: '⚽' });
+    } else if (ev.type === 'own-goal') {
+      out.push({ minute: ev.minute, icon: '⚽', isOwnGoal: true });
+    } else if (ev.type === 'red') {
+      out.push({ minute: ev.minute, icon: '🟥' });
+    }
+  }
+  return out;
+}
+
+// ── PressureSection component ─────────────────────────────────────────────────
+
+const UPSAMPLE_POINTS = 300; // upsampled resolution → smooth bezier-like curve
 
 const PressureSection: React.FC<{
   pressure: PressureIndex;
   match: Match;
   events?: MatchEvent[];
 }> = ({ pressure, match, events = [] }) => {
-  const c = useThemeColors();
+  const c           = useThemeColors();
+  const { isDark }  = useDarkMode();
   const matchMinutes = match.minute ?? 90;
-  const curve = React.useMemo(
+
+  const rawCurve = React.useMemo(
     () => buildPressureCurve(events, pressure.home, matchMinutes),
     [events, pressure.home, matchMinutes],
   );
-  const totalMin = curve.length - 1;
 
-  // Chart dimensions
-  const chartWidth = SCREEN_WIDTH - 72; // card padding
-  const stepX = chartWidth / totalMin;
+  // Catmull-Rom upsample → Gaussian smooth → final smooth wave
+  const smoothCurve = React.useMemo(() => {
+    const up = upsampleCurve(rawCurve, UPSAMPLE_POINTS);
+    return gaussianSmooth(up, 6);
+  }, [rawCurve]);
+
+  const totalMin    = rawCurve.length - 1; // original minute count for marker x-pos
+  const numBars     = smoothCurve.length;
+
+  // Measure actual chart pixel width via onLayout
+  const [chartW, setChartW] = React.useState(SCREEN_WIDTH - Y_AXIS_W - CHART_PAD_R - 34);
+  const barW = chartW / numBars;
+
+  // Event markers
+  const homeMarkers = React.useMemo(
+    () => extractMarkers(events, 'home', totalMin),
+    [events, totalMin],
+  );
+  const awayMarkers = React.useMemo(
+    () => extractMarkers(events, 'away', totalMin),
+    [events, totalMin],
+  );
+
+  const borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)';
+  const gridColor   = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
 
   return (
     <View style={[pi.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      {/* Header */}
+      {/* ── Header ── */}
       <View style={pi.header}>
         <Text style={pi.icon}>🔥</Text>
         <Text style={[pi.title, { color: c.textTertiary }]}>ÍNDICE DE PRESIÓN</Text>
         <View style={{ flex: 1 }} />
-        {/* Legend */}
         <View style={pi.legend}>
-          <View style={[pi.legendDot, { backgroundColor: HOME_COLOR }]} />
+          <View style={[pi.legendDot, { backgroundColor: PI_HOME }]} />
           <Text style={[pi.legendLabel, { color: c.textTertiary }]}>{match.homeTeam.shortName}</Text>
-          <View style={[pi.legendDot, { backgroundColor: AWAY_COLOR, marginLeft: 8 }]} />
+          <View style={[pi.legendDot, { backgroundColor: PI_AWAY, marginLeft: 8 }]} />
           <Text style={[pi.legendLabel, { color: c.textTertiary }]}>{match.awayTeam.shortName}</Text>
         </View>
       </View>
 
-      {/* Chart area */}
-      <View style={[pi.chartWrap, { borderTopColor: c.border }]}>
-        {/* Y-axis labels */}
-        <View style={pi.yAxis}>
-          <Text style={[pi.yLabel, { color: c.textTertiary }]}>100</Text>
+      {/* ── Chart body ── */}
+      <View style={[pi.chartWrap, { borderTopColor: borderColor }]}>
+        {/* Y-axis */}
+        <View style={[pi.yAxis, { height: MARKER_H + CHART_H + MARKER_H }]}>
+          <Text style={[pi.yLabel, { color: c.textTertiary, marginTop: MARKER_H }]}>100</Text>
           <Text style={[pi.yLabel, { color: c.textTertiary }]}>50</Text>
-          <Text style={[pi.yLabel, { color: c.textTertiary }]}>0</Text>
+          <Text style={[pi.yLabel, { color: c.textTertiary, marginBottom: MARKER_H }]}>0</Text>
         </View>
 
-        {/* Chart */}
-        <View style={[pi.chart, { height: CHART_HEIGHT }]}>
-          {/* Grid lines */}
-          <View style={[pi.gridLine, { top: 0, borderBottomColor: c.border }]} />
-          <View style={[pi.gridLine, { top: CHART_HEIGHT / 2, borderBottomColor: c.border }]} />
-          <View style={[pi.gridLine, { top: CHART_HEIGHT - 1, borderBottomColor: c.border }]} />
-          {/* Half-time marker */}
-          <View style={[pi.htLine, { left: (45 / totalMin) * chartWidth, backgroundColor: c.border }]} />
+        <View style={{ flex: 1 }}>
+          {/* ── Home event markers (above chart) ── */}
+          <View
+            style={{ height: MARKER_H, position: 'relative', overflow: 'hidden', paddingRight: CHART_PAD_R }}
+            onLayout={e => setChartW(e.nativeEvent.layout.width - CHART_PAD_R)}
+          >
+            {homeMarkers.map((m, idx) => {
+              const x = (m.minute / totalMin) * chartW - 8;
+              return (
+                <View key={idx} style={{ position: 'absolute', left: x, top: 2, width: 16, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 11, lineHeight: 14 }}>{m.icon}</Text>
+                  {m.isOwnGoal && (
+                    <Text style={{ fontSize: 6, color: c.textTertiary, lineHeight: 8 }}>pp</Text>
+                  )}
+                </View>
+              );
+            })}
+          </View>
 
-          {/* Area bars — one per minute, from center line */}
-          {curve.map((val, i) => {
-            const homeVal = val; // % for home (>50 = home dominates)
-            const deviationFromCenter = homeVal - 50;
-            const barHeight = Math.abs(deviationFromCenter) * (CHART_HEIGHT / 100);
-            const isHomeDominant = deviationFromCenter > 0;
-            return (
-              <View
-                key={i}
-                style={{
+          {/* ── Area chart ── */}
+          <View
+            style={{ height: CHART_H, overflow: 'hidden', position: 'relative', paddingRight: CHART_PAD_R }}
+          >
+            {/* Background grid */}
+            <View style={[pi.gridLine, { top: 0, borderBottomColor: gridColor }]} />
+            <View style={[pi.gridLine, { top: CHART_H / 2, borderBottomColor: gridColor }]} />
+            <View style={[pi.gridLine, { top: CHART_H - 1, borderBottomColor: gridColor }]} />
+            {/* Half-time dotted line */}
+            <View style={[pi.htLine, {
+              left: (45 / totalMin) * chartW,
+              borderColor: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)',
+            }]} />
+
+            {/* Red-card vertical lines */}
+            {[...homeMarkers, ...awayMarkers]
+              .filter(m => m.icon === '🟥')
+              .map((m, idx) => (
+                <View key={idx} style={{
                   position: 'absolute',
-                  left: i * stepX,
-                  width: Math.max(stepX, 1.5),
-                  height: barHeight,
-                  top: isHomeDominant ? CHART_HEIGHT / 2 - barHeight : CHART_HEIGHT / 2,
-                  backgroundColor: isHomeDominant ? HOME_COLOR : AWAY_COLOR,
-                  opacity: 0.35,
-                }}
-              />
-            );
-          })}
+                  left: (m.minute / totalMin) * chartW,
+                  top: 0,
+                  bottom: 0,
+                  width: 1.5,
+                  backgroundColor: '#ef4444',
+                  opacity: 0.4,
+                }} />
+              ))}
+
+            {/* Smooth fill bars — upsampled to 300 points */}
+            {smoothCurve.map((val, i) => {
+              const dev   = val - 50;
+              const barH  = Math.abs(dev) * (CHART_H / 100);
+              const isHome = dev > 0;
+              if (barH < 0.3) return null;
+              return (
+                <View
+                  key={i}
+                  style={{
+                    position: 'absolute',
+                    left: i * barW,
+                    width: Math.ceil(barW) + 0.5,  // +0.5 closes sub-pixel gaps
+                    height: barH,
+                    top: isHome ? CHART_H / 2 - barH : CHART_H / 2,
+                    backgroundColor: isHome ? PI_HOME : PI_AWAY,
+                    opacity: 0.55,
+                  }}
+                />
+              );
+            })}
+          </View>
+
+          {/* ── Away event markers (below chart) ── */}
+          <View style={{ height: MARKER_H, position: 'relative', overflow: 'hidden', paddingRight: CHART_PAD_R }}>
+            {awayMarkers.map((m, idx) => {
+              const x = (m.minute / totalMin) * chartW - 8;
+              return (
+                <View key={idx} style={{ position: 'absolute', left: x, top: 4, width: 16, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 11, lineHeight: 14 }}>{m.icon}</Text>
+                  {m.isOwnGoal && (
+                    <Text style={{ fontSize: 6, color: c.textTertiary, lineHeight: 8 }}>pp</Text>
+                  )}
+                </View>
+              );
+            })}
+          </View>
         </View>
       </View>
 
-      {/* X-axis */}
+      {/* ── X-axis labels ── */}
       <View style={pi.xAxis}>
         <Text style={[pi.xLabel, { color: c.textTertiary }]}>0'</Text>
         <Text style={[pi.xLabel, { color: c.textTertiary }]}>15'</Text>
@@ -1333,44 +1806,49 @@ const PressureSection: React.FC<{
         <Text style={[pi.xLabel, { color: c.textTertiary }]}>90'</Text>
       </View>
 
-      {/* Summary bar */}
-      <View style={[pi.summary, { borderTopColor: c.border }]}>
-        <Text style={[pi.summaryValue, { color: HOME_COLOR }]}>{pressure.home}%</Text>
+      {/* ── Summary bar ── */}
+      <View style={[pi.summary, { borderTopColor: borderColor }]}>
+        <Text style={[pi.summaryValue, { color: PI_HOME }]}>{pressure.home}%</Text>
         <View style={pi.summaryBarWrap}>
           <View style={[pi.summaryBarBg, { backgroundColor: c.surface }]}>
             <View style={[pi.summaryBarHome, { width: `${pressure.home}%` }]} />
           </View>
         </View>
-        <Text style={[pi.summaryValue, { color: AWAY_COLOR, textAlign: 'right' }]}>{pressure.away}%</Text>
+        <Text style={[pi.summaryValue, { color: PI_AWAY, textAlign: 'right' }]}>{pressure.away}%</Text>
       </View>
     </View>
   );
 };
 
 const pi = StyleSheet.create({
-  card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden', marginBottom: 8 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
-  icon: { fontSize: 16 },
-  title: { fontSize: 10, fontWeight: '700', letterSpacing: 1 },
-  legend: { flexDirection: 'row', alignItems: 'center' },
-  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  card:        { borderRadius: 14, borderWidth: 1, overflow: 'hidden', marginBottom: 8 },
+  header:      { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
+  icon:        { fontSize: 16 },
+  title:       { fontSize: 10, fontWeight: '700', letterSpacing: 1 },
+  legend:      { flexDirection: 'row', alignItems: 'center' },
+  legendDot:   { width: 8, height: 8, borderRadius: 4 },
   legendLabel: { fontSize: 10, fontWeight: '500', marginLeft: 4 },
-  chartWrap: { flexDirection: 'row', paddingLeft: 4, paddingRight: 14, borderTopWidth: 1 },
-  yAxis: { width: 28, justifyContent: 'space-between', paddingVertical: 2 },
-  yLabel: { fontSize: 8, fontWeight: '500', textAlign: 'right', paddingRight: 4 },
-  chart: { flex: 1, overflow: 'hidden', position: 'relative' },
+
+  chartWrap: { flexDirection: 'row', paddingLeft: 4, borderTopWidth: 1 },
+  yAxis:     { width: Y_AXIS_W, justifyContent: 'space-between', paddingVertical: 2 },
+  yLabel:    { fontSize: 8, fontWeight: '500', textAlign: 'right', paddingRight: 4 },
+
   gridLine: { position: 'absolute', left: 0, right: 0, borderBottomWidth: StyleSheet.hairlineWidth },
-  htLine: { position: 'absolute', top: 0, bottom: 0, width: StyleSheet.hairlineWidth },
-  xAxis: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    paddingHorizontal: 32, paddingVertical: 6,
+  htLine:   {
+    position: 'absolute', top: 0, bottom: 0,
+    width: 1,
+    borderLeftWidth: 1,
+    borderStyle: 'dashed' as const,
   },
+
+  xAxis:  { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 32, paddingVertical: 6 },
   xLabel: { fontSize: 8, fontWeight: '500' },
-  summary: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, gap: 10, borderTopWidth: 1 },
-  summaryValue: { fontSize: 15, fontWeight: '800', width: 42 },
+
+  summary:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, gap: 10, borderTopWidth: 1 },
+  summaryValue:   { fontSize: 15, fontWeight: '800', width: 42 },
   summaryBarWrap: { flex: 1 },
-  summaryBarBg: { height: 6, borderRadius: 3, overflow: 'hidden' },
-  summaryBarHome: { height: 6, backgroundColor: HOME_COLOR, borderRadius: 3 },
+  summaryBarBg:   { height: 6, borderRadius: 3, overflow: 'hidden' },
+  summaryBarHome: { height: 6, backgroundColor: PI_HOME, borderRadius: 3 },
 });
 
 // ── Injuries section ─────────────────────────────────────────────────────────
@@ -1426,15 +1904,83 @@ const injS = StyleSheet.create({
 // MAIN TAB COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
 
+const IMPORTANT_TYPES = new Set(['goal', 'own-goal', 'penalty-goal', 'red', 'second-yellow', 'var']);
+
 export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ match, detail }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const isScheduled = match.status === 'scheduled';
+  const isFinished  = match.status === 'finished';
+  const [showAllEvents, setShowAllEvents] = useState(false);
 
-  // Split events into halves
-  const first  = detail.events.filter(e => e.minute <= 45).sort((a, b) => a.minute - b.minute);
-  const second = detail.events.filter(e => e.minute > 45).sort((a, b) => a.minute - b.minute);
+  // Filter + split events into halves
+  const filteredEvents = showAllEvents
+    ? detail.events
+    : detail.events.filter(e => IMPORTANT_TYPES.has(e.type));
+  const firstFiltered  = filteredEvents.filter(e => e.minute <= 45).sort((a, b) => a.minute - b.minute);
+  const secondFiltered = filteredEvents.filter(e => e.minute > 45).sort((a, b) => a.minute - b.minute);
   const hasEvents = detail.events.length > 0;
   const hasMissing = (detail.missingPlayers?.home?.length ?? 0) > 0 || (detail.missingPlayers?.away?.length ?? 0) > 0;
+
+  // ── Timeline block — reused in two positions (finished: top, live: below stats)
+  const TimelineBlock = () => (
+    <View style={[tl.card, { backgroundColor: c.card, borderColor: c.border }]}>
+      {/* Teams header */}
+      <View style={[tl.teamsHeader, { borderBottomColor: c.border }]}>
+        <Text style={[tl.teamLabel, { color: '#3b82f6' }]}>{match.homeTeam.shortName}</Text>
+        <Text style={[tl.cronLabel, { color: c.textTertiary }]}>{t('timeline.title')}</Text>
+        <Text style={[tl.teamLabel, { color: '#f97316', textAlign: 'right' }]}>{match.awayTeam.shortName}</Text>
+      </View>
+      {/* Filter toggle */}
+      <View style={[tl.filterRow, { borderBottomColor: c.border }]}>
+        <TouchableOpacity
+          style={[tl.filterBtn, { borderColor: !showAllEvents ? c.accent : c.border },
+            !showAllEvents && { backgroundColor: c.accent + '1A' }]}
+          onPress={() => setShowAllEvents(false)}
+          activeOpacity={0.7}
+        >
+          <Text style={[tl.filterBtnText, { color: !showAllEvents ? c.accent : c.textTertiary }]}>
+            ⭐ {t('timeline.highlights')}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[tl.filterBtn, { borderColor: showAllEvents ? c.accent : c.border },
+            showAllEvents && { backgroundColor: c.accent + '1A' }]}
+          onPress={() => setShowAllEvents(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={[tl.filterBtnText, { color: showAllEvents ? c.accent : c.textTertiary }]}>
+            {t('timeline.showAll')}
+          </Text>
+        </TouchableOpacity>
+      </View>
+      {/* Event rows or empty state */}
+      {firstFiltered.length === 0 && secondFiltered.length === 0 ? (
+        <View style={tl.emptyHighlights}>
+          <Text style={[tl.emptyHighlightsText, { color: c.textTertiary }]}>
+            {t('timeline.noHighlights')}
+          </Text>
+        </View>
+      ) : (
+        <>
+          {firstFiltered.length > 0 && (
+            <>
+              <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
+                <Text style={[tl.halfSepText, { color: c.textTertiary }]}>{t('timeline.firstHalf')}</Text>
+              </View>
+              {firstFiltered.map(e => <EventRow key={e.id} event={e} match={match} />)}
+            </>
+          )}
+          {firstFiltered.length > 0 && secondFiltered.length > 0 && (
+            <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
+              <Text style={[tl.halfSepText, { color: c.textTertiary }]}>{t('timeline.secondHalf')}</Text>
+            </View>
+          )}
+          {secondFiltered.map(e => <EventRow key={e.id} event={e} match={match} />)}
+        </>
+      )}
+    </View>
+  );
 
   return (
     <View style={{ paddingHorizontal: 16, gap: 12 }}>
@@ -1475,24 +2021,19 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
         </>
       )}
 
-      {/* ── LIVE/FINISHED: existing layout ── */}
+      {/* ── LIVE / FINISHED: live+finished share most sections; order differs ── */}
       {!isScheduled && (
         <>
-          {/* Result info */}
-          {detail.resultInfo && match.status === 'finished' && (
-            <View style={[tl.resultBanner, { backgroundColor: c.card, borderColor: c.border }]}>
-              <Text style={{ fontSize: 16 }}>📋</Text>
-              <Text style={[tl.resultText, { color: c.textPrimary }]}>{detail.resultInfo}</Text>
-            </View>
-          )}
+          {/* ── Cronología — FIRST for finished, after stats for live ── */}
+          {isFinished && hasEvents && <TimelineBlock />}
 
-          {/* Quick stats */}
+          {/* Quick stats (possession bar + key numbers) */}
           <QuickStats match={match} detail={detail} />
 
-          {/* Pressure */}
+          {/* Pressure index */}
           {detail.pressureIndex && <PressureSection pressure={detail.pressureIndex} match={match} events={detail.events} />}
 
-          {/* Poll results (locked) */}
+          {/* Poll results (locked after match) */}
           <PollResultsSection match={match} />
 
           {/* Odds */}
@@ -1500,30 +2041,8 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
             <MomiosSection odds={detail.odds} match={match} />
           )}
 
-          {/* Events timeline */}
-          {hasEvents && (
-            <View style={[tl.card, { backgroundColor: c.card, borderColor: c.border }]}>
-              <View style={[tl.teamsHeader, { borderBottomColor: c.border }]}>
-                <Text style={[tl.teamLabel, { color: '#3b82f6' }]}>{match.homeTeam.shortName}</Text>
-                <Text style={[tl.cronLabel, { color: c.textTertiary }]}>Cronología</Text>
-                <Text style={[tl.teamLabel, { color: '#f97316', textAlign: 'right' }]}>{match.awayTeam.shortName}</Text>
-              </View>
-              {first.length > 0 && (
-                <>
-                  <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
-                    <Text style={[tl.halfSepText, { color: c.textTertiary }]}>1er Tiempo</Text>
-                  </View>
-                  {first.map(e => <EventRow key={e.id} event={e} match={match} />)}
-                </>
-              )}
-              {first.length > 0 && second.length > 0 && (
-                <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
-                  <Text style={[tl.halfSepText, { color: c.textTertiary }]}>2do Tiempo</Text>
-                </View>
-              )}
-              {second.map(e => <EventRow key={e.id} event={e} match={match} />)}
-            </View>
-          )}
+          {/* ── Cronología — for live matches (after stats) ── */}
+          {!isFinished && hasEvents && <TimelineBlock />}
 
           {/* H2H */}
           {detail.h2h && detail.h2h.results.length > 0 && (
@@ -1557,6 +2076,12 @@ const tl = StyleSheet.create({
   cronLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.3 },
   halfSep: { paddingVertical: 7, alignItems: 'center' },
   halfSepText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
-  resultBanner: { borderRadius: 14, borderWidth: 1, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
   resultText: { flex: 1, fontSize: 13, fontWeight: '500', lineHeight: 18 },
+  // Filter toggle
+  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1 },
+  filterBtn: { flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
+  filterBtnText: { fontSize: 12, fontWeight: '700', letterSpacing: 0.2 },
+  // Empty highlights state
+  emptyHighlights: { paddingVertical: 22, alignItems: 'center' },
+  emptyHighlightsText: { fontSize: 13, fontWeight: '500' },
 });
