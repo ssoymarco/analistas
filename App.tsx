@@ -11,6 +11,7 @@ import { NotificationPrefsProvider } from './src/contexts/NotificationPrefsConte
 import { OnboardingProvider } from './src/contexts/OnboardingContext';
 import { UserStatsProvider } from './src/contexts/UserStatsContext';
 import { NetworkProvider } from './src/contexts/NetworkContext';
+import { TimeFormatProvider } from './src/contexts/TimeFormatContext';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { initialize } from './src/services/notifications';
 import { navigateToMatch } from './src/utils/navigationRef';
@@ -116,18 +117,20 @@ export default function App() {
       <SafeAreaProvider>
         <NetworkProvider>
           <DarkModeProvider>
-            <AuthProvider>
-              <OnboardingProvider>
-                <NotificationPrefsProvider>
-                  <FavoritesProvider>
-                    <UserStatsProvider>
-                      <AppNavigator />
-                      <OfflineBanner />
-                    </UserStatsProvider>
-                  </FavoritesProvider>
-                </NotificationPrefsProvider>
-              </OnboardingProvider>
-            </AuthProvider>
+            <TimeFormatProvider>
+              <AuthProvider>
+                <OnboardingProvider>
+                  <NotificationPrefsProvider>
+                    <FavoritesProvider>
+                      <UserStatsProvider>
+                        <AppNavigator />
+                        <OfflineBanner />
+                      </UserStatsProvider>
+                    </FavoritesProvider>
+                  </NotificationPrefsProvider>
+                </OnboardingProvider>
+              </AuthProvider>
+            </TimeFormatProvider>
           </DarkModeProvider>
         </NetworkProvider>
       </SafeAreaProvider>

@@ -26,6 +26,8 @@ import { SkeletonLeagueDetail } from '../components/Skeleton';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useLeagueDetail } from '../hooks/useLeagueDetail';
+import { useCupBracket } from '../hooks/useCupBracket';
+import { CupBracketView } from '../components/CupBracketView';
 import type {
   LeagueDetailData,
   LeagueStandingRow,
@@ -37,33 +39,13 @@ import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { getLeagueConfig } from '../config/leagues';
 import type { LeagueZone } from '../config/leagues';
 import type { Match, MatchStatus } from '../data/types';
+import { BackArrow, ShareIcon } from '../components/NavIcons';
+import { useTimeFormat } from '../contexts/TimeFormatContext';
+import { formatUtcTime } from '../utils/formatMatchTime';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'LeagueDetail'>;
-type Tab = 'clasificacion' | 'goleadores' | 'equipos' | 'calendario';
+type Tab = 'clasificacion' | 'goleadores' | 'asistencias' | 'tarjetas' | 'equipos' | 'calendario';
 
-// ── Icon: Back arrow ────────────────────────────────────────────────────────
-function BackArrow({ color }: { color: string }) {
-  return (
-    <View style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ position: 'absolute', top: 4, left: 2, width: 9, height: 1.8, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '-45deg' }] }} />
-      <View style={{ position: 'absolute', bottom: 4, left: 2, width: 9, height: 1.8, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '45deg' }] }} />
-    </View>
-  );
-}
-
-// ── Icon: Share ─────────────────────────────────────────────────────────────
-function ShareIcon({ color, size = 18 }: { color: string; size?: number }) {
-  const dotR = size * 0.15;
-  return (
-    <View style={{ width: size, height: size }}>
-      <View style={{ position: 'absolute', top: 0, right: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      <View style={{ position: 'absolute', top: size * 0.36, left: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      <View style={{ position: 'absolute', bottom: 0, right: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      <View style={{ position: 'absolute', top: size * 0.18, left: size * 0.18, width: size * 0.52, height: 1.5, backgroundColor: color, transform: [{ rotate: '-25deg' }] }} />
-      <View style={{ position: 'absolute', top: size * 0.62, left: size * 0.18, width: size * 0.52, height: 1.5, backgroundColor: color, transform: [{ rotate: '25deg' }] }} />
-    </View>
-  );
-}
 
 // ── Icon: Chevron right ─────────────────────────────────────────────────────
 function ChevronRight({ color, size = 12 }: { color: string; size?: number }) {
@@ -107,10 +89,6 @@ function formatDate(dateStr: string, t: (key: string, opts?: any) => any): strin
   return `${day} ${months[d.getMonth()]}`;
 }
 
-function formatTime(dateStr: string): string {
-  const d = new Date(dateStr);
-  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TAB: Clasificación
@@ -383,6 +361,98 @@ const gs = StyleSheet.create({
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// TAB: Asistencias / Tarjetas (generic stat list — reuses GoleadoresTab layout)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const StatListTab: React.FC<{ data: LeagueDetailData; type: 'assists' | 'cards' }> = ({ data, type }) => {
+  const c = useThemeColors();
+  const { t } = useTranslation();
+  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
+
+  const rows    = type === 'assists' ? data.topAssists : data.topCards;
+  const title   = type === 'assists' ? t('league.assistsTitle')  : t('league.cardsTitle');
+  const hStat   = type === 'assists' ? t('league.assistsHeader') : t('league.cardsHeader');
+  const emptyTx = type === 'assists' ? t('league.noAssists')     : t('league.noCards');
+  const badgeColor = type === 'assists' ? '#10b981' : '#f59e0b'; // emerald / amber
+
+  if (rows.length === 0) {
+    return (
+      <View style={gs.outer}>
+        <View style={[gs.card, { backgroundColor: c.card, borderColor: c.border }]}>
+          <Text style={[gs.empty, { color: c.textTertiary }]}>{emptyTx}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={gs.outer}>
+      <View style={[gs.card, { backgroundColor: c.card, borderColor: c.border }]}>
+        <Text style={[gs.title, { color: c.textPrimary }]}>{title}</Text>
+
+        {/* Header */}
+        <View style={[gs.headerRow, { borderBottomColor: c.border }]}>
+          <Text style={[gs.hPos, { color: c.textTertiary }]}>#</Text>
+          <View style={{ width: 32 }} />
+          <View style={gs.hNameWrap}>
+            <Text style={[gs.hText, { color: c.textTertiary }]}>{t('league.playerHeader')}</Text>
+          </View>
+          <Text style={[gs.hGoals, { color: c.textTertiary }]}>{hStat}</Text>
+        </View>
+
+        {rows.map((row, i) => {
+          const isTop3 = row.position <= 3;
+          const posColor = row.position === 1 ? '#fbbf24' : row.position === 2 ? '#94a3b8' : row.position === 3 ? '#d97706' : c.textTertiary;
+
+          return (
+            <TouchableOpacity
+              key={`${row.playerId}-${i}`}
+              style={[gs.row, { borderBottomColor: c.border }]}
+              activeOpacity={0.7}
+              onPress={() => navigation.push('PlayerDetail', {
+                playerId: row.playerId,
+                playerName: row.playerName,
+                playerImage: row.playerImage,
+                teamName: row.teamName,
+                teamLogo: row.teamLogo,
+              })}
+            >
+              <Text style={[gs.pos, { color: posColor, fontWeight: isTop3 ? '900' : '700' }]}>
+                {row.position}
+              </Text>
+              <View style={gs.avatarWrap}>
+                {row.playerImage?.startsWith('http') ? (
+                  <Image source={{ uri: row.playerImage }} style={gs.avatar} resizeMode="cover" />
+                ) : (
+                  <View style={[gs.avatar, { backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }]}>
+                    <Text style={{ fontSize: 14 }}>👤</Text>
+                  </View>
+                )}
+              </View>
+              <View style={gs.nameWrap}>
+                <Text style={[gs.name, { color: c.textPrimary }]} numberOfLines={1}>{row.playerName}</Text>
+                {row.teamName ? (
+                  <View style={gs.teamRow}>
+                    {row.teamLogo?.startsWith('http') && (
+                      <Image source={{ uri: row.teamLogo }} style={gs.teamMiniLogo} resizeMode="contain" />
+                    )}
+                    <Text style={[gs.teamName, { color: c.textTertiary }]} numberOfLines={1}>{row.teamName}</Text>
+                  </View>
+                ) : null}
+              </View>
+              <View style={[gs.goalsBadge, { backgroundColor: isTop3 ? badgeColor + '22' : c.surface }]}>
+                <Text style={[gs.goalsValue, { color: isTop3 ? badgeColor : c.textPrimary }]}>{row.goals}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <View style={{ height: 16 }} />
+    </View>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
 // TAB: Equipos
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -537,6 +607,7 @@ function fixtureToMatch(f: LeagueFixture, leagueName: string, leagueLogo: string
 const CalendarioTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
+  const { timeFormat } = useTimeFormat();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const { fixtures, leagueName, leagueLogo } = data;
 
@@ -603,7 +674,7 @@ const FixtureRow: React.FC<{ fixture: LeagueFixture; onPress?: () => void }> = (
       <View style={ca.dateCol}>
         <Text style={[ca.dateText, { color: c.textTertiary }]}>{formatDate(f.date, t)}</Text>
         <Text style={[ca.timeText, { color: isLive ? '#ef4444' : c.textTertiary }]}>
-          {isLive ? t('league.live') : isFinished ? 'FT' : formatTime(f.date)}
+          {isLive ? t('league.live') : isFinished ? 'FT' : formatUtcTime(f.date, timeFormat)}
         </Text>
       </View>
 
@@ -672,14 +743,23 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
 
   const { data, loading } = useLeagueDetail(leagueId, leagueName, leagueLogo, seasonId);
 
+  const leagueConfig = getLeagueConfig(leagueId);
+  const isCup = leagueConfig?.isCup ?? false;
+
+  // Cup bracket — only fetched when the league is a cup competition
+  const cupSeasonId = isCup ? (data?.seasonId ?? leagueConfig?.currentSeasonId ?? null) : null;
+  const { rounds: cupRounds, loading: bracketLoading } = useCupBracket(cupSeasonId);
+
   const isFollowing = isFollowingLeague(String(leagueId));
 
   // ── Tabs ──
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'clasificacion', label: t('league.standingsTab') },
-    { key: 'goleadores', label: t('league.scorersTab') },
-    { key: 'equipos', label: t('league.teamsTab') },
-    { key: 'calendario', label: t('league.calendarTab') },
+    { key: 'clasificacion', label: isCup ? t('cup.bracket') : t('league.standingsTab') },
+    { key: 'goleadores',    label: t('league.scorersTab') },
+    { key: 'asistencias',  label: t('league.assistsTab') },
+    { key: 'tarjetas',     label: t('league.cardsTab') },
+    { key: 'equipos',      label: t('league.teamsTab') },
+    { key: 'calendario',   label: t('league.calendarTab') },
   ];
   const [activeTab, setActiveTab] = useState<Tab>('clasificacion');
 
@@ -738,13 +818,11 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
           <BackArrow color={hText} />
         </TouchableOpacity>
 
-        {/* Compact center — appears on scroll */}
-        {showCompact && (
-          <View style={s.compactCenter}>
-            {displayFlag ? <Text style={{ fontSize: 15 }}>{displayFlag}</Text> : null}
-            <Text style={[s.compactName, { color: hText }]} numberOfLines={1}>{displayName}</Text>
-          </View>
-        )}
+        {/* Compact center — always rendered as spacer; content appears on scroll */}
+        <View style={s.compactCenter}>
+          {showCompact && displayFlag ? <Text style={{ fontSize: 15 }}>{displayFlag}</Text> : null}
+          {showCompact ? <Text style={[s.compactName, { color: hText }]} numberOfLines={1}>{displayName}</Text> : null}
+        </View>
 
         <TouchableOpacity style={[s.actionBtn, { backgroundColor: hBtnBg }]} onPress={handleShare} activeOpacity={0.7}>
           <ShareIcon color={hText} size={16} />
@@ -822,21 +900,19 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
           </TouchableOpacity>
         </View>
 
-        {/* ── Tab bar (sticky) ── */}
+        {/* ── Tab bar (sticky, scrollable) ── */}
         <View style={[s.tabBar, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
           <ScrollView
             horizontal
-            scrollEnabled={false}
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ flexDirection: 'row', width: SCREEN_WIDTH }}
+            contentContainerStyle={s.tabBarContent}
           >
             {TABS.map(tab => {
               const active = activeTab === tab.key;
               return (
                 <TouchableOpacity
                   key={tab.key}
-                  style={[s.tab, { width: SCREEN_WIDTH / TABS.length },
-                    active && { borderBottomColor: c.accent, borderBottomWidth: 2 }]}
+                  style={[s.tab, active && { borderBottomColor: c.accent, borderBottomWidth: 2 }]}
                   onPress={() => setActiveTab(tab.key)}
                   activeOpacity={0.7}
                 >
@@ -852,8 +928,24 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
         {/* ── Tab content ── */}
         <View style={s.tabContent}>
           {data ? (
-            activeTab === 'clasificacion' ? <ClasificacionTab data={data} /> :
+            activeTab === 'clasificacion' ? (
+              isCup ? (
+                bracketLoading
+                  ? <ActivityIndicator style={{ marginTop: 48 }} color={c.accent} />
+                  : cupRounds.length > 0
+                    ? <CupBracketView
+                        rounds={cupRounds}
+                        leagueName={displayName}
+                        seasonStr={data.seasonName}
+                      />
+                    : <View style={s.loadingWrap}>
+                        <Text style={[s.loadingText, { color: c.textTertiary }]}>{t('cup.bracketUnavailable')}</Text>
+                      </View>
+              ) : <ClasificacionTab data={data} />
+            ) :
             activeTab === 'goleadores'    ? <GoleadoresTab data={data} /> :
+            activeTab === 'asistencias'   ? <StatListTab data={data} type="assists" /> :
+            activeTab === 'tarjetas'      ? <StatListTab data={data} type="cards" /> :
             activeTab === 'equipos'       ? <EquiposTab data={data} /> :
             activeTab === 'calendario'    ? <CalendarioTab data={data} /> :
             null
@@ -923,16 +1015,21 @@ const s = StyleSheet.create({
   },
   followText: { fontSize: 14, fontWeight: '700' },
 
-  // Tab bar
+  // Tab bar (scrollable)
   tabBar: {
-    flexDirection: 'row', borderBottomWidth: 1,
+    borderBottomWidth: 1,
+  },
+  tabBarContent: {
+    flexDirection: 'row',
     paddingHorizontal: 8,
   },
   tab: {
-    flex: 1, alignItems: 'center',
-    paddingVertical: 12, paddingBottom: 10,
+    alignItems: 'center',
+    paddingVertical: 11,
+    paddingHorizontal: 18,
+    paddingBottom: 9,
   },
-  tabText: { fontSize: 13, fontWeight: '700' },
+  tabText: { fontSize: 13, fontWeight: '700', letterSpacing: 0.1 },
 
   tabContent: { paddingTop: 14 },
 });

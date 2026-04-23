@@ -25,6 +25,7 @@ import { useUserStats } from '../contexts/UserStatsContext';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFixtureDetail } from '../hooks/useFixtureDetail';
 import { useCountdown } from '../hooks/useCountdown';
+import { useLiveTick, computeLiveMinuteSeconds, formatLiveClock } from '../hooks/useLiveTick';
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { getLeagueConfig }  from '../config/leagues';
@@ -34,25 +35,19 @@ import { AlineacionTab }    from './matchDetail/AlineacionTab';
 import { TablaTab }         from './matchDetail/TablaTab';
 import { NoticiasTab }      from './matchDetail/NoticiasTab';
 import { EstadisticasTab }  from './matchDetail/EstadisticasTab';
+import { BackArrow, ShareIcon } from '../components/NavIcons';
+import { useTimeFormat } from '../contexts/TimeFormatContext';
+import { formatMatchTime } from '../utils/formatMatchTime';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'MatchDetail'>;
 type Tab  = 'previa' | 'alineacion' | 'estadisticas' | 'tabla' | 'noticias';
 
 // ── Animation constants ──────────────────────────────────────────────────────
-const HERO_EXPANDED  = 175;
+const HERO_EXPANDED  = 205;
 const HERO_COMPACT   = 64;
 const COLLAPSE_RANGE = 110;
 const SCROLL_TOP_THRESHOLD = 400;
 
-// ── Icon: Back chevron ───────────────────────────────────────────────────────
-function BackArrow({ color }: { color: string }) {
-  return (
-    <View style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ position: 'absolute', top: 4, left: 2, width: 9, height: 1.8, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '-45deg' }] }} />
-      <View style={{ position: 'absolute', bottom: 4, left: 2, width: 9, height: 1.8, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '45deg' }] }} />
-    </View>
-  );
-}
 
 // ── Icon: Bell ───────────────────────────────────────────────────────────────
 function BellIcon({ size = 18 }: { size?: number }) {
@@ -101,33 +96,6 @@ function BellIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-// ── Icon: Share (node) ───────────────────────────────────────────────────────
-function ShareNodeIcon({ color, size = 18 }: { color: string; size?: number }) {
-  const s = size;
-  const dotR = s * 0.15;
-  return (
-    <View style={{ width: s, height: s }}>
-      {/* Top-right dot */}
-      <View style={{ position: 'absolute', top: 0, right: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      {/* Middle-left dot */}
-      <View style={{ position: 'absolute', top: s * 0.36, left: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      {/* Bottom-right dot */}
-      <View style={{ position: 'absolute', bottom: 0, right: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      {/* Line top */}
-      <View style={{
-        position: 'absolute', top: s * 0.18, left: s * 0.18,
-        width: s * 0.52, height: 1.5, backgroundColor: color,
-        transform: [{ rotate: '-25deg' }],
-      }} />
-      {/* Line bottom */}
-      <View style={{
-        position: 'absolute', top: s * 0.62, left: s * 0.18,
-        width: s * 0.52, height: 1.5, backgroundColor: color,
-        transform: [{ rotate: '25deg' }],
-      }} />
-    </View>
-  );
-}
 
 // ── Icon: Clock ──────────────────────────────────────────────────────────────
 function ClockIcon({ color, size = 14 }: { color: string; size?: number }) {
@@ -169,7 +137,9 @@ function UpChevron({ color }: { color: string }) {
 function TeamBadge({ name, logo, size = 80 }: { name: string; logo: string; size?: number }) {
   const isUrl = logo.startsWith('http');
   const hue = name.charCodeAt(0) * 37 % 360;
-  const bg  = `hsl(${hue}, 40%, 18%)`;
+  // Real logo → transparent container (logo is self-contained)
+  // Fallback text/emoji → colored pill so the initials are legible
+  const bg  = isUrl ? 'transparent' : `hsl(${hue}, 40%, 18%)`;
   const fg  = `hsl(${hue}, 70%, 70%)`;
   const init = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   return (
@@ -178,7 +148,7 @@ function TeamBadge({ name, logo, size = 80 }: { name: string; logo: string; size
       backgroundColor: bg, alignItems: 'center', justifyContent: 'center',
     }}>
       {isUrl
-        ? <Image source={{ uri: logo }} style={{ width: size * 0.72, height: size * 0.72 }} resizeMode="contain" />
+        ? <Image source={{ uri: logo }} style={{ width: size * 0.92, height: size * 0.92 }} resizeMode="contain" />
         : logo.length <= 2
           ? <Text style={{ fontSize: size * 0.4 }}>{logo}</Text>
           : <Text style={{ fontWeight: '800', color: fg, fontSize: size * 0.27 }}>{init}</Text>
@@ -191,7 +161,7 @@ function TeamBadge({ name, logo, size = 80 }: { name: string; logo: string; size
 function TeamBadgeSmall({ name, logo, size = 32 }: { name: string; logo: string; size?: number }) {
   const isUrl = logo.startsWith('http');
   const hue = name.charCodeAt(0) * 37 % 360;
-  const bg  = `hsl(${hue}, 40%, 18%)`;
+  const bg  = isUrl ? 'transparent' : `hsl(${hue}, 40%, 18%)`;
   const fg  = `hsl(${hue}, 70%, 70%)`;
   const init = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   return (
@@ -200,7 +170,7 @@ function TeamBadgeSmall({ name, logo, size = 32 }: { name: string; logo: string;
       backgroundColor: bg, alignItems: 'center', justifyContent: 'center',
     }}>
       {isUrl
-        ? <Image source={{ uri: logo }} style={{ width: size * 0.75, height: size * 0.75 }} resizeMode="contain" />
+        ? <Image source={{ uri: logo }} style={{ width: size * 0.92, height: size * 0.92 }} resizeMode="contain" />
         : logo.length <= 2
           ? <Text style={{ fontSize: size * 0.42 }}>{logo}</Text>
           : <Text style={{ fontWeight: '800', color: fg, fontSize: 9 }}>{init}</Text>
@@ -218,6 +188,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const { match } = route.params;
   const c         = useThemeColors();
   const { isDark } = useDarkMode();
+  const { timeFormat } = useTimeFormat();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const scrollRef  = useRef<any>(null);
 
@@ -240,24 +211,15 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     : isMatchEstadio(match.id);
   const countdown = useCountdown(isScheduled ? match.startingAtUtc : undefined);
 
-  // ── Local seconds clock ────────────────────────────────────────────────────
-  // SportMonks only provides the minute, not seconds. We simulate seconds
-  // locally: reset to 0 each time match.minute advances, then count up at 1 Hz.
-  const [localSeconds, setLocalSeconds] = useState(0);
-  const prevMinuteRef = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    if (!isLive || match.stateLabel === 'HT') { setLocalSeconds(0); return; }
-    if (match.minute !== prevMinuteRef.current) {
-      prevMinuteRef.current = match.minute;
-      setLocalSeconds(0);
-    }
-    const id = setInterval(() => setLocalSeconds(s => Math.min(s + 1, 59)), 1000);
-    return () => clearInterval(id);
-  }, [isLive, match.minute, match.stateLabel]);
-  // Formatted live clock: "48:23'" — falls back to match.time if no minute
-  const liveClock = isLive && match.stateLabel !== 'HT' && match.minute != null
-    ? `${match.minute}:${String(localSeconds).padStart(2, '0')}'`
-    : null;
+  // ── Centralized live clock ─────────────────────────────────────────────────
+  // Previously we ran a local `setInterval` here that reset to 0 on every
+  // mount AND every time `minute` advanced — that's why seconds restarted from
+  // 00 whenever you navigated in/out of a match. Now we derive minute/seconds
+  // from the shared `useLiveTick()` + the server anchor (`displayMatch.liveClock`)
+  // so the clock stays in sync with the Partidos list and survives navigation.
+  const tickNow = useLiveTick(isLive);
+  const liveDisplay = isLive ? computeLiveMinuteSeconds(displayMatch, tickNow) : null;
+  const liveClock = liveDisplay ? formatLiveClock(liveDisplay) : null;
 
   // Track match view (once per unique match)
   useEffect(() => { incrementMatchesViewed(match.id); }, [match.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -366,6 +328,42 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     scrollRef.current?.getNode?.()?.scrollTo?.({ y: 0, animated: true });
   }, []);
 
+  // ── Scorers summary (goals only, grouped by player) ───────────────────────
+  const scorerLines = useMemo(() => {
+    if (isScheduled) return { home: [], away: [] };
+    const goals = (detail?.events ?? [])
+      .filter(e => e.type === 'goal' || e.type === 'own-goal' || e.type === 'penalty-goal')
+      .sort((a, b) => a.minute - b.minute);
+
+    // "Guillermo Martínez Ayala" → "Martínez"
+    const firstLastName = (name: string) => {
+      const parts = name.trim().split(/\s+/);
+      return parts.length >= 2 ? parts[1] : parts[0];
+    };
+
+    const build = (side: 'home' | 'away') => {
+      const sideGoals = goals.filter(g => g.team === side);
+      const byPlayer = new Map<string, number[]>();
+      for (const g of sideGoals) {
+        if (!byPlayer.has(g.player)) byPlayer.set(g.player, []);
+        byPlayer.get(g.player)!.push(g.minute);
+      }
+      const seen = new Set<string>();
+      return sideGoals.reduce<string[]>((acc, g) => {
+        if (seen.has(g.player)) return acc;
+        seen.add(g.player);
+        const mins = byPlayer.get(g.player)!.map(m => `${m}'`).join(', ');
+        const suffix = g.type === 'own-goal' ? ' (pp)' : '';
+        acc.push(`${firstLastName(g.player)}${suffix} ${mins}`);
+        return acc;
+      }, []);
+    };
+
+    return { home: build('home'), away: build('away') };
+  }, [detail?.events, isScheduled]);
+
+  const hasScorers = scorerLines.home.length > 0 || scorerLines.away.length > 0;
+
   // ── Header colors ──────────────────────────────────────────────────────────
   const headerBg       = c.bg;
   const hText          = isDark ? '#fff' : '#111827';
@@ -375,9 +373,19 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const hCapsuleBg     = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)';
 
   // ── Display values — use liveMatch (API-fresh) when available ─────────────
-  const displayTime = displayMatch.time;
-  const displayDate = displayMatch.date;
-  const compactScoreText = isScheduled ? displayMatch.time : `${displayMatch.homeScore} - ${displayMatch.awayScore}`;
+  const displayTime = formatMatchTime(displayMatch.time, timeFormat);
+  const displayDate = (() => {
+    // Format "YYYY-MM-DD" → "Jue, 21 abr" using i18n locale arrays
+    const [y, m, d] = displayMatch.date.split('-').map(Number);
+    if (!y || !m || !d) return displayMatch.date;
+    const dt = new Date(y, m - 1, d);
+    const daysShort   = t('dates.daysShort',   { returnObjects: true }) as string[];
+    const monthsShort = t('dates.monthsShort', { returnObjects: true }) as string[];
+    const dayName  = daysShort[dt.getDay()];
+    const monthStr = monthsShort[m - 1];
+    return `${dayName} ${d} ${monthStr}`;
+  })();
+  const compactScoreText = isScheduled ? displayTime : `${displayMatch.homeScore} - ${displayMatch.awayScore}`;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
@@ -435,7 +443,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
             <Text style={{ fontSize: 15, opacity: matchEstadioActive ? 1 : 0.5 }}>🏟️</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[scr.navBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7}>
-            <ShareNodeIcon color={hText} size={16} />
+            <ShareIcon color={hText} size={16} />
           </TouchableOpacity>
         </View>
 
@@ -449,9 +457,9 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               <View style={scr.livePill}>
                 <View style={scr.liveDot} />
                 <Text style={scr.livePillText}>
-                  {match.stateLabel === 'HT'
+                  {displayMatch.stateLabel === 'HT'
                     ? t('matchStatus.halfTimeLong')
-                    : `EN VIVO · ${liveClock ?? `${match.minute ?? match.time}'`}`}
+                    : `EN VIVO · ${liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`}`}
                 </Text>
               </View>
             )}
@@ -524,8 +532,10 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                       <Text style={[scr.scoreDash, { color: hTextMuted }]}>–</Text>
                       <Text style={[scr.score, { color: hText }]}>{displayMatch.awayScore}</Text>
                     </View>
-                    {displayMatch.homeScoreHT !== undefined && displayMatch.awayScoreHT !== undefined && (
-                      <Text style={[scr.htLabel, { color: hTextSoft }]}>MT: {displayMatch.homeScoreHT}–{displayMatch.awayScoreHT}</Text>
+                    {detail?.aggregateScore && (
+                      <Text style={[scr.aggregateLabel, { color: hTextSoft }]}>
+                        ({detail.aggregateScore.home}-{detail.aggregateScore.away} {t('matches.aggregateAbbr')})
+                      </Text>
                     )}
                   </>
                 )}
@@ -551,6 +561,23 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{match.awayTeam.name}</Text>
               </TouchableOpacity>
             </View>
+
+            {/* ── Scorers summary ── */}
+            {hasScorers && (
+              <View style={scr.scorersRow}>
+                <View style={scr.scorersSide}>
+                  {scorerLines.home.map((line, i) => (
+                    <Text key={i} style={[scr.scorerLine, { color: hTextSoft, textAlign: 'right' }]} numberOfLines={1}>{line}</Text>
+                  ))}
+                </View>
+                <Text style={scr.scorersBall}>⚽</Text>
+                <View style={scr.scorersSide}>
+                  {scorerLines.away.map((line, i) => (
+                    <Text key={i} style={[scr.scorerLine, { color: hTextSoft, textAlign: 'left' }]} numberOfLines={1}>{line}</Text>
+                  ))}
+                </View>
+              </View>
+            )}
           </Animated.View>
 
           {/* ── COMPACT view ── */}
@@ -565,9 +592,9 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
             </View>
             <Text style={[scr.compactDate, { color: hTextSoft }]}>
               {isLive
-                ? match.stateLabel === 'HT'
+                ? displayMatch.stateLabel === 'HT'
                   ? t('matchStatus.halfTimeLong')
-                  : liveClock ?? `${match.minute ?? match.time}'`
+                  : liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`
                 : isFinished
                 ? 'Finalizado'
                 : displayDate}
@@ -651,7 +678,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
             {activeTab === 'previa' && !isScheduled && <EnVivoTab     match={match} detail={detail} />}
             {activeTab === 'alineacion'   && <AlineacionTab    match={match} detail={detail} />}
             {activeTab === 'estadisticas' && <EstadisticasTab  match={match} detail={detail} />}
-            {activeTab === 'tabla'        && <TablaTab         match={match} detail={detail} onCupDetected={handleCupDetected} />}
+            {activeTab === 'tabla'        && <TablaTab         match={displayMatch} detail={detail} onCupDetected={handleCupDetected} />}
             {activeTab === 'noticias'     && <NoticiasTab      match={match} detail={detail} />}
           </>
         )}
@@ -801,7 +828,7 @@ const scr = StyleSheet.create({
   scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   score: { fontSize: 36, fontWeight: '900', color: '#fff', lineHeight: 42 },
   scoreDash: { fontSize: 22, fontWeight: '300', color: 'rgba(255,255,255,0.4)', lineHeight: 42 },
-  htLabel: { fontSize: 10, fontWeight: '500', color: 'rgba(255,255,255,0.5)' },
+  aggregateLabel: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.6)', marginTop: 2, letterSpacing: 0.3 },
 
   // ── Compact hero ──
   heroCompact: {
@@ -876,5 +903,25 @@ const scr = StyleSheet.create({
   },
   scrollTopText: {
     fontSize: 13, fontWeight: '700', color: '#fff',
+  },
+
+  // Scorers summary row
+  scorersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 8,
+    gap: 8,
+  },
+  scorersSide: {
+    flex: 1,
+  },
+  scorersBall: {
+    fontSize: 13,
+  },
+  scorerLine: {
+    fontSize: 10,
+    fontWeight: '500',
+    lineHeight: 15,
   },
 });

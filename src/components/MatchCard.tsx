@@ -10,6 +10,9 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { AnimatedPressable } from './AnimatedPressable';
+import { useLiveTick, computeLiveMinuteSeconds, formatLiveMinute } from '../hooks/useLiveTick';
+import { useTimeFormat } from '../contexts/TimeFormatContext';
+import { formatMatchTime } from '../utils/formatMatchTime';
 import type { Match } from '../data/types';
 
 /** Renders a team logo — Image if URL, Text if emoji/short string */
@@ -19,7 +22,7 @@ const TeamLogo = ({ logo, size = 24 }: { logo: string; size?: number }) => {
     return (
       <Image
         source={{ uri: logo }}
-        style={{ width: size, height: size, borderRadius: size / 2 }}
+        style={{ width: size, height: size, borderRadius: 3 }}
         resizeMode="contain"
       />
     );
@@ -35,6 +38,7 @@ interface MatchCardProps {
 export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
+  const { timeFormat } = useTimeFormat();
 
   const isLive      = match.status === 'live';
   const isFinished  = match.status === 'finished';
@@ -42,6 +46,13 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
 
   const homeWon = isFinished && match.homeScore > match.awayScore;
   const awayWon = isFinished && match.awayScore > match.homeScore;
+
+  // Shared 1-Hz tick — advances the minute locally between API polls so the
+  // list view never freezes at the minute it was first loaded. We only
+  // subscribe for live matches so finished/scheduled cards don't re-render.
+  const now = useLiveTick(isLive);
+  const liveDisplay = isLive ? computeLiveMinuteSeconds(match, now) : null;
+  const liveMinuteLabel = liveDisplay ? (formatLiveMinute(liveDisplay) ?? match.time) : match.time;
 
   return (
     <AnimatedPressable
@@ -60,13 +71,14 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
           >
             {match.homeTeam.name}
           </Text>
+          {!!match.homeRedCards && <RedCards count={match.homeRedCards} />}
         </View>
 
         {/* Score / Time (center) */}
         <View style={s.center}>
           {isScheduled ? (
             <View style={[s.timePill, { backgroundColor: c.surface }]}>
-              <Text style={[s.timePillText, { color: c.textSecondary }]}>{match.time}</Text>
+              <Text style={[s.timePillText, { color: c.textSecondary }]}>{formatMatchTime(match.time, timeFormat)}</Text>
             </View>
           ) : (
             <View style={s.scoreRow}>
@@ -81,7 +93,7 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
           )}
           {isLive && (
             <Text style={s.liveMin}>
-              {match.stateLabel === 'HT' ? t('matchStatus.halfTime') : match.time}
+              {match.stateLabel === 'HT' ? t('matchStatus.halfTime') : liveMinuteLabel}
             </Text>
           )}
           {isFinished && <Text style={[s.ftLabel, { color: c.textTertiary }]}>Final</Text>}
@@ -89,6 +101,7 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
 
         {/* Away team (right) */}
         <View style={s.teamRight}>
+          {!!match.awayRedCards && <RedCards count={match.awayRedCards} />}
           <Text
             style={[s.teamName, s.teamNameRight, { color: c.textPrimary }, awayWon && s.teamNameBold]}
             numberOfLines={1}
@@ -106,6 +119,15 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
     </AnimatedPressable>
   );
 };
+
+// Red card indicator — one small rectangle per expelled player
+const RedCards = ({ count }: { count: number }) => (
+  <View style={s.redCardsWrap}>
+    {Array.from({ length: count }).map((_, i) => (
+      <View key={i} style={[s.redCard, i > 0 && s.redCardStacked]} />
+    ))}
+  </View>
+);
 
 // Live pulse dot
 const LivePulse = ({ color }: { color: string }) => {
@@ -244,6 +266,23 @@ const s = StyleSheet.create({
     backgroundColor: '#f87171',
     borderRadius: 1,
     transform: [{ rotate: '-45deg' }],
+  },
+
+  // Red cards
+  redCardsWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    flexShrink: 0,
+  },
+  redCard: {
+    width: 7,
+    height: 10,
+    borderRadius: 1.5,
+    backgroundColor: '#ef4444',
+  },
+  redCardStacked: {
+    marginLeft: -3,
   },
 
   // Live pulse

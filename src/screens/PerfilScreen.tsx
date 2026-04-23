@@ -24,6 +24,7 @@ import { scheduleLocalNotification } from '../services/notifications';
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useTranslation } from 'react-i18next';
 import i18n, { LANGUAGE_STORAGE_KEY } from '../i18n';
+import { useTimeFormat } from '../contexts/TimeFormatContext';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getInitials(name: string) {
@@ -296,7 +297,7 @@ export const PerfilScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   useEffect(() => { const t = setTimeout(() => setLoading(false), 400); return () => clearTimeout(t); }, []);
   const [showNameInHeader, setShowNameInHeader] = useState(false);
-  const [timeFormat, setTimeFormat] = useState<'24h' | '12h'>('24h');
+  const { timeFormat, setTimeFormat } = useTimeFormat();
   const [momiosEnabled, setMomiosEnabled] = useState(true);
   const [selectedLang, setSelectedLang] = useState(i18n.language || 'es');
   const [streakModalVisible, setStreakModalVisible] = useState(false);
@@ -527,7 +528,7 @@ export const PerfilScreen: React.FC = () => {
           <MenuRow c={c} emoji="🔔" label={t('profile.notifications')} iconBg="rgba(249,115,22,0.15)" />
           <MenuRow c={c} emoji={isDark ? '🌙' : '☀️'} label={t('profile.appearance')} sublabel={isDark ? t('profile.darkMode') : t('profile.lightMode')} iconBg={isDark ? 'rgba(99,102,241,0.15)' : 'rgba(234,179,8,0.15)'} rightElement={<CustomToggle value={isDark} onToggle={toggleDark} activeColor={isDark ? '#6366f1' : '#eab308'} icon={isDark ? '🌙' : '☀️'} />} />
           <MenuRow c={c} emoji="🕐" label={t('profile.timeFormat')} sublabel={timeFormat === '24h' ? '14:30' : '2:30 PM'} iconBg="rgba(6,182,212,0.15)" rightElement={
-            <TouchableOpacity style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: 'rgba(6,182,212,0.15)', borderWidth: 1, borderColor: 'rgba(6,182,212,0.2)' }} onPress={() => { haptics.selection(); setTimeFormat(f => f === '24h' ? '12h' : '24h'); }} activeOpacity={0.7}>
+            <TouchableOpacity style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: 'rgba(6,182,212,0.15)', borderWidth: 1, borderColor: 'rgba(6,182,212,0.2)' }} onPress={() => { haptics.selection(); setTimeFormat(timeFormat === '24h' ? '12h' : '24h'); }} activeOpacity={0.7}>
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#06b6d4' }}>{timeFormat}</Text>
             </TouchableOpacity>
           } />
