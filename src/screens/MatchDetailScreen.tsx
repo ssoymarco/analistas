@@ -272,9 +272,13 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   // ── Animated hero ──────────────────────────────────────────────────────────
   const scrollY = useRef(new Animated.Value(0)).current;
 
+  // Dynamic expanded height — measured from actual content via onLayout.
+  // Falls back to HERO_EXPANDED until the first layout fires.
+  const [heroExpandedH, setHeroExpandedH] = useState(HERO_EXPANDED);
+
   const heroHeight = scrollY.interpolate({
     inputRange: [0, COLLAPSE_RANGE],
-    outputRange: [HERO_EXPANDED, HERO_COMPACT],
+    outputRange: [heroExpandedH, HERO_COMPACT],
     extrapolate: 'clamp',
   });
   const expandedOpacity = scrollY.interpolate({
@@ -451,7 +455,13 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
         <Animated.View style={[scr.heroWrap, { height: heroHeight, overflow: 'hidden' }]}>
 
           {/* ── EXPANDED view ── */}
-          <Animated.View style={[scr.heroExpanded, { opacity: expandedOpacity }]}>
+          <Animated.View
+            style={[scr.heroExpanded, { opacity: expandedOpacity }]}
+            onLayout={(e) => {
+              const h = Math.ceil(e.nativeEvent.layout.height);
+              if (h > HERO_COMPACT) setHeroExpandedH(h);
+            }}
+          >
             {/* Live pill */}
             {isLive && (
               <View style={scr.livePill}>
@@ -778,6 +788,7 @@ const scr = StyleSheet.create({
     top: 0, left: 0, right: 0,
     alignItems: 'center',
     paddingHorizontal: 16,
+    paddingBottom: 12,
     gap: 10,
   },
   livePill: {
