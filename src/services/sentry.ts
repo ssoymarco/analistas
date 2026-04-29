@@ -13,7 +13,7 @@
 
 import * as Sentry from '@sentry/react-native';
 
-const SENTRY_DSN = 'YOUR_SENTRY_DSN_HERE'; // ← replace with your DSN
+const SENTRY_DSN = 'https://4b909e1e1c12141e4efc1c001335f321@o4511302084460544.ingest.us.sentry.io/4511302091407360';
 
 export function initSentry(): void {
   // Don't crash the app if DSN hasn't been set yet
