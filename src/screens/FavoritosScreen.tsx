@@ -159,6 +159,17 @@ function abbrev(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
+/** Remove duplicate items keeping the first occurrence (by smId, else by id) */
+function deduplicateItems(items: FavItem[]): FavItem[] {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const eid = item.smId ? String(item.smId) : item.id;
+    if (seen.has(eid)) return false;
+    seen.add(eid);
+    return true;
+  });
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 /** Round avatar — image if available, initials fallback */
@@ -463,7 +474,7 @@ export const FavoritosScreen: React.FC = () => {
         image: t.logo?.startsWith('http') ? t.logo : undefined,
         seasonId: t.seasonId,
       }));
-    return [...popular, ...extras];
+    return deduplicateItems([...popular, ...extras]);
   }, [smTeamMap, smTeams]);
 
   const enrichedPlayers = useMemo(() => {
@@ -496,7 +507,7 @@ export const FavoritosScreen: React.FC = () => {
         jerseyNumber: p.jerseyNumber,
         position: p.position,
       }));
-    return [...popular, ...extras];
+    return deduplicateItems([...popular, ...extras]);
   }, [smPlayerMap, smPlayers]);
 
   const enrichedLeagues = useMemo(() => {
@@ -516,7 +527,7 @@ export const FavoritosScreen: React.FC = () => {
         smId: l.id,
         seasonId: l.seasonId,
       }));
-    return [...popular, ...extras];
+    return deduplicateItems([...popular, ...extras]);
   }, [smLeagueMap, smLeagues]);
 
   // ── Effective ID helper ──
@@ -610,11 +621,12 @@ export const FavoritosScreen: React.FC = () => {
   const remainingSuggested = suggestions.length - suggestedVisible;
 
   // ── Render item (shared between search and sectioned list) ──
-  const renderItem = useCallback((item: FavItem) => {
+  // keyPrefix ensures sibling keys are unique across sections ('f_', 's_', 'q_').
+  const renderItem = useCallback((item: FavItem, keyPrefix: string) => {
     const fol = config.isFollowing(item);
     return (
       <ItemRow
-        key={item.id}
+        key={`${keyPrefix}${item.id}`}
         item={item}
         followed={fol}
         canNavigate={!!item.smId}
@@ -748,7 +760,7 @@ export const FavoritosScreen: React.FC = () => {
                     </Text>
                     <View style={[sh.line, { backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)' }]} />
                   </View>
-                  {searchResults.map(item => renderItem(item))}
+                  {searchResults.map(item => renderItem(item, 'q_'))}
                 </>
               )}
             </>
@@ -786,7 +798,7 @@ export const FavoritosScreen: React.FC = () => {
                     accent
                     isDark={isDark}
                   />
-                  {followed.map(item => renderItem(item))}
+                  {followed.map(item => renderItem(item, 'f_'))}
                 </>
               )}
 
@@ -796,7 +808,7 @@ export const FavoritosScreen: React.FC = () => {
                 count={suggestions.length}
                 isDark={isDark}
               />
-              {visibleSuggestions.map(item => renderItem(item))}
+              {visibleSuggestions.map(item => renderItem(item, 's_'))}
 
               {/* Load more */}
               {remainingSuggested > 0 && (
