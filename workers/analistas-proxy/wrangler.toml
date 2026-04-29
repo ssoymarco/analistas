@@ -1,0 +1,12 @@
+name = "analistas-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+# Routes — update with your actual Cloudflare zone once configured
+# [[routes]]
+# pattern = "api.analistas.app/football/*"
+# zone_name = "analistas.app"
