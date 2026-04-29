@@ -5,6 +5,7 @@
 // If the API is down or returns an error, we fall back to mock data.
 
 import { AppCache, CacheTTL } from './cache';
+import { captureError } from './sentry';
 
 import type {
   Match,
@@ -42,6 +43,7 @@ import {
   fetchRefereeStats,
   fetchTeamRecentFixtures,
   fetchPredictions,
+  fetchPlayerById,
   SM_STATE_IDS,
   SM_EVENT_TYPES,
   SM_STAT_TYPES,
@@ -65,10 +67,16 @@ import {
   type SMStage,
   fetchFixturesBySeasonId,
   fetchLivescoresLatest,
+  fetchGroupsBySeason,
+  fetchAggregateById,
+  fetchFixturesByStage,
+  type SMGroup,
+  type SMAggregate,
 } from './sportmonks';
 
-import type { NewsArticle } from '../data/types';
+import type { NewsArticle, CupGroup, CupGroupsResult } from '../data/types';
 import { AVAILABLE_LEAGUES, getLeagueConfig, LEAGUE_IDS } from '../config/leagues';
+import i18n from '../i18n';
 
 // ── State Mapping ───────────────────────────────────────────────────────────
 
@@ -117,10 +125,12 @@ function mapStateToStatus(stateId: number, startingAt?: string): MatchStatus {
 
 /**
  * Re-evaluate live status of already-mapped Match objects.
- * Used for cache hits: cached Match objects have status baked in at fetch time,
- * so a match that was "scheduled" when cached may now be "live".
+ * Used for cache hits and after fast-poll merges: Match objects have status
+ * baked in at fetch time, so a match that was "scheduled" when cached — or one
+ * downgraded by a lagging /livescores/latest state_id=1 feed — may now be "live".
+ * Exported so the list hook can apply it defensively after patch merges.
  */
-function reapplyLiveStatus(matches: Match[]): Match[] {
+export function reapplyLiveStatus(matches: Match[]): Match[] {
   return matches.map(m => {
     if (m.status !== 'scheduled' || !m.startingAtUtc) return m;
     const kickoff = new Date(m.startingAtUtc.replace(' ', 'T') + 'Z');
@@ -209,6 +219,30 @@ function getUtcDatesForLocalDay(localDateStr: string): string[] {
 
 // ── Time Display ────────────────────────────────────────────────────────────
 
+/**
+ * Read the authoritative live minute from SportMonks' `periods` array.
+ * The period with `ticking: true` is the current phase; its `minutes` field is
+ * the real game clock (e.g. "90" during 90+5 stoppage time — broadcasters display
+ * "90+5" which we approximate via its `minutes` + stoppage rendering separately
+ * via stateLabel). This avoids the wall-time drift that compounds with stoppage.
+ */
+function getRealMinute(fixture: SMFixture): number | undefined {
+  const periods = fixture.periods;
+  if (!periods || periods.length === 0) return undefined;
+  const ticking = periods.find(p => p.ticking);
+  if (!ticking) return undefined;
+  if (typeof ticking.minutes === 'number' && ticking.minutes >= 0) {
+    return Math.max(1, Math.min(ticking.minutes, 120));
+  }
+  // Fallback: derive from started timestamp + counts_from
+  if (ticking.started && typeof ticking.counts_from === 'number') {
+    const secondsSinceStart = Math.max(0, Math.floor(Date.now() / 1000 - ticking.started));
+    const minute = ticking.counts_from + Math.floor(secondsSinceStart / 60);
+    return Math.max(1, Math.min(minute, 120));
+  }
+  return undefined;
+}
+
 /** Elapsed minutes since kick-off, accounting for half-time break when known. */
 function calcElapsed(startingAt: string, stateId: number): number {
   const kickoff = new Date(startingAt.replace(' ', 'T') + 'Z');
@@ -230,6 +264,9 @@ function getTimeDisplay(fixture: SMFixture): string {
 
   if (status === 'live') {
     if (fixture.state_id === SM_STATE_IDS.HALF_TIME) return 'HT';
+    // Prefer SportMonks' authoritative in-game clock over wall-time math
+    const real = getRealMinute(fixture);
+    if (real !== undefined) return `${real}'`;
     return `${calcElapsed(fixture.starting_at, fixture.state_id)}'`;
   }
 
@@ -245,7 +282,32 @@ function getTimeDisplay(fixture: SMFixture): string {
 function getLiveMinute(fixture: SMFixture): number | undefined {
   if (mapStateToStatus(fixture.state_id, fixture.starting_at) !== 'live') return undefined;
   if (fixture.state_id === SM_STATE_IDS.HALF_TIME) return 45;
+  // Prefer SportMonks' authoritative in-game clock over wall-time math
+  const real = getRealMinute(fixture);
+  if (real !== undefined) return real;
   return calcElapsed(fixture.starting_at, fixture.state_id);
+}
+
+/**
+ * Extract a live-clock anchor that lets the client smoothly advance the
+ * minute/seconds between server polls. Only populated when a period is
+ * actively ticking and we have both the `started` unix timestamp and a valid
+ * `counts_from` base minute. Returns undefined for HT/scheduled/finished.
+ */
+function getLiveClockAnchor(fixture: SMFixture):
+  | { periodStartedAt: number; periodMinuteOffset: number }
+  | undefined
+{
+  const periods = fixture.periods;
+  if (!periods || periods.length === 0) return undefined;
+  const ticking = periods.find(p => p.ticking);
+  if (!ticking) return undefined;
+  if (typeof ticking.started !== 'number' || ticking.started <= 0) return undefined;
+  const offset = typeof ticking.counts_from === 'number' ? ticking.counts_from : 0;
+  return {
+    periodStartedAt: ticking.started,
+    periodMinuteOffset: Math.max(0, offset),
+  };
 }
 
 // ── Participant Helpers ─────────────────────────────────────────────────────
@@ -255,11 +317,12 @@ function getParticipant(fixture: SMFixture, location: 'home' | 'away'): SMPartic
 }
 
 function mapParticipantToTeam(p: SMParticipant | undefined): Team {
-  if (!p) return { id: '0', name: 'TBD', shortName: 'TBD', logo: '⚽' };
+  if (!p) return { id: '0', name: i18n.t('cup.toBeDefined'), shortName: 'TBD', logo: '⚽' };
+  const name = translatePlaceholderName(p.name);
   return {
     id: String(p.id),
-    name: p.name,
-    shortName: p.short_code || p.name.slice(0, 3).toUpperCase(),
+    name,
+    shortName: p.short_code || name.slice(0, 3).toUpperCase(),
     logo: p.image_path || '⚽',
   };
 }
@@ -283,6 +346,17 @@ function mapFixtureToMatch(fixture: SMFixture): Match {
   const homeScoreHT = getHalfTimeGoals(fixture.scores, 'home');
   const awayScoreHT = getHalfTimeGoals(fixture.scores, 'away');
 
+  // Red cards from statistics (type_id=83) — match by participant_id like mapStatistics does
+  const getStatVal = (participantId: number, typeId: number): number => {
+    const stat = (fixture.statistics ?? []).find(
+      s => s.type_id === typeId && s.participant_id === participantId,
+    );
+    const raw = stat?.data?.value;
+    return typeof raw === 'number' ? raw : parseFloat(String(raw)) || 0;
+  };
+  const homeRedCards = getStatVal(home?.id ?? -1, SM_STAT_TYPES.REDCARDS) || undefined;
+  const awayRedCards = getStatVal(away?.id ?? -1, SM_STAT_TYPES.REDCARDS) || undefined;
+
   return {
     id: String(fixture.id),
     homeTeam: mapParticipantToTeam(home),
@@ -291,10 +365,13 @@ function mapFixtureToMatch(fixture: SMFixture): Match {
     awayScore: getGoals(fixture.scores, 'away'),
     homeScoreHT,
     awayScoreHT,
+    homeRedCards,
+    awayRedCards,
     status,
     time: getTimeDisplay(fixture),
     minute: getLiveMinute(fixture),
     stateLabel: mapStateLabel(fixture.state_id),
+    liveClock: getLiveClockAnchor(fixture),
     league: fixture.league?.name ?? leagueConfig?.name ?? 'Unknown',
     leagueLogo: fixture.league?.image_path || undefined,
     leagueId: rawLeagueId > 0 ? String(rawLeagueId) : '',
@@ -650,8 +727,9 @@ function positionShort(posId: number): string {
 
 // ── Venue Mapper ────────────────────────────────────────────────────────────
 
-function mapVenue(v: SMVenue | undefined): MatchVenue {
+function mapVenue(v: SMVenue | undefined, venueId?: number): MatchVenue {
   return {
+    id: v?.id ?? venueId,
     name: v?.name ?? 'Estadio desconocido',
     city: v?.city_name ?? '',
     capacity: v?.capacity ?? 0,
@@ -725,7 +803,10 @@ async function fetchFixturesWithLiveState(localDate: string): Promise<SMFixture[
     return true;
   });
 
-  // Override with /livescores data where available (authoritative real-time source)
+  // Override with /livescores data where available (authoritative real-time source).
+  // NEVER downgrade: if /livescores reports state_id=1 (NOT_STARTED) — which LATAM
+  // feeds do well into a match — keep the original state_id. Same for scores: if
+  // /livescores returns an empty scores array, keep the fixture's own scores.
   if (liveFixtures.length > 0) {
     const liveById = new Map<number, SMFixture>();
     for (const lf of liveFixtures) liveById.set(lf.id, lf);
@@ -733,11 +814,14 @@ async function fetchFixturesWithLiveState(localDate: string): Promise<SMFixture[
     return unique.map(f => {
       const live = liveById.get(f.id);
       if (!live) return f;
+      const liveIsAuthoritative =
+        LIVE_STATE_IDS.has(live.state_id) || FINISHED_STATE_IDS.has(live.state_id);
+      const liveHasScores = Array.isArray(live.scores) && live.scores.length > 0;
       return {
         ...f,
-        state_id: live.state_id,
-        state: live.state ?? f.state,
-        scores: live.scores ?? f.scores,
+        state_id: liveIsAuthoritative ? live.state_id : f.state_id,
+        state: liveIsAuthoritative ? (live.state ?? f.state) : f.state,
+        scores: liveHasScores ? live.scores : f.scores,
       };
     });
   }
@@ -756,6 +840,11 @@ export async function getFixturesByDate(localDate: string): Promise<Match[]> {
   const cacheKey = `fixtures_${localDate}`;
   const today = new Date().toISOString().slice(0, 10);
   const ttl = localDate === today ? CacheTTL.fixturesLive : CacheTTL.fixturesStatic;
+
+  // Serve from cache if fresh — avoids redundant API calls between polls
+  const cached = await AppCache.get<Match[]>(cacheKey);
+  if (cached) return reapplyLiveStatus(cached);
+
   try {
     const unique = await fetchFixturesWithLiveState(localDate);
     const matches = reapplyLiveStatus(
@@ -765,9 +854,34 @@ export async function getFixturesByDate(localDate: string): Promise<Match[]> {
     return matches;
   } catch (err) {
     console.warn('[sportsApi] getFixturesByDate failed:', err);
-    const cached = await AppCache.get<Match[]>(cacheKey);
-    return cached ? reapplyLiveStatus(cached) : [];
+    captureError(err, { fn: 'getFixturesByDate', localDate });
+    return [];
   }
+}
+
+/**
+ * Pure helper — groups a Match[] by league. No API calls.
+ * Used by getLeaguesByDate and useFixtures to avoid a second fetch.
+ */
+export function groupMatchesByLeague(matches: Match[]): LeagueWithMatches[] {
+  const leagues: LeagueWithMatches[] = [];
+  const leagueMap = new Map<string, LeagueWithMatches>();
+  for (const m of matches) {
+    if (!leagueMap.has(m.leagueId)) {
+      const config = getLeagueConfig(Number(m.leagueId));
+      const lw: LeagueWithMatches = {
+        id: m.leagueId,
+        name: m.league,
+        country: config?.country ?? '',
+        logo: m.leagueLogo || config?.flag || '⚽',
+        matches: [],
+      };
+      leagueMap.set(m.leagueId, lw);
+      leagues.push(lw);
+    }
+    leagueMap.get(m.leagueId)!.matches.push(m);
+  }
+  return leagues;
 }
 
 /**
@@ -779,47 +893,14 @@ export interface LeagueWithMatches extends League {
 }
 
 export async function getLeaguesByDate(localDate: string): Promise<LeagueWithMatches[]> {
-  const cacheKey = `leagues_${localDate}`;
-  const today = new Date().toISOString().slice(0, 10);
-  const ttl = localDate === today ? CacheTTL.fixturesLive : CacheTTL.fixturesStatic;
+  // Reuses getFixturesByDate — which reads/writes its own cache — so we never
+  // call fetchFixturesWithLiveState twice for the same date in the same tick.
   try {
-    const unique = await fetchFixturesWithLiveState(localDate);
-    if (unique.length === 0) return [];
-
-    const matches = reapplyLiveStatus(
-      unique.map(mapFixtureToMatch).filter(m => m.date === localDate)
-    );
-    const realLeagues: LeagueWithMatches[] = [];
-    const leagueMap = new Map<string, LeagueWithMatches>();
-    for (const m of matches) {
-      if (!leagueMap.has(m.leagueId)) {
-        const config = getLeagueConfig(Number(m.leagueId));
-        const lw: LeagueWithMatches = {
-          id: m.leagueId,
-          name: m.league,
-          country: config?.country ?? '',
-          // Prefer official SM image URL; fall back to emoji flag from config
-          logo: m.leagueLogo || config?.flag || '⚽',
-          matches: [],
-        };
-        leagueMap.set(m.leagueId, lw);
-        realLeagues.push(lw);
-      }
-      leagueMap.get(m.leagueId)!.matches.push(m);
-    }
-
-    AppCache.set(cacheKey, realLeagues, ttl);
-    return realLeagues;
+    const matches = await getFixturesByDate(localDate);
+    return groupMatchesByLeague(matches);
   } catch (err) {
     console.warn('[sportsApi] getLeaguesByDate failed:', err);
-    const cached = await AppCache.get<LeagueWithMatches[]>(cacheKey);
-    if (cached) {
-      // Re-evaluate live status on cached data (status was baked in at fetch time)
-      return cached.map(league => ({
-        ...league,
-        matches: reapplyLiveStatus(league.matches),
-      }));
-    }
+    captureError(err, { fn: 'getLeaguesByDate', localDate });
     return [];
   }
 }
@@ -831,29 +912,73 @@ export async function getLiveFixtures(): Promise<Match[]> {
   try {
     const fixtures = await fetchLivescores();
     if (!Array.isArray(fixtures)) return [];
-    return fixtures.map(mapFixtureToMatch);
+    return reapplyLiveStatus(fixtures.map(mapFixtureToMatch));
   } catch (err) {
     console.warn('[sportsApi] getLiveFixtures failed:', err);
+    captureError(err, { fn: 'getLiveFixtures' });
     return [];
   }
 }
 
 /**
  * Fetches only the fixtures that changed in the last 10 seconds and returns
- * a Map<fixtureId, {homeScore, awayScore, status}> for quick state merging.
+ * a Map<fixtureId, Partial<Match>> for quick state merging.
+ *
+ * IMPORTANT: this function ONLY includes fields in the patch that are backed by
+ * real data in the latest response:
+ *  - scores: omitted if `f.scores` is empty/missing (otherwise getGoals would
+ *    return 0 and clobber a real 1-0 score back to 0-0)
+ *  - status: omitted if the inferred status is 'scheduled' — lagging feeds
+ *    return state_id=1 (NOT_STARTED) for matches at minute 70+, and the time
+ *    inference may not always rescue it. reapplyLiveStatus (applied by the
+ *    caller after the merge) corrects this based on startingAtUtc.
  *
  * Returns an empty Map when nothing changed — callers can skip re-renders.
  * Cost: 1 API call per poll vs 4–6 calls for a full date fetch.
  */
-export async function fetchLatestLivescoreUpdates(): Promise<Map<number, Pick<Match, 'homeScore' | 'awayScore' | 'status'>>> {
+export type LivescorePatch = Partial<Pick<Match,
+  'homeScore' | 'awayScore' | 'status' | 'minute' | 'stateLabel' | 'time' | 'liveClock'
+>>;
+
+export async function fetchLatestLivescoreUpdates(): Promise<Map<number, LivescorePatch>> {
   const latest = await fetchLivescoresLatest();
-  const map = new Map<number, Pick<Match, 'homeScore' | 'awayScore' | 'status'>>();
+  const map = new Map<number, LivescorePatch>();
   for (const f of latest) {
-    map.set(f.id, {
-      homeScore: getGoals(f.scores, 'home'),
-      awayScore: getGoals(f.scores, 'away'),
-      status: mapStateToStatus(f.state_id),
-    });
+    const patch: LivescorePatch = {};
+
+    const hasScores = Array.isArray(f.scores) && f.scores.length > 0;
+    if (hasScores) {
+      patch.homeScore = getGoals(f.scores, 'home');
+      patch.awayScore = getGoals(f.scores, 'away');
+    }
+
+    // Only promote status on strong signals — never downgrade live→scheduled
+    // from this lightweight endpoint. reapplyLiveStatus (defense-in-depth in
+    // the caller) handles the scheduled→live time-inference case.
+    const inferred = mapStateToStatus(f.state_id, f.starting_at);
+    if (inferred !== 'scheduled') {
+      patch.status = inferred;
+    }
+
+    // Live-clock fields: MUST be refreshed on every fast-poll so the list view
+    // doesn't freeze at the minute it was loaded. Without this, the minute
+    // stayed static until the 60-s full re-sync (or forever if cached).
+    if (inferred === 'live') {
+      patch.stateLabel = mapStateLabel(f.state_id);
+      patch.time       = getTimeDisplay(f);
+      patch.minute     = getLiveMinute(f);
+      patch.liveClock  = getLiveClockAnchor(f);
+    } else if (inferred === 'finished') {
+      // Clear live-clock state on transition to finished so the card stops ticking.
+      patch.stateLabel = undefined;
+      patch.minute     = undefined;
+      patch.liveClock  = undefined;
+      patch.time       = getTimeDisplay(f);
+    }
+
+    if (Object.keys(patch).length > 0) {
+      map.set(f.id, patch);
+    }
   }
   return map;
 }
@@ -867,11 +992,14 @@ function mapReferee(refs: SMFixtureReferee[] | undefined) {
   const assistants = refs.filter(r => r.type_id === 7 || r.type_id === 8);
   const fourth = refs.find(r => r.type_id === 9);
 
+  const refImg = main?.referee?.image_path;
   return {
     referee: {
+      id: main?.referee_id,
       name: main?.referee?.display_name ?? main?.referee?.common_name ?? '',
       nationality: '',
       flag: '👔',
+      imageUrl: refImg && !refImg.includes('placeholder') ? refImg : undefined,
     },
     assistants: assistants.map(a => a.referee?.display_name ?? a.referee?.common_name ?? ''),
     fourthOfficial: fourth?.referee?.display_name ?? fourth?.referee?.common_name ?? undefined,
@@ -1152,6 +1280,173 @@ function mapPredictions(raw: SMPrediction[]): MatchPrediction[] {
 }
 
 /**
+ * H2H-based fallback: compute aggregate score by finding the other leg of a
+ * two-legged knockout tie in the team's H2H results. Used when SportMonks
+ * doesn't populate `aggregate_id` or AGGREGATE score entries for a competition
+ * (observed for Coppa Italia, Copa del Rey, DFB-Pokal semifinals, etc.).
+ *
+ * Matching criteria — two fixtures are considered legs of the same tie when:
+ *   - They're in the same `league_id` + `season_id` (different comps never paired)
+ *   - Both are finished
+ *   - They're within 35 days of each other. Generous window is needed because
+ *     Coppa Italia semifinals are often ~3 weeks apart. Safe because:
+ *       • League matches between the same teams are >3 months apart
+ *       • UCL league-phase (new format): no double matchups exist
+ *       • UCL/EL/ECL knockouts: always within 2 weeks
+ *       • Copa Libertadores group stage: rematches >2 months apart
+ *   - The teams match (in either home/away orientation)
+ *
+ * Returns `undefined` when no matching other leg is found, when the current
+ * fixture is the first leg (no prior leg to sum with), or when team IDs are missing.
+ */
+function computeAggregateFromH2H(
+  fixture: SMFixture,
+  h2hResults: SMFixture[],
+): { home: number; away: number } | undefined {
+  const homeId = getParticipant(fixture, 'home')?.id;
+  const awayId = getParticipant(fixture, 'away')?.id;
+  if (!homeId || !awayId) return undefined;
+
+  const fixtureDateMs = new Date(fixture.starting_at.replace(' ', 'T') + 'Z').getTime();
+  const WINDOW_MS = 70 * 24 * 60 * 60 * 1000; // 70 days — covers long cup gaps (Coppa Italia SF: ~48d)
+
+  const rejections: string[] = [];
+
+  // Find the other leg among candidates.
+  // We intentionally skip the season_id check: SportMonks sometimes assigns
+  // different season_ids to different rounds of the same cup (e.g. Coppa Italia
+  // preliminary rounds vs knockout rounds). league_id + teams + date window is
+  // a sufficient and safe signal — the 35-day window rules out cross-season collisions.
+  const otherLeg = h2hResults.find(h => {
+    if (h.id === fixture.id)                        { rejections.push(`${h.id}:self`);        return false; }
+    if (h.league_id !== fixture.league_id)          { rejections.push(`${h.id}:league(${h.league_id}≠${fixture.league_id})`); return false; }
+
+    const hStatus = mapStateToStatus(h.state_id, h.starting_at);
+    if (hStatus !== 'finished')                     { rejections.push(`${h.id}:notFinished(${hStatus})`); return false; }
+
+    const hDateMs = new Date(h.starting_at.replace(' ', 'T') + 'Z').getTime();
+    const daysApart = Math.round(Math.abs(fixtureDateMs - hDateMs) / (24 * 60 * 60 * 1000));
+    if (Math.abs(fixtureDateMs - hDateMs) > WINDOW_MS) { rejections.push(`${h.id}:tooFar(${daysApart}d)`); return false; }
+
+    const hHomeId = getParticipant(h, 'home')?.id;
+    const hAwayId = getParticipant(h, 'away')?.id;
+    const sameTeams = (hHomeId === homeId && hAwayId === awayId) ||
+                      (hHomeId === awayId && hAwayId === homeId);
+    if (!sameTeams)                                 { rejections.push(`${h.id}:teams(${hHomeId}v${hAwayId})`); return false; }
+    return true;
+  });
+
+  if (__DEV__ && !otherLeg) {
+    console.warn(`[aggregate H2H/stage] fixture=${fixture.id} no match among ${h2hResults.length} candidates — rejections:`, rejections);
+  }
+
+  if (!otherLeg) return undefined;
+
+  // Only show aggregate on the *later* leg (first leg has nothing to sum with)
+  const otherDateMs = new Date(otherLeg.starting_at.replace(' ', 'T') + 'Z').getTime();
+  if (otherDateMs > fixtureDateMs) return undefined;
+
+  // Sum current leg + prior leg, handling team orientation (prior may be at opp. ground)
+  let aggHome = getGoals(fixture.scores, 'home');
+  let aggAway = getGoals(fixture.scores, 'away');
+  const otherHomeId = getParticipant(otherLeg, 'home')?.id;
+  const otherHome = getGoals(otherLeg.scores, 'home');
+  const otherAway = getGoals(otherLeg.scores, 'away');
+
+  if (otherHomeId === homeId) {
+    aggHome += otherHome;
+    aggAway += otherAway;
+  } else {
+    aggHome += otherAway;
+    aggAway += otherHome;
+  }
+
+  return { home: aggHome, away: aggAway };
+}
+
+/**
+ * Compute aggregate score for a knockout tie. Uses two strategies in order:
+ *
+ * Strategy A — Direct score entry (most reliable):
+ *   SportMonks sometimes includes an AGGREGATE score entry in the fixture's
+ *   own `scores` array (description === 'AGGREGATE'). This is instant and
+ *   requires no nested includes.
+ *
+ * Strategy B — Cross-leg sum (fallback):
+ *   If the aggregate isn't directly in scores, sum goals across all legs
+ *   fetched via `aggregate.fixtures.scores;aggregate.fixtures.participants`.
+ *   Requires the two-legged tie to have at least 2 fixtures in the nested
+ *   include, and only shows on the second leg or later.
+ *
+ * Returns `undefined` when: no aggregate data is available, this is a
+ * single-leg cup match, or this is the first leg of a multi-leg tie.
+ */
+function computeAggregateScore(fixture: SMFixture): { home: number; away: number } | undefined {
+  // ── Strategy A: AGGREGATE score entry directly on the fixture ──────────────
+  if (fixture.scores && fixture.scores.length > 0) {
+    const aggHome = fixture.scores.find(
+      s => s.description === 'AGGREGATE' && s.score.participant === 'home',
+    );
+    const aggAway = fixture.scores.find(
+      s => s.description === 'AGGREGATE' && s.score.participant === 'away',
+    );
+    if (aggHome !== undefined && aggAway !== undefined) {
+      // Only show when the aggregate actually differs from the match score
+      // (avoids showing "(3-2 glo.)" on a single-leg match that SportMonks
+      //  erroneously tags with an AGGREGATE entry equal to the FT score).
+      const ftHome = getGoals(fixture.scores, 'home');
+      const ftAway = getGoals(fixture.scores, 'away');
+      const isOnlyOneLeg = aggHome.score.goals === ftHome && aggAway.score.goals === ftAway
+        && (!fixture.aggregate?.fixtures || fixture.aggregate.fixtures.length < 2);
+      if (!isOnlyOneLeg) {
+        return { home: aggHome.score.goals, away: aggAway.score.goals };
+      }
+    }
+  }
+
+  // ── Strategy B: sum goals across nested leg fixtures ───────────────────────
+  const legs = fixture.aggregate?.fixtures;
+  if (!legs || legs.length < 2) return undefined;
+
+  // Sort legs chronologically
+  const sorted = [...legs].sort((a, b) => a.starting_at.localeCompare(b.starting_at));
+
+  // Don't show aggregate on the first leg — there's nothing to sum yet
+  const currentIdx = sorted.findIndex(f => f.id === fixture.id);
+  if (currentIdx <= 0) return undefined;
+
+  // Canonical teams = current fixture's home/away (matches what the UI shows above)
+  const currentHomeId = getParticipant(fixture, 'home')?.id;
+  const currentAwayId = getParticipant(fixture, 'away')?.id;
+  if (!currentHomeId || !currentAwayId) return undefined;
+
+  let aggHome = 0;
+  let aggAway = 0;
+  let hasAny = false;
+
+  for (const leg of sorted) {
+    const status = mapStateToStatus(leg.state_id, leg.starting_at);
+    if (status === 'scheduled') continue; // skip legs that haven't started
+    const legHomeId = getParticipant(leg, 'home')?.id;
+    const legAwayId = getParticipant(leg, 'away')?.id;
+    const homeGoals = getGoals(leg.scores, 'home');
+    const awayGoals = getGoals(leg.scores, 'away');
+    hasAny = true;
+
+    if (legHomeId === currentHomeId && legAwayId === currentAwayId) {
+      aggHome += homeGoals;
+      aggAway += awayGoals;
+    } else if (legHomeId === currentAwayId && legAwayId === currentHomeId) {
+      // Swap — leg was at opponent's ground
+      aggHome += awayGoals;
+      aggAway += homeGoals;
+    }
+  }
+
+  return hasAny ? { home: aggHome, away: aggAway } : undefined;
+}
+
+/**
  * Fetch full fixture detail with all available SM data:
  * events, stats, lineups, venue, referee, weather, TV, H2H, pressure,
  * injuries, form, predictions, referee stats.
@@ -1159,15 +1454,21 @@ function mapPredictions(raw: SMPrediction[]): MatchPrediction[] {
 export async function getFixtureDetail(id: number): Promise<{ match: Match; detail: Partial<MatchDetail> } | null> {
   try {
     const fixture = await fetchFixtureById(id);
-    const match = mapFixtureToMatch(fixture);
+    // reapplyLiveStatus is defense-in-depth: mapStateToStatus already handles
+    // time-based inference when state_id lags, but if the API returns an
+    // unexpected state_id combo, reapplyLiveStatus ensures the match gets
+    // flagged live whenever starting_at is within the expected window.
+    const match = reapplyLiveStatus([mapFixtureToMatch(fixture)])[0];
     const homeTeam = getParticipant(fixture, 'home');
     const awayTeam = getParticipant(fixture, 'away');
 
     const refereeData = mapReferee(fixture.referees);
     const mainRefereeId = fixture.referees?.find(r => r.type_id === 6)?.referee_id;
 
+    const isCupLeague = getLeagueConfig(fixture.league_id)?.isCup === true;
+
     // Fire ALL secondary requests in parallel
-    const [h2hResults, homeSidelined, awaySidelined, homeFixtures, awayFixtures, refStats, predictions] = await Promise.all([
+    const [h2hResults, homeSidelined, awaySidelined, homeFixtures, awayFixtures, refStats, predictions, aggregateData, stageFixtures] = await Promise.all([
       // H2H
       (homeTeam && awayTeam)
         ? fetchH2H(homeTeam.id, awayTeam.id).catch(() => [] as SMFixture[])
@@ -1194,15 +1495,41 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
         : Promise.resolve({ id: 0 }),
       // Predictions
       fetchPredictions(id).catch(() => [] as SMPrediction[]),
+      // Aggregate — only fetch separately for cup ties where the nested include
+      // didn't return both legs (e.g. Coppa Italia). Zero cost for non-cup matches.
+      (fixture.aggregate_id && (!fixture.aggregate?.fixtures || fixture.aggregate.fixtures.length < 2))
+        ? fetchAggregateById(fixture.aggregate_id).catch(() => null as SMAggregate | null)
+        : Promise.resolve(null as SMAggregate | null),
+      // Stage fixtures — fallback for cup ties where SM omits aggregate_id entirely
+      // (e.g. Coppa Italia). Fetches all fixtures in the same stage so we can pair legs.
+      (isCupLeague && !fixture.aggregate_id && fixture.stage_id)
+        ? fetchFixturesByStage(fixture.stage_id).catch(() => [] as SMFixture[])
+        : Promise.resolve([] as SMFixture[]),
     ]);
 
-    // Filter sidelined to only active (not completed) injuries/suspensions
-    const activeHomeSidelined = homeSidelined.filter(s => !s.completed);
-    const activeAwaySidelined = awaySidelined.filter(s => !s.completed);
+    // Filter sidelined to players who were unavailable at match time.
+    // We use the fixture date rather than the `completed` flag because SportMonks
+    // sometimes sets completed=true before the player has actually returned.
+    const matchDateTime = fixture.starting_at ? new Date(fixture.starting_at) : new Date();
+    const isActiveForMatch = (s: SMSidelined) => {
+      const start = s.start_date ? new Date(s.start_date) : null;
+      if (start && start > matchDateTime) return false; // injury begins after this match
+      if (!s.end_date) return true;                      // open-ended → still out
+      return new Date(s.end_date) >= matchDateTime;      // return date is on/after match day
+    };
+    const activeHomeSidelined = homeSidelined.filter(isActiveForMatch);
+    const activeAwaySidelined = awaySidelined.filter(isActiveForMatch);
+
+    // Patch fixture with separately-fetched aggregate data when the nested include
+    // didn't return both legs (common in domestic cups like Coppa Italia where
+    // SportMonks doesn't embed AGGREGATE score entries in the fixture's scores array).
+    const effectiveFixture: SMFixture = aggregateData
+      ? { ...fixture, aggregate: aggregateData }
+      : fixture;
 
     const detail: Partial<MatchDetail> = {
       matchId: String(fixture.id),
-      venue: mapVenue(fixture.venue),
+      venue: mapVenue(fixture.venue, fixture.venue_id),
       referee: refereeData.referee,
       assistantReferees: refereeData.assistants.length > 0 ? refereeData.assistants : undefined,
       fourthOfficial: refereeData.fourthOfficial,
@@ -1226,6 +1553,7 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
           ...mapLineup(entries, homeTeam?.id ?? 0, fixture.events),
           isExpected: useExpected,
           coachImageUrl: homeCoachImg,
+          coachId: homeCoach?.meta?.coach_id ?? homeCoach?.id,
         };
       })(),
       awayLineup: (() => {
@@ -1244,6 +1572,7 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
           ...mapLineup(entries, awayTeam?.id ?? 0, fixture.events),
           isExpected: useExpected,
           coachImageUrl: awayCoachImg,
+          coachId: awayCoach?.meta?.coach_id ?? awayCoach?.id,
         };
       })(),
       tvStations: mapTVStations(fixture.tvstations),
@@ -1268,6 +1597,39 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
           venue: '',
         })),
       },
+      aggregateScore: (() => {
+        // Strategy A (AGGREGATE score entry) + Strategy B (nested legs / fetched aggregate)
+        let agg = computeAggregateScore(effectiveFixture);
+
+        // Strategy C+D: pair with the other leg from H2H results and/or stage fixtures.
+        // Stage fixtures (Strategy D) directly fetches all fixtures in the same cup stage
+        // — this catches Coppa Italia and similar competitions where SportMonks leaves
+        // aggregate_id null, omits AGGREGATE score entries, and H2H coverage is sparse.
+        if (!agg && match.status === 'finished') {
+          // Deduplicate by id before searching (H2H and stage may overlap)
+          const seen = new Set<number>();
+          const allCandidates: SMFixture[] = [];
+          for (const f of [...h2hResults, ...stageFixtures]) {
+            if (!seen.has(f.id)) { seen.add(f.id); allCandidates.push(f); }
+          }
+          if (allCandidates.length > 0) {
+            agg = computeAggregateFromH2H(fixture, allCandidates);
+          }
+        }
+
+        if (__DEV__ && (fixture.aggregate_id || match.status === 'finished')) {
+          console.warn(
+            `[aggregate] fixture=${fixture.id} league=${fixture.league_id} stage=${fixture.stage_id} agg_id=${fixture.aggregate_id}`,
+            `\n  scores:`, fixture.scores?.map(s => `${s.description}:${s.score.participant}=${s.score.goals}`),
+            `\n  nested fixtures:`, fixture.aggregate?.fixtures?.length ?? 'none',
+            `\n  separate agg fetched:`, aggregateData ? `yes (${aggregateData.fixtures?.length ?? 0} legs)` : 'no',
+            `\n  h2h candidates:`, h2hResults.length,
+            `\n  stage fixtures:`, stageFixtures.length,
+            `\n  computed:`, agg,
+          );
+        }
+        return agg;
+      })(),
     };
 
     // Pick TTL based on match status
@@ -1281,6 +1643,7 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
     return { match, detail };
   } catch (err) {
     console.warn('[sportsApi] getFixtureDetail FAILED for id=' + id + ':', err instanceof Error ? err.message : err);
+    captureError(err, { fn: 'getFixtureDetail', fixtureId: id });
     const cached = await AppCache.get<{ match: Match; detail: Partial<MatchDetail> }>(`fixture_detail_${id}`);
     return cached ?? null;
   }
@@ -1354,8 +1717,85 @@ export async function getStandings(seasonId: number): Promise<LeagueStanding[]> 
     return result;
   } catch (err) {
     console.warn('[sportsApi] getStandings failed:', err);
+    captureError(err, { fn: 'getStandings', seasonId });
     const cached = await AppCache.get<LeagueStanding[]>(`standings_${seasonId}`);
     return cached ?? [];
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CUP GROUP STAGE — group-phase standings for cup competitions
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Fetches group-stage standings for a cup competition.
+ *
+ * Approach:
+ *  1. Fetch all standings for the season — entries with `group_id != null` are
+ *     the group-stage rows (entries without group_id belong to the knockout
+ *     phase or are aggregate league tables).
+ *  2. In parallel, fetch `/groups/seasons/{id}` to get real group names
+ *     ("Group A", "Grupo B", etc.). Falls back to auto-generated letters if
+ *     the endpoint returns nothing (knockout-only competitions).
+ *  3. Sort each group by position, map to `LeagueStanding`, and return.
+ *
+ * Result is cached for 30 min (same TTL as regular standings).
+ */
+export async function getCupGroupStandings(seasonId: number): Promise<CupGroupsResult> {
+  const cacheKey = `cup_groups_${seasonId}`;
+  const cached = await AppCache.get<CupGroupsResult>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const [rawData, smGroups] = await Promise.all([
+      fetchStandings(seasonId),
+      fetchGroupsBySeason(seasonId).catch(() => [] as SMGroup[]),
+    ]);
+
+    // Flatten nested arrays (same guard as getStandings)
+    const data: SMStandingGroup[] = rawData.length > 0 && Array.isArray(rawData[0])
+      ? (rawData as unknown as SMStandingGroup[][]).flat()
+      : rawData;
+
+    // Only rows with a group_id belong to the group stage
+    const groupRows = data.filter(sg => sg.group_id != null);
+    if (groupRows.length === 0) {
+      const empty: CupGroupsResult = { hasGroups: false, groups: [] };
+      AppCache.set(cacheKey, empty, CacheTTL.standings);
+      return empty;
+    }
+
+    // Build group_id → display name map (from API or auto-generated letters)
+    const apiNameMap = new Map<number, string>(smGroups.map(g => [g.id, g.name]));
+    const sortedGroupIds = Array.from(new Set(groupRows.map(sg => sg.group_id!)))
+      .sort((a, b) => a - b);
+    const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+    // Bucket rows by group_id
+    const buckets = new Map<number, SMStandingGroup[]>();
+    for (const sg of groupRows) {
+      const gid = sg.group_id!;
+      if (!buckets.has(gid)) buckets.set(gid, []);
+      buckets.get(gid)!.push(sg);
+    }
+
+    const groups: CupGroup[] = sortedGroupIds.map((gid, idx) => {
+      const rows = (buckets.get(gid) ?? []).slice().sort((a, b) => a.position - b.position);
+      const apiName = apiNameMap.get(gid);
+      const name    = apiName ?? `Grupo ${LETTERS[idx] ?? String(idx + 1)}`;
+      return {
+        id: gid,
+        name,
+        standings: rows.map(sg => mapStandingToLeagueStanding(sg)),
+      };
+    });
+
+    const result: CupGroupsResult = { hasGroups: true, groups };
+    AppCache.set(cacheKey, result, CacheTTL.standings);
+    return result;
+  } catch {
+    const cached2 = await AppCache.get<CupGroupsResult>(cacheKey);
+    return cached2 ?? { hasGroups: false, groups: [] };
   }
 }
 
@@ -1438,8 +1878,36 @@ const ROUND_TRANSLATIONS: Record<string, string> = {
 };
 
 function translateRoundName(name: string): string {
+  // Strip tournament prefix like "Clausura - " (SPACE + hyphen + SPACE pattern).
+  // This preserves hyphenated round names like "Quarter-finals", "Semi-finals".
+  const withoutPrefix = name.replace(/^.+\s+-\s+/i, '').trim();
+  const lower = withoutPrefix.toLowerCase().trim();
+  return ROUND_TRANSLATIONS[lower] ?? withoutPrefix;
+}
+
+// Ordinal rank map: "1st ranked" / "2nd ranked" / etc. → i18n key
+const RANKED_KEYS: Record<number, string> = {
+  1: 'cup.ranked1', 2: 'cup.ranked2', 3: 'cup.ranked3', 4: 'cup.ranked4',
+  5: 'cup.ranked5', 6: 'cup.ranked6', 7: 'cup.ranked7', 8: 'cup.ranked8',
+  9: 'cup.ranked9', 10: 'cup.ranked10',
+};
+
+/** Translate placeholder team names from SportMonks (TBC, "6th ranked", etc.) */
+function translatePlaceholderName(name: string): string {
+  if (!name) return name;
   const lower = name.toLowerCase().trim();
-  return ROUND_TRANSLATIONS[lower] ?? name;
+  // TBC / TBD variants
+  if (lower === 'tbc' || lower === 'tbd') {
+    return i18n.t('cup.toBeDefined');
+  }
+  // "Nth ranked" or "Nth place" → ordinal
+  const rankedMatch = lower.match(/^(\d+)(?:st|nd|rd|th)?\s+(?:ranked|place)$/);
+  if (rankedMatch) {
+    const n = parseInt(rankedMatch[1], 10);
+    const key = RANKED_KEYS[n];
+    if (key) return i18n.t(key as any);
+  }
+  return name;
 }
 
 // ── Leg label from fixture.leg field ─────────────────────────────────────────
@@ -1489,7 +1957,7 @@ function mapTie(fixtures: SMFixture[], currentFixtureId?: string): CupTie {
   const legs: CupLeg[] = fixtures.map(fixture => {
     const fHome = getParticipant(fixture, 'home');
     const fAway = getParticipant(fixture, 'away');
-    const status = mapStateToStatus(fixture.state_id);
+    const status = mapStateToStatus(fixture.state_id, fixture.starting_at);
     const played = status !== 'scheduled';
     return {
       fixtureId: String(fixture.id),
@@ -1564,6 +2032,7 @@ function mapTie(fixtures: SMFixture[], currentFixtureId?: string): CupTie {
 export async function getCupBracket(
   seasonId: number,
   currentFixtureId?: string,
+  isPlayoffsOnly?: boolean,
 ): Promise<CupRound[]> {
   try {
     const fixtures = await fetchFixturesBySeasonId(seasonId);
@@ -1596,10 +2065,67 @@ export async function getCupBracket(
       stageMap.get(stageId)!.fixtures.push(fixture);
     }
 
+    // ── Playoffs-only filter (Liga MX, MLS, etc.) ─────────────────────────────
+    // Goal: show only the CURRENT tournament's knockout stages.
+    // Strategy:
+    //   1. Discard stages with too many fixtures (regular season has 100+ per stage).
+    //   2. Discard stages that are fully finished — past tournaments (e.g. Apertura).
+    //      If ALL playoff-sized stages are finished → return [] so the caller can
+    //      show a projected bracket from current standings instead.
+    //   3. Among remaining (active/upcoming) stages, isolate one tournament by prefix
+    //      (e.g. "Clausura") using isCurrent flag or currentFixtureId.
+    let activeMap = stageMap;
+    if (isPlayoffsOnly) {
+      // Step 1 — remove regular-season stages (Liga MX Clausura has ~153 fixtures)
+      const MAX_PLAYOFF_FIXTURES = 24;
+      const playoffSized = Array.from(stageMap.entries())
+        .filter(([, s]) => s.fixtures.length <= MAX_PLAYOFF_FIXTURES);
+
+      // Step 2 — keep only stages that are NOT fully finished
+      // This drops Apertura (past) and leaves Clausura (active/upcoming) stages.
+      const notFinished = playoffSized.filter(([, s]) => !s.isFinished);
+
+      // If every playoff stage is done (Apertura over, Clausura not yet created),
+      // return an empty map → TablaTab.tsx will show a projected bracket instead.
+      if (notFinished.length === 0) {
+        activeMap = new Map();
+      } else {
+        // Step 3 — detect tournament prefix to avoid mixing two active tournaments
+        let tournamentPrefix: string | null = null;
+
+        // Option A: stage flagged isCurrent by SportMonks
+        for (const [, s] of notFinished) {
+          if (s.isCurrent) {
+            const m = s.name.match(/^(.+?)\s+-\s+/i);
+            if (m) { tournamentPrefix = m[1].trim().toLowerCase(); break; }
+          }
+        }
+        // Option B: stage containing the current fixture
+        if (!tournamentPrefix && currentFixtureId) {
+          for (const [, s] of notFinished) {
+            if (s.fixtures.some(f => String(f.id) === currentFixtureId)) {
+              const m = s.name.match(/^(.+?)\s+-\s+/i);
+              if (m) { tournamentPrefix = m[1].trim().toLowerCase(); break; }
+            }
+          }
+        }
+
+        // Step 4 — filter by prefix (if found) to keep one tournament only
+        const filtered = tournamentPrefix
+          ? notFinished.filter(([, s]) => {
+              const nl = s.name.toLowerCase();
+              return nl.startsWith(tournamentPrefix!) || !nl.includes(' - ');
+            })
+          : notFinished;
+
+        activeMap = new Map(filtered);
+      }
+    }
+
     // ── Convert to CupRound[] ─────────────────────────────────────────────────
     const rounds: CupRound[] = [];
 
-    for (const [stageId, { name, sortOrder, isCurrent, isFinished, fixtures: stageFixtures }] of stageMap) {
+    for (const [stageId, { name, sortOrder, isCurrent, isFinished, fixtures: stageFixtures }] of activeMap) {
       const ties = pairFixturesToTies(stageFixtures)
         .map(f => mapTie(f, currentFixtureId));
 
@@ -1615,6 +2141,43 @@ export async function getCupBracket(
 
     // Sort: earliest stage first (Prelim → R16 → QF → SF → Final)
     rounds.sort((a, b) => a.sortOrder - b.sortOrder);
+
+    // ── Backfill TBD slots in already-created future rounds ──────────────────
+    // SportMonks sometimes creates future stages (e.g. Final) before the matchups
+    // are determined, using placeholder participants (id=0 / name="TBC"). We fill
+    // those slots with confirmed winners from the previous round, or with a
+    // "Ganador X vs Y" label when the previous-round tie is still in progress.
+    for (let ri = 1; ri < rounds.length; ri++) {
+      const prevRound = rounds[ri - 1];
+      const currRound = rounds[ri];
+
+      // Build the ordered list of teams advancing from the previous round
+      const advancing: Team[] = prevRound.ties.map((tie, ti) => {
+        if (tie.isFinished && tie.winner) return { ...tie.winner };
+        return {
+          id: `tbd-${prevRound.id}-${ti}`,
+          name: `Ganador ${abbreviate(tie.homeTeam.name)} vs ${abbreviate(tie.awayTeam.name)}`,
+          shortName: 'TBD',
+          logo: '⚽',
+        };
+      });
+
+      // Detect TBD: either no participant was returned (id='0') OR SM sent a
+      // placeholder with a real ID but name "TBC" / "TBD" (translated to "Por definir").
+      const TBD_NAME = i18n.t('cup.toBeDefined' as any) as string;
+      const isTBDTeam = (team: Team) => team.id === '0' || team.name === TBD_NAME;
+
+      let advIdx = 0;
+      const updatedTies = currRound.ties.map(tie => {
+        const needsHome = isTBDTeam(tie.homeTeam);
+        const needsAway = isTBDTeam(tie.awayTeam);
+        if (!needsHome && !needsAway) return tie;
+        const newHome = needsHome && advIdx < advancing.length ? advancing[advIdx++] : tie.homeTeam;
+        const newAway = needsAway && advIdx < advancing.length ? advancing[advIdx++] : tie.awayTeam;
+        return { ...tie, homeTeam: newHome, awayTeam: newAway };
+      });
+      rounds[ri] = { ...currRound, ties: updatedTies };
+    }
 
     // ── Infer missing future stages ──────────────────────────────────────────
     // SportMonks doesn't create stages/fixtures until matchups are known.
@@ -1679,6 +2242,7 @@ export async function getCupBracket(
 
   } catch (err) {
     console.warn('[sportsApi] getCupBracket failed:', err);
+    captureError(err, { fn: 'getCupBracket' });
     return [];
   }
 }
@@ -1720,6 +2284,7 @@ export async function getTopScorers(seasonId: number): Promise<TopScorer[]> {
     return result;
   } catch (err) {
     console.warn('[sportsApi] getTopScorers failed:', err);
+    captureError(err, { fn: 'getTopScorers' });
     const cached = await AppCache.get<TopScorer[]>(cacheKey);
     return cached ?? [];
   }
@@ -1907,6 +2472,47 @@ export async function getSearchableTeams(): Promise<SearchableTeam[]> {
 }
 
 /**
+ * Returns the **complete** searchable team index: all ~30 hardcoded "popular"
+ * teams + every team from every configured league (via /teams/seasons/{id}) +
+ * all national teams. Used by the onboarding/global search so niche clubs
+ * like Dorados (Liga Expansión MX) are findable.
+ *
+ * Result is cached for 7 days under `searchable_teams_all_v1`, so the
+ * multi-request fan-out runs at most once a week. On failure falls back to
+ * whatever partial list was assembled.
+ */
+export async function getAllSearchableTeams(): Promise<SearchableTeam[]> {
+  const cacheKey = 'searchable_teams_all_v1';
+  const cached = await AppCache.get<SearchableTeam[]>(cacheKey);
+  if (cached && cached.length > POPULAR_TEAMS.length) {
+    return cached;
+  }
+
+  const seen = new Set<number>();
+  const merged: SearchableTeam[] = [];
+  const push = (t: SearchableTeam) => {
+    if (!seen.has(t.id)) { seen.add(t.id); merged.push(t); }
+  };
+
+  // Seed with popular so they still come first
+  POPULAR_TEAMS.forEach(push);
+
+  try {
+    const [nationals, leagueTeams] = await Promise.all([
+      getSearchableNationalTeams().catch(() => [] as SearchableTeam[]),
+      loadMoreTeams(AVAILABLE_LEAGUES).catch(() => [] as SearchableTeam[]),
+    ]);
+    leagueTeams.forEach(push);
+    nationals.forEach(push);
+
+    AppCache.set(cacheKey, merged, CacheTTL.players);
+    return merged;
+  } catch {
+    return merged;
+  }
+}
+
+/**
  * Load more teams from a specific set of leagues (called when user taps "Ver más").
  * Uses parallel requests for speed.
  */
@@ -1949,9 +2555,104 @@ export async function loadMoreTeams(leagueConfigs: typeof AVAILABLE_LEAGUES): Pr
   return teams;
 }
 
-/** Returns popular players instantly (hardcoded) */
+/**
+ * Returns the popular-players list for onboarding, enriched with the real
+ * `image_path` and display name from SportMonks. Hardcoded image URLs often
+ * rot when SportMonks reorganizes its CDN folders, so we fetch fresh metadata
+ * on first launch and cache it for 7 days.
+ *
+ * The fetch is resilient: if any individual /players/{id} call fails, we fall
+ * back to the hardcoded entry for that player. If the whole attempt fails
+ * (offline on first launch), we return the hardcoded list untouched.
+ */
 export async function getSearchablePlayers(): Promise<SearchablePlayer[]> {
-  return POPULAR_PLAYERS;
+  const cacheKey = 'searchable_players_v2';
+  const cached = await AppCache.get<SearchablePlayer[]>(cacheKey);
+  if (cached && cached.length === POPULAR_PLAYERS.length) {
+    return cached;
+  }
+
+  try {
+    const results = await Promise.allSettled(
+      POPULAR_PLAYERS.map(p => fetchPlayerById(p.id)),
+    );
+
+    const enriched: SearchablePlayer[] = POPULAR_PLAYERS.map((fallback, i) => {
+      const r = results[i];
+      if (r.status === 'fulfilled' && r.value) {
+        const api = r.value;
+        return {
+          ...fallback,
+          name: api.display_name || api.common_name || fallback.name,
+          image: api.image_path || fallback.image,
+        };
+      }
+      return fallback;
+    });
+
+    AppCache.set(cacheKey, enriched, CacheTTL.players);
+    return enriched;
+  } catch {
+    return POPULAR_PLAYERS;
+  }
+}
+
+/**
+ * Returns the **complete** searchable player index: all enriched "popular"
+ * players + every player in the squad of every team in `POPULAR_TEAMS`. We
+ * intentionally don't expand to every team in every league — that would be
+ * ~1000 squad requests on first launch. Popular-team squads alone adds ~750
+ * players on top of the 15 hardcoded, which covers the realistic search
+ * space for onboarding while keeping the fan-out bounded.
+ *
+ * Cached for 7 days under `searchable_players_all_v1`.
+ */
+export async function getAllSearchablePlayers(): Promise<SearchablePlayer[]> {
+  const cacheKey = 'searchable_players_all_v1';
+  const cached = await AppCache.get<SearchablePlayer[]>(cacheKey);
+  if (cached && cached.length > POPULAR_PLAYERS.length) {
+    return cached;
+  }
+
+  // Seed with the enriched popular list so marquee names still rank first
+  const popular = await getSearchablePlayers();
+  const seen = new Set<number>(popular.map(p => p.id));
+  const merged: SearchablePlayer[] = [...popular];
+
+  try {
+    // Fetch squads for POPULAR_TEAMS in batches of 8 to avoid hammering the API
+    const teamsWithSeason = POPULAR_TEAMS.filter(t => !!t.seasonId);
+    for (let i = 0; i < teamsWithSeason.length; i += 8) {
+      const batch = teamsWithSeason.slice(i, i + 8);
+      const results = await Promise.allSettled(
+        batch.map(t => fetchSquad(t.seasonId!, t.id)),
+      );
+      for (let j = 0; j < results.length; j++) {
+        const r = results[j];
+        if (r.status !== 'fulfilled') continue;
+        const team = batch[j];
+        for (const sp of r.value) {
+          const p = sp.player;
+          if (!p || seen.has(p.id)) continue;
+          seen.add(p.id);
+          merged.push({
+            id: p.id,
+            name: p.display_name || p.common_name || 'Unknown',
+            image: p.image_path || '',
+            teamName: team.name,
+            teamLogo: team.logo,
+            teamId: team.id,
+            jerseyNumber: sp.jersey_number,
+          });
+        }
+      }
+    }
+
+    AppCache.set(cacheKey, merged, CacheTTL.players);
+    return merged;
+  } catch {
+    return merged;
+  }
 }
 
 // ── National Teams ────────────────────────────────────────────────────────────

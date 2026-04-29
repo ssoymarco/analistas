@@ -3,9 +3,15 @@ import * as Notifications from 'expo-notifications';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { I18nextProvider } from 'react-i18next';
 import i18n, { applyStoredLanguage } from './src/i18n';
+import { initSentry, identifyUser, clearUser, Sentry } from './src/services/sentry';
+
+// Initialize Sentry as early as possible — before any other imports run their
+// side effects — so we capture any startup errors too.
+initSentry();
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { DarkModeProvider } from './src/contexts/DarkModeContext';
-import { AuthProvider } from './src/contexts/AuthContext';
+import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { FavoritesProvider } from './src/contexts/FavoritesContext';
 import { NotificationPrefsProvider } from './src/contexts/NotificationPrefsContext';
 import { OnboardingProvider } from './src/contexts/OnboardingContext';
@@ -81,9 +87,27 @@ function buildMatchStubFromPayload(payload: NotificationPayload): Match | null {
   }
 }
 
+// ── Sentry user sync ──────────────────────────────────────────────────────────
+// Sits inside AuthProvider so it can read the current user and tag Sentry
+// events with the user ID. Renders nothing.
+
+function SentryUserSync() {
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (user) {
+      identifyUser(user.id, user.username ?? user.name);
+    } else {
+      clearUser();
+    }
+  }, [user]);
+
+  return null;
+}
+
 // ── Root component ────────────────────────────────────────────────────────────
 
-export default function App() {
+function App() {
   const notifResponseListener = useRef<Notifications.Subscription | null>(null);
 
   useEffect(() => {
@@ -113,27 +137,34 @@ export default function App() {
   }, []);
 
   return (
-    <I18nextProvider i18n={i18n}>
-      <SafeAreaProvider>
-        <NetworkProvider>
-          <DarkModeProvider>
-            <TimeFormatProvider>
-              <AuthProvider>
-                <OnboardingProvider>
-                  <NotificationPrefsProvider>
-                    <FavoritesProvider>
-                      <UserStatsProvider>
-                        <AppNavigator />
-                        <OfflineBanner />
-                      </UserStatsProvider>
-                    </FavoritesProvider>
-                  </NotificationPrefsProvider>
-                </OnboardingProvider>
-              </AuthProvider>
-            </TimeFormatProvider>
-          </DarkModeProvider>
-        </NetworkProvider>
-      </SafeAreaProvider>
-    </I18nextProvider>
+    <ErrorBoundary>
+      <I18nextProvider i18n={i18n}>
+        <SafeAreaProvider>
+          <NetworkProvider>
+            <DarkModeProvider>
+              <TimeFormatProvider>
+                <AuthProvider>
+                  <SentryUserSync />
+                  <OnboardingProvider>
+                    <NotificationPrefsProvider>
+                      <FavoritesProvider>
+                        <UserStatsProvider>
+                          <AppNavigator />
+                          <OfflineBanner />
+                        </UserStatsProvider>
+                      </FavoritesProvider>
+                    </NotificationPrefsProvider>
+                  </OnboardingProvider>
+                </AuthProvider>
+              </TimeFormatProvider>
+            </DarkModeProvider>
+          </NetworkProvider>
+        </SafeAreaProvider>
+      </I18nextProvider>
+    </ErrorBoundary>
   );
 }
+
+// Wrap the root component with Sentry so it captures React render errors
+// AND adds Sentry's own ErrorBoundary at the outermost layer.
+export default Sentry.wrap(App);
