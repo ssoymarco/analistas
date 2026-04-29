@@ -5,6 +5,7 @@ import {
   fetchTopScorers,
   fetchTeamsBySeasonId,
   fetchFixturesByDate,
+  fetchFixturesBySeasonId,
   fetchSeasonsByLeagueId,
   type SMStandingGroup,
   type SMStandingDetail,
@@ -97,6 +98,10 @@ export interface LeagueDetailData {
   seasonName: string;
   standings: LeagueStandingRow[];
   topScorers: TopScorerRow[];
+  /** Top 20 assist leaders for the season (type_id=209). */
+  topAssists: TopScorerRow[];
+  /** Top 20 card leaders for the season (type_id=84, yellow cards). */
+  topCards: TopScorerRow[];
   teams: LeagueTeam[];
   fixtures: LeagueFixture[];
 }
@@ -302,11 +307,19 @@ export function useLeagueDetail(
         }
 
         // 2. Fetch all data in parallel
-        const [standingsRaw, topScorersRaw, teamsRaw, fixturesRaw] = await Promise.all([
+        // type_ids: 208=goals, 209=assists, 84=yellow cards
+        // For cup competitions: use season-level fixture fetch (all rounds, no ±7d window).
+        // For regular leagues: use day-by-day around today (fast, covers only current jornada).
+        const isCupLeague = config?.isCup ?? false;
+        const [standingsRaw, topScorersRaw, topAssistsRaw, topCardsRaw, teamsRaw, fixturesRaw] = await Promise.all([
           fetchStandings(resolvedSeasonId).catch(() => [] as SMStandingGroup[]),
-          fetchTopScorers(resolvedSeasonId).catch(() => [] as SMTopScorer[]),
+          fetchTopScorers(resolvedSeasonId, 208).catch(() => [] as SMTopScorer[]),
+          fetchTopScorers(resolvedSeasonId, 209).catch(() => [] as SMTopScorer[]),
+          fetchTopScorers(resolvedSeasonId, 84).catch(() => [] as SMTopScorer[]),
           fetchTeamsBySeasonId(resolvedSeasonId).catch(() => [] as SMParticipant[]),
-          fetchLeagueFixtures(leagueId).catch(() => [] as SMFixture[]),
+          isCupLeague
+            ? fetchFixturesBySeasonId(resolvedSeasonId).catch(() => [] as SMFixture[])
+            : fetchLeagueFixtures(leagueId).catch(() => [] as SMFixture[]),
         ]);
 
         if (!mounted.current) return;
@@ -333,22 +346,28 @@ export function useLeagueDetail(
         // Also add from standings (covers cases where teams tab is empty)
         for (const s of standings) teamLookup.set(s.teamId, { name: s.teamName, logo: s.teamLogo });
 
-        // Only goals (type_id=208 is goals in topscorers endpoint)
-        // Fall back to all entries if the season uses a different type_id mapping
-        const goalScorers = topScorersRaw.filter(ts => ts.type_id === 208);
-        const scorersSource = goalScorers.length > 0 ? goalScorers : topScorersRaw;
-        const topScorers = scorersSource
-          .map((ts, i) => {
-            const row = mapTopScorer(ts, i);
-            const team = teamLookup.get(ts.participant_id);
-            if (team) {
-              row.teamName = team.name;
-              row.teamLogo = team.logo;
-            }
-            return row;
-          })
-          .sort((a, b) => a.position - b.position)
-          .slice(0, 20);
+        // Helper to map a raw topscorer array enriched with team lookup
+        const buildStatRows = (raw: SMTopScorer[]): TopScorerRow[] =>
+          raw
+            .map((ts, i) => {
+              const row = mapTopScorer(ts, i);
+              const team = teamLookup.get(ts.participant_id);
+              if (team) { row.teamName = team.name; row.teamLogo = team.logo; }
+              return row;
+            })
+            .sort((a, b) => a.position - b.position)
+            .slice(0, 20);
+
+        // Goals (type_id=208 filtered at API level; fall back to unfiltered if empty)
+        const scorersFallback = topScorersRaw.length === 0
+          ? [] : topScorersRaw;
+        const topScorers = buildStatRows(scorersFallback);
+
+        // Assists (type_id=209) — stored in `goals` field for UI reuse
+        const topAssists = buildStatRows(topAssistsRaw);
+
+        // Cards (type_id=84, yellow cards) — stored in `goals` field for UI reuse
+        const topCards = buildStatRows(topCardsRaw);
 
         const fixtures = fixturesRaw
           .map(mapFixture)
@@ -364,6 +383,8 @@ export function useLeagueDetail(
           seasonName: resolvedSeasonName || `${new Date().getFullYear() - 1}/${String(new Date().getFullYear()).slice(2)}`,
           standings,
           topScorers,
+          topAssists,
+          topCards,
           teams,
           fixtures,
         });

@@ -234,8 +234,11 @@ const tr: TranslationKeys = {
     madeIn: 'Hecho en México 🇲🇽',
     selectLanguage: 'Dil seçin',
     guestMode: 'Misafir modundasınız',
-    guestModeSub: 'İlerlemenizi kaydetmek için hesap oluşturun',
-    register: 'Kayıt ol',
+    guestModeSub: 'Tüm cihazlarınızda favorileri kaydetmek için hesabınızı bağlayın',
+    register: 'Hesap oluştur',
+    connectWithGoogle: 'Google ile devam et',
+    upgradeSuccess: 'Hesap bağlandı! Favorileriniz kaydedildi.',
+    upgradeError: 'Hesap bağlanamadı. Lütfen tekrar deneyin.',
     loginPrompt: 'Daha fazla özellik için giriş yapın',
     signIn: 'Giriş yap',
     streakActive: 'Seri aktif',
@@ -262,6 +265,7 @@ const tr: TranslationKeys = {
     usernameInUse: 'Bu @kullanıcı adı zaten kullanımda',
     saveError: 'Kaydetme hatası. Tekrar deneyin.',
     usernameHint: 'En az 3 karakter (harf, rakam, . _)',
+    avatarNote: 'Avatarınız baş harflerinizden otomatik olarak oluşturulur',
   },
 
   // ── Streak modal ───────────────────────────────────────────────────────────

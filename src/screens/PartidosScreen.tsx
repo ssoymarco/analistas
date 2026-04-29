@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, PanResponder, Animated } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated } from 'react-native';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { StreakModal } from '../components/StreakModal';
 import { SkeletonPartidos } from '../components/Skeleton';
@@ -150,7 +150,17 @@ export const PartidosScreen: React.FC = () => {
     // Example: follows América → Liga MX inferred → all Liga MX matches shown
     // even if the user never explicitly followed the league.
     const priorityIds = new Set([...inferredLeagueIds, ...leagueSet]);
-    const priorityLeagueGroups = filteredLeagues.filter(lg => priorityIds.has(lg.id));
+
+    // Deduplicate: strip matches already shown in "Mis equipos" from league sections
+    // so the same fixture never appears twice on screen.
+    const myTeamMatchIds = new Set(myTeamMatches.map(m => m.id));
+    const priorityLeagueGroups = filteredLeagues
+      .filter(lg => priorityIds.has(lg.id))
+      .map(lg => ({
+        ...lg,
+        matches: lg.matches.filter(m => !myTeamMatchIds.has(m.id)),
+      }))
+      .filter(lg => lg.matches.length > 0);
 
     // ── Remaining leagues — not in priority — split by tier ───────────────────
     const remaining = filteredLeagues.filter(lg => !priorityIds.has(lg.id));
@@ -160,7 +170,23 @@ export const PartidosScreen: React.FC = () => {
       lg => !LEAGUE_TIER_1.has(Number(lg.id)) && !LEAGUE_TIER_2.has(Number(lg.id))
     );
 
-    return { myTeamMatches, priorityLeagueGroups, tier1Groups, tier2Groups, tier3Groups };
+    // ── Sort each tier: leagues with live matches first, then finished, then scheduled-only
+    const byLiveFirst = (a: LeagueWithMatches, b: LeagueWithMatches) => {
+      const priority = (lg: LeagueWithMatches) => {
+        if (lg.matches.some(m => m.status === 'live'))     return 0;
+        if (lg.matches.some(m => m.status === 'finished')) return 1;
+        return 2;
+      };
+      return priority(a) - priority(b);
+    };
+
+    return {
+      myTeamMatches,
+      priorityLeagueGroups: [...priorityLeagueGroups].sort(byLiveFirst),
+      tier1Groups:          [...tier1Groups].sort(byLiveFirst),
+      tier2Groups:          [...tier2Groups].sort(byLiveFirst),
+      tier3Groups:          [...tier3Groups].sort(byLiveFirst),
+    };
   }, [filteredLeagues, followedTeamIds, followedLeagueIds]);
 
   // Does the user have at least some personalization set up?
@@ -219,28 +245,18 @@ export const PartidosScreen: React.FC = () => {
     setActiveTab('todos');
   }, []);
 
-  // ── Swipe left/right to change date ─────────────────────────────────────
-  const shiftDate = useCallback((days: number) => {
-    setSelectedDate(prev => {
-      const d = new Date(prev + 'T12:00:00');
-      d.setDate(d.getDate() + days);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // ── Tab press → jump to today ──────────────────────────────────────────────
+  // When the user taps the "Partidos" tab while already on it (from any date),
+  // snap back to today. Uses the parent tab navigator's tabPress event.
+  useEffect(() => {
+    const parent = navigation.getParent();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const unsubscribe = parent?.addListener('tabPress' as any, () => {
+      setSelectedDate(todayISO());
+      setActiveTab('todos');
     });
-    setActiveTab('todos');
-  }, []);
-
-  const swipeRef = useRef({ startX: 0, handled: false });
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > 30 && Math.abs(gs.dy) < 40,
-      onPanResponderGrant: (_, gs) => { swipeRef.current = { startX: gs.x0, handled: false }; },
-      onPanResponderRelease: (_, gs) => {
-        if (swipeRef.current.handled) return;
-        if (gs.dx < -60) { swipeRef.current.handled = true; shiftDate(1); }   // swipe left → tomorrow
-        if (gs.dx > 60)  { swipeRef.current.handled = true; shiftDate(-1); }  // swipe right → yesterday
-      },
-    })
-  ).current;
+    return unsubscribe ?? undefined;
+  }, []); // navigation ref is stable for the lifetime of this screen
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
@@ -249,17 +265,18 @@ export const PartidosScreen: React.FC = () => {
       {/* ── Top Bar ── */}
       <View style={{
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingHorizontal: 16, paddingTop: 4, paddingBottom: 10, backgroundColor: c.bg,
+        paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, backgroundColor: c.bg,
+        borderBottomWidth: 1, borderBottomColor: c.border,
       }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <View style={{
-            width: 36, height: 36, borderRadius: 18,
+            width: 32, height: 32, borderRadius: 10,
             backgroundColor: 'rgba(16,185,129,0.15)',
             alignItems: 'center', justifyContent: 'center',
           }}>
-            <Text style={{ fontSize: 18 }}>⚽</Text>
+            <Text style={{ fontSize: 14 }}>⚽</Text>
           </View>
-          <Text style={{ fontSize: 22, fontWeight: '800', color: c.textPrimary, letterSpacing: -0.5 }}>
+          <Text style={{ fontSize: 18, fontWeight: '800', color: c.textPrimary }}>
             {t('matches.title')}
           </Text>
         </View>
@@ -320,22 +337,9 @@ export const PartidosScreen: React.FC = () => {
         <FilterTabs activeTab={activeTab} onTabChange={setActiveTab} liveCounts={liveCount} totalCount={totalCount} finishedCount={finishedCount} />
       )}
 
-      {/* Live auto-refresh indicator — subtle pulsing dot only, no text */}
-      {isPolling && (
-        <View style={{
-          alignItems: 'center', justifyContent: 'center',
-          paddingVertical: 4, backgroundColor: 'rgba(255,69,58,0.05)',
-          borderBottomWidth: 1, borderBottomColor: 'rgba(255,69,58,0.10)',
-        }}>
-          <Animated.View style={{
-            width: 6, height: 6, borderRadius: 3,
-            backgroundColor: c.live, opacity: liveDotOpacity,
-          }} />
-        </View>
-      )}
+      {/* Live auto-refresh indicator removed */}
 
       <ScrollView
-        {...panResponder.panHandlers}
         style={{ flex: 1, backgroundColor: c.bg }}
         contentContainerStyle={{ paddingTop: 8 }}
         showsVerticalScrollIndicator={false}

@@ -28,33 +28,11 @@ import { useFavorites } from '../contexts/FavoritesContext';
 import { usePlayerDetail } from '../hooks/usePlayerDetail';
 import type { PlayerDetailData, PlayerSeasonStats } from '../hooks/usePlayerDetail';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
+import { BackArrow, ShareIcon } from '../components/NavIcons';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'PlayerDetail'>;
 type Tab = 'resumen' | 'estadisticas' | 'historial';
 
-// ── Icon: Back arrow ────────────────────────────────────────────────────────
-function BackArrow({ color }: { color: string }) {
-  return (
-    <View style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ position: 'absolute', top: 4, left: 2, width: 9, height: 1.8, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '-45deg' }] }} />
-      <View style={{ position: 'absolute', bottom: 4, left: 2, width: 9, height: 1.8, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '45deg' }] }} />
-    </View>
-  );
-}
-
-// ── Icon: Share ─────────────────────────────────────────────────────────────
-function ShareIcon({ color, size = 18 }: { color: string; size?: number }) {
-  const dotR = size * 0.15;
-  return (
-    <View style={{ width: size, height: size }}>
-      <View style={{ position: 'absolute', top: 0, right: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      <View style={{ position: 'absolute', top: size * 0.36, left: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      <View style={{ position: 'absolute', bottom: 0, right: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      <View style={{ position: 'absolute', top: size * 0.18, left: size * 0.18, width: size * 0.52, height: 1.5, backgroundColor: color, transform: [{ rotate: '-25deg' }] }} />
-      <View style={{ position: 'absolute', top: size * 0.62, left: size * 0.18, width: size * 0.52, height: 1.5, backgroundColor: color, transform: [{ rotate: '25deg' }] }} />
-    </View>
-  );
-}
 
 // ── Icon: Chevron right ─────────────────────────────────────────────────────
 function ChevronRight({ color, size = 12 }: { color: string; size?: number }) {
@@ -695,28 +673,69 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
             {/* Player name */}
             <Text style={[ps.playerName, { color: hText }]}>{displayName}</Text>
 
-            {/* Team link */}
-            {displayTeam ? (
-              <TouchableOpacity
-                style={ps.teamLink}
-                activeOpacity={0.7}
-                onPress={() => {
-                  if (data?.teamId && data.teamId > 0) {
-                    navigation.push('TeamDetail', {
-                      teamId: data.teamId,
-                      teamName: displayTeam,
-                      teamLogo: displayTeamLogo,
-                    });
-                  }
-                }}
-              >
-                {displayTeamLogo?.startsWith('http') ? (
-                  <Image source={{ uri: displayTeamLogo }} style={ps.teamDot} resizeMode="contain" />
-                ) : (
-                  <View style={[ps.teamDot, { backgroundColor: c.accent }]} />
-                )}
-                <Text style={[ps.teamLinkText, { color: c.accent }]}>{displayTeam}</Text>
-              </TouchableOpacity>
+            {/* Club + Country, side-by-side on a single horizontal line */}
+            {(displayTeam || (data?.info.nationality && data.info.nationality !== 'Desconocido')) ? (
+              <View style={ps.affiliationRow}>
+                {/* Club (the team they play for week-to-week) */}
+                {displayTeam ? (
+                  <TouchableOpacity
+                    style={ps.teamLink}
+                    activeOpacity={0.7}
+                    disabled={!(data?.teamId && data.teamId > 0)}
+                    onPress={() => {
+                      if (data?.teamId && data.teamId > 0) {
+                        navigation.push('TeamDetail', {
+                          teamId: data.teamId,
+                          teamName: displayTeam,
+                          teamLogo: displayTeamLogo,
+                        });
+                      }
+                    }}
+                  >
+                    {displayTeamLogo?.startsWith('http') ? (
+                      <Image source={{ uri: displayTeamLogo }} style={ps.teamDot} resizeMode="contain" />
+                    ) : (
+                      <View style={[ps.teamDot, { backgroundColor: c.accent }]} />
+                    )}
+                    <Text style={[ps.teamLinkText, { color: c.accent }]} numberOfLines={1}>
+                      {displayTeam}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {/* Separator dot — only shown when both pieces are present */}
+                {displayTeam && data?.info.nationality && data.info.nationality !== 'Desconocido' ? (
+                  <Text style={[ps.affiliationSep, { color: hTextSoft }]}>·</Text>
+                ) : null}
+
+                {/* Nationality (always shown when known — independent of being
+                 *  called up). Clickable when SportMonks has a record of the
+                 *  player on the national team; otherwise plain text. */}
+                {data?.info.nationality && data.info.nationality !== 'Desconocido' ? (
+                  <TouchableOpacity
+                    style={ps.teamLink}
+                    activeOpacity={data.nationalTeamId ? 0.7 : 1}
+                    disabled={!data.nationalTeamId}
+                    onPress={() => {
+                      if (data.nationalTeamId) {
+                        navigation.push('TeamDetail', {
+                          teamId: data.nationalTeamId,
+                          teamName: data.nationalTeamName || data.info.nationality,
+                          teamLogo: data.nationalTeamLogo || '',
+                        });
+                      }
+                    }}
+                  >
+                    <Text style={{ fontSize: 14 }}>{data.info.nationalityFlag}</Text>
+                    <Text style={[
+                      ps.teamLinkText,
+                      { color: data.nationalTeamId ? c.accent : hTextSoft },
+                    ]} numberOfLines={1}>
+                      {data.info.nationality}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             ) : null}
 
             {/* Position + League */}
@@ -883,6 +902,21 @@ const ps = StyleSheet.create({
     letterSpacing: -0.3,
   },
 
+  // Affiliation row — wraps club + country side-by-side (with " · " separator)
+  affiliationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',          // graceful wrap if the player has very long club + country names
+    gap: 8,
+    paddingHorizontal: 12,
+    marginTop: 4,
+  },
+  affiliationSep: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
   // Team link
   teamLink: {
     flexDirection: 'row',
@@ -890,7 +924,9 @@ const ps = StyleSheet.create({
     gap: 6,
   },
   teamDot: {
-    width: 18, height: 18, borderRadius: 9,
+    // Rounded square (not full circle) so shield-shaped club crests like
+    // Barcelona, Atlético Madrid or Inter aren't cropped at the edges.
+    width: 18, height: 18, borderRadius: 4,
   },
   teamLinkText: {
     fontSize: 14, fontWeight: '600',

@@ -1,15 +1,8 @@
-/**
- * EditProfileModal.tsx
- *
- * Bottom-sheet modal to edit display name and @username.
- * Shows inline availability check with debounce.
- */
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Modal, View, Text, TextInput, TouchableOpacity,
   ActivityIndicator, KeyboardAvoidingView, Platform,
-  StyleSheet, Pressable,
+  Pressable,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -24,20 +17,23 @@ interface Props {
 
 type UsernameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
 
+function getInitials(name: string): string {
+  return name.split(' ').slice(0, 2).map(w => w.charAt(0).toUpperCase()).join('') || '?';
+}
+
 export const EditProfileModal: React.FC<Props> = ({ visible, onClose }) => {
   const c = useThemeColors();
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const { user, updateProfile, checkUsernameAvailable } = useAuth();
 
-  const [name, setName]               = useState(user?.name ?? '');
-  const [username, setUsername]       = useState(user?.username ?? '');
-  const [usernameStatus, setStatus]   = useState<UsernameStatus>('idle');
-  const [isSaving, setIsSaving]       = useState(false);
-  const [error, setError]             = useState<string | null>(null);
+  const [name, setName]             = useState(user?.name ?? '');
+  const [username, setUsername]     = useState(user?.username ?? '');
+  const [usernameStatus, setStatus] = useState<UsernameStatus>('idle');
+  const [isSaving, setIsSaving]     = useState(false);
+  const [error, setError]           = useState<string | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Reset fields when modal opens
   useEffect(() => {
     if (visible) {
       setName(user?.name ?? '');
@@ -47,11 +43,10 @@ export const EditProfileModal: React.FC<Props> = ({ visible, onClose }) => {
     }
   }, [visible, user]);
 
-  // Debounced username availability check
   const handleUsernameChange = useCallback((text: string) => {
     const cleaned = text.toLowerCase().replace(/[^a-z0-9._]/g, '').slice(0, 20);
     setUsername(cleaned);
-    setStatus('checking');
+    setError(null);
 
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
 
@@ -66,6 +61,7 @@ export const EditProfileModal: React.FC<Props> = ({ visible, onClose }) => {
       return;
     }
 
+    setStatus('checking');
     debounceTimer.current = setTimeout(async () => {
       try {
         const available = await checkUsernameAvailable(cleaned);
@@ -76,9 +72,10 @@ export const EditProfileModal: React.FC<Props> = ({ visible, onClose }) => {
     }, 500);
   }, [user?.username, checkUsernameAvailable]);
 
-  const canSave =
-    (name.trim() !== '' && name.trim() !== user?.name) ||
-    (username !== user?.username && (usernameStatus === 'available' || username === user?.username));
+  const nameChanged     = name.trim() !== '' && name.trim() !== user?.name;
+  const usernameChanged = username !== user?.username;
+  const usernameOk      = !usernameChanged || usernameStatus === 'available';
+  const canSave         = (nameChanged || usernameChanged) && usernameOk && !isSaving;
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -86,67 +83,108 @@ export const EditProfileModal: React.FC<Props> = ({ visible, onClose }) => {
     setError(null);
     try {
       await updateProfile({
-        displayName: name.trim() !== user?.name ? name.trim() : undefined,
-        username:    username !== user?.username ? username : undefined,
+        displayName: nameChanged     ? name.trim() : undefined,
+        username:    usernameChanged ? username    : undefined,
       });
       haptics.success();
       onClose();
     } catch (err: unknown) {
       haptics.error();
       const msg = err instanceof Error ? err.message : 'error';
-      setError(msg === 'username_taken' ? t('editProfileModal.usernameInUse') : t('editProfileModal.saveError'));
+      setError(msg === 'username_taken'
+        ? t('editProfileModal.usernameInUse')
+        : t('editProfileModal.saveError'));
     } finally {
       setIsSaving(false);
     }
   };
 
-  const statusColor = () => {
-    if (usernameStatus === 'available') return '#00E096';
-    if (usernameStatus === 'taken' || usernameStatus === 'invalid') return '#FF453A';
-    return c.textTertiary;
-  };
+  const statusColor = usernameStatus === 'available' ? '#00E096'
+    : (usernameStatus === 'taken' || usernameStatus === 'invalid') ? '#FF453A'
+    : c.textTertiary;
 
-  const statusText = () => {
-    if (usernameStatus === 'checking') return '...';
-    if (usernameStatus === 'available') return t('common.available');
-    if (usernameStatus === 'taken') return t('common.unavailable');
-    if (usernameStatus === 'invalid') return t('editProfileModal.usernameHint');
-    return '';
-  };
+  const statusText = usernameStatus === 'checking' ? '...'
+    : usernameStatus === 'available' ? `✓ ${t('common.available')}`
+    : usernameStatus === 'taken'     ? `✕ ${t('common.unavailable')}`
+    : usernameStatus === 'invalid'   ? t('editProfileModal.usernameHint')
+    : '';
+
+  const previewName     = name.trim() || user?.name || '';
+  const previewInitials = getInitials(previewName);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={s.backdrop} onPress={onClose} />
+      <Pressable
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }}
+        onPress={onClose}
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={s.kvContainer}
+        style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}
       >
-        <View style={[s.sheet, { backgroundColor: c.surface, paddingBottom: insets.bottom + 16 }]}>
-
+        <View style={{
+          backgroundColor: c.card,
+          borderTopLeftRadius: 28, borderTopRightRadius: 28,
+          paddingHorizontal: 24,
+          paddingTop: 12,
+          paddingBottom: insets.bottom + 20,
+        }}>
           {/* Handle */}
-          <View style={[s.handle, { backgroundColor: c.border }]} />
+          <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 24 }} />
 
-          {/* Title */}
-          <Text style={[s.title, { color: c.textPrimary }]}>{t('editProfileModal.title')}</Text>
+          {/* Avatar preview */}
+          <View style={{ alignItems: 'center', marginBottom: 24 }}>
+            <View style={{
+              width: 80, height: 80, borderRadius: 40,
+              backgroundColor: '#6366f1',
+              alignItems: 'center', justifyContent: 'center',
+              marginBottom: 8,
+            }}>
+              <Text style={{ fontSize: 28, fontWeight: '900', color: '#fff' }}>{previewInitials}</Text>
+            </View>
+            <Text style={{ fontSize: 12, color: c.textTertiary }}>{t('editProfileModal.avatarNote')}</Text>
+          </View>
 
           {/* Name field */}
-          <Text style={[s.label, { color: c.textSecondary }]}>{t('editProfileModal.nameLabel')}</Text>
-          <TextInput
-            style={[s.input, { backgroundColor: c.card, color: c.textPrimary, borderColor: c.border }]}
-            value={name}
-            onChangeText={setName}
-            placeholder={t('editProfileModal.namePlaceholder')}
-            placeholderTextColor={c.textTertiary}
-            autoCapitalize="words"
-            maxLength={40}
-          />
+          <Text style={{ fontSize: 12, fontWeight: '700', color: c.textTertiary, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>
+            {t('editProfileModal.nameLabel')}
+          </Text>
+          <View style={{
+            flexDirection: 'row', alignItems: 'center',
+            backgroundColor: c.surface, borderRadius: 14,
+            borderWidth: 1, borderColor: nameChanged ? '#6366f1' : c.border,
+            paddingHorizontal: 14, marginBottom: 16,
+          }}>
+            <TextInput
+              style={{ flex: 1, fontSize: 16, color: c.textPrimary, paddingVertical: 13 }}
+              value={name}
+              onChangeText={text => { setName(text); setError(null); }}
+              placeholder={t('editProfileModal.namePlaceholder')}
+              placeholderTextColor={c.textTertiary}
+              autoCapitalize="words"
+              maxLength={40}
+            />
+            {nameChanged && (
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#6366f1' }} />
+            )}
+          </View>
 
           {/* Username field */}
-          <Text style={[s.label, { color: c.textSecondary }]}>{t('editProfileModal.usernameLabel')}</Text>
-          <View style={[s.usernameRow, { backgroundColor: c.card, borderColor: c.border }]}>
-            <Text style={[s.atSign, { color: c.textTertiary }]}>@</Text>
+          <Text style={{ fontSize: 12, fontWeight: '700', color: c.textTertiary, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>
+            {t('editProfileModal.usernameLabel')}
+          </Text>
+          <View style={{
+            flexDirection: 'row', alignItems: 'center',
+            backgroundColor: c.surface, borderRadius: 14,
+            borderWidth: 1,
+            borderColor: usernameStatus === 'available' ? '#00E096'
+              : usernameStatus === 'taken' || usernameStatus === 'invalid' ? '#FF453A'
+              : usernameChanged ? '#6366f1' : c.border,
+            paddingHorizontal: 14, marginBottom: 6,
+          }}>
+            <Text style={{ fontSize: 16, color: c.textTertiary, marginRight: 2 }}>@</Text>
             <TextInput
-              style={[s.usernameInput, { color: c.textPrimary }]}
+              style={{ flex: 1, fontSize: 16, color: c.textPrimary, paddingVertical: 13 }}
               value={username}
               onChangeText={handleUsernameChange}
               placeholder={t('editProfileModal.usernamePlaceholder')}
@@ -155,72 +193,53 @@ export const EditProfileModal: React.FC<Props> = ({ visible, onClose }) => {
               autoCorrect={false}
               maxLength={20}
             />
-            {usernameStatus === 'checking' && (
-              <ActivityIndicator size="small" color={c.textTertiary} style={{ marginRight: 12 }} />
-            )}
+            {usernameStatus === 'checking'
+              ? <ActivityIndicator size="small" color={c.textTertiary} />
+              : statusText
+              ? <Text style={{ fontSize: 12, fontWeight: '600', color: statusColor }}>{statusText}</Text>
+              : null
+            }
           </View>
-          {statusText() ? (
-            <Text style={[s.statusText, { color: statusColor() }]}>{statusText()}</Text>
-          ) : null}
+
+          {/* Username hint */}
+          <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 4, marginLeft: 4 }}>
+            {t('editProfileModal.usernameHint')}
+          </Text>
 
           {/* Error */}
-          {error && <Text style={[s.errorText, { color: '#FF453A' }]}>{error}</Text>}
+          {error && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, marginBottom: 4, padding: 10, borderRadius: 10, backgroundColor: 'rgba(255,69,58,0.1)' }}>
+              <Text style={{ fontSize: 12, color: '#FF453A' }}>⚠️ {error}</Text>
+            </View>
+          )}
 
           {/* Save button */}
           <TouchableOpacity
-            style={[
-              s.saveBtn,
-              { backgroundColor: canSave && !isSaving ? '#00E096' : c.border },
-            ]}
+            style={{
+              borderRadius: 16, paddingVertical: 15,
+              alignItems: 'center', marginTop: 16,
+              backgroundColor: canSave ? '#00E096' : c.surface,
+              borderWidth: canSave ? 0 : 1,
+              borderColor: c.border,
+            }}
             onPress={handleSave}
-            disabled={!canSave || isSaving}
+            disabled={!canSave}
             activeOpacity={0.85}
           >
             {isSaving
               ? <ActivityIndicator color="#000" />
-              : <Text style={[s.saveBtnText, { color: canSave ? '#000' : c.textTertiary }]}>{t('common.save')}</Text>
+              : <Text style={{ fontSize: 16, fontWeight: '700', color: canSave ? '#000' : c.textTertiary }}>
+                  {t('common.save')}
+                </Text>
             }
           </TouchableOpacity>
 
           {/* Cancel */}
-          <TouchableOpacity onPress={onClose} style={s.cancelBtn} activeOpacity={0.7}>
-            <Text style={[s.cancelText, { color: c.textSecondary }]}>{t('common.cancel')}</Text>
+          <TouchableOpacity onPress={onClose} style={{ alignItems: 'center', paddingVertical: 12 }} activeOpacity={0.7}>
+            <Text style={{ fontSize: 15, color: c.textSecondary }}>{t('common.cancel')}</Text>
           </TouchableOpacity>
-
         </View>
       </KeyboardAvoidingView>
     </Modal>
   );
 };
-
-const s = StyleSheet.create({
-  backdrop:      { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
-  kvContainer:   { flex: 1, justifyContent: 'flex-end' },
-  sheet: {
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingHorizontal: 20, paddingTop: 12,
-  },
-  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
-  title:  { fontSize: 18, fontWeight: '700', marginBottom: 24 },
-  label:  { fontSize: 13, fontWeight: '600', marginBottom: 8, marginTop: 4 },
-  input: {
-    borderRadius: 12, borderWidth: 1,
-    paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 16, marginBottom: 4,
-  },
-  usernameRow: {
-    flexDirection: 'row', alignItems: 'center',
-    borderRadius: 12, borderWidth: 1, marginBottom: 4,
-  },
-  atSign:        { fontSize: 16, paddingLeft: 14, paddingRight: 4 },
-  usernameInput: { flex: 1, paddingVertical: 12, paddingRight: 14, fontSize: 16 },
-  statusText:    { fontSize: 12, marginBottom: 8, marginLeft: 4 },
-  errorText:     { fontSize: 13, marginBottom: 8, marginLeft: 4 },
-  saveBtn: {
-    borderRadius: 14, paddingVertical: 14,
-    alignItems: 'center', marginTop: 16, marginBottom: 8,
-  },
-  saveBtnText:   { fontSize: 16, fontWeight: '700' },
-  cancelBtn:     { alignItems: 'center', paddingVertical: 10 },
-  cancelText:    { fontSize: 15 },
-});

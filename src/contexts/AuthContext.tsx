@@ -21,7 +21,7 @@ import {
   User as FirebaseUser,
 } from 'firebase/auth';
 import {
-  doc, getDoc, setDoc, updateDoc, deleteDoc,
+  doc, getDoc, setDoc, updateDoc,
   serverTimestamp, runTransaction,
 } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
@@ -124,6 +124,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (snap.exists()) {
       const profile = snap.data() as FirestoreProfile;
+
+      // If upgrading from guest → Google/Apple, pull the real name from the provider
+      const isNowReal   = !fbUser.isAnonymous;
+      const wasGuest    = profile.authMethod === 'guest';
+      const hasRealName = !!fbUser.displayName;
+      const hasDefaultName = !profile.displayName || profile.displayName === 'Analista';
+
+      if (isNowReal && hasRealName && (wasGuest || hasDefaultName)) {
+        const updates = {
+          displayName: fbUser.displayName!,
+          authMethod:  fbUser.providerData[0]?.providerId ?? profile.authMethod,
+          email:       fbUser.email ?? profile.email ?? null,
+          updatedAt:   serverTimestamp(),
+        };
+        await updateDoc(userRef, updates);
+        return mapFirebaseUser(fbUser, { ...profile, ...updates });
+      }
+
       return mapFirebaseUser(fbUser, profile);
     }
 
@@ -213,7 +231,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const newSnap = await tx.get(newRef);
         if (newSnap.exists()) throw new Error('username_taken');
 
-        if (user.username) tx.delete(doc(db, 'usernames', user.username));
+        // Only delete old username doc if it actually exists
+        if (user.username) {
+          const oldRef  = doc(db, 'usernames', user.username);
+          const oldSnap = await tx.get(oldRef);
+          if (oldSnap.exists()) tx.delete(oldRef);
+        }
         tx.set(newRef, { uid: user.id });
         tx.update(userRef, {
           ...(updates.displayName ? { displayName: updates.displayName } : {}),

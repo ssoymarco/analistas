@@ -304,6 +304,26 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const toastTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [toastActivating, setToastActivating] = useState(true);
 
+  // ── Follow team toast ──────────────────────────────────────────────────────
+  const followToastOpacity = useRef(new Animated.Value(0)).current;
+  const followToastTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [followToastMsg, setFollowToastMsg] = useState('');
+  const [followToastIsFollow, setFollowToastIsFollow] = useState(true);
+
+  const showFollowToast = useCallback((teamName: string, nowFollowing: boolean) => {
+    setFollowToastMsg(nowFollowing
+      ? t('team.followToast', { name: teamName })
+      : t('team.unfollowToast', { name: teamName }));
+    setFollowToastIsFollow(nowFollowing);
+    if (followToastTimer.current) clearTimeout(followToastTimer.current);
+    followToastOpacity.setValue(0);
+    Animated.sequence([
+      Animated.timing(followToastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.delay(2500),
+      Animated.timing(followToastOpacity, { toValue: 0, duration: 280, useNativeDriver: true }),
+    ]).start();
+  }, [followToastOpacity, t]);
+
   const showEstadioToast = useCallback((activating: boolean) => {
     setToastActivating(activating);
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -494,25 +514,30 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
             {/* Badges row */}
             <View style={scr.badgesRow}>
 
-              {/* ── Home follow star ── */}
+              {/* ── Home follow button ── */}
               {(() => {
                 const following = isFollowingTeam(match.homeTeam.id);
                 return (
                   <TouchableOpacity
                     style={[scr.followBtn, {
                       backgroundColor: following
-                        ? 'rgba(251,191,36,0.18)'
-                        : isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                        ? 'rgba(0,224,150,0.15)'
+                        : isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)',
                       borderColor: following
-                        ? 'rgba(251,191,36,0.45)'
-                        : isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.10)',
+                        ? 'rgba(0,224,150,0.50)'
+                        : isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.60)',
                     }]}
-                    onPress={() => { haptics.selection(); toggleFollowTeam(match.homeTeam.id); }}
+                    onPress={() => {
+                      haptics.selection();
+                      const nowFollowing = !isFollowingTeam(match.homeTeam.id);
+                      toggleFollowTeam(match.homeTeam.id);
+                      showFollowToast(match.homeTeam.name, nowFollowing);
+                    }}
                     activeOpacity={0.75}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
-                    <Text style={{ fontSize: 15, color: following ? '#fbbf24' : hTextMuted }}>
-                      {following ? '★' : '☆'}
+                    <Text style={{ fontSize: 16, fontWeight: '800', color: following ? c.accent : isDark ? hTextSoft : '#111827' }}>
+                      {following ? '✓' : '+'}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -598,25 +623,30 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{match.awayTeam.name}</Text>
               </TouchableOpacity>
 
-              {/* ── Away follow star ── */}
+              {/* ── Away follow button ── */}
               {(() => {
                 const following = isFollowingTeam(match.awayTeam.id);
                 return (
                   <TouchableOpacity
                     style={[scr.followBtn, {
                       backgroundColor: following
-                        ? 'rgba(251,191,36,0.18)'
-                        : isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                        ? 'rgba(0,224,150,0.15)'
+                        : isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)',
                       borderColor: following
-                        ? 'rgba(251,191,36,0.45)'
-                        : isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.10)',
+                        ? 'rgba(0,224,150,0.50)'
+                        : isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.60)',
                     }]}
-                    onPress={() => { haptics.selection(); toggleFollowTeam(match.awayTeam.id); }}
+                    onPress={() => {
+                      haptics.selection();
+                      const nowFollowing = !isFollowingTeam(match.awayTeam.id);
+                      toggleFollowTeam(match.awayTeam.id);
+                      showFollowToast(match.awayTeam.name, nowFollowing);
+                    }}
                     activeOpacity={0.75}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
-                    <Text style={{ fontSize: 15, color: following ? '#fbbf24' : hTextMuted }}>
-                      {following ? '★' : '☆'}
+                    <Text style={{ fontSize: 16, fontWeight: '800', color: following ? c.accent : isDark ? hTextSoft : '#111827' }}>
+                      {following ? '✓' : '+'}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -765,6 +795,27 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           {toastActivating
             ? t('estadioMode.toastActivated', { delay: prefs.estadioDelay })
             : t('estadioMode.toastDeactivated')}
+        </Text>
+      </Animated.View>
+
+      {/* ── Follow team toast ── */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute', bottom: 88, left: 32, right: 32,
+          opacity: followToastOpacity,
+          backgroundColor: isDark ? 'rgba(18,18,18,0.97)' : 'rgba(22,22,22,0.93)',
+          borderRadius: 14,
+          paddingVertical: 11, paddingHorizontal: 16,
+          flexDirection: 'row', alignItems: 'center', gap: 10,
+          borderWidth: 1,
+          borderColor: followToastIsFollow ? 'rgba(0,224,150,0.40)' : 'rgba(255,255,255,0.10)',
+          shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.28, shadowRadius: 10, elevation: 8,
+        }}
+      >
+        <Text style={{ fontSize: 18 }}>{followToastIsFollow ? '✓' : '—'}</Text>
+        <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', color: followToastIsFollow ? '#00E096' : 'rgba(255,255,255,0.75)' }}>
+          {followToastMsg}
         </Text>
       </Animated.View>
 

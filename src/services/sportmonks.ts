@@ -1,21 +1,13 @@
 // ── SportMonks v3 Raw API Client ─────────────────────────────────────────────
-// Direct HTTP calls to SportMonks. No app-type mapping here — that lives in
-// sportsApi.ts. This file only deals with SM response shapes.
+// All requests go through the Analistas Cloudflare Worker (analistas-proxy).
+// The Worker injects the SportMonks API token server-side — it never ships
+// inside the app bundle.
+//
+// Worker URL: https://analistas-proxy.<your-subdomain>.workers.dev/football
+// To switch back to direct calls, set USE_PROXY = false and restore API_TOKEN.
 
-import { Platform } from 'react-native';
-
-const API_TOKEN = 'fJSTWbE3MXoQFM8cOTbZcoEomEMx9xJEh9F77IGS7RKjs2wGHd0vQDNanYIN';
-const BASE_URL = 'https://api.sportmonks.com/v3/football';
-
-// On web, browsers block cross-origin requests (no CORS headers from SM).
-// We route through a lightweight CORS proxy. On native (iOS/Android), go direct.
-const IS_WEB = Platform.OS === 'web';
-const CORS_PROXY = 'https://corsproxy.io/?';
-
-/** Wrap the final URL with a CORS proxy when running on web */
-function proxyUrl(url: string): string {
-  return IS_WEB ? `${CORS_PROXY}${encodeURIComponent(url)}` : url;
-}
+// Cloudflare Worker proxy — token is a Worker secret, not in this file
+const BASE_URL = 'https://analistas-proxy.marquitojr92.workers.dev/football';
 
 // ── SM Response Wrapper ──────────────────────────────────────────────────────
 
@@ -132,6 +124,48 @@ export interface SMFixture {
   tvstations?: SMFixtureTVStation[];
   weatherreport?: SMWeatherReport;
   odds?: SMOdd[];
+  periods?: SMPeriod[];                       // include=periods — authoritative live minute
+  aggregate?: SMAggregate;                    // include=aggregate — two-legged ties
+}
+
+/**
+ * SportMonks aggregate object — represents a multi-leg tie (e.g. Champions
+ * League QF, Liga MX Liguilla). Includes nested `fixtures` (both legs) when
+ * fetched via include=aggregate.fixtures.scores;aggregate.fixtures.participants.
+ */
+export interface SMAggregate {
+  id: number;
+  league_id: number;
+  season_id: number;
+  stage_id: number;
+  round_id: number | null;
+  fixture_id: number;   // winner's fixture (after tie is decided)
+  detailed_id: number | null;
+  name: string;         // e.g. "Real Madrid vs Bayern Munich"
+  fixtures?: SMFixture[];
+}
+
+/**
+ * SportMonks period object — one per game phase (1st half, HT, 2nd half, ET, PEN).
+ * The period with `ticking: true` is the currently running phase; `minutes` holds
+ * the authoritative in-game clock (e.g. 45 means 45:00, while stoppage time
+ * is exposed separately and the real broadcaster minute stays at 45+).
+ */
+export interface SMPeriod {
+  id: number;
+  fixture_id: number;
+  type_id: number;          // 1=1H, 2=HT, 3=2H, 4=ET, 5=PEN, …
+  started: number | null;   // epoch seconds — when this period kicked off
+  ended: number | null;
+  counts_from: number;      // 0, 45, 60, 75, 90 — base minute
+  ticking: boolean;         // true if this period is the one currently running
+  sort_order: number;
+  description?: string;     // "1st-half", "Half-time", "2nd-half", etc.
+  time_added?: number | null;
+  period_length?: number;
+  minutes?: number;         // current in-game minute
+  seconds?: number | null;
+  has_timer?: boolean;
 }
 
 export interface SMFixtureReferee {
@@ -273,6 +307,19 @@ export interface SMStage {
   is_current: boolean;
 }
 
+/**
+ * SportMonks group entity — represents one group within a group-stage
+ * competition (e.g. "Group A" in Copa Libertadores, "Grupo B" in CONCACAF).
+ */
+export interface SMGroup {
+  id: number;
+  name: string;       // "Group A", "Grupo A", etc. — as stored by SportMonks
+  stage_id: number;
+  league_id: number;
+  season_id: number;
+  sort_order: number;
+}
+
 export interface SMStandingGroup {
   id: number;
   participant_id: number;
@@ -298,6 +345,35 @@ export interface SMStandingDetail {
   value: number;
 }
 
+export interface SMCountry {
+  id: number;
+  continent_id?: number;
+  name: string;            // canonical English name, e.g. "France"
+  official_name?: string;
+  fifa_name?: string;      // 3-letter, e.g. "FRA"
+  iso2?: string;           // 2-letter ISO code, e.g. "FR"
+  iso3?: string;           // 3-letter ISO code, e.g. "FRA"
+  image_path?: string;     // CDN URL of the flag PNG
+}
+
+export interface SMPlayerTeamMembership {
+  id: number;
+  player_id: number;
+  team_id: number;
+  start: string | null;
+  end: string | null;
+  active?: boolean;
+  jersey_number?: number | null;
+  team?: {
+    id: number;
+    name: string;
+    short_code?: string;
+    image_path?: string;
+    country_id?: number;
+    type?: 'national' | 'club' | 'domestic' | string;
+  };
+}
+
 export interface SMPlayer {
   id: number;
   sport_id: number;
@@ -317,6 +393,10 @@ export interface SMPlayer {
   weight: number | null;
   date_of_birth: string;
   gender: string;
+  // Optional includes (request via ?include=nationality;teams.team)
+  nationality?: SMCountry;
+  country?: SMCountry;
+  teams?: SMPlayerTeamMembership[];
 }
 
 export interface SMVenue {
@@ -502,9 +582,8 @@ export async function fetchApi<T>(
   endpoint: string,
   params: Record<string, string> = {},
 ): Promise<T> {
-  const qs = buildQueryString({ api_token: API_TOKEN, ...params });
-  const rawUrl = `${BASE_URL}/${endpoint}?${qs}`;
-  const url = proxyUrl(rawUrl);
+  const qs = buildQueryString(params);
+  const url = `${BASE_URL}/${endpoint}?${qs}`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
@@ -542,9 +621,8 @@ async function fetchAllPages<T>(
   let hasMore = true;
 
   while (hasMore) {
-    const qs = buildQueryString({ api_token: API_TOKEN, page: String(page), per_page: '150', ...params });
-    const rawUrl = `${BASE_URL}/${endpoint}?${qs}`;
-    const url = proxyUrl(rawUrl);
+    const qs = buildQueryString({ page: String(page), per_page: '150', ...params });
+    const url = `${BASE_URL}/${endpoint}?${qs}`;
 
     const response = await fetch(url);
     if (!response.ok) {
@@ -569,10 +647,10 @@ async function fetchAllPages<T>(
 
 // ── Endpoint Functions ───────────────────────────────────────────────────────
 
-/** GET /fixtures/date/{date}?include=participants;scores;league;state */
+/** GET /fixtures/date/{date}?include=participants;scores;league;state;statistics */
 export async function fetchFixturesByDate(date: string, leagueIds?: string): Promise<SMFixture[]> {
   const params: Record<string, string> = {
-    include: 'participants;scores;league;state',
+    include: 'participants;scores;league;state;periods;statistics',
   };
   if (leagueIds) {
     params.filters = `fixtureLeagues:${leagueIds}`;
@@ -584,14 +662,26 @@ export async function fetchFixturesByDate(date: string, leagueIds?: string): Pro
 export async function fetchFixtureById(id: number): Promise<SMFixture> {
   return fetchApi<SMFixture>(`fixtures/${id}`, {
     // Note: 'odds' causes 403 on Pro plan — omitted. Fetch separately if needed.
-    include: 'participants;scores;events;statistics;lineups.player;expectedLineups.player;coaches;venue;league;referees.referee;tvstations.tvstation;weatherreport;predictions',
+    include: 'participants;scores;events;statistics;lineups.player;expectedLineups.player;coaches;venue;league;referees.referee;tvstations.tvstation;weatherreport;predictions;periods;aggregate.fixtures.scores;aggregate.fixtures.participants',
   });
 }
 
-/** GET /livescores?include=participants;scores;league;state */
+/**
+ * GET /aggregates/{id}?include=fixtures.scores;fixtures.participants
+ * Fetches the aggregate entity for a knockout tie, with both legs and their scores.
+ * Used as a fallback when the fixture's own `aggregate.fixtures` include doesn't
+ * return both legs (e.g. Coppa Italia, where SportMonks omits AGGREGATE score entries).
+ */
+export async function fetchAggregateById(aggregateId: number): Promise<SMAggregate> {
+  return fetchApi<SMAggregate>(`aggregates/${aggregateId}`, {
+    include: 'fixtures.scores;fixtures.participants',
+  });
+}
+
+/** GET /livescores?include=participants;scores;league;state;statistics */
 export async function fetchLivescores(): Promise<SMFixture[]> {
   return fetchApi<SMFixture[]>('livescores', {
-    include: 'participants;scores;league;state',
+    include: 'participants;scores;league;state;periods;statistics',
   });
 }
 
@@ -602,7 +692,7 @@ export async function fetchLivescores(): Promise<SMFixture[]> {
  */
 export async function fetchLivescoresLatest(): Promise<SMFixture[]> {
   return fetchApi<SMFixture[]>('livescores/latest', {
-    include: 'participants;scores;state',
+    include: 'participants;scores;state;periods;statistics',
   });
 }
 
@@ -628,16 +718,54 @@ export async function fetchFixturesBySeasonId(seasonId: number): Promise<SMFixtu
   return season.fixtures ?? [];
 }
 
-/** GET /topscorers/seasons/{seasonId}?include=player */
-export async function fetchTopScorers(seasonId: number): Promise<SMTopScorer[]> {
-  return fetchApi<SMTopScorer[]>(`topscorers/seasons/${seasonId}`, {
-    include: 'player',
+/**
+ * GET /stages/{stageId}?include=fixtures.participants;fixtures.scores
+ * Returns all fixtures in a specific stage (e.g. "Semifinales", "Final").
+ * Used to find the other leg of a two-legged cup tie when H2H coverage is
+ * insufficient — e.g. Coppa Italia where SportMonks omits AGGREGATE entries.
+ */
+export async function fetchFixturesByStage(stageId: number): Promise<SMFixture[]> {
+  const stage = await fetchApi<{ fixtures?: SMFixture[] }>(`stages/${stageId}`, {
+    include: 'fixtures.participants;fixtures.scores',
   });
+  return stage.fixtures ?? [];
+}
+
+/**
+ * GET /topscorers/seasons/{seasonId}?include=player
+ * @param typeId  SM type_id filter: 208=goals, 209=assists, 84=yellow cards.
+ *                Omit to return all types (caller must filter by type_id).
+ */
+export async function fetchTopScorers(seasonId: number, typeId?: number): Promise<SMTopScorer[]> {
+  const params: Record<string, string> = { include: 'player' };
+  if (typeId !== undefined) params.filters = `topScorerTypes:${typeId}`;
+  return fetchApi<SMTopScorer[]>(`topscorers/seasons/${seasonId}`, params);
+}
+
+/** GET /coaches/{id} — full coach profile with nationality & photo */
+export async function fetchCoachById(id: number): Promise<SMCoach> {
+  return fetchApi<SMCoach>(`coaches/${id}`);
 }
 
 /** GET /teams/seasons/{seasonId} */
 export async function fetchTeamsBySeasonId(seasonId: number): Promise<SMParticipant[]> {
   return fetchApi<SMParticipant[]>(`teams/seasons/${seasonId}`);
+}
+
+/**
+ * GET /groups/seasons/{seasonId}
+ * Returns the named groups for a season (e.g. "Group A", "Group B").
+ * Only available for competitions with a group stage (Copa Libertadores,
+ * CONCACAF Champions Cup, etc.). Returns [] for knockout-only competitions.
+ */
+export async function fetchGroupsBySeason(seasonId: number): Promise<SMGroup[]> {
+  try {
+    const data = await fetchApi<SMGroup[]>(`groups/seasons/${seasonId}`);
+    return Array.isArray(data) ? data : [];
+  } catch {
+    // Not all competitions have groups — treat 404/empty as "no groups"
+    return [];
+  }
 }
 
 /** GET /teams/{id}?include=coach;venue;activeSeasons */
@@ -661,9 +789,27 @@ export async function fetchH2H(teamId1: number, teamId2: number): Promise<SMFixt
   });
 }
 
-/** GET /players/{id} */
-export async function fetchPlayerById(id: number): Promise<SMPlayer> {
-  return fetchApi<SMPlayer>(`players/${id}`);
+/** GET /players/{id} — optionally with includes (e.g. 'teams.team;nationality') */
+export async function fetchPlayerById(id: number, includes?: string): Promise<SMPlayer> {
+  return fetchApi<SMPlayer>(
+    `players/${id}`,
+    includes ? { include: includes } : {},
+  );
+}
+
+/**
+ * GET /players/search/{query}
+ * Returns up to 25 players matching the search query, sorted by relevance.
+ *
+ * Includes `nationality` (used to disambiguate same-name players — e.g. the
+ * Manchester-City Bernardo Silva from his Lithuanian namesake) and
+ * `teams.team` (current club, when the search endpoint honors it).
+ */
+export async function fetchPlayersBySearch(query: string): Promise<SMPlayer[]> {
+  return fetchApi<SMPlayer[]>(
+    `players/search/${encodeURIComponent(query)}`,
+    { include: 'nationality;teams.team' },
+  );
 }
 
 /** GET /venues/{id} */

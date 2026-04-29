@@ -15,8 +15,10 @@ import { useDarkMode } from '../contexts/DarkModeContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import {
   getSearchableTeams, getSearchablePlayers, getSearchableLeagues, getSearchableNationalTeams,
+  getAllSearchableTeams, getAllSearchablePlayers,
   type SearchableTeam, type SearchablePlayer, type SearchableLeague,
 } from '../services/sportsApi';
+import { BackArrow } from '../components/NavIcons';
 
 const RECENT_KEY = 'analistas_recent_searches';
 const MAX_RECENT = 8;
@@ -168,6 +170,27 @@ export const GlobalSearchScreen: React.FC = () => {
           });
         }
       }).catch(() => { /* silently ignore */ });
+
+      // Phase 3: full team/player index (all leagues + all popular-team squads).
+      // Cached 7 days, so after the first run this is effectively free. This is
+      // what makes niche clubs (e.g. Dorados — Liga Expansión MX) searchable.
+      getAllSearchableTeams().then(all => {
+        if (!mounted || all.length === 0) return;
+        setTeams(prev => {
+          const prevIds = new Set(prev.map(t => t.id));
+          const extras = all.filter(t => !prevIds.has(t.id));
+          return extras.length > 0 ? [...prev, ...extras] : prev;
+        });
+      }).catch(() => {});
+
+      getAllSearchablePlayers().then(all => {
+        if (!mounted || all.length === 0) return;
+        setPlayers(prev => {
+          const prevIds = new Set(prev.map(p => p.id));
+          const extras = all.filter(p => !prevIds.has(p.id));
+          return extras.length > 0 ? [...prev, ...extras] : prev;
+        });
+      }).catch(() => {});
     })();
     return () => { mounted = false; };
   }, []);
@@ -434,13 +457,6 @@ export const GlobalSearchScreen: React.FC = () => {
     </View>
   );
 
-  // ── Back arrow icon ───────────────────────────────────────────────────────
-  const BackArrow = () => (
-    <View style={{ width: 10, height: 18, justifyContent: 'center' }}>
-      <View style={{ position: 'absolute', width: 8, height: 1.5, borderRadius: 1, backgroundColor: c.textPrimary, transform: [{ rotate: '-45deg' }, { translateY: -3 }] }} />
-      <View style={{ position: 'absolute', width: 8, height: 1.5, borderRadius: 1, backgroundColor: c.textPrimary, transform: [{ rotate: '45deg' }, { translateY: 3 }] }} />
-    </View>
-  );
 
   // ── Search icon for input ─────────────────────────────────────────────────
   const SearchInputIcon = () => (
@@ -469,7 +485,7 @@ export const GlobalSearchScreen: React.FC = () => {
       {/* ── Header with search bar ── */}
       <View style={[s.header, { borderBottomColor: c.border }]}>
         <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
-          <BackArrow />
+          <BackArrow color={c.textPrimary} />
         </TouchableOpacity>
         <View style={[s.inputWrap, { backgroundColor: inputBg }]}>
           <SearchInputIcon />

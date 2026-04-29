@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   Animated,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
@@ -162,42 +161,6 @@ function StatSection({ category, textPrimary, textSecondary, textTertiary, borde
   );
 }
 
-// ── Team header card ──────────────────────────────────────────────────────────
-
-function TeamHeader({
-  homeName, awayName, homeLogo, awayLogo, textSecondary, border, card,
-}: {
-  homeName: string; awayName: string;
-  homeLogo?: string; awayLogo?: string;
-  textSecondary: string; border: string; card: string;
-}) {
-  return (
-    <View style={[styles.teamCard, { backgroundColor: card, borderColor: border }]}>
-      <View style={styles.teamSide}>
-        {homeLogo
-          ? <Image source={{ uri: homeLogo }} style={styles.teamLogo} resizeMode="contain" />
-          : <View style={[styles.teamLogoFallback, { backgroundColor: HOME_BG_IDLE }]}>
-              <Text style={[styles.teamLogoInitial, { color: HOME_COLOR }]}>{homeName.charAt(0).toUpperCase()}</Text>
-            </View>
-        }
-        <Text style={[styles.teamName, { color: HOME_COLOR }]} numberOfLines={1}>{homeName}</Text>
-        <View style={[styles.teamDot, { backgroundColor: HOME_COLOR }]} />
-      </View>
-      <Text style={[styles.vsText, { color: textSecondary }]}>VS</Text>
-      <View style={[styles.teamSide, styles.teamSideRight]}>
-        <View style={[styles.teamDot, { backgroundColor: AWAY_COLOR }]} />
-        <Text style={[styles.teamName, { color: AWAY_COLOR }]} numberOfLines={1}>{awayName}</Text>
-        {awayLogo
-          ? <Image source={{ uri: awayLogo }} style={styles.teamLogo} resizeMode="contain" />
-          : <View style={[styles.teamLogoFallback, { backgroundColor: AWAY_BG_IDLE }]}>
-              <Text style={[styles.teamLogoInitial, { color: AWAY_COLOR }]}>{awayName.charAt(0).toUpperCase()}</Text>
-            </View>
-        }
-      </View>
-    </View>
-  );
-}
-
 // ── Skeleton stats preview ────────────────────────────────────────────────────
 
 const SKELETON_ROWS = [0.72, 0.45, 0.61, 0.38, 0.55, 0.80];
@@ -340,15 +303,6 @@ export const EstadisticasTab: React.FC<{ match: Match; detail: MatchDetail }> = 
   return (
     // Mirror EnVivoTab root: paddingHorizontal + gap, NO explicit backgroundColor
     <View style={styles.root}>
-      <TeamHeader
-        homeName={match.homeTeam.shortName || match.homeTeam.name}
-        awayName={match.awayTeam.shortName || match.awayTeam.name}
-        homeLogo={match.homeTeam.logo?.startsWith('http') ? match.homeTeam.logo : undefined}
-        awayLogo={match.awayTeam.logo?.startsWith('http') ? match.awayTeam.logo : undefined}
-        textSecondary={c.textSecondary}
-        border={c.border}
-        card={c.card}
-      />
       {detail.statistics.map((cat, idx) => (
         <StatSection
           key={idx}

@@ -1,132 +1,259 @@
-// ── Onboarding Flow ─────────────────────────────────────────────────────────
-// 6-step onboarding: Welcome → Teams → Players → Leagues → Notifications → Presentación
-// Shown on first launch. Syncs selections to FavoritesContext on completion.
-// Professional quality — animated transitions, custom toggles, team/player grids,
-// social auth placeholders, progress bar, emotional "Presentación" login.
+// ── Onboarding Flow (10 screens) ─────────────────────────────────────────────
+// Screen 1:  Welcome
+// Screen 2:  Fan Level
+// Screen 3:  Teams
+// Screen 4:  Players
+// Screen 5:  Leagues
+// Screen 6:  Feed Preview (AHA moment)
+// Screen 7:  Notifications
+// Screen 8:  Name + Auth
+// Screen 9:  Personalizing (auto-advances, applies side effects)
+// Screen 10: Welcome Final (confetti)
 
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import React, {
+  useState, useRef, useCallback, useEffect, useMemo,
+} from 'react';
 import {
   View, Text, StyleSheet, Animated, TouchableOpacity, FlatList, ScrollView,
-  TextInput, Image, Dimensions, Platform, StatusBar, ActivityIndicator,
-  Keyboard, Easing, KeyboardAvoidingView, Alert,
+  TextInput, Image, ImageBackground, Dimensions, Platform, ActivityIndicator,
+  Easing, KeyboardAvoidingView,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
-import { useThemeColors } from '../../theme/useTheme';
-import { useDarkMode } from '../../contexts/DarkModeContext';
 import { useOnboarding } from '../../contexts/OnboardingContext';
+import { useDarkMode } from '../../contexts/DarkModeContext';
 import { useFavorites } from '../../contexts/FavoritesContext';
 import { useAuth } from '../../contexts/AuthContext';
-import type { AuthMethod } from '../../contexts/AuthContext';
-import { useGoogleAuth } from '../../services/authGoogle';
+import { useNotificationPrefs } from '../../contexts/NotificationPrefsContext';
 import { getSearchableTeams, getSearchableLeagues, getSearchablePlayers } from '../../services/sportsApi';
 import { normalize } from '../../utils/normalize';
-import type { SearchableTeam, SearchableLeague, SearchablePlayer } from '../../services/sportsApi';
 import { requestPermissionsAndGetToken } from '../../services/notifications';
-import { useNotificationPrefs } from '../../contexts/NotificationPrefsContext';
+import type { SearchableTeam, SearchableLeague, SearchablePlayer } from '../../services/sportsApi';
+import type { AuthMethod } from '../../contexts/AuthContext';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
-const TOTAL_STEPS = 6;
+const { width: SCREEN_W } = Dimensions.get('window');
 
-// ── Accent colors ───────────────────────────────────────────────────────────
-const GREEN = '#10b981';
-const GREEN_DIM = 'rgba(16,185,129,0.12)';
-// PersonalizingScreen uses its own neon green — separate from onboarding GREEN
-const NEON_GREEN = '#00FF9D';
-const NEON_GREEN_DIM = 'rgba(0,255,157,0.10)';
-const GOLD = '#fbbf24';
-const GOLD_DIM = 'rgba(251,191,36,0.12)';
+// ── Design tokens ─────────────────────────────────────────────────────────────
+// BLUE and GOLD are accent colors — same in both light and dark modes.
+const BLUE = '#2E7CF6';
+const GOLD = '#F5B800';
 
-// ── Card layout ─────────────────────────────────────────────────────────────
-const CARD_GAP = 10;
+// ── Theme-aware hook (reads DarkModeContext — single source of truth) ─────────
+// BLUE (#2E7CF6) and GOLD (#F5B800) are accent colors — same in both modes.
+type OBTheme = {
+  BG: string;
+  SURFACE: string;
+  TEXT_PRIMARY: string;
+  TEXT_DIM: string;
+  SUB_TEXT: string;
+  BORDER: string;
+  INPUT_BG: string;
+  BLUE_DIM: string;
+  GOLD_DIM: string;
+  DOT_INACTIVE: string;
+  SHADOW: object;
+  isDark: boolean;
+};
+
+function useOBTheme(): OBTheme {
+  const { isDark } = useDarkMode();
+  return {
+    BG:           isDark ? '#0A0A0A'                : '#F9FAFB',
+    SURFACE:      isDark ? '#141414'                : '#FFFFFF',
+    TEXT_PRIMARY: isDark ? '#FFFFFF'                : '#111827',
+    TEXT_DIM:     isDark ? '#8A8A8A'                : '#6B7280',
+    SUB_TEXT:     isDark ? '#D4D4D4'                : '#374151',
+    BORDER:       isDark ? 'rgba(255,255,255,0.08)' : '#E5E7EB',
+    INPUT_BG:     isDark ? '#1A1A1A'                : '#F3F4F6',
+    BLUE_DIM:     isDark ? 'rgba(46,124,246,0.15)'  : 'rgba(46,124,246,0.10)',
+    GOLD_DIM:     isDark ? 'rgba(245,184,0,0.15)'   : 'rgba(245,184,0,0.10)',
+    DOT_INACTIVE: isDark ? '#2A2A2A'                : '#D1D5DB',
+    SHADOW:       isDark ? {} : {
+      shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.08, shadowRadius: 12, elevation: 3,
+    },
+    isDark,
+  };
+}
+
+// ── Layout ────────────────────────────────────────────────────────────────────
 const SIDE_PAD = 20;
-const CARD_W = (SCREEN_W - SIDE_PAD * 2 - CARD_GAP * 2) / 3;
+const CARD_GAP = 10;
+const CARD_W   = (SCREEN_W - SIDE_PAD * 2 - CARD_GAP * 2) / 3;
 
-// (Personalizing messages are now in i18n: onboarding.personalizingMessages)
+// ── Static fallbacks ──────────────────────────────────────────────────────────
+const FALLBACK_TEAMS: SearchableTeam[] = [
+  { id: 2687,  name: 'América',          shortName: 'AME', logo: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png',   leagueName: 'Liga MX',        leagueId: 743 },
+  { id: 427,   name: 'Guadalajara',      shortName: 'GUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png',    leagueName: 'Liga MX',        leagueId: 743 },
+  { id: 2626,  name: 'Cruz Azul',        shortName: 'CAZ', logo: 'https://cdn.sportmonks.com/images/soccer/teams/2/2626.png',    leagueName: 'Liga MX',        leagueId: 743 },
+  { id: 609,   name: 'Tigres UANL',      shortName: 'TUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/1/609.png',     leagueName: 'Liga MX',        leagueId: 743 },
+  { id: 2662,  name: 'Monterrey',        shortName: 'MNT', logo: 'https://cdn.sportmonks.com/images/soccer/teams/6/2662.png',    leagueName: 'Liga MX',        leagueId: 743 },
+  { id: 2989,  name: 'Pumas UNAM',       shortName: 'PUM', logo: 'https://cdn.sportmonks.com/images/soccer/teams/13/2989.png',   leagueName: 'Liga MX',        leagueId: 743 },
+  { id: 53,    name: 'Real Madrid',      shortName: 'RMA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/21/53.png',     leagueName: 'La Liga',        leagueId: 564 },
+  { id: 83,    name: 'Barcelona',        shortName: 'BAR', logo: 'https://cdn.sportmonks.com/images/soccer/teams/19/83.png',     leagueName: 'La Liga',        leagueId: 564 },
+  { id: 1044,  name: 'Manchester City',  shortName: 'MCI', logo: 'https://cdn.sportmonks.com/images/soccer/teams/4/1044.png',    leagueName: 'Premier League', leagueId: 8 },
+  { id: 42,    name: 'Arsenal',          shortName: 'ARS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/10/42.png',     leagueName: 'Premier League', leagueId: 8 },
+  { id: 496,   name: 'Liverpool',        shortName: 'LIV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/496.png',     leagueName: 'Premier League', leagueId: 8 },
+];
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── Shared sub-components ──────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
+const FALLBACK_LEAGUES: SearchableLeague[] = [
+  { id: 743,  name: 'Liga MX',           country: 'México',    flag: '🇲🇽', image: 'https://cdn.sportmonks.com/images/soccer/leagues/743.png' },
+  { id: 564,  name: 'La Liga',           country: 'España',    flag: '🇪🇸', image: 'https://cdn.sportmonks.com/images/soccer/leagues/564.png' },
+  { id: 8,    name: 'Premier League',    country: 'Inglaterra', flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', image: 'https://cdn.sportmonks.com/images/soccer/leagues/8.png' },
+  { id: 2,    name: 'Champions League',  country: 'UEFA',       flag: '⭐', image: 'https://cdn.sportmonks.com/images/soccer/leagues/2.png' },
+  { id: 82,   name: 'Bundesliga',        country: 'Alemania',   flag: '🇩🇪', image: 'https://cdn.sportmonks.com/images/soccer/leagues/82.png' },
+  { id: 384,  name: 'Serie A',           country: 'Italia',     flag: '🇮🇹', image: 'https://cdn.sportmonks.com/images/soccer/leagues/384.png' },
+  { id: 325,  name: 'Brasileirão',       country: 'Brasil',     flag: '🇧🇷', image: 'https://cdn.sportmonks.com/images/soccer/leagues/325.png' },
+  { id: 155,  name: 'Liga Argentina',    country: 'Argentina',  flag: '🇦🇷', image: 'https://cdn.sportmonks.com/images/soccer/leagues/155.png' },
+];
 
-// ── Progress Bar ────────────────────────────────────────────────────────────
-const ProgressBar: React.FC<{ step: number; bgColor: string }> = ({ step, bgColor }) => {
-  const widthAnim = useRef(new Animated.Value((step + 1) / TOTAL_STEPS)).current;
+const FALLBACK_PLAYERS: SearchablePlayer[] = [
+  { id: 198756, name: 'Henry Martín',    position: 'Delantero',     teamName: 'América' },
+  { id: 220665, name: 'Vinícius Jr',     position: 'Delantero',     teamName: 'Real Madrid' },
+  { id: 229533, name: 'Jude Bellingham', position: 'Mediocampista', teamName: 'Real Madrid' },
+  { id: 950020, name: 'Lamine Yamal',    position: 'Delantero',     teamName: 'Barcelona' },
+  { id: 2371,   name: 'Robert Lewandowski', position: 'Delantero',  teamName: 'Barcelona' },
+  { id: 163626, name: 'Lionel Messi',    position: 'Delantero',     teamName: 'Inter Miami' },
+  { id: 219028, name: 'Erling Haaland',  position: 'Delantero',     teamName: 'Manchester City' },
+  { id: 216528, name: 'Kylian Mbappé',   position: 'Delantero',     teamName: 'Real Madrid' },
+];
 
-  useEffect(() => {
-    Animated.timing(widthAnim, {
-      toValue: (step + 1) / TOTAL_STEPS,
-      duration: 350,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-  }, [step]);
+// ── Team IDs for suggestion logic ─────────────────────────────────────────────
+const MX_TEAM_IDS = new Set([2687, 427, 2626, 609, 2662, 2989, 2844, 967, 10036, 680]);
+const EU_TEAM_IDS = new Set([53, 83, 1044, 42, 496]);
 
+// ── State shape ───────────────────────────────────────────────────────────────
+type FanLevel = 'casual' | 'fan' | 'analista';
+
+type NotifKey = 'goals' | 'kickoff' | 'results' | 'lineups' | 'transfers' | 'news';
+
+type OnboardingState = {
+  fanLevel: FanLevel | null;
+  teamIds: number[];
+  playerIds: number[];
+  leagueIds: number[];
+  notifications: Record<NotifKey, boolean>;
+  name: string;
+  authMethod: AuthMethod | null;
+};
+
+const DEFAULT_NOTIFS_BY_LEVEL: Record<FanLevel, Record<NotifKey, boolean>> = {
+  casual:   { goals: false, kickoff: false, results: true,  lineups: true,  transfers: false, news: false },
+  fan:      { goals: true,  kickoff: true,  results: true,  lineups: true,  transfers: false, news: false },
+  analista: { goals: true,  kickoff: true,  results: true,  lineups: true,  transfers: true,  news: true  },
+};
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+// Progress dots (screens 2-7, dot index 0-4)
+const ProgressDots: React.FC<{ active: number; total?: number }> = ({ active, total = 5 }) => {
+  const th = useOBTheme();
   return (
-    <View style={[pgb.track, { backgroundColor: bgColor }]}>
-      <Animated.View
-        style={[pgb.fill, {
-          width: widthAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
-        }]}
-      />
+    <View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>
+      {Array.from({ length: total }).map((_, i) => {
+        const isActive = i === active;
+        const isDone   = i < active;
+        return (
+          <Animated.View
+            key={i}
+            style={{
+              width: isActive ? 22 : 6,
+              height: 6,
+              borderRadius: 3,
+              backgroundColor: (isActive || isDone) ? BLUE : th.DOT_INACTIVE,
+            }}
+          />
+        );
+      })}
     </View>
   );
 };
 
-const pgb = StyleSheet.create({
-  track: { height: 3, borderRadius: 2 },
-  fill: { height: '100%', borderRadius: 2, backgroundColor: GREEN },
-});
-
-// ── Step Dots ───────────────────────────────────────────────────────────────
-const StepDot: React.FC<{ state: 'done' | 'active' | 'upcoming'; accent: string }> = ({ state, accent }) => {
-  const widthAnim = useRef(new Animated.Value(state === 'active' ? 1 : 0)).current;
-  useEffect(() => {
-    Animated.timing(widthAnim, {
-      toValue: state === 'active' ? 1 : 0,
-      duration: 350,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-  }, [state]);
+// Top bar (back + dots + optional skip)
+const TopBar: React.FC<{
+  dotIndex: number;
+  onBack: () => void;
+  onSkip?: () => void;
+  skipLabel?: string;
+}> = ({ dotIndex, onBack, onSkip, skipLabel }) => {
+  const insets = useSafeAreaInsets();
+  const th = useOBTheme();
   return (
-    <Animated.View style={{
-      height: 5,
-      width: widthAnim.interpolate({ inputRange: [0, 1], outputRange: [5, 18] }),
-      borderRadius: 2.5,
-      backgroundColor: state === 'upcoming' ? 'rgba(255,255,255,0.18)' : accent,
-      opacity: state === 'done' ? 0.55 : 1,
-    }} />
+    <View style={[tb.row, { paddingTop: insets.top + 8 }]}>
+      <TouchableOpacity onPress={onBack} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} style={tb.backBtn}>
+        <View style={[tb.arrow, { borderColor: th.TEXT_PRIMARY }]} />
+      </TouchableOpacity>
+      <ProgressDots active={dotIndex} />
+      {onSkip ? (
+        <TouchableOpacity onPress={onSkip} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
+          <Text style={[tb.skip, { color: th.TEXT_DIM }]}>{skipLabel ?? ''}</Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={{ width: 48 }} />
+      )}
+    </View>
   );
 };
 
-const StepDots: React.FC<{ step: number; total: number; accent: string }> = ({ step, total, accent }) => (
-  <View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>
-    {Array.from({ length: total }).map((_, i) => (
-      <StepDot key={i} state={i < step ? 'done' : i === step ? 'active' : 'upcoming'} accent={accent} />
-    ))}
-  </View>
+const tb = StyleSheet.create({
+  row: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: SIDE_PAD, paddingBottom: 8,
+  },
+  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  arrow: {
+    width: 10, height: 10,
+    borderLeftWidth: 2.5, borderBottomWidth: 2.5,
+    transform: [{ rotate: '45deg' }],
+  },
+  skip: { fontSize: 14, fontWeight: '500', minWidth: 48, textAlign: 'right' },
+});
+
+// Blue CTA button
+const CTAButton: React.FC<{
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  glow?: boolean;
+}> = ({ label, onPress, disabled, glow }) => (
+  <TouchableOpacity
+    onPress={onPress}
+    disabled={disabled}
+    activeOpacity={0.85}
+    style={[
+      cta.btn,
+      disabled && { opacity: 0.4 },
+      glow && { shadowColor: BLUE, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.55, shadowRadius: 14, elevation: 10 },
+    ]}
+  >
+    <Text style={cta.label}>{label}</Text>
+  </TouchableOpacity>
 );
 
-// ── Custom Toggle ───────────────────────────────────────────────────────────
+const cta = StyleSheet.create({
+  btn: {
+    backgroundColor: BLUE, borderRadius: 16, paddingVertical: 18,
+    alignItems: 'center', justifyContent: 'center', marginHorizontal: SIDE_PAD,
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8 },
+      android: { elevation: 6 },
+    }),
+  },
+  label: { fontSize: 17, fontWeight: '900', color: '#FFFFFF', letterSpacing: 1 },
+});
+
+// Custom Toggle
 const CustomToggle: React.FC<{ value: boolean; onToggle: () => void }> = ({ value, onToggle }) => {
   const anim = useRef(new Animated.Value(value ? 1 : 0)).current;
-
   useEffect(() => {
-    Animated.spring(anim, {
-      toValue: value ? 1 : 0,
-      useNativeDriver: true,
-      friction: 8,
-      tension: 50,
-    }).start();
-  }, [value]);
-
-  const thumbX = anim.interpolate({ inputRange: [0, 1], outputRange: [2, 22] });
-
+    Animated.spring(anim, { toValue: value ? 1 : 0, useNativeDriver: true, friction: 8, tension: 50 }).start();
+  }, [value, anim]);
+  const thumbX = anim.interpolate({ inputRange: [0, 1], outputRange: [2, 18] });
   return (
     <TouchableOpacity onPress={onToggle} activeOpacity={0.8} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-      <View style={[tog.track, { backgroundColor: value ? GREEN : 'rgba(128,128,128,0.25)' }]}>
-        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: GREEN, borderRadius: 14, opacity: anim }]} />
+      <View style={[tog.track, { backgroundColor: value ? BLUE : 'rgba(128,128,128,0.25)' }]}>
         <Animated.View style={[tog.thumb, { transform: [{ translateX: thumbX }] }]} />
       </View>
     </TouchableOpacity>
@@ -134,9 +261,9 @@ const CustomToggle: React.FC<{ value: boolean; onToggle: () => void }> = ({ valu
 };
 
 const tog = StyleSheet.create({
-  track: { width: 48, height: 28, borderRadius: 14, justifyContent: 'center', overflow: 'hidden' },
+  track: { width: 46, height: 28, borderRadius: 14, justifyContent: 'center', overflow: 'hidden' },
   thumb: {
-    width: 24, height: 24, borderRadius: 12, backgroundColor: '#fff',
+    width: 24, height: 24, borderRadius: 12, backgroundColor: '#FFFFFF',
     ...Platform.select({
       ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
       android: { elevation: 3 },
@@ -144,87 +271,78 @@ const tog = StyleSheet.create({
   },
 });
 
-// ── Generic Logo ────────────────────────────────────────────────────────────
-const SmartLogo: React.FC<{ uri: string; size?: number; round?: boolean }> = ({ uri, size = 40, round }) => {
-  if (uri && uri.startsWith('http')) {
+// "South Korea" → "southKorea"  |  "England" → "england"
+const toCountryKey = (country: string) =>
+  country.trim().split(/\s+/).map((w, i) => i === 0 ? w.toLowerCase() : w[0].toUpperCase() + w.slice(1).toLowerCase()).join('');
+
+// SmartLogo
+const SmartLogo: React.FC<{ uri: string; size?: number; round?: boolean; fallback?: string }> = ({ uri, size = 40, round, fallback }) => {
+  const [failed, setFailed] = useState(false);
+  if (uri && uri.startsWith('http') && !failed) {
     return (
       <Image
         source={{ uri }}
         style={{ width: size, height: size, borderRadius: round ? size / 2 : 4 }}
         resizeMode="contain"
+        onError={() => setFailed(true)}
       />
     );
   }
-  return <Text style={{ fontSize: size * 0.7 }}>{uri || '⚽'}</Text>;
+  const display = failed ? (fallback ?? '⚽') : (uri || '⚽');
+  return <Text style={{ fontSize: size * 0.65 }}>{display}</Text>;
 };
 
-// ── Back Arrow ──────────────────────────────────────────────────────────────
-const BackArrow: React.FC<{ color: string }> = ({ color }) => (
-  <View style={{ width: 12, height: 12, borderLeftWidth: 2.5, borderBottomWidth: 2.5, borderColor: color, transform: [{ rotate: '45deg' }] }} />
-);
-
-// ── Checkmark Icon ──────────────────────────────────────────────────────────
-const CheckIcon: React.FC<{ size?: number; color?: string }> = ({ size = 14, color = '#fff' }) => (
+// Checkmark icon
+const CheckIcon: React.FC<{ size?: number; color?: string }> = ({ size = 14, color = '#FFFFFF' }) => (
   <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
     <View style={{
       width: size * 0.35, height: size * 0.65,
-      borderRightWidth: 2.5, borderBottomWidth: 2.5, borderColor: color,
+      borderRightWidth: 2, borderBottomWidth: 2, borderColor: color,
       transform: [{ rotate: '45deg' }, { translateY: -1 }],
     }} />
   </View>
 );
 
-// ── Analistas Logo ───────────────────────────────────────────────────────────
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const ANALISTAS_LOGO = require('../../../assets/logo-white.png');
-
-const AnalistasLogo: React.FC<{ size?: number }> = ({ size = 48 }) => (
-  <Image
-    source={ANALISTAS_LOGO}
-    style={{ width: size, height: size }}
-    resizeMode="contain"
-  />
+// Analistas logo (shield) — tintColor lets us reuse the white asset for any color
+const LOGO_SRC = require('../../../assets/logo-white.png');
+const AnalistasLogo: React.FC<{ size?: number; tint?: string }> = ({ size = 44, tint = '#FFFFFF' }) => (
+  <Image source={LOGO_SRC} style={{ width: size, height: size, tintColor: tint }} resizeMode="contain" />
 );
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── Step 0: Welcome ────────────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN 1 — Welcome
+// ─────────────────────────────────────────────────────────────────────────────
+const Screen1Welcome: React.FC<{ onNext: () => void }> = ({ onNext }) => {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const th = useOBTheme();
+  const bgImage = th.isDark
+    ? require('../../../assets/DarkModeAnalistas.png')
+    : require('../../../assets/LightModeAnalistas.png');
 
-const WelcomeStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
-  const c = useThemeColors();
-  const { isDark } = useDarkMode();
-
-  // Entrance animations
-  const logoOpacity = useRef(new Animated.Value(0)).current;
-  const logoY = useRef(new Animated.Value(-10)).current;
-  const iconScale = useRef(new Animated.Value(0.3)).current;
-  const iconOpacity = useRef(new Animated.Value(0)).current;
+  const logoOpacity  = useRef(new Animated.Value(0)).current;
+  const logoY        = useRef(new Animated.Value(-10)).current;
+  const orbScale1    = useRef(new Animated.Value(0.5)).current;
+  const orbScale2    = useRef(new Animated.Value(0.4)).current;
+  const iconOpacity  = useRef(new Animated.Value(0)).current;
+  const iconScale    = useRef(new Animated.Value(0.3)).current;
+  const floatY       = useRef(new Animated.Value(0)).current;
   const titleOpacity = useRef(new Animated.Value(0)).current;
-  const titleY = useRef(new Animated.Value(20)).current;
-  const subtitleOpacity = useRef(new Animated.Value(0)).current;
-  const subtitleY = useRef(new Animated.Value(15)).current;
-  const badgeOpacity = useRef(new Animated.Value(0)).current;
-  const btnOpacity = useRef(new Animated.Value(0)).current;
-  const btnY = useRef(new Animated.Value(20)).current;
-  const floatY = useRef(new Animated.Value(0)).current;
-  const orbScale1 = useRef(new Animated.Value(0.5)).current;
-  const orbScale2 = useRef(new Animated.Value(0.4)).current;
+  const titleY       = useRef(new Animated.Value(20)).current;
+  const subOpacity   = useRef(new Animated.Value(0)).current;
+  const subY         = useRef(new Animated.Value(15)).current;
+  const pillOpacity  = useRef(new Animated.Value(0)).current;
+  const btnOpacity   = useRef(new Animated.Value(0)).current;
+  const btnY         = useRef(new Animated.Value(20)).current;
 
   useEffect(() => {
-    // Staggered entrance using delays (more reliable than Animated.sequence with springs)
-    const anims = [
-      // Logo at 0ms
-      Animated.parallel([
-        Animated.timing(logoOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
-        Animated.timing(logoY, { toValue: 0, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      ]),
-      // Orbs at 0ms
+    Animated.parallel([
+      Animated.timing(logoOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+      Animated.timing(logoY, { toValue: 0, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
       Animated.timing(orbScale1, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
       Animated.timing(orbScale2, { toValue: 1, duration: 700, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-    ];
-    Animated.parallel(anims).start();
+    ]).start();
 
-    // Icon at 200ms
     setTimeout(() => {
       Animated.parallel([
         Animated.spring(iconScale, { toValue: 1, useNativeDriver: true, friction: 5, tension: 40 }),
@@ -232,7 +350,6 @@ const WelcomeStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
       ]).start();
     }, 200);
 
-    // Title at 700ms
     setTimeout(() => {
       Animated.parallel([
         Animated.timing(titleOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
@@ -240,20 +357,17 @@ const WelcomeStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
       ]).start();
     }, 700);
 
-    // Subtitle at 1100ms
     setTimeout(() => {
       Animated.parallel([
-        Animated.timing(subtitleOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
-        Animated.timing(subtitleY, { toValue: 0, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(subOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+        Animated.timing(subY, { toValue: 0, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
       ]).start();
     }, 1100);
 
-    // Badge at 1450ms
     setTimeout(() => {
-      Animated.timing(badgeOpacity, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+      Animated.timing(pillOpacity, { toValue: 1, duration: 300, useNativeDriver: true }).start();
     }, 1450);
 
-    // Button at 1750ms
     setTimeout(() => {
       Animated.parallel([
         Animated.timing(btnOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
@@ -261,160 +375,212 @@ const WelcomeStep: React.FC<{ onNext: () => void }> = ({ onNext }) => {
       ]).start();
     }, 1750);
 
-    // Floating loop
     Animated.loop(
       Animated.sequence([
         Animated.timing(floatY, { toValue: -8, duration: 2500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(floatY, { toValue: 0, duration: 2500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(floatY, { toValue: 0,  duration: 2500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
       ]),
     ).start();
   }, []);
 
   return (
-    <View style={[wst.container, { backgroundColor: c.bg }]}>
-      {/* Background orbs */}
-      <Animated.View style={[wst.orb1, {
-        backgroundColor: isDark ? 'rgba(16,185,129,0.06)' : 'rgba(16,185,129,0.08)',
-        transform: [{ scale: orbScale1 }],
-      }]} />
-      <Animated.View style={[wst.orb2, {
-        backgroundColor: isDark ? 'rgba(59,130,246,0.05)' : 'rgba(59,130,246,0.06)',
-        transform: [{ scale: orbScale2 }],
-      }]} />
-
-      {/* Analistas logo — top right */}
-      <Animated.View style={[wst.logoWrap, { opacity: logoOpacity, transform: [{ translateY: logoY }] }]}>
-        <AnalistasLogo size={44} />
-      </Animated.View>
-
-      {/* Floating illustration placeholder */}
-      <Animated.View style={[wst.illustrationWrap, {
-        opacity: iconOpacity,
-        transform: [{ scale: iconScale }, { translateY: floatY }],
-      }]}>
-        {/* Placeholder circle — will be replaced by illustration */}
-        <View style={[wst.illustrationCircle, { backgroundColor: GREEN_DIM }]}>
-          <Text style={wst.illustrationEmoji}>⚽</Text>
-        </View>
-        {/* Subtle "measuring tape" hint for the concept */}
-        <View style={wst.measureHint}>
-          <View style={[wst.measureLine, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]} />
-          <View style={[wst.measureTick]} />
-          <View style={[wst.measureTick, { left: '25%' }]} />
-          <View style={[wst.measureTick, { left: '50%' }]} />
-          <View style={[wst.measureTick, { left: '75%' }]} />
-          <View style={[wst.measureTick, { left: '100%' }]} />
+    <ImageBackground source={bgImage} resizeMode="cover" style={{ flex: 1 }}>
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.50)', 'rgba(0,0,0,0.85)']}
+        locations={[0, 0.45, 1]}
+        style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '60%' }}
+        pointerEvents="none"
+      />
+    <View style={[s1.container, { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: 'transparent' }]}>
+      {/* Logo centered in stands area */}
+      <Animated.View style={[s1.logoWrap, { opacity: logoOpacity, transform: [{ translateY: Animated.add(logoY, floatY) }], top: insets.top + 24 }]}>
+        <View style={[s1.logoBadge, {
+          backgroundColor: th.isDark ? 'rgba(0,0,0,0.40)' : '#FFFFFF',
+          ...(th.isDark ? {} : { shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4 }),
+        }]}>
+          <AnalistasLogo size={56} tint={th.isDark ? '#FFFFFF' : '#2E7CF6'} />
         </View>
       </Animated.View>
 
       {/* Title */}
-      <Animated.View style={{ opacity: titleOpacity, transform: [{ translateY: titleY }] }}>
-        <Text style={[wst.titleBig, { color: c.textPrimary }]}>LOS MEJORES</Text>
-        <Text style={[wst.titleSmall, { color: c.textSecondary }]}>piden todo a su medida.</Text>
+      <Animated.View style={{ opacity: titleOpacity, transform: [{ translateY: titleY }], alignItems: 'center' }}>
+        <Text style={[s1.title, { color: '#FFFFFF' }]}>{t('onboarding.welcomeTitle')}</Text>
+        <Text style={[s1.subtitle, { color: 'rgba(255,255,255,0.88)' }]}>{t('onboarding.welcomeSubtitle')}</Text>
       </Animated.View>
 
-      {/* Subtitle */}
-      <Animated.Text style={[wst.subtitle, {
-        color: c.textTertiary,
-        opacity: subtitleOpacity,
-        transform: [{ translateY: subtitleY }],
-      }]}>
-        Personalicemos tu app solo para ti.
-      </Animated.Text>
-
-      {/* Timer badge */}
-      <Animated.View style={[wst.timeBadge, { backgroundColor: GREEN_DIM, opacity: badgeOpacity }]}>
-        <Text style={wst.timeIcon}>⏱</Text>
-        <Text style={[wst.timeText, { color: GREEN }]}>Solo toma 40 segundos</Text>
+      {/* Pill */}
+      <Animated.View style={[s1.pill, { opacity: pillOpacity, backgroundColor: th.BLUE_DIM }]}>
+        <Text style={s1.pillText}>⏱ {t('onboarding.welcomePill')}</Text>
       </Animated.View>
 
       {/* CTA */}
-      <Animated.View style={{ opacity: btnOpacity, transform: [{ translateY: btnY }], width: '100%', paddingHorizontal: SIDE_PAD }}>
-        <TouchableOpacity style={wst.ctaBtn} onPress={onNext} activeOpacity={0.85}>
-          <Text style={wst.ctaText}>COMENZAR</Text>
-        </TouchableOpacity>
+      <Animated.View style={{ opacity: btnOpacity, transform: [{ translateY: btnY }], width: '100%' }}>
+        <CTAButton label={t('onboarding.start')} onPress={onNext} />
       </Animated.View>
+    </View>
+    </ImageBackground>
+  );
+};
+
+const s1 = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: 'center', justifyContent: 'flex-end',
+    paddingHorizontal: SIDE_PAD, gap: 20,
+    paddingBottom: 32,
+  },
+  orb1: {
+    position: 'absolute', width: 280, height: 280, borderRadius: 140,
+    backgroundColor: 'rgba(46,124,246,0.08)', top: -60, right: -80,
+  },
+  orb2: {
+    position: 'absolute', width: 200, height: 200, borderRadius: 100,
+    backgroundColor: 'rgba(46,124,246,0.05)', bottom: 80, left: -60,
+  },
+  logoWrap: {
+    position: 'absolute', left: 0, right: 0,
+    alignItems: 'center',
+  },
+  logoBadge: {
+    width: 100, height: 100, borderRadius: 50,
+    backgroundColor: 'rgba(0,0,0,0.40)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  logoText: { fontSize: 13, fontWeight: '900', letterSpacing: 2 },
+  illWrap: {
+    width: 220, height: 220, borderRadius: 110,
+    alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  ring: {
+    width: 180, height: 180, borderRadius: 90,
+    borderWidth: 2, borderColor: 'rgba(46,124,246,0.4)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  innerCircle: {
+    width: 90, height: 90, borderRadius: 45,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  ballEmoji: { fontSize: 44 },
+  title: { fontSize: 68, fontWeight: '900', textTransform: 'uppercase', letterSpacing: -1, textAlign: 'center' },
+  subtitle: { fontSize: 26, fontWeight: '600', textAlign: 'center', marginTop: 4 },
+  pill: {
+    borderRadius: 24,
+    paddingHorizontal: 18, paddingVertical: 10,
+  },
+  pillText: { fontSize: 14, fontWeight: '700', color: BLUE },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN 2 — Fan Level
+// ─────────────────────────────────────────────────────────────────────────────
+const Screen2FanLevel: React.FC<{
+  selected: FanLevel | null;
+  onSelect: (l: FanLevel) => void;
+  onNext: () => void;
+  onBack: () => void;
+  onSkip: () => void;
+}> = ({ selected, onSelect, onNext, onBack, onSkip }) => {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const th = useOBTheme();
+
+  const options: { key: FanLevel; icon: string; title: string; sub: string }[] = [
+    { key: 'casual',   icon: '🙂', title: t('onboarding.casual'),   sub: t('onboarding.casualSub') },
+    { key: 'fan',      icon: '⚽', title: t('onboarding.fan'),      sub: t('onboarding.fanSub') },
+    { key: 'analista', icon: '🔥', title: t('onboarding.analista'), sub: t('onboarding.analistaSub') },
+  ];
+
+  return (
+    <View style={[base.screen, { paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
+      <TopBar dotIndex={0} onBack={onBack} onSkip={onSkip} skipLabel={t('onboarding.skip')} />
+
+      <ScrollView contentContainerStyle={base.scrollContent} showsVerticalScrollIndicator={false}>
+        <Text style={[base.headline, { color: th.TEXT_PRIMARY }]}>{t('onboarding.fanLevelTitle')}</Text>
+        <Text style={[base.sub, { color: th.TEXT_DIM }]}>{t('onboarding.fanLevelSub')}</Text>
+
+        <View style={{ gap: 12, marginTop: 24 }}>
+          {options.map(opt => {
+            const isSelected = selected === opt.key;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                onPress={() => { Haptics.selectionAsync(); onSelect(opt.key); }}
+                activeOpacity={0.85}
+              >
+                <View style={[s2.card, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#222' : '#E5E7EB' }, isSelected && { backgroundColor: th.BLUE_DIM, borderColor: BLUE }]}>
+                  <View style={[s2.iconBox, { backgroundColor: th.isDark ? '#1E1E1E' : '#F3F4F6' }, isSelected && { backgroundColor: th.BLUE_DIM }]}>
+                    <Text style={{ fontSize: 24 }}>{opt.icon}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s2.cardTitle, { color: th.TEXT_PRIMARY }, isSelected && { color: BLUE }]}>{opt.title}</Text>
+                    <Text style={[s2.cardSub, { color: th.TEXT_DIM }]}>{opt.sub}</Text>
+                  </View>
+                  {/* Radio */}
+                  <View style={[s2.radio, { borderColor: th.isDark ? '#444' : '#D1D5DB' }, isSelected && { borderColor: BLUE }]}>
+                    {isSelected && <View style={s2.radioDot} />}
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </ScrollView>
+
+      <CTAButton label={t('onboarding.continue')} onPress={onNext} disabled={!selected} />
     </View>
   );
 };
 
-const wst = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SIDE_PAD },
-  orb1: { position: 'absolute', width: 220, height: 220, borderRadius: 110, top: '12%', right: '-18%' },
-  orb2: { position: 'absolute', width: 160, height: 160, borderRadius: 80, bottom: '18%', left: '-12%' },
-  logoWrap: { position: 'absolute', top: 16, right: 20 },
-  illustrationWrap: { alignItems: 'center', marginBottom: 28 },
-  illustrationCircle: {
-    width: 100, height: 100, borderRadius: 50,
+const s2 = StyleSheet.create({
+  card: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    borderRadius: 16, borderWidth: 1.5,
+    padding: 16,
+  },
+  iconBox: {
+    width: 48, height: 48, borderRadius: 12,
     alignItems: 'center', justifyContent: 'center',
   },
-  illustrationEmoji: { fontSize: 48 },
-  measureHint: {
-    width: 80, height: 6, marginTop: 12, position: 'relative',
-  },
-  measureLine: { height: 1, width: '100%', position: 'absolute', top: 2.5 },
-  measureTick: {
-    position: 'absolute', left: 0, top: 0,
-    width: 1, height: 6, backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  titleBig: { fontSize: 32, fontWeight: '900', textAlign: 'center', letterSpacing: 1 },
-  titleSmall: { fontSize: 20, fontWeight: '500', textAlign: 'center', marginTop: 4 },
-  subtitle: { fontSize: 14, fontWeight: '500', textAlign: 'center', marginTop: 12, marginBottom: 20 },
-  timeBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 18, paddingVertical: 10, borderRadius: 24, marginBottom: 28,
-  },
-  timeIcon: { fontSize: 16 },
-  timeText: { fontSize: 14, fontWeight: '700' },
-  ctaBtn: {
-    backgroundColor: GREEN, borderRadius: 16, paddingVertical: 18,
+  cardTitle: { fontSize: 22, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
+  cardSub: { fontSize: 13, marginTop: 2 },
+  radio: {
+    width: 22, height: 22, borderRadius: 11, borderWidth: 2,
     alignItems: 'center', justifyContent: 'center',
   },
-  ctaText: { fontSize: 17, fontWeight: '900', color: '#fff', letterSpacing: 1.5 },
+  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: BLUE },
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── Step 1: Teams ──────────────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN 3 — Teams
+// ─────────────────────────────────────────────────────────────────────────────
 const TeamCard: React.FC<{
   team: SearchableTeam;
   selected: boolean;
   onToggle: () => void;
-  cardBg: string;
-  textColor: string;
-  borderColor: string;
-}> = React.memo(({ team, selected, onToggle, cardBg, textColor, borderColor }) => {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-
+}> = React.memo(({ team, selected, onToggle }) => {
+  const th = useOBTheme();
+  const scale = useRef(new Animated.Value(1)).current;
   const handlePress = () => {
     Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 0.92, duration: 80, useNativeDriver: true }),
-      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, friction: 4, tension: 100 }),
+      Animated.timing(scale, { toValue: 0.92, duration: 80, useNativeDriver: true }),
+      Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 4, tension: 100 }),
     ]).start();
+    Haptics.selectionAsync();
     onToggle();
   };
-
   return (
     <TouchableOpacity onPress={handlePress} activeOpacity={0.85} style={{ width: CARD_W, marginBottom: CARD_GAP }}>
-      <Animated.View style={[tc.card, {
-        backgroundColor: selected ? GREEN_DIM : cardBg,
-        borderColor: selected ? GREEN : borderColor,
-        transform: [{ scale: scaleAnim }],
-      }]}>
+      <Animated.View style={[s3.card, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#222' : '#E5E7EB' }, selected && { backgroundColor: th.BLUE_DIM, borderColor: BLUE }, { transform: [{ scale }] }]}>
         <SmartLogo uri={team.logo} size={38} />
-        <Text style={[tc.name, { color: textColor }]} numberOfLines={1}>{team.shortName}</Text>
-        {selected && (
-          <View style={tc.check}>
-            <CheckIcon size={10} color="#fff" />
-          </View>
-        )}
+        <Text style={[s3.name, { color: th.TEXT_PRIMARY }, selected && { color: BLUE }]} numberOfLines={1}>{team.shortName}</Text>
+        {selected && <View style={s3.check}><CheckIcon size={10} /></View>}
       </Animated.View>
     </TouchableOpacity>
   );
 });
 
-const tc = StyleSheet.create({
+const s3 = StyleSheet.create({
   card: {
     height: CARD_W * 1.05, borderRadius: 14, borderWidth: 1.5,
     alignItems: 'center', justifyContent: 'center', gap: 8, padding: 8,
@@ -422,1413 +588,1390 @@ const tc = StyleSheet.create({
   name: { fontSize: 11, fontWeight: '700', textAlign: 'center', letterSpacing: 0.2 },
   check: {
     position: 'absolute', top: 6, right: 6,
-    width: 20, height: 20, borderRadius: 10, backgroundColor: GREEN,
+    width: 20, height: 20, borderRadius: 10, backgroundColor: BLUE,
     alignItems: 'center', justifyContent: 'center',
   },
 });
 
-const TeamsStep: React.FC<{
+const Screen3Teams: React.FC<{
   teams: SearchableTeam[];
   loading: boolean;
-  selectedTeams: string[];
-  toggleTeam: (id: string) => void;
-}> = ({ teams, loading, selectedTeams, toggleTeam }) => {
-  const c = useThemeColors();
+  selectedIds: number[];
+  onToggle: (id: number) => void;
+  fanLevel: FanLevel | null;
+  onNext: () => void;
+  onBack: () => void;
+  onSkip: () => void;
+}> = ({ teams, loading, selectedIds, onToggle, fanLevel, onNext, onBack, onSkip }) => {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const th = useOBTheme();
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => {
     if (!query.trim()) return teams;
     const q = normalize(query);
-    return teams.filter(t =>
-      normalize(t.name).includes(q) || normalize(t.shortName).includes(q),
-    );
+    return teams.filter(t2 => normalize(t2.name).includes(q) || normalize(t2.shortName).includes(q));
   }, [teams, query]);
 
-  const renderTeam = useCallback(({ item }: { item: SearchableTeam }) => (
+  const renderItem = useCallback(({ item }: { item: SearchableTeam }) => (
     <TeamCard
       team={item}
-      selected={selectedTeams.includes(String(item.id))}
-      onToggle={() => toggleTeam(String(item.id))}
-      cardBg={c.card}
-      textColor={c.textPrimary}
-      borderColor={c.border}
+      selected={selectedIds.includes(item.id)}
+      onToggle={() => onToggle(item.id)}
     />
-  ), [selectedTeams, c]);
+  ), [selectedIds, onToggle]);
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color={GREEN} />
-        <Text style={{ color: c.textTertiary, fontSize: 13, marginTop: 14 }}>Cargando equipos...</Text>
-      </View>
-    );
-  }
+  const headline = fanLevel === 'casual' ? t('onboarding.teamsTitleCasual') : t('onboarding.teamsTitle');
+  const countLabel = t('onboarding.teamsSelected', { count: selectedIds.length });
 
   return (
-    <View style={{ flex: 1 }}>
-      <View style={[searchS.wrap, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <Text style={{ fontSize: 14, opacity: 0.5 }}>🔍</Text>
-        <TextInput
-          style={[searchS.input, { color: c.textPrimary }]}
-          placeholder="Buscar equipo..."
-          placeholderTextColor={c.textTertiary}
-          value={query}
-          onChangeText={setQuery}
-          autoCorrect={false}
-          returnKeyType="search"
-        />
-        {query.length > 0 && (
-          <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={{ fontSize: 14, color: c.textTertiary }}>✕</Text>
-          </TouchableOpacity>
+    <View style={[base.screen, { paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
+      <TopBar dotIndex={1} onBack={onBack} onSkip={onSkip} skipLabel={t('onboarding.skip')} />
+
+      <View style={{ flex: 1, paddingHorizontal: SIDE_PAD }}>
+        <Text style={[base.headline, { color: th.TEXT_PRIMARY }]}>{headline}</Text>
+        <Text style={[base.sub, { color: th.TEXT_DIM }]}>{t('onboarding.teamsSub')}</Text>
+
+        {/* Search */}
+        <View style={[searchS.wrap, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#333' : '#E5E7EB' }]}>
+          <Text style={{ fontSize: 14, opacity: 0.5 }}>🔍</Text>
+          <TextInput
+            style={[searchS.input, { color: th.TEXT_PRIMARY }]}
+            placeholder={t('onboarding.searchTeam')}
+            placeholderTextColor={th.TEXT_DIM}
+            value={query}
+            onChangeText={setQuery}
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {query.length > 0 && (
+            <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={{ fontSize: 14, color: th.TEXT_DIM }}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {selectedIds.length > 0 && (
+          <Text style={[base.counter, { color: BLUE, marginBottom: 10 }]}>{countLabel}</Text>
+        )}
+
+        {loading ? (
+          <View style={base.loading}>
+            <ActivityIndicator size="large" color={BLUE} />
+          </View>
+        ) : (
+          <FlatList
+            data={filtered}
+            renderItem={renderItem}
+            keyExtractor={it => String(it.id)}
+            numColumns={3}
+            columnWrapperStyle={{ gap: CARD_GAP }}
+            contentContainerStyle={{ paddingBottom: 12 }}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          />
         )}
       </View>
 
-      {selectedTeams.length > 0 && (
-        <View style={{ marginBottom: 12 }}>
-          <Text style={{ fontSize: 13, fontWeight: '700', color: GREEN }}>
-            {selectedTeams.length} equipo{selectedTeams.length !== 1 ? 's' : ''} seleccionado{selectedTeams.length !== 1 ? 's' : ''}
-          </Text>
-        </View>
-      )}
-
-      <FlatList
-        data={filtered}
-        renderItem={renderTeam}
-        keyExtractor={item => String(item.id)}
-        numColumns={3}
-        columnWrapperStyle={{ gap: CARD_GAP }}
-        contentContainerStyle={{ paddingBottom: 20 }}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={
-          <View style={{ alignItems: 'center', paddingTop: 40 }}>
-            <Text style={{ fontSize: 32, marginBottom: 8 }}>🔍</Text>
-            <Text style={{ color: c.textTertiary, fontSize: 14 }}>No se encontraron equipos</Text>
-          </View>
-        }
+      <CTAButton
+        label={selectedIds.length > 0 ? `${t('onboarding.continue')} (${selectedIds.length})` : t('onboarding.continue')}
+        onPress={onNext}
+        disabled={selectedIds.length === 0}
       />
     </View>
   );
 };
 
-const searchS = StyleSheet.create({
-  wrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 14, paddingVertical: Platform.OS === 'ios' ? 12 : 8,
-    borderRadius: 12, borderWidth: 1, marginBottom: 14,
-  },
-  input: { flex: 1, fontSize: 15, fontWeight: '500', padding: 0 },
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── Step 2: Players ────────────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const PlayerCard: React.FC<{
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN 4 — Players
+// ─────────────────────────────────────────────────────────────────────────────
+const PlayerRow: React.FC<{
   player: SearchablePlayer;
   selected: boolean;
+  isYourTeam: boolean;
   onToggle: () => void;
-  cardBg: string;
-  textColor: string;
-  textSecondary: string;
-  borderColor: string;
-}> = React.memo(({ player, selected, onToggle, cardBg, textColor, textSecondary, borderColor }) => {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+}> = React.memo(({ player, selected, isYourTeam, onToggle }) => {
+  const { t } = useTranslation();
+  const th = useOBTheme();
+  const [imgFailed, setImgFailed] = useState(false);
+  const scale = useRef(new Animated.Value(1)).current;
 
   const handlePress = () => {
     Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 0.95, duration: 60, useNativeDriver: true }),
-      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, friction: 4, tension: 100 }),
+      Animated.timing(scale, { toValue: 0.97, duration: 60, useNativeDriver: true }),
+      Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 4, tension: 100 }),
     ]).start();
+    Haptics.selectionAsync();
     onToggle();
   };
 
-  // Split name to show last name bigger
-  const nameParts = player.name.split(' ');
-  const displayName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : player.name;
-  const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(' ') : '';
+  const parts = player.name.split(' ');
+  const lastName  = parts.length > 1 ? parts[parts.length - 1] : player.name;
+  const firstName = parts.length > 1 ? parts.slice(0, -1).join(' ') : '';
 
   return (
     <TouchableOpacity onPress={handlePress} activeOpacity={0.85}>
-      <Animated.View style={[pc.card, {
-        backgroundColor: selected ? GOLD_DIM : cardBg,
-        borderColor: selected ? GOLD : borderColor,
-        transform: [{ scale: scaleAnim }],
-      }]}>
-        {/* Photo */}
-        <View style={pc.photoWrap}>
-          {player.image ? (
-            <Image source={{ uri: player.image }} style={pc.photo} resizeMode="cover" />
+      <Animated.View style={[s4.row, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#222' : '#E5E7EB' }, selected && { backgroundColor: th.GOLD_DIM, borderColor: GOLD }, { transform: [{ scale }] }]}>
+        {/* Avatar */}
+        <View style={s4.avatar}>
+          {player.image && !imgFailed ? (
+            <Image
+              source={{ uri: player.image }}
+              style={{ width: 48, height: 48, borderRadius: 24 }}
+              resizeMode="cover"
+              onError={() => setImgFailed(true)}
+            />
           ) : (
-            <View style={[pc.photoPlaceholder, { backgroundColor: 'rgba(128,128,128,0.2)' }]}>
-              <Text style={{ fontSize: 22 }}>⚽</Text>
-            </View>
+            <LinearGradient colors={[GOLD, '#E68A00']} style={s4.avatarGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+              <Text style={s4.avatarInitial}>{lastName.charAt(0)}</Text>
+            </LinearGradient>
           )}
         </View>
 
         {/* Info */}
-        <View style={pc.info}>
-          {firstName ? (
-            <Text style={[pc.firstName, { color: textSecondary }]} numberOfLines={1}>{firstName}</Text>
-          ) : null}
-          <Text style={[pc.lastName, { color: textColor }]} numberOfLines={1}>{displayName}</Text>
-          {player.position ? (
-            <Text style={[pc.position, { color: textSecondary }]} numberOfLines={1}>{player.position}</Text>
-          ) : null}
+        <View style={{ flex: 1 }}>
+          {firstName ? <Text style={[s4.firstName, { color: th.TEXT_DIM }]} numberOfLines={1}>{firstName}</Text> : null}
+          <Text style={[s4.lastName, { color: th.TEXT_PRIMARY }]} numberOfLines={1}>{lastName.toUpperCase()}</Text>
+          <View style={{ flexDirection: 'row', gap: 6, marginTop: 3 }}>
+            {player.position ? <View style={[s4.badge, { backgroundColor: th.isDark ? '#222' : '#F3F4F6', borderColor: th.isDark ? '#333' : '#E5E7EB' }]}><Text style={[s4.badgeText, { color: th.TEXT_DIM }]}>{player.position}</Text></View> : null}
+            {isYourTeam ? <View style={[s4.badge, { backgroundColor: th.BLUE_DIM, borderColor: BLUE }]}><Text style={[s4.badgeText, { color: BLUE }]}>{t('onboarding.yourTeam')}</Text></View> : null}
+          </View>
         </View>
 
         {/* Checkbox */}
-        <View style={[pc.checkbox, selected ? pc.checkboxOn : { borderColor }]}>
-          {selected && <CheckIcon size={12} color="#fff" />}
+        <View style={[s4.checkbox, { borderColor: th.isDark ? '#444' : '#D1D5DB' }, selected && { backgroundColor: GOLD, borderColor: GOLD }]}>
+          {selected && <CheckIcon size={12} />}
         </View>
       </Animated.View>
     </TouchableOpacity>
   );
 });
 
-const pc = StyleSheet.create({
-  card: {
+const s4 = StyleSheet.create({
+  row: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14,
-    borderWidth: 1.5, marginBottom: 8,
+    borderRadius: 14, borderWidth: 1.5,
+    padding: 12, marginBottom: 10,
   },
-  photoWrap: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden' },
-  photo: { width: 44, height: 44 },
-  photoPlaceholder: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: 'center', justifyContent: 'center',
+  avatar: { width: 48, height: 48, borderRadius: 24, overflow: 'hidden' },
+  avatarGradient: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  avatarInitial: { fontSize: 20, fontWeight: '900', color: '#FFFFFF' },
+  firstName: { fontSize: 12 },
+  lastName: { fontSize: 18, fontWeight: '900', letterSpacing: 0.5 },
+  badge: {
+    borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2,
+    borderWidth: 1,
   },
-  info: { flex: 1 },
-  firstName: { fontSize: 11, fontWeight: '500' },
-  lastName: { fontSize: 15, fontWeight: '800' },
-  position: { fontSize: 11, fontWeight: '500', marginTop: 1, textTransform: 'capitalize' },
+  badgeText: { fontSize: 10, fontWeight: '700' },
   checkbox: {
-    width: 26, height: 26, borderRadius: 13, borderWidth: 2,
+    width: 26, height: 26, borderRadius: 6, borderWidth: 2,
     alignItems: 'center', justifyContent: 'center',
   },
-  checkboxOn: { backgroundColor: GOLD, borderColor: GOLD },
 });
 
-const PlayersStep: React.FC<{
+const Screen4Players: React.FC<{
   players: SearchablePlayer[];
   loading: boolean;
-  selectedPlayers: string[];
-  togglePlayer: (id: string) => void;
-}> = ({ players, loading, selectedPlayers, togglePlayer }) => {
-  const c = useThemeColors();
+  selectedTeamIds: number[];
+  selectedIds: number[];
+  onToggle: (id: number) => void;
+  onNext: () => void;
+  onBack: () => void;
+  onSkip: () => void;
+  teamNames: string[];
+}> = ({ players, loading, selectedTeamIds, selectedIds, onToggle, onNext, onBack, onSkip, teamNames }) => {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const th = useOBTheme();
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => {
     if (!query.trim()) return players;
     const q = normalize(query);
-    return players.filter(p => normalize(p.name).includes(q));
+    return players.filter(p =>
+      normalize(p.name).includes(q) ||
+      (p.teamName && normalize(p.teamName).includes(q)),
+    );
   }, [players, query]);
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color={GOLD} />
-        <Text style={{ color: c.textTertiary, fontSize: 13, marginTop: 14 }}>Cargando jugadores...</Text>
-      </View>
-    );
-  }
+  const countLabel = t('onboarding.playersSelected', { count: selectedIds.length });
 
   return (
-    <View style={{ flex: 1 }}>
-      <View style={[searchS.wrap, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <Text style={{ fontSize: 14, opacity: 0.5 }}>🔍</Text>
-        <TextInput
-          style={[searchS.input, { color: c.textPrimary }]}
-          placeholder="Buscar jugador..."
-          placeholderTextColor={c.textTertiary}
-          value={query}
-          onChangeText={setQuery}
-          autoCorrect={false}
-          returnKeyType="search"
-        />
-        {query.length > 0 && (
-          <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={{ fontSize: 14, color: c.textTertiary }}>✕</Text>
-          </TouchableOpacity>
+    <View style={[base.screen, { paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
+      <TopBar dotIndex={2} onBack={onBack} onSkip={onSkip} skipLabel={t('onboarding.skip')} />
+
+      <View style={{ flex: 1, paddingHorizontal: SIDE_PAD }}>
+        {/* Teams chip */}
+        {teamNames.length > 0 && (
+          <View style={[s4b.chip, { backgroundColor: th.BLUE_DIM }]}>
+            <Text style={s4b.chipText}>⚡ Sigues a {teamNames.slice(0, 2).join(', ')}{teamNames.length > 2 ? ` +${teamNames.length - 2}` : ''}. Ahora, ¿algún jugador?</Text>
+          </View>
+        )}
+
+        <Text style={[base.headline, { color: th.TEXT_PRIMARY }]}>{t('onboarding.playersTitle')}</Text>
+
+        {/* Search */}
+        <View style={[searchS.wrap, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#333' : '#E5E7EB' }]}>
+          <Text style={{ fontSize: 14, opacity: 0.5 }}>🔍</Text>
+          <TextInput
+            style={[searchS.input, { color: th.TEXT_PRIMARY }]}
+            placeholder={t('onboarding.searchPlayer')}
+            placeholderTextColor={th.TEXT_DIM}
+            value={query}
+            onChangeText={setQuery}
+            autoCorrect={false}
+          />
+          {query.length > 0 && (
+            <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={{ fontSize: 14, color: th.TEXT_DIM }}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {selectedIds.length > 0 && (
+          <Text style={[base.counter, { color: GOLD, marginBottom: 10 }]}>{countLabel}</Text>
+        )}
+
+        {loading ? (
+          <View style={base.loading}><ActivityIndicator size="large" color={GOLD} /></View>
+        ) : (
+          <FlatList
+            data={filtered}
+            keyExtractor={it => String(it.id)}
+            renderItem={({ item }) => (
+              <PlayerRow
+                player={item}
+                selected={selectedIds.includes(item.id)}
+                isYourTeam={item.teamId !== undefined && selectedTeamIds.includes(item.teamId)}
+                onToggle={() => onToggle(item.id)}
+              />
+            )}
+            contentContainerStyle={{ paddingBottom: 12 }}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          />
         )}
       </View>
 
-      {selectedPlayers.length > 0 && (
-        <View style={{ marginBottom: 10 }}>
-          <Text style={{ fontSize: 13, fontWeight: '700', color: GOLD }}>
-            {selectedPlayers.length} jugador{selectedPlayers.length !== 1 ? 'es' : ''} seleccionado{selectedPlayers.length !== 1 ? 's' : ''}
-          </Text>
-        </View>
-      )}
-
-      <FlatList
-        data={filtered}
-        renderItem={({ item }) => (
-          <PlayerCard
-            player={item}
-            selected={selectedPlayers.includes(String(item.id))}
-            onToggle={() => togglePlayer(String(item.id))}
-            cardBg={c.card}
-            textColor={c.textPrimary}
-            textSecondary={c.textSecondary}
-            borderColor={c.border}
-          />
-        )}
-        keyExtractor={item => String(item.id)}
-        contentContainerStyle={{ paddingBottom: 20 }}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={
-          <View style={{ alignItems: 'center', paddingTop: 40 }}>
-            <Text style={{ fontSize: 32, marginBottom: 8 }}>🔍</Text>
-            <Text style={{ color: c.textTertiary, fontSize: 14 }}>No se encontraron jugadores</Text>
-          </View>
-        }
+      <CTAButton
+        label={selectedIds.length > 0 ? `${t('onboarding.continue')} (${selectedIds.length})` : t('onboarding.continue')}
+        onPress={onNext}
       />
     </View>
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── Step 3: Leagues ────────────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
+// s4b chip uses BLUE which is theme-invariant; BLUE_DIM is applied inline via th
+const s4b = StyleSheet.create({
+  chip: {
+    borderRadius: 12, padding: 12,
+    marginBottom: 12, borderWidth: 1, borderColor: BLUE,
+  },
+  chipText: { fontSize: 13, color: BLUE, fontWeight: '600', lineHeight: 18 },
+});
 
-const LeagueCard: React.FC<{
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN 5 — Leagues
+// ─────────────────────────────────────────────────────────────────────────────
+const LeagueRow: React.FC<{
   league: SearchableLeague;
   selected: boolean;
+  isSuggested: boolean;
   onToggle: () => void;
-  cardBg: string;
-  borderColor: string;
-  textPrimary: string;
-  textSecondary: string;
-}> = React.memo(({ league, selected, onToggle, cardBg, borderColor, textPrimary, textSecondary }) => {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-
-  const handlePress = () => {
-    Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 0.97, duration: 60, useNativeDriver: true }),
-      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, friction: 5, tension: 120 }),
-    ]).start();
-    onToggle();
-  };
-
+}> = React.memo(({ league, selected, isSuggested, onToggle }) => {
+  const { t } = useTranslation();
+  const th = useOBTheme();
+  const handlePress = () => { Haptics.selectionAsync(); onToggle(); };
   return (
     <TouchableOpacity onPress={handlePress} activeOpacity={0.85}>
-      <Animated.View style={[lc.card, {
-        backgroundColor: selected ? GREEN_DIM : cardBg,
-        borderColor: selected ? GREEN : borderColor,
-        transform: [{ scale: scaleAnim }],
-      }]}>
-        <Text style={lc.flag}>{league.flag}</Text>
-        <View style={lc.info}>
-          <Text style={[lc.name, { color: textPrimary }]}>{league.name}</Text>
-          <Text style={[lc.country, { color: textSecondary }]}>{league.country}</Text>
+      <View style={[s5.row, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#222' : '#E5E7EB' }, selected && { backgroundColor: th.BLUE_DIM, borderColor: BLUE }]}>
+        {/* Badge — always white; falls back to country flag if logo fails to load */}
+        <View style={[s5.badge, s5.badgeLight]}>
+          <SmartLogo uri={league.image} size={30} fallback={league.flag} />
         </View>
-        <View style={[lc.sugBadge, { backgroundColor: GREEN_DIM }]}>
-          <Text style={[lc.sugText, { color: GREEN }]}>Sugerida</Text>
+
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={s5.flag}>{league.flag}</Text>
+            <Text style={[s5.name, { color: th.TEXT_PRIMARY }, selected && { color: BLUE }]} numberOfLines={1}>{league.name}</Text>
+          </View>
+          <Text style={[s5.country, { color: th.TEXT_DIM }]}>{t(`countries.${toCountryKey(league.country)}` as any, { defaultValue: league.country })}</Text>
         </View>
-        <View style={[lc.checkbox, selected ? lc.checkboxOn : { borderColor }]}>
-          {selected && <CheckIcon size={12} color="#fff" />}
+
+        {isSuggested && (
+          <View style={[s5.suggestedChip, { backgroundColor: th.GOLD_DIM }]}>
+            <Text style={s5.suggestedText}>{t('onboarding.suggested')}</Text>
+          </View>
+        )}
+
+        {/* Checkbox */}
+        <View style={[s5.checkbox, { borderColor: th.isDark ? '#444' : '#D1D5DB' }, selected && { backgroundColor: BLUE, borderColor: BLUE }]}>
+          {selected && <CheckIcon size={12} />}
         </View>
-      </Animated.View>
+      </View>
     </TouchableOpacity>
   );
 });
 
-const lc = StyleSheet.create({
-  card: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    paddingHorizontal: 16, paddingVertical: 18, borderRadius: 14,
-    borderWidth: 1.5, marginBottom: 10,
+const s5 = StyleSheet.create({
+  row: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderRadius: 14, borderWidth: 1.5,
+    padding: 12, marginBottom: 10,
   },
-  flag: { fontSize: 28 },
-  info: { flex: 1 },
-  name: { fontSize: 16, fontWeight: '700' },
-  country: { fontSize: 13, fontWeight: '500', marginTop: 2 },
-  sugBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  sugText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.3 },
+  badge: { width: 44, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  badgeLight: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB' },
+  flag: { fontSize: 16 },
+  name: { fontSize: 15, fontWeight: '700' },
+  country: { fontSize: 12, marginTop: 2 },
+  suggestedChip: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  suggestedText: { fontSize: 10, fontWeight: '700', color: GOLD },
   checkbox: {
-    width: 26, height: 26, borderRadius: 13, borderWidth: 2,
+    width: 26, height: 26, borderRadius: 6, borderWidth: 2,
     alignItems: 'center', justifyContent: 'center',
   },
-  checkboxOn: { backgroundColor: GREEN, borderColor: GREEN },
 });
 
-const LeaguesStep: React.FC<{
-  selectedLeagues: string[];
-  toggleLeague: (id: string) => void;
-}> = ({ selectedLeagues, toggleLeague }) => {
-  const c = useThemeColors();
-  const leagues = useMemo(() => getSearchableLeagues(), []);
-
-  useEffect(() => {
-    if (selectedLeagues.length === 0) {
-      leagues.forEach(l => toggleLeague(String(l.id)));
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <View style={{ flex: 1, paddingBottom: 80 }}>
-      {leagues.map(league => (
-        <LeagueCard
-          key={league.id}
-          league={league}
-          selected={selectedLeagues.includes(String(league.id))}
-          onToggle={() => toggleLeague(String(league.id))}
-          cardBg={c.card}
-          borderColor={c.border}
-          textPrimary={c.textPrimary}
-          textSecondary={c.textSecondary}
-        />
-      ))}
-      <View style={ls.comingSoon}>
-        <Text style={{ fontSize: 18 }}>🌍</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={[ls.comingTitle, { color: c.textSecondary }]}>Más ligas próximamente</Text>
-          <Text style={[ls.comingSub, { color: c.textTertiary }]}>
-            Premier League, La Liga, Serie A, Bundesliga y más
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
-};
-
-const ls = StyleSheet.create({
-  comingSoon: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    paddingHorizontal: 16, paddingVertical: 18, marginTop: 10, opacity: 0.7,
-  },
-  comingTitle: { fontSize: 14, fontWeight: '700' },
-  comingSub: { fontSize: 12, fontWeight: '500', marginTop: 2 },
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── Step 4: Notifications ──────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
-
-interface NotifItem { key: string; icon: string; label: string; description: string; }
-
-function buildNotifItems(t: (key: string) => string): NotifItem[] {
-  return [
-    { key: 'goals',      icon: '⚽', label: 'Goles',              description: 'Cuando alguien anota en tus partidos' },
-    { key: 'matchStart', icon: '📣', label: 'Inicio de partido',  description: '5 minutos antes del pitazo inicial' },
-    { key: 'results',    icon: '🏆', label: 'Resultados finales', description: 'Resultado final al terminar el partido' },
-    { key: 'lineups',    icon: '📋', label: 'Alineaciones',       description: 'Alineaciones confirmadas antes del partido' },
-    { key: 'transfers',  icon: '🔄', label: t('onboarding.notifications.transfers'),  description: t('onboarding.notifications.transfersDesc') },
-    { key: 'news',       icon: '📰', label: t('onboarding.notifications.news'),       description: t('onboarding.notifications.newsDesc') },
-  ];
-}
-
-const NotificationRow: React.FC<{
-  item: NotifItem; value: boolean; onToggle: () => void;
-  borderColor: string; textPrimary: string; textSecondary: string;
-}> = React.memo(({ item, value, onToggle, borderColor, textPrimary, textSecondary }) => (
-  <View style={[nr.row, { borderBottomColor: borderColor }]}>
-    <Text style={nr.icon}>{item.icon}</Text>
-    <View style={nr.info}>
-      <Text style={[nr.label, { color: textPrimary }]}>{item.label}</Text>
-      <Text style={[nr.desc, { color: textSecondary }]}>{item.description}</Text>
-    </View>
-    <CustomToggle value={value} onToggle={onToggle} />
-  </View>
-));
-
-const nr = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, borderBottomWidth: 1 },
-  icon: { fontSize: 22, width: 30, textAlign: 'center' },
-  info: { flex: 1 },
-  label: { fontSize: 15, fontWeight: '700' },
-  desc: { fontSize: 12, fontWeight: '500', marginTop: 2 },
-});
-
-const NotificationsStep: React.FC<{
-  notifications: Record<string, boolean>;
-  toggleNotification: (key: string) => void;
-}> = ({ notifications, toggleNotification }) => {
-  const c = useThemeColors();
-  const { t } = useTranslation();
-  const NOTIF_ITEMS = buildNotifItems(t);
-  return (
-    <View style={{ flex: 1 }}>
-      <View style={[ns.callout, { backgroundColor: GREEN_DIM }]}>
-        <Text style={{ fontSize: 16 }}>🔔</Text>
-        <Text style={[ns.calloutText, { color: GREEN }]}>Puedes cambiar esto después en Configuración</Text>
-      </View>
-      {NOTIF_ITEMS.map(item => (
-        <NotificationRow
-          key={item.key}
-          item={item}
-          value={notifications[item.key] ?? false}
-          onToggle={() => toggleNotification(item.key)}
-          borderColor={c.borderLight}
-          textPrimary={c.textPrimary}
-          textSecondary={c.textSecondary}
-        />
-      ))}
-    </View>
-  );
-};
-
-const ns = StyleSheet.create({
-  callout: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, marginBottom: 8,
-  },
-  calloutText: { fontSize: 13, fontWeight: '600', flex: 1 },
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── Step 5: Presentación (Login) ───────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const SocialButton: React.FC<{
-  icon: React.ReactNode; label: string; bg: string; textColor: string;
-  borderColor?: string; onPress: () => void;
-}> = ({ icon, label, bg, textColor, borderColor, onPress }) => (
-  <TouchableOpacity
-    style={[sb.btn, { backgroundColor: bg, borderColor: borderColor || bg }]}
-    onPress={onPress}
-    activeOpacity={0.85}
-  >
-    {icon}
-    <Text style={[sb.label, { color: textColor }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
-const sb = StyleSheet.create({
-  btn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
-    paddingVertical: 14, borderRadius: 14, borderWidth: 1.5, marginBottom: 8,
-  },
-  label: { fontSize: 15, fontWeight: '700' },
-});
-
-const AppleIcon: React.FC<{ color: string }> = ({ color }) => (
-  <Text style={{ fontSize: 18, color, marginTop: -2 }}></Text>
-);
-
-const GoogleIcon: React.FC = () => (
-  <View style={gi.wrap}><Text style={gi.text}>G</Text></View>
-);
-const gi = StyleSheet.create({
-  wrap: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#4285F4', alignItems: 'center', justifyContent: 'center' },
-  text: { fontSize: 14, fontWeight: '900', color: '#fff', marginTop: -1 },
-});
-
-const FacebookIcon: React.FC = () => (
-  <Text style={{ fontSize: 20, fontWeight: '900', color: '#fff', marginTop: -1 }}>f</Text>
-);
-
-const PresentacionStep: React.FC<{
-  teamsCount: number;
-  leaguesCount: number;
-  playersCount: number;
-  userName: string;
-  onChangeName: (name: string) => void;
-  onLogin: (method: AuthMethod) => void;
+const Screen5Leagues: React.FC<{
+  leagues: SearchableLeague[];
+  selectedIds: number[];
+  suggestedIds: Set<number>;
+  onToggle: (id: number) => void;
+  onNext: () => void;
+  onBack: () => void;
   onSkip: () => void;
-}> = ({ teamsCount, leaguesCount, playersCount, userName, onChangeName, onLogin, onSkip }) => {
-  const c = useThemeColors();
-  const { isDark } = useDarkMode();
+}> = ({ leagues, selectedIds, suggestedIds, onToggle, onNext, onBack, onSkip }) => {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const th = useOBTheme();
+  const countLabel = t('onboarding.leaguesSelected', { count: selectedIds.length });
 
-  // Entrance animations
-  const jerseyScale = useRef(new Animated.Value(0.5)).current;
-  const jerseyOpacity = useRef(new Animated.Value(0)).current;
-  const contentOpacity = useRef(new Animated.Value(0)).current;
-  const contentY = useRef(new Animated.Value(20)).current;
+  return (
+    <View style={[base.screen, { paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
+      <TopBar dotIndex={3} onBack={onBack} onSkip={onSkip} skipLabel={t('onboarding.skip')} />
+
+      <View style={{ flex: 1, paddingHorizontal: SIDE_PAD }}>
+        <Text style={[base.headline, { color: th.TEXT_PRIMARY }]}>{t('onboarding.leaguesTitle')}</Text>
+        <Text style={[base.sub, { color: th.TEXT_DIM }]}>{t('onboarding.leaguesSub')}</Text>
+
+        {selectedIds.length > 0 && (
+          <Text style={[base.counter, { color: BLUE, marginBottom: 10 }]}>{countLabel}</Text>
+        )}
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 12 }}>
+          {leagues.map(l => (
+            <LeagueRow
+              key={l.id}
+              league={l}
+              selected={selectedIds.includes(l.id)}
+              isSuggested={suggestedIds.has(l.id)}
+              onToggle={() => onToggle(l.id)}
+            />
+          ))}
+        </ScrollView>
+      </View>
+
+      <CTAButton
+        label={selectedIds.length > 0 ? `${t('onboarding.continue')} (${selectedIds.length})` : t('onboarding.continue')}
+        onPress={onNext}
+      />
+    </View>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN 6 — Feed Preview
+// ─────────────────────────────────────────────────────────────────────────────
+const Screen6Feed: React.FC<{
+  state: OnboardingState;
+  teams: SearchableTeam[];
+  players: SearchablePlayer[];
+  leagues: SearchableLeague[];
+  onNext: () => void;
+  onBack: () => void;
+}> = ({ state, teams, players, leagues, onNext, onBack }) => {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const th = useOBTheme();
+
+  const cardAnims = [0, 150, 300, 450].map(delay => {
+    const opacity = useRef(new Animated.Value(0)).current;
+    const translateY = useRef(new Animated.Value(30)).current;
+    return { opacity, translateY, delay };
+  });
 
   useEffect(() => {
-    // Jersey entrance — use spring for scale so it never goes negative (Easing.back can produce
-    // negative intermediate scale values which crash Android's native animation driver)
-    Animated.parallel([
-      Animated.spring(jerseyScale, { toValue: 1, useNativeDriver: true, friction: 5, tension: 60 }),
-      Animated.timing(jerseyOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
-    ]).start();
-
-    // Content fades in after jersey
-    setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(contentOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
-        Animated.timing(contentY, { toValue: 0, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      ]).start();
-    }, 500);
+    cardAnims.forEach(({ opacity, translateY, delay }) => {
+      setTimeout(() => {
+        Animated.parallel([
+          Animated.timing(opacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+          Animated.timing(translateY, { toValue: 0, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        ]).start();
+      }, delay);
+    });
   }, []);
 
-  // Jersey shows last name only (like a real jersey)
-  const jerseyDisplayName = useMemo(() => {
-    const trimmed = userName.trim();
-    if (!trimmed) return '';
-    const words = trimmed.split(/\s+/);
-    // If only one word, show it. If multiple, show the last word (surname).
-    return words[words.length - 1].toUpperCase();
-  }, [userName]);
+  const firstTeam = teams.find(t2 => state.teamIds.includes(t2.id));
+  const firstPlayer = players.find(p => state.playerIds.includes(p.id));
+  const firstLeague = leagues.find(l => state.leagueIds.includes(l.id));
 
-  // Summary
-  const parts: string[] = [];
-  if (teamsCount > 0) parts.push(`${teamsCount} equipo${teamsCount !== 1 ? 's' : ''}`);
-  if (playersCount > 0) parts.push(`${playersCount} jugador${playersCount !== 1 ? 'es' : ''}`);
-  if (leaguesCount > 0) parts.push(`${leaguesCount} liga${leaguesCount !== 1 ? 's' : ''}`);
+  return (
+    <View style={[base.screen, { paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
+      <TopBar dotIndex={4} onBack={onBack} />
+
+      <ScrollView
+        contentContainerStyle={[base.scrollContent, { paddingHorizontal: SIDE_PAD }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={[base.headline, { color: th.TEXT_PRIMARY }]}>{t('onboarding.feedTitle')}</Text>
+        <Text style={[base.sub, { color: th.TEXT_DIM }]}>{t('onboarding.feedSub')}</Text>
+
+        <View style={{ gap: 12, marginTop: 20 }}>
+          {/* Card 1 — Next Match */}
+          <Animated.View style={[{ opacity: cardAnims[0].opacity, transform: [{ translateY: cardAnims[0].translateY }] }, th.SHADOW]}>
+            <LinearGradient colors={[th.isDark ? '#1A2A4A' : '#EFF6FF', th.isDark ? '#0D1520' : '#DBEAFE']} style={s6.card} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+              <View style={[s6.badge, { backgroundColor: th.BLUE_DIM }]}>
+                <Text style={[s6.badgeText, { color: BLUE }]}>{t('onboarding.nextMatchLabel')}</Text>
+              </View>
+              <View style={s6.matchRow}>
+                <View style={s6.teamBox}>
+                  {firstTeam ? <SmartLogo uri={firstTeam.logo} size={40} /> : <Text style={{ fontSize: 40 }}>⚽</Text>}
+                  <Text style={[s6.teamName, { color: th.TEXT_PRIMARY }]} numberOfLines={1}>{firstTeam?.shortName ?? 'EQP'}</Text>
+                </View>
+                <Text style={[s6.vs, { color: th.TEXT_DIM }]}>VS</Text>
+                <View style={s6.teamBox}>
+                  <Text style={{ fontSize: 40 }}>🆚</Text>
+                  <Text style={[s6.teamName, { color: th.TEXT_PRIMARY }]}>OPP</Text>
+                </View>
+              </View>
+              <Text style={[s6.matchTime, { color: th.SUB_TEXT }]}>Sábado · 21:00</Text>
+              {firstLeague && <Text style={[s6.leagueName, { color: th.TEXT_DIM }]}>{firstLeague.name}</Text>}
+            </LinearGradient>
+          </Animated.View>
+
+          {/* Card 2 — News */}
+          <Animated.View style={[{ opacity: cardAnims[1].opacity, transform: [{ translateY: cardAnims[1].translateY }] }, th.SHADOW]}>
+            <View style={[s6.card, { backgroundColor: th.SURFACE }]}>
+              <View style={s6.newsRow}>
+                <LinearGradient colors={[GOLD, '#E68A00']} style={s6.newsAvatar} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                  <Text style={{ fontSize: 22 }}>⚽</Text>
+                </LinearGradient>
+                <View style={{ flex: 1 }}>
+                  <View style={[s6.badge, { backgroundColor: th.GOLD_DIM, alignSelf: 'flex-start', marginBottom: 4 }]}>
+                    <Text style={[s6.badgeText, { color: GOLD }]}>{t('onboarding.newsLabel')}</Text>
+                  </View>
+                  <Text style={[s6.newsTitle, { color: th.TEXT_PRIMARY }]} numberOfLines={2}>
+                    {firstPlayer ? `${firstPlayer.name} anotó doblete anoche` : 'Tu jugador favorito anotó anoche'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </Animated.View>
+
+          {/* Card 3 — Table */}
+          <Animated.View style={[{ opacity: cardAnims[2].opacity, transform: [{ translateY: cardAnims[2].translateY }] }, th.SHADOW]}>
+            <View style={[s6.card, { backgroundColor: th.SURFACE }]}>
+              <View style={[s6.badge, { backgroundColor: th.BLUE_DIM, marginBottom: 10 }]}>
+                <Text style={[s6.badgeText, { color: BLUE }]}>{t('onboarding.tableLabel')}</Text>
+              </View>
+              {[1, 2, 3].map(pos => (
+                <View key={pos} style={[s6.tableRow, pos === 1 && firstTeam && { backgroundColor: th.BLUE_DIM, borderRadius: 8 }]}>
+                  <Text style={[s6.tablePos, { color: th.TEXT_DIM }]}>{pos}</Text>
+                  <Text style={[s6.tableName, { color: th.TEXT_PRIMARY }]} numberOfLines={1}>
+                    {pos === 1 && firstTeam ? firstTeam.name : pos === 2 ? 'Equipo B' : 'Equipo C'}
+                  </Text>
+                  <Text style={[s6.tablePoints, { color: th.TEXT_PRIMARY }]}>{36 - pos * 3} pts</Text>
+                </View>
+              ))}
+            </View>
+          </Animated.View>
+
+          {/* Card 4 — Stat */}
+          <Animated.View style={[{ opacity: cardAnims[3].opacity, transform: [{ translateY: cardAnims[3].translateY }] }, th.SHADOW]}>
+            <LinearGradient colors={[th.isDark ? '#1A1A1D' : '#FFFBEB', th.isDark ? '#2a1f00' : '#FEF3C7']} style={s6.card} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+              <View style={[s6.badge, { backgroundColor: th.GOLD_DIM, marginBottom: 10 }]}>
+                <Text style={[s6.badgeText, { color: GOLD }]}>{t('onboarding.statLabel')}</Text>
+              </View>
+              <Text style={s6.statNumber}>15</Text>
+              <View style={[s6.barContainer, { backgroundColor: th.isDark ? 'rgba(255,255,255,0.1)' : '#E5E7EB' }]}>
+                <LinearGradient colors={[GOLD, '#E68A00']} style={[s6.bar, { width: '75%' }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+              </View>
+              <Text style={[s6.statSub, { color: th.TEXT_DIM }]}>
+                {firstPlayer ? `${firstPlayer.name} · Delantero` : 'Tu jugador · Delantero'}
+              </Text>
+            </LinearGradient>
+          </Animated.View>
+        </View>
+      </ScrollView>
+
+      <CTAButton label={t('onboarding.likeWhatISee')} onPress={onNext} glow />
+    </View>
+  );
+};
+
+const s6 = StyleSheet.create({
+  card: { borderRadius: 16, padding: 16, overflow: 'hidden' },
+  badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start' },
+  badgeText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  matchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', marginVertical: 12 },
+  teamBox: { alignItems: 'center', gap: 6, width: 80 },
+  teamName: { fontSize: 12, fontWeight: '800' },
+  vs: { fontSize: 18, fontWeight: '900' },
+  matchTime: { fontSize: 13, textAlign: 'center', marginTop: 4 },
+  leagueName: { fontSize: 11, textAlign: 'center', marginTop: 2 },
+  newsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  newsAvatar: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+  newsTitle: { fontSize: 14, fontWeight: '700', lineHeight: 20 },
+  tableRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 4 },
+  tablePos: { fontSize: 14, fontWeight: '800', width: 20 },
+  tableName: { flex: 1, fontSize: 14, fontWeight: '600' },
+  tablePoints: { fontSize: 13, fontWeight: '700' },
+  statNumber: { fontSize: 84, fontWeight: '900', color: GOLD, lineHeight: 90 },
+  barContainer: { height: 6, borderRadius: 3, overflow: 'hidden', marginVertical: 8 },
+  bar: { height: 6, borderRadius: 3 },
+  statSub: { fontSize: 13 },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN 7 — Notifications
+// ─────────────────────────────────────────────────────────────────────────────
+type NotifRowItem = {
+  key: NotifKey;
+  icon: string;
+  titleKey: string;
+  subKey: string;
+};
+
+const NOTIF_ROWS: NotifRowItem[] = [
+  { key: 'goals',     icon: '⚽', titleKey: 'onboarding.nGoals',     subKey: 'onboarding.nGoalsSub' },
+  { key: 'kickoff',   icon: '📣', titleKey: 'onboarding.nKickoff',   subKey: 'onboarding.nKickoffSub' },
+  { key: 'results',   icon: '🏆', titleKey: 'onboarding.nResults',   subKey: 'onboarding.nResultsSub' },
+  { key: 'lineups',   icon: '📋', titleKey: 'onboarding.nLineups',   subKey: 'onboarding.nLineupsSub' },
+  { key: 'transfers', icon: '🔄', titleKey: 'onboarding.nTransfers', subKey: 'onboarding.nTransfersSub' },
+  { key: 'news',      icon: '📰', titleKey: 'onboarding.nNews',      subKey: 'onboarding.nNewsSub' },
+];
+
+const Screen7Notifs: React.FC<{
+  notifs: Record<NotifKey, boolean>;
+  onToggle: (key: NotifKey) => void;
+  fanLevel: FanLevel | null;
+  onNext: () => void;
+  onBack: () => void;
+  onSkip: () => void;
+}> = ({ notifs, onToggle, fanLevel, onNext, onBack, onSkip }) => {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const th = useOBTheme();
+
+  const subCopy =
+    fanLevel === 'analista' ? t('onboarding.notifsSubAnalista') :
+    fanLevel === 'fan'      ? t('onboarding.notifsSubFan') :
+    t('onboarding.notifsSubCasual');
+
+  return (
+    <View style={[base.screen, { paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
+      <TopBar dotIndex={4} onBack={onBack} onSkip={onSkip} skipLabel={t('onboarding.skip')} />
+
+      <ScrollView contentContainerStyle={[base.scrollContent, { paddingHorizontal: SIDE_PAD }]} showsVerticalScrollIndicator={false}>
+        <Text style={[base.headline, { color: th.TEXT_PRIMARY }]}>{t('onboarding.notifsTitle')}</Text>
+        <Text style={[base.sub, { color: th.TEXT_DIM }]}>{subCopy}</Text>
+
+        {/* Info chip */}
+        <View style={[s7.infoChip, { backgroundColor: th.BLUE_DIM }]}>
+          <Text style={s7.infoText}>🔔 {t('onboarding.notifsInfo')}</Text>
+        </View>
+
+        <View style={{ gap: 8, marginTop: 8 }}>
+          {NOTIF_ROWS.map(row => (
+            <View key={row.key} style={[s7.row, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#222' : '#E5E7EB' }]}>
+              <View style={[s7.iconBox, { backgroundColor: th.isDark ? '#1E1E1E' : '#F3F4F6' }]}>
+                <Text style={{ fontSize: 20 }}>{row.icon}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s7.rowTitle, { color: th.TEXT_PRIMARY }]}>{t(row.titleKey)}</Text>
+                <Text style={[s7.rowSub, { color: th.TEXT_DIM }]}>{t(row.subKey)}</Text>
+              </View>
+              <CustomToggle value={notifs[row.key]} onToggle={() => onToggle(row.key)} />
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+
+      <CTAButton label={t('onboarding.continue')} onPress={onNext} />
+    </View>
+  );
+};
+
+const s7 = StyleSheet.create({
+  infoChip: {
+    borderRadius: 12, padding: 12,
+    marginVertical: 12, borderWidth: 1, borderColor: BLUE,
+  },
+  infoText: { fontSize: 13, color: BLUE, fontWeight: '600', lineHeight: 18 },
+  row: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderRadius: 14, padding: 14,
+    borderWidth: 1.5,
+  },
+  iconBox: {
+    width: 40, height: 40, borderRadius: 10,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  rowTitle: { fontSize: 15, fontWeight: '700' },
+  rowSub: { fontSize: 12, marginTop: 2 },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN 8 — Name + Auth
+// ─────────────────────────────────────────────────────────────────────────────
+const Screen8Name: React.FC<{
+  name: string;
+  onChangeName: (n: string) => void;
+  state: OnboardingState;
+  onAuth: (method: AuthMethod) => void;
+  onBack: () => void;
+}> = ({ name, onChangeName, state, onAuth, onBack }) => {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const th = useOBTheme();
+
+  const displayName = name.trim() || '___';
+  const jerseyAnim  = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(jerseyAnim, { toValue: 1.04, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(jerseyAnim, { toValue: 1, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    ).start();
+  }, []);
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1 }}
+      style={[base.screen, { paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={40}
     >
+      <TopBar dotIndex={4} onBack={onBack} />
+
       <ScrollView
-        contentContainerStyle={prs.scroll}
+        contentContainerStyle={[base.scrollContent, { paddingHorizontal: SIDE_PAD }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Jersey / Presentation visual */}
-        <Animated.View style={[prs.jerseyWrap, { opacity: jerseyOpacity, transform: [{ scale: jerseyScale }] }]}>
-          <View style={[prs.jersey, { backgroundColor: isDark ? '#1a1d2e' : '#f1f5f9', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }]}>
-            <Text style={{ fontSize: 36 }}>👕</Text>
-            {userName.length > 0 ? (
-              <Text
-                style={[prs.jerseyName, {
-                  color: c.textPrimary,
-                  fontSize: jerseyDisplayName.length > 10 ? 9 : jerseyDisplayName.length > 7 ? 11 : 13,
-                  letterSpacing: jerseyDisplayName.length > 10 ? 0.5 : jerseyDisplayName.length > 7 ? 1 : 2,
-                }]}
-                numberOfLines={1}
-              >
-                {jerseyDisplayName}
-              </Text>
-            ) : (
-              <Text style={[prs.jerseyName, { color: c.textTertiary }]}>TU NOMBRE</Text>
-            )}
-            <Text style={[prs.jerseyNumber, { color: GREEN }]}>10</Text>
+        {/* Jersey illustration */}
+        <Animated.View style={[s8.jerseyWrap, { transform: [{ scale: jerseyAnim }] }]}>
+          {/* Simple jersey shape via Views */}
+          <View style={s8.jersey}>
+            {/* Collar */}
+            <View style={s8.collar} />
+            {/* Name on back */}
+            <Text style={s8.jerseyName} numberOfLines={1}>{displayName.toUpperCase().slice(0, 10)}</Text>
+            <Text style={s8.jerseyNumber}>10</Text>
           </View>
         </Animated.View>
 
-        <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentY }] }}>
-          {/* Headline */}
-          <Text style={[prs.headline, { color: c.textPrimary }]}>{t('onboarding.welcome')}</Text>
+        <Text style={[s8.title, { color: th.TEXT_PRIMARY }]}>{t('onboarding.nameTitle')}</Text>
+        <Text style={s8.hub}>{t('onboarding.nameHub')}</Text>
+        <Text style={[base.sub, { color: BLUE, marginBottom: 16, textAlign: 'center' }]}>{t('onboarding.nameSubtitle')}</Text>
 
-          {/* Emotional subtext */}
-          <Text style={[prs.emotional, { color: GREEN }]}>
-            No eres solo un número.{'\n'}Queremos llamarte por tu nombre.
-          </Text>
+        {/* Name input */}
+        <View style={[s8.inputWrap, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#333' : '#E5E7EB' }]}>
+          <TextInput
+            style={[s8.input, { color: th.TEXT_PRIMARY }]}
+            placeholder={t('onboarding.namePlaceholder')}
+            placeholderTextColor={th.TEXT_DIM}
+            value={name}
+            onChangeText={v => onChangeName(v.slice(0, 16))}
+            autoCapitalize="words"
+            returnKeyType="done"
+            maxLength={16}
+          />
+        </View>
 
-          {/* Name input */}
-          <View style={[prs.nameInputWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
-            <Text style={{ fontSize: 16 }}>✏️</Text>
-            <TextInput
-              style={[prs.nameInput, { color: c.textPrimary }]}
-              placeholder="¿Cómo te llaman?"
-              placeholderTextColor={c.textTertiary}
-              value={userName}
-              onChangeText={onChangeName}
-              autoCorrect={false}
-              autoCapitalize="words"
-              returnKeyType="done"
-              maxLength={30}
-            />
+        {/* Micro-reflect */}
+        <Text style={[s8.reflect, { color: th.TEXT_DIM }]}>
+          {t('onboarding.nameFollowing', {
+            teams: state.teamIds.length,
+            players: state.playerIds.length,
+            leagues: state.leagueIds.length,
+          })}
+        </Text>
+
+        <Text style={[s8.registerHint, { color: th.TEXT_DIM }]}>{t('onboarding.nameRegister')}</Text>
+
+        {/* Auth buttons */}
+        <TouchableOpacity style={s8.appleBtn} onPress={() => onAuth('apple')} activeOpacity={0.85}>
+          <View style={s8.appleLogo}>
+            {/* Apple logo drawn with View */}
+            <Text style={{ fontSize: 18, color: '#000' }}>🍎</Text>
           </View>
+          <Text style={s8.appleBtnText}>{t('onboarding.continueWithApple')}</Text>
+        </TouchableOpacity>
 
-          {/* Summary */}
-          {parts.length > 0 && (
-            <Text style={[prs.summary, { color: c.textTertiary }]}>
-              Siguiendo {parts.join(' · ')}
-            </Text>
-          )}
+        <TouchableOpacity style={[s8.googleBtn, { borderColor: th.isDark ? '#333' : '#E5E7EB' }]} onPress={() => onAuth('google')} activeOpacity={0.85}>
+          <Text style={{ fontSize: 18 }}>🌐</Text>
+          <Text style={[s8.googleBtnText, { color: th.TEXT_PRIMARY }]}>{t('onboarding.continueWithGoogle')}</Text>
+        </TouchableOpacity>
 
-          {/* Registration subtext */}
-          <Text style={[prs.regSubtext, { color: c.textTertiary }]}>
-            Regístrate para guardar tu configuración
-          </Text>
-
-          {/* Social buttons */}
-          <View style={prs.buttons}>
-            <SocialButton
-              icon={<AppleIcon color={isDark ? '#000' : '#fff'} />}
-              label="Continuar con Apple"
-              bg={isDark ? '#fff' : '#000'}
-              textColor={isDark ? '#000' : '#fff'}
-              onPress={() => onLogin('apple')}
-            />
-            <SocialButton
-              icon={<GoogleIcon />}
-              label="Continuar con Google"
-              bg={c.card}
-              textColor={c.textPrimary}
-              borderColor={c.border}
-              onPress={() => onLogin('google')}
-            />
-          </View>
-
-          {/* Guest */}
-          <TouchableOpacity onPress={onSkip} style={prs.skipWrap} activeOpacity={0.7}>
-            <Text style={[prs.skipText, { color: c.textTertiary }]}>Continuar sin cuenta</Text>
-          </TouchableOpacity>
-        </Animated.View>
+        <TouchableOpacity onPress={() => onAuth('guest')} style={{ paddingVertical: 16, alignItems: 'center' }}>
+          <Text style={s8.guestLink}>{t('onboarding.continueWithoutAccount')}</Text>
+        </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 };
 
-const prs = StyleSheet.create({
-  scroll: { paddingHorizontal: 4, paddingBottom: 24 },
-  jerseyWrap: { alignItems: 'center', marginTop: 8, marginBottom: 20 },
+const s8 = StyleSheet.create({
+  jerseyWrap: { alignSelf: 'center', marginBottom: 12 },
   jersey: {
-    width: 140, height: 140, borderRadius: 20, borderWidth: 1.5,
-    alignItems: 'center', justifyContent: 'center', gap: 2,
+    width: 100, height: 110, backgroundColor: BLUE,
+    borderRadius: 16, alignItems: 'center', justifyContent: 'center',
+    position: 'relative', overflow: 'hidden',
   },
-  jerseyName: { fontSize: 13, fontWeight: '900', letterSpacing: 2, marginTop: 4, textAlign: 'center' },
-  jerseyNumber: { fontSize: 28, fontWeight: '900', marginTop: -2 },
-  headline: { fontSize: 24, fontWeight: '900', textAlign: 'center', letterSpacing: 0.5, marginBottom: 10 },
-  emotional: { fontSize: 15, fontWeight: '600', textAlign: 'center', lineHeight: 22, marginBottom: 20 },
-  nameInputWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 16, paddingVertical: Platform.OS === 'ios' ? 14 : 10,
-    borderRadius: 14, borderWidth: 1.5, marginBottom: 14,
+  collar: {
+    position: 'absolute', top: -6, width: 36, height: 22,
+    backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 18,
   },
-  nameInput: { flex: 1, fontSize: 16, fontWeight: '600', padding: 0 },
-  summary: { fontSize: 13, fontWeight: '600', textAlign: 'center', marginBottom: 16 },
-  regSubtext: { fontSize: 13, fontWeight: '500', textAlign: 'center', marginBottom: 16 },
-  buttons: {},
-  skipWrap: { alignItems: 'center', paddingVertical: 14, marginTop: 2 },
-  skipText: { fontSize: 14, fontWeight: '600', textDecorationLine: 'underline' },
+  jerseyName: {
+    fontSize: 11, fontWeight: '900', color: '#FFFFFF',
+    letterSpacing: 1, textAlign: 'center', marginTop: 12,
+  },
+  jerseyNumber: { fontSize: 32, fontWeight: '900', color: '#FFFFFF' },
+  title: {
+    fontSize: 20, fontWeight: '900',
+    textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center',
+  },
+  hub: { fontSize: 20, fontWeight: '900', color: BLUE, textAlign: 'center', marginBottom: 8 },
+  inputWrap: {
+    borderRadius: 14, borderWidth: 1.5,
+    paddingHorizontal: 16, paddingVertical: Platform.OS === 'ios' ? 16 : 12,
+    marginBottom: 12,
+  },
+  input: { fontSize: 18, fontWeight: '700' },
+  reflect: { fontSize: 13, textAlign: 'center', marginBottom: 8 },
+  registerHint: { fontSize: 14, textAlign: 'center', marginBottom: 20 },
+  appleBtn: {
+    backgroundColor: '#FFFFFF', borderRadius: 14, paddingVertical: 16,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    marginBottom: 10,
+  },
+  appleLogo: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
+  appleBtnText: { fontSize: 16, fontWeight: '700', color: '#000' },
+  googleBtn: {
+    backgroundColor: 'transparent', borderRadius: 14, paddingVertical: 16,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    borderWidth: 1.5, marginBottom: 4,
+  },
+  googleBtnText: { fontSize: 16, fontWeight: '700' },
+  guestLink: { fontSize: 15, color: BLUE, fontWeight: '600', textDecorationLine: 'underline' },
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── Welcome Animation (post-registration) ─────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const CONFETTI_COLS = ['#10b981','#fbbf24','#3b82f6','#f97316','#ef4444','#8b5cf6','#ec4899','#ffffff'];
-
-// Golden-ratio spacing gives well-distributed deterministic X positions
-const _PHI = 1.61803398875;
-const PARTICLES = Array.from({ length: 56 }, (_, i) => ({
-  id: i,
-  x: (((i * _PHI) % 1) * SCREEN_W),
-  color: CONFETTI_COLS[i % CONFETTI_COLS.length],
-  size: 6 + (i % 4) * 2.5,
-  delay: (i % 7) * 120,
-  duration: 1800 + (i % 5) * 300,
-  drift: (i % 2 === 0 ? 1 : -1) * (15 + (i % 4) * 8),
-  startRot: (i * 37) % 360,
-}));
-
-const FallingParticle: React.FC<{ p: typeof PARTICLES[0] }> = ({ p }) => {
-  const y   = useRef(new Animated.Value(-20)).current;
-  const x   = useRef(new Animated.Value(0)).current;
-  const rot = useRef(new Animated.Value(p.startRot)).current;
-  const op  = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const anim = Animated.sequence([
-      Animated.delay(p.delay),
-      Animated.parallel([
-        Animated.timing(op,  { toValue: 1, duration: 200, useNativeDriver: true }),
-        Animated.timing(y,   { toValue: SCREEN_H + 40, duration: p.duration, easing: Easing.linear, useNativeDriver: true }),
-        Animated.sequence([
-          Animated.timing(x, { toValue: p.drift, duration: p.duration / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(x, { toValue: 0,       duration: p.duration / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ]),
-        Animated.timing(rot, { toValue: p.startRot + 540, duration: p.duration, easing: Easing.linear, useNativeDriver: true }),
-        Animated.sequence([
-          Animated.delay(p.duration - 400),
-          Animated.timing(op, { toValue: 0, duration: 400, useNativeDriver: true }),
-        ]),
-      ]),
-    ]);
-    anim.start();
-    return () => anim.stop();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const spin = rot.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] });
-  return (
-    <Animated.View style={{
-      position: 'absolute',
-      left: p.x,
-      top: 0,
-      width: p.size,
-      height: p.size * 0.5,
-      borderRadius: 1,
-      backgroundColor: p.color,
-      opacity: op,
-      transform: [{ translateY: y }, { translateX: x }, { rotate: spin }],
-    }} />
-  );
-};
-
-// ── Personalizing Screen ────────────────────────────────────────────────────
-//
-// DESIGN NOTES — por qué funciona:
-//
-// 1. NEGRO PURO (#000000): Maximiza el contraste con el verde neón.
-//    En OLED/AMOLED los píxeles negros están apagados → ahorro de batería
-//    y el neón "brilla" literalmente contra la oscuridad absoluta.
-//
-// 2. NEÓN (#00FF9D) sobre negro: Relación de contraste >14:1. Supera WCAG AAA.
-//    El verde-menta crea una asociación inmediata con "datos / tecnología / éxito".
-//    Psicológicamente activa: energía, progreso, confianza.
-//
-// 3. PROGRESO ORGÁNICO (no lineal): Imita comportamiento real de carga.
-//    Arranque rápido (entusiasmo) → pausa en la mitad (tensión narrativa) →
-//    sprint final (alivio y satisfacción). La mente humana encuentra esto más
-//    creíble que una barra lineal robótica.
-//
-// 4. MENSAJES ROTATIVOS con crossfade (no slide): Ningún elemento se mueve
-//    de su posición vertical. La información cambia in-place. Esto evita
-//    el vértigo de UIs que "saltan" y mantiene la sensación de control.
-//
-// 5. LOGO CON PULSO (breathing): La animación 1.0→1.07→1.0 en 2s simula
-//    respiración. Es el patrón más tranquilizador que existe — activa el
-//    sistema parasimpático. El usuario espera 7 segundos sin ansiedad.
-//
-// 6. GLOW en el porcentaje y la barra: textShadow + shadow hacen que el
-//    neón "irradie". No es decorativo — comunica energía activa, no estática.
-//
-// 7. CHECK ANIMADO (spring + fade): La combinación escala+opacidad da la
-//    sensación de que el check "aparece con peso", no flota. El spring
-//    natural (sin bounce excesivo) transmite solidez y profesionalismo.
-//
-// 8. 7 SEGUNDOS TOTALES: Suficiente para leer ~12 mensajes a 580ms/mensaje.
-//    El usuario siente que "pasaron cosas", no que esperó. Apple recomienda
-//    no superar 8s para pantallas de carga percibida como "acción del usuario".
-
-const PersonalizingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN 9 — Personalizing (auto-advances after 3s)
+// ─────────────────────────────────────────────────────────────────────────────
+const Screen9Personalizing: React.FC<{
+  state: OnboardingState;
+  teams: SearchableTeam[];
+  players: SearchablePlayer[];
+  leagues: SearchableLeague[];
+  onDone: () => void;
+}> = ({ state, teams, players, leagues, onDone }) => {
   const { t } = useTranslation();
-  const messages = t('onboarding.personalizingMessages', { returnObjects: true }) as string[];
+  const insets = useSafeAreaInsets();
+  const th = useOBTheme();
+  const { setFanLevel } = useOnboarding();
+  const { isFollowingTeam, toggleFollowTeam, isFollowingLeague, toggleFollowLeague, isFollowingPlayer, toggleFollowPlayer } = useFavorites();
+  const { login } = useAuth();
+  const { togglePref, prefs } = useNotificationPrefs();
 
-  // ── Animated values ──────────────────────────────────────────────────────
-  const pulseAnim   = useRef(new Animated.Value(1)).current;
-  const logoOp      = useRef(new Animated.Value(0)).current;
-  const contentOp   = useRef(new Animated.Value(0)).current;
-  const msgOp       = useRef(new Animated.Value(1)).current;
-  const progressVal = useRef(new Animated.Value(0)).current;
-  const checkScale  = useRef(new Animated.Value(0)).current;
-  const checkOp     = useRef(new Animated.Value(0)).current;
+  const [pct, setPct] = useState(0);
+  const [msgIndex, setMsgIndex] = useState(0);
+  const pctAnim   = useRef(new Animated.Value(0)).current;
+  const circleScale = useRef(new Animated.Value(1)).current;
+  const glowOpacity = useRef(new Animated.Value(0.3)).current;
+  const appliedRef  = useRef(false);
 
-  const [percent, setPercent] = useState(0);
-  const [msgIdx, setMsgIdx]   = useState(0);
+  // Build cycling messages
+  const msgs = useMemo(() => {
+    const list: string[] = [];
+    const selectedTeams   = teams.filter(t2 => state.teamIds.includes(t2.id));
+    const selectedPlayers = players.filter(p => state.playerIds.includes(p.id));
+    const selectedLeagues = leagues.filter(l => state.leagueIds.includes(l.id));
 
-  // ── Entrance + breathing pulse ───────────────────────────────────────────
+    if (selectedTeams.length > 0) {
+      list.push(t('onboarding.connectingTeam', { team: selectedTeams[0].name }));
+    } else {
+      list.push(t('onboarding.connectingTeams'));
+    }
+    if (selectedPlayers.length > 0) {
+      list.push(t('onboarding.loadingPlayer', { player: selectedPlayers[0].name }));
+    } else {
+      list.push(t('onboarding.loadingPlayers'));
+    }
+    if (selectedLeagues.length > 0) {
+      list.push(t('onboarding.preparingLeague', { league: selectedLeagues[0].name }));
+    } else {
+      list.push(t('onboarding.preparingLeagues'));
+    }
+    list.push(t('onboarding.readyMessage'));
+    return list;
+  }, [state, teams, players, leagues]);
+
   useEffect(() => {
-    // Fade-in entrance
-    Animated.parallel([
-      Animated.timing(logoOp,    { toValue: 1, duration: 400,              useNativeDriver: true }),
-      Animated.timing(contentOp, { toValue: 1, duration: 500, delay: 250,  useNativeDriver: true }),
-    ]).start();
-
-    // Breathing loop: 1.0 → 1.07 → 1.0 every 2s
+    // Pulse animation
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.07, duration: 1000, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1,    duration: 1000, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-      ])
+        Animated.timing(circleScale,  { toValue: 1.08, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(circleScale,  { toValue: 1,    duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
     ).start();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowOpacity, { toValue: 0.7, duration: 900, useNativeDriver: true }),
+        Animated.timing(glowOpacity, { toValue: 0.2, duration: 900, useNativeDriver: true }),
+      ]),
+    ).start();
 
-  // ── Message cycling (independent of progress) ────────────────────────────
-  useEffect(() => {
-    const cycle = setInterval(() => {
-      // Fade out → swap text → fade in (crossfade in-place)
-      Animated.timing(msgOp, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
-        setMsgIdx(prev => (prev + 1) % messages.length);
-        Animated.timing(msgOp, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+    // Percentage counter
+    const start = Date.now();
+    const duration = 3000;
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const progress = Math.min(elapsed / duration, 1);
+      // ease-out
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setPct(Math.round(eased * 100));
+      if (progress >= 1) clearInterval(interval);
+    }, 30);
+
+    // Message cycling
+    const msgInterval = setInterval(() => {
+      setMsgIndex(i => Math.min(i + 1, msgs.length - 1));
+    }, 800);
+
+    // Side effects — run ONCE
+    if (!appliedRef.current) {
+      appliedRef.current = true;
+
+      // Apply fan level
+      if (state.fanLevel) setFanLevel(state.fanLevel);
+
+      // Apply teams
+      state.teamIds.forEach(id => {
+        if (!isFollowingTeam(String(id))) toggleFollowTeam(String(id));
       });
-    }, 580); // 580ms ≈ 12 messages × 580ms = ~7s total cycle
-    return () => clearInterval(cycle);
-  }, [messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Organic non-linear progress ──────────────────────────────────────────
-  useEffect(() => {
-    // Mirror progressVal → percent state for the display number
-    const id = progressVal.addListener(({ value }) => {
-      const pct = Math.round(value * 100);
-      setPercent(pct);
-      if (pct === 25 || pct === 50 || pct === 75) {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      // Apply players
+      state.playerIds.forEach(id => {
+        if (!isFollowingPlayer(String(id))) toggleFollowPlayer(String(id));
+      });
+
+      // Apply leagues
+      state.leagueIds.forEach(id => {
+        if (!isFollowingLeague(String(id))) toggleFollowLeague(String(id));
+      });
+
+      // Apply notifications (map design keys → NotificationPrefsContext keys)
+      const notifMap: Partial<Record<NotifKey, keyof typeof prefs>> = {
+        goals:   'goals',
+        kickoff: 'matchStart',
+        results: 'matchEnd',
+        lineups: 'lineups',
+      };
+      Object.entries(notifMap).forEach(([designKey, prefKey]) => {
+        const desired = state.notifications[designKey as NotifKey];
+        const current = prefs[prefKey as keyof typeof prefs];
+        if (typeof current === 'boolean' && desired !== current) {
+          togglePref(prefKey as Parameters<typeof togglePref>[0]);
+        }
+      });
+
+      // Request push permissions
+      requestPermissionsAndGetToken().catch(() => {});
+
+      // Auth
+      if (state.authMethod) {
+        login(state.authMethod, state.name.trim() || 'Analista').catch(() => {});
       }
-    });
+    }
 
-    // Keyframe sequence — total 7 000ms
-    // Fast start → plateau → micro-pauses → final sprint
-    Animated.sequence([
-      Animated.timing(progressVal, { toValue: 0.15, duration:  500, easing: Easing.out(Easing.cubic),  useNativeDriver: false }),
-      Animated.timing(progressVal, { toValue: 0.30, duration:  700, easing: Easing.inOut(Easing.quad), useNativeDriver: false }),
-      Animated.timing(progressVal, { toValue: 0.45, duration:  900, easing: Easing.inOut(Easing.quad), useNativeDriver: false }),
-      Animated.timing(progressVal, { toValue: 0.55, duration: 1200, easing: Easing.in(Easing.quad),    useNativeDriver: false }), // ← deliberate crawl
-      Animated.timing(progressVal, { toValue: 0.65, duration:  800, easing: Easing.out(Easing.quad),   useNativeDriver: false }),
-      Animated.timing(progressVal, { toValue: 0.75, duration:  700, easing: Easing.inOut(Easing.quad), useNativeDriver: false }),
-      Animated.timing(progressVal, { toValue: 0.88, duration: 1000, easing: Easing.in(Easing.quad),    useNativeDriver: false }), // ← second crawl
-      Animated.timing(progressVal, { toValue: 0.95, duration:  600, easing: Easing.out(Easing.cubic),  useNativeDriver: false }),
-      Animated.timing(progressVal, { toValue: 1.00, duration:  600, easing: Easing.out(Easing.cubic),  useNativeDriver: false }),
-    ]).start(({ finished }) => {
-      if (!finished) return;
-      setPercent(100);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    // Auto-advance after 3s
+    const advanceTimer = setTimeout(() => {
+      clearInterval(interval);
+      clearInterval(msgInterval);
+      onDone();
+    }, 3200);
 
-      // Check mark: spring scale + fade in simultaneously
-      Animated.parallel([
-        Animated.spring(checkScale, { toValue: 1, friction: 5, tension: 60, useNativeDriver: true }),
-        Animated.timing(checkOp,   { toValue: 1, duration: 220,             useNativeDriver: true }),
-      ]).start();
-
-      setTimeout(onComplete, 900);
-    });
-
-    return () => progressVal.removeListener(id);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <Animated.View style={[
-      StyleSheet.absoluteFillObject,
-      { backgroundColor: '#000000', zIndex: 998, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36 },
-    ]}>
-      <StatusBar barStyle="light-content" />
-
-      {/* ── Logo with breathing pulse ───────────────────────────────────── */}
-      <Animated.View style={{ opacity: logoOp, marginBottom: 32, transform: [{ scale: pulseAnim }] }}>
-        <View style={{
-          width: 84, height: 84, borderRadius: 42,
-          backgroundColor: NEON_GREEN_DIM,
-          borderWidth: 2, borderColor: NEON_GREEN,
-          alignItems: 'center', justifyContent: 'center',
-          // Neon halo (iOS)
-          shadowColor: NEON_GREEN,
-          shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.55,
-          shadowRadius: 14,
-        }}>
-          <Text style={{ fontSize: 30, fontWeight: '900', color: NEON_GREEN, letterSpacing: -0.5 }}>A</Text>
-        </View>
-      </Animated.View>
-
-      {/* ── Title — fixed, never moves ──────────────────────────────────── */}
-      <Animated.View style={{ opacity: contentOp, alignItems: 'center', width: '100%' }}>
-        <Text style={{
-          fontSize: 23, fontWeight: '800', color: '#ffffff',
-          letterSpacing: -0.4, marginBottom: 14,
-        }}>
-          {t('onboarding.personalizing')}
-        </Text>
-
-        {/* Fixed-height message slot — crossfade only, zero layout shift */}
-        <View style={{ height: 44, alignItems: 'center', justifyContent: 'center', width: '100%', marginBottom: 36 }}>
-          <Animated.Text style={{
-            fontSize: 13, color: 'rgba(255,255,255,0.42)',
-            textAlign: 'center', lineHeight: 20,
-            opacity: msgOp,
-            position: 'absolute',
-          }}>
-            {messages[msgIdx]}
-          </Animated.Text>
-        </View>
-      </Animated.View>
-
-      {/* ── Percentage (neon glow via textShadow) ──────────────────────── */}
-      <Text style={{
-        fontSize: 76, fontWeight: '900', color: NEON_GREEN,
-        letterSpacing: -3, marginBottom: 28,
-        textShadowColor: 'rgba(0,255,157,0.45)',
-        textShadowOffset: { width: 0, height: 0 },
-        textShadowRadius: 22,
-      }}>
-        {percent}%
-      </Text>
-
-      {/* ── Progress bar with neon glow ─────────────────────────────────── */}
-      {/* No overflow:hidden on track so the fill's shadow can bleed out */}
-      <View style={{
-        width: '100%', height: 6, borderRadius: 3,
-        backgroundColor: 'rgba(0,255,157,0.13)',
-        marginBottom: 32,
-      }}>
-        <Animated.View style={{
-          height: 6, borderRadius: 3,
-          backgroundColor: NEON_GREEN,
-          width: progressVal.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
-          // Glowing fill (iOS)
-          shadowColor: NEON_GREEN,
-          shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.95,
-          shadowRadius: 9,
-        }} />
-      </View>
-
-      {/* ── Check mark — always rendered, animated opacity+scale ────────── */}
-      <Animated.View style={{ opacity: checkOp, transform: [{ scale: checkScale }] }}>
-        <View style={{
-          width: 58, height: 58, borderRadius: 29,
-          backgroundColor: NEON_GREEN,
-          alignItems: 'center', justifyContent: 'center',
-          shadowColor: NEON_GREEN,
-          shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.7,
-          shadowRadius: 12,
-        }}>
-          {/* Check-mark drawn with two bordered sides */}
-          <View style={{
-            width: 14, height: 25,
-            borderRightWidth: 3.5, borderBottomWidth: 3.5, borderColor: '#000',
-            transform: [{ rotate: '45deg' }, { translateY: -2 }],
-          }} />
-        </View>
-      </Animated.View>
-    </Animated.View>
-  );
-};
-
-const WelcomeAnimation: React.FC<{ userName: string; onComplete: () => void }> = ({ userName, onComplete }) => {
-  const { t } = useTranslation();
-  const fadeOut    = useRef(new Animated.Value(1)).current;
-  const logoOp     = useRef(new Animated.Value(0)).current;
-  const logoScale  = useRef(new Animated.Value(0.8)).current;
-  const nameOp     = useRef(new Animated.Value(0)).current;
-  const nameY      = useRef(new Animated.Value(12)).current;
-  const bodyOp     = useRef(new Animated.Value(0)).current;
-  const bodyY      = useRef(new Animated.Value(14)).current;
-  const btnOp      = useRef(new Animated.Value(0)).current;
-  const btnScale   = useRef(new Animated.Value(0.92)).current;
-
-  const handleStart = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    Animated.timing(fadeOut, { toValue: 0, duration: 500, easing: Easing.in(Easing.cubic), useNativeDriver: true })
-      .start(() => onComplete());
-  }, [fadeOut, onComplete]);
-
-  useEffect(() => {
-    // Staggered entrance: logo → name → body text → button
-    Animated.sequence([
-      // Logo pops in
-      Animated.parallel([
-        Animated.spring(logoScale, { toValue: 1, friction: 6, tension: 55, useNativeDriver: true }),
-        Animated.timing(logoOp, { toValue: 1, duration: 350, useNativeDriver: true }),
-      ]),
-      // Name slides up
-      Animated.parallel([
-        Animated.timing(nameOp, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        Animated.timing(nameY,  { toValue: 0, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      ]),
-      // Body text slides up
-      Animated.parallel([
-        Animated.timing(bodyOp, { toValue: 1, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        Animated.timing(bodyY,  { toValue: 0, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      ]),
-      // Button bounces in
-      Animated.parallel([
-        Animated.spring(btnScale, { toValue: 1, friction: 6, tension: 60, useNativeDriver: true }),
-        Animated.timing(btnOp, { toValue: 1, duration: 250, useNativeDriver: true }),
-      ]),
-    ]).start();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const displayName = userName.trim()
-    ? userName.trim().split(' ')[0].toUpperCase()
-    : t('onboarding.defaultName');
-
-  return (
-    <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#0D0D0D', opacity: fadeOut, zIndex: 999 }]}>
-      {/* Confetti */}
-      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-        {PARTICLES.map(p => <FallingParticle key={p.id} p={p} />)}
-      </View>
-
-      {/* Central content */}
-      <View style={wl.content}>
-
-        {/* ── Analistas logo ──────────────────────────────────────────────── */}
-        <Animated.View style={{ opacity: logoOp, transform: [{ scale: logoScale }], marginBottom: 32 }}>
-          <Image
-            source={ANALISTAS_LOGO}
-            style={wl.logoImage}
-            resizeMode="contain"
-          />
-        </Animated.View>
-
-        {/* ── Name ───────────────────────────────────────────────────────── */}
-        <Animated.Text style={[wl.nameText, { opacity: nameOp, transform: [{ translateY: nameY }] }]}>
-          {displayName},
-        </Animated.Text>
-
-        {/* ── Welcome headline ────────────────────────────────────────────── */}
-        <Animated.Text style={[wl.welcomeText, { opacity: nameOp, transform: [{ translateY: nameY }] }]}>
-          {t('onboarding.welcome')}
-        </Animated.Text>
-
-        {/* ── Divider ─────────────────────────────────────────────────────── */}
-        <Animated.View style={[wl.divider, { opacity: bodyOp }]} />
-
-        {/* ── Tagline ─────────────────────────────────────────────────────── */}
-        <Animated.Text style={[wl.tagline, { opacity: bodyOp, transform: [{ translateY: bodyY }] }]}>
-          {t('onboarding.tagline')}
-        </Animated.Text>
-
-        {/* ── CTA ─────────────────────────────────────────────────────────── */}
-        <Animated.View style={{ opacity: btnOp, transform: [{ scale: btnScale }], marginTop: 40 }}>
-          <TouchableOpacity style={wl.ctaBtn} onPress={handleStart} activeOpacity={0.85}>
-            <Text style={wl.ctaBtnText}>{t('onboarding.start')}</Text>
-          </TouchableOpacity>
-        </Animated.View>
-
-      </View>
-    </Animated.View>
-  );
-};
-
-const wl = StyleSheet.create({
-  content: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 36,
-  },
-  // Logo — sized to look premium without overwhelming the screen
-  logoImage: {
-    width: 110,
-    height: 110,
-  },
-  // Name — big, green, owns the first line
-  nameText: {
-    fontSize: 38, fontWeight: '900', color: GREEN,
-    letterSpacing: 0.5, textAlign: 'center', marginBottom: 6,
-  },
-  // Welcome copy — runs under the name, 2 lines
-  welcomeText: {
-    fontSize: 22, fontWeight: '700', color: '#ffffff',
-    textAlign: 'center', lineHeight: 30, marginBottom: 20,
-    letterSpacing: -0.2,
-  },
-  divider: { width: 48, height: 3, borderRadius: 2, backgroundColor: GREEN, marginBottom: 20 },
-  tagline: {
-    fontSize: 15, fontWeight: '400', color: 'rgba(255,255,255,0.50)',
-    textAlign: 'center', lineHeight: 24,
-  },
-  ctaBtn: {
-    backgroundColor: GREEN, borderRadius: 18,
-    paddingVertical: 17, paddingHorizontal: 56,
-  },
-  ctaBtnText: {
-    fontSize: 16, fontWeight: '800', color: '#fff', letterSpacing: 0.5,
-  },
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── Main Onboarding Screen ─────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
-
-export const OnboardingScreen: React.FC = () => {
-  const c = useThemeColors();
-  const insets = useSafeAreaInsets();
-
-  // Contexts
-  const {
-    selectedTeams, toggleTeam,
-    selectedLeagues, toggleLeague,
-    selectedPlayers, togglePlayer,
-    notifications, toggleNotification,
-    completeOnboarding,
-  } = useOnboarding();
-  const {
-    toggleFollowTeam, isFollowingTeam,
-    toggleFollowLeague, isFollowingLeague,
-    toggleFollowPlayer, isFollowingPlayer,
-  } = useFavorites();
-  const { login } = useAuth();
-  const { signInWithGoogle } = useGoogleAuth();
-  const { setPushToken, setPermissionStatus } = useNotificationPrefs();
-
-  // Step state
-  const [step, setStep] = useState(0);
-
-  // Personalizing + Welcome animation states
-  const [showPersonalizing, setShowPersonalizing] = useState(false);
-  const [showWelcomeAnim, setShowWelcomeAnim] = useState(false);
-
-  // User name for presentación
-  const [userName, setUserName] = useState('');
-
-  // Data
-  const [teams, setTeams] = useState<SearchableTeam[]>([]);
-  const [teamsLoading, setTeamsLoading] = useState(true);
-  const [players, setPlayers] = useState<SearchablePlayer[]>([]);
-  const [playersLoading, setPlayersLoading] = useState(true);
-
-  // Transition animation
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const slideAnim = useRef(new Animated.Value(0)).current;
-
-  // Load teams + players on mount (parallel)
-  useEffect(() => {
-    let cancelled = false;
-    getSearchableTeams().then(data => {
-      if (!cancelled) { setTeams(data); setTeamsLoading(false); }
-    }).catch(() => { if (!cancelled) setTeamsLoading(false); });
-
-    getSearchablePlayers().then(data => {
-      if (!cancelled) { setPlayers(data); setPlayersLoading(false); }
-    }).catch(() => { if (!cancelled) setPlayersLoading(false); });
-
-    return () => { cancelled = true; };
+    return () => {
+      clearInterval(interval);
+      clearInterval(msgInterval);
+      clearTimeout(advanceTimer);
+    };
   }, []);
 
-  // Pending fade-in after step change
-  const [pendingFadeIn, setPendingFadeIn] = useState(false);
-
-  useEffect(() => {
-    if (pendingFadeIn) {
-      requestAnimationFrame(() => {
-        Animated.parallel([
-          Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
-          Animated.timing(slideAnim, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        ]).start(() => setPendingFadeIn(false));
-      });
-    }
-  }, [pendingFadeIn, step]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Haptic wrappers ──────────────────────────────────────────────────────
-  const hapticToggleTeam = useCallback((id: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    toggleTeam(id);
-  }, [toggleTeam]);
-
-  const hapticTogglePlayer = useCallback((id: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    togglePlayer(id);
-  }, [togglePlayer]);
-
-  const hapticToggleLeague = useCallback((id: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    toggleLeague(id);
-  }, [toggleLeague]);
-
-  const hapticToggleNotification = useCallback((id: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    toggleNotification(id);
-  }, [toggleNotification]);
-
-  // ── Navigation ──────────────────────────────────────────────────────────
-  const animateTransition = useCallback((next: number) => {
-    const direction = next > step ? 1 : -1;
-    Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 0, duration: 120, useNativeDriver: true }),
-      Animated.timing(slideAnim, { toValue: -direction * 30, duration: 120, useNativeDriver: true }),
-    ]).start(() => {
-      slideAnim.setValue(direction * 30);
-      setStep(next);
-      setPendingFadeIn(true);
-    });
-  }, [step, fadeAnim, slideAnim]);
-
-  const goNext = useCallback(() => {
-    Keyboard.dismiss();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-
-    // Step 4 = Notifications step. Request OS permission when the user presses
-    // CONTINUAR. Fire-and-forget: we advance regardless of outcome — the system
-    // sheet appears on top of the next step.
-    if (step === 4) {
-      requestPermissionsAndGetToken()
-        .then(token => {
-          if (token) {
-            setPushToken(token);
-            setPermissionStatus('granted');
-          } else {
-            setPermissionStatus('denied');
-          }
-        })
-        .catch(() => { setPermissionStatus('denied'); });
-    }
-
-    if (step < TOTAL_STEPS - 1) animateTransition(step + 1);
-  }, [step, animateTransition, setPushToken, setPermissionStatus]);
-
-  const goBack = useCallback(() => {
-    Keyboard.dismiss();
-    if (step > 0) animateTransition(step - 1);
-  }, [step, animateTransition]);
-
-  const handleSkipToEnd = useCallback(() => {
-    Keyboard.dismiss();
-    animateTransition(TOTAL_STEPS - 1);
-  }, [animateTransition]);
-
-  // ── Finish ──────────────────────────────────────────────────────────────
-  const finishOnboarding = useCallback(async (method?: AuthMethod) => {
-    // Sync to FavoritesContext
-    selectedTeams.forEach(id => { if (!isFollowingTeam(id)) toggleFollowTeam(id); });
-    selectedLeagues.forEach(id => { if (!isFollowingLeague(id)) toggleFollowLeague(id); });
-    selectedPlayers.forEach(id => { if (!isFollowingPlayer(id)) toggleFollowPlayer(id); });
-
-    const pendingName = userName.trim() || undefined;
-
-    try {
-      if (method === 'google') {
-        // Store the display name for onAuthStateChanged to pick up, then trigger OAuth
-        login('google', pendingName);
-        await signInWithGoogle();
-      } else if (method === 'apple') {
-        Alert.alert(
-          'Apple Sign-In',
-          'Apple Sign-In requiere un dev build. Por ahora puedes continuar como invitado.',
-          [{ text: 'OK' }],
-        );
-        return;
-      } else {
-        // Guest
-        await login('guest', pendingName);
-      }
-      setShowPersonalizing(true);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg !== 'cancelled') {
-        Alert.alert('Error al iniciar sesión', 'No se pudo completar el inicio de sesión. Intenta de nuevo.');
-      }
-    }
-  }, [selectedTeams, selectedLeagues, selectedPlayers, userName, isFollowingTeam, isFollowingLeague, isFollowingPlayer, toggleFollowTeam, toggleFollowLeague, toggleFollowPlayer, login, signInWithGoogle]);
-
-  // ── Step metadata ───────────────────────────────────────────────────────
-  const stepMeta: Record<number, { title: string; subtitle: string }> = {
-    1: { title: 'Elige tus equipos', subtitle: 'Sigue a tus equipos favoritos para contenido personalizado' },
-    2: { title: 'Sigue jugadores', subtitle: 'Sigue a tus jugadores favoritos, sin importar el equipo' },
-    3: { title: 'Competiciones', subtitle: 'Elige las ligas que te interesan' },
-    4: { title: 'Notificaciones', subtitle: 'Elige las alertas que quieres recibir' },
-  };
-
-  // ── CTA label ───────────────────────────────────────────────────────────
-  const ctaLabel = () => {
-    if (step === 1 && selectedTeams.length > 0) return `CONTINUAR (${selectedTeams.length})`;
-    if (step === 2 && selectedPlayers.length > 0) return `CONTINUAR (${selectedPlayers.length})`;
-    if (step === 3 && selectedLeagues.length > 0) return `CONTINUAR (${selectedLeagues.length})`;
-    return 'CONTINUAR';
-  };
-
-  // ── Render ──────────────────────────────────────────────────────────────
-
-  // Step 0: Welcome — full-screen
-  if (step === 0) {
-    return (
-      <View style={[ob.root, { backgroundColor: c.bg, paddingTop: insets.top }]}>
-        <StatusBar barStyle="light-content" />
-        <ProgressBar step={0} bgColor={c.border} />
-        <WelcomeStep onNext={goNext} />
-        {showPersonalizing && !showWelcomeAnim && (
-          <PersonalizingScreen onComplete={() => setShowWelcomeAnim(true)} />
-        )}
-        {showWelcomeAnim && (
-          <WelcomeAnimation userName={userName} onComplete={completeOnboarding} />
-        )}
-      </View>
-    );
-  }
-
-  // Step 5: Presentación — its own layout
-  if (step === 5) {
-    return (
-      <View style={[ob.root, { backgroundColor: c.bg, paddingTop: insets.top }]}>
-        <StatusBar barStyle="light-content" />
-        <ProgressBar step={5} bgColor={c.border} />
-        {/* Back button + Step dots */}
-        <View style={ob.topBar}>
-          <TouchableOpacity onPress={goBack} style={ob.backBtn} activeOpacity={0.7} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-            <BackArrow color={c.textSecondary} />
-          </TouchableOpacity>
-          <StepDots step={4} total={5} accent={GREEN} />
-          <View style={{ width: 40 }} />
-        </View>
-        <Animated.View style={[ob.content, { opacity: fadeAnim, transform: [{ translateX: slideAnim }] }]}>
-          <PresentacionStep
-            teamsCount={selectedTeams.length}
-            leaguesCount={selectedLeagues.length}
-            playersCount={selectedPlayers.length}
-            userName={userName}
-            onChangeName={setUserName}
-            onLogin={(method) => finishOnboarding(method)}
-            onSkip={() => finishOnboarding()}
-          />
-        </Animated.View>
-        <View style={{ height: insets.bottom + 8 }} />
-        {showPersonalizing && !showWelcomeAnim && (
-          <PersonalizingScreen onComplete={() => setShowWelcomeAnim(true)} />
-        )}
-        {showWelcomeAnim && (
-          <WelcomeAnimation userName={userName} onComplete={completeOnboarding} />
-        )}
-      </View>
-    );
-  }
-
-  // Steps 1–4: shared layout
-  const meta = stepMeta[step];
-
   return (
-    <View style={[ob.root, { backgroundColor: c.bg, paddingTop: insets.top }]}>
-      <StatusBar barStyle="light-content" />
-      <ProgressBar step={step} bgColor={c.border} />
-
-      <View style={ob.topBar}>
-        <TouchableOpacity onPress={goBack} style={ob.backBtn} activeOpacity={0.7} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          <BackArrow color={c.textSecondary} />
-        </TouchableOpacity>
-        {/* Step dots centered between back and skip */}
-        <StepDots step={step - 1} total={5} accent={GREEN} />
-        <TouchableOpacity onPress={handleSkipToEnd} activeOpacity={0.7} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          <Text style={[ob.skipText, { color: c.textTertiary }]}>Omitir</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Animated.View style={[ob.header, { opacity: fadeAnim, transform: [{ translateX: slideAnim }] }]}>
-        <Text style={[ob.title, { color: c.textPrimary }]}>{meta.title}</Text>
-        <Text style={[ob.subtitle, { color: c.textSecondary }]}>{meta.subtitle}</Text>
+    <View style={[s9.container, { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: th.BG }]}>
+      {/* Pulsing A circle */}
+      <Animated.View style={[s9.glowOuter, { opacity: glowOpacity }]} />
+      <Animated.View style={[s9.circleWrap, { transform: [{ scale: circleScale }] }]}>
+        <LinearGradient colors={[BLUE, '#1A4DB0']} style={s9.circle} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+          <Text style={s9.aLetter}>A</Text>
+        </LinearGradient>
       </Animated.View>
 
-      <Animated.View style={[ob.stepContent, { opacity: fadeAnim, transform: [{ translateX: slideAnim }] }]}>
-        {step === 1 && (
-          <TeamsStep teams={teams} loading={teamsLoading} selectedTeams={selectedTeams} toggleTeam={hapticToggleTeam} />
-        )}
-        {step === 2 && (
-          <PlayersStep players={players} loading={playersLoading} selectedPlayers={selectedPlayers} togglePlayer={hapticTogglePlayer} />
-        )}
-        {step === 3 && (
-          <LeaguesStep selectedLeagues={selectedLeagues} toggleLeague={hapticToggleLeague} />
-        )}
-        {step === 4 && (
-          <NotificationsStep notifications={notifications} toggleNotification={hapticToggleNotification} />
-        )}
-      </Animated.View>
+      <Text style={[s9.title, { color: th.TEXT_DIM }]}>{t('onboarding.personalizingTitle')}</Text>
 
-      <View style={[ob.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
-        <TouchableOpacity style={ob.ctaBtn} onPress={goNext} activeOpacity={0.85}>
-          <Text style={ob.ctaBtnText}>{ctaLabel()}</Text>
-        </TouchableOpacity>
+      {/* Big percentage */}
+      <Text style={s9.pct}>{pct}<Text style={s9.pctSymbol}>%</Text></Text>
+
+      {/* Progress bar */}
+      <View style={[s9.barTrack, { backgroundColor: th.isDark ? '#1A1A1A' : '#E5E7EB' }]}>
+        <LinearGradient
+          colors={[BLUE, '#6BAAFF']}
+          style={[s9.barFill, { width: `${pct}%` }]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+        />
       </View>
 
-      {showWelcomeAnim && (
-        <WelcomeAnimation userName={userName} onComplete={completeOnboarding} />
-      )}
+      {/* Status message */}
+      <Text style={[s9.msg, { color: th.TEXT_DIM }]}>{msgs[msgIndex]}</Text>
     </View>
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── Main Styles ────────────────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const ob = StyleSheet.create({
-  root: { flex: 1 },
-  content: { flex: 1, paddingHorizontal: SIDE_PAD },
-  topBar: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: SIDE_PAD, paddingVertical: 14,
+const s9 = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: 'center', justifyContent: 'center', gap: 16,
+    paddingHorizontal: SIDE_PAD,
   },
-  backBtn: { padding: 4 },
-  skipText: { fontSize: 14, fontWeight: '600' },
-  header: { paddingHorizontal: SIDE_PAD, marginBottom: 20 },
-  title: { fontSize: 26, fontWeight: '900', letterSpacing: -0.3, marginBottom: 6 },
-  subtitle: { fontSize: 14, fontWeight: '500', lineHeight: 20 },
-  stepContent: { flex: 1, paddingHorizontal: SIDE_PAD },
-  bottomBar: { paddingHorizontal: SIDE_PAD, paddingTop: 8 },
-  ctaBtn: {
-    backgroundColor: GREEN, borderRadius: 16, paddingVertical: 18,
+  glowOuter: {
+    position: 'absolute',
+    width: 200, height: 200, borderRadius: 100,
+    backgroundColor: 'rgba(46,124,246,0.20)',
+  },
+  circleWrap: { marginBottom: 8 },
+  circle: {
+    width: 96, height: 96, borderRadius: 48,
     alignItems: 'center', justifyContent: 'center',
   },
-  ctaBtnText: { fontSize: 16, fontWeight: '900', color: '#fff', letterSpacing: 1 },
+  aLetter: { fontSize: 48, fontWeight: '900', color: '#FFFFFF' },
+  title: { fontSize: 20, fontWeight: '700' },
+  pct: { fontSize: 84, fontWeight: '900', color: BLUE, lineHeight: 90 },
+  pctSymbol: { fontSize: 40, fontWeight: '700' },
+  barTrack: {
+    width: SCREEN_W - SIDE_PAD * 2, height: 6,
+    borderRadius: 3, overflow: 'hidden',
+  },
+  barFill: { height: 6, borderRadius: 3 },
+  msg: { fontSize: 14, textAlign: 'center', minHeight: 22 },
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN 10 — Welcome Final (confetti)
+// ─────────────────────────────────────────────────────────────────────────────
+const CONFETTI_COUNT = 36;
+const CONFETTI_COLORS = [BLUE, GOLD, '#FF6B6B', '#51CF66', '#845EF7', '#FF922B', '#FFFFFF'];
+
+const Screen10Final: React.FC<{
+  name: string;
+  teams: SearchableTeam[];
+  selectedTeamIds: number[];
+  onStart: () => void;
+}> = ({ name, teams, selectedTeamIds, onStart }) => {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const th = useOBTheme();
+
+  // Confetti anims
+  const confettiAnims = useRef(
+    Array.from({ length: CONFETTI_COUNT }).map(() => ({
+      y: new Animated.Value(-80),
+      x: new Animated.Value(Math.random() * SCREEN_W),
+      rotate: new Animated.Value(0),
+      opacity: new Animated.Value(1),
+    })),
+  ).current;
+
+  const contentOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    // Start confetti
+    confettiAnims.forEach((anim, i) => {
+      const startDelay = (i % 6) * 120;
+      const duration   = 2500 + Math.random() * 2000;
+      anim.x.setValue(Math.random() * SCREEN_W);
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(startDelay),
+          Animated.parallel([
+            Animated.timing(anim.y, { toValue: 900, duration, useNativeDriver: true, easing: Easing.linear }),
+            Animated.timing(anim.rotate, { toValue: Math.random() * 360, duration, useNativeDriver: true }),
+            Animated.sequence([
+              Animated.timing(anim.opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+              Animated.delay(duration - 400),
+              Animated.timing(anim.opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
+            ]),
+          ]),
+        ]),
+      ).start();
+    });
+
+    Animated.timing(contentOpacity, { toValue: 1, duration: 600, useNativeDriver: true }).start();
+  }, []);
+
+  const firstTeam = teams.find(t2 => selectedTeamIds.includes(t2.id));
+  const displayName = name.trim() || t('onboarding.defaultName');
+
+  return (
+    <View style={[s10.container, { paddingTop: insets.top, paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
+      {/* Confetti layer */}
+      {confettiAnims.map((anim, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            s10.confetti,
+            {
+              transform: [
+                { translateX: anim.x },
+                { translateY: anim.y },
+                { rotate: anim.rotate.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] }) },
+              ],
+              opacity: anim.opacity,
+              backgroundColor: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+            },
+          ]}
+        />
+      ))}
+
+      {/* Content */}
+      <Animated.View style={[s10.content, { opacity: contentOpacity }]}>
+        {/* Big logo */}
+        <AnalistasLogo size={80} tint={th.isDark ? '#FFFFFF' : '#2E7CF6'} />
+
+        {/* Name */}
+        <Text style={[s10.nameText, { fontSize: Math.max(28, Math.min(56, Math.floor(220 / Math.max(displayName.length, 4)))) }]}>
+          {displayName},
+        </Text>
+
+        <Text style={[s10.finalHeadline, { color: th.TEXT_PRIMARY }]}>{t('onboarding.welcomeFinalTitle')}</Text>
+
+        {/* Accent line */}
+        <View style={s10.accentLine} />
+
+        <Text style={[s10.finalSub, { color: th.TEXT_DIM }]}>{t('onboarding.welcomeFinalSub')}</Text>
+
+        {/* Hook card */}
+        {firstTeam && (
+          <View style={[s10.hookCard, { backgroundColor: th.SURFACE, borderColor: 'rgba(46,124,246,0.35)' }]}>
+            <Text style={s10.hookIcon}>⚡</Text>
+            <Text style={[s10.hookLabel, { color: th.TEXT_DIM }]}>{t('onboarding.firstMatch')}</Text>
+            <SmartLogo uri={firstTeam.logo} size={32} />
+            <Text style={[s10.hookTeam, { color: th.TEXT_PRIMARY }]}>{firstTeam.name}</Text>
+            <Text style={s10.hookTime}>Pronto</Text>
+          </View>
+        )}
+
+        <CTAButton label={t('onboarding.start_btn')} onPress={onStart} glow />
+      </Animated.View>
+    </View>
+  );
+};
+
+const s10 = StyleSheet.create({
+  container: { flex: 1, overflow: 'hidden' },
+  confetti: {
+    position: 'absolute', top: 0,
+    width: 8, height: 14, borderRadius: 3,
+  },
+  content: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: SIDE_PAD, gap: 12,
+  },
+  nameText: { fontWeight: '900', color: BLUE, letterSpacing: -1, textAlign: 'center' },
+  finalHeadline: {
+    fontSize: 22, fontWeight: '700',
+    textAlign: 'center', lineHeight: 30,
+  },
+  accentLine: { width: 48, height: 3, backgroundColor: BLUE, borderRadius: 2 },
+  finalSub: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  hookCard: {
+    borderRadius: 16, padding: 16,
+    borderWidth: 1.5,
+    width: '100%', flexDirection: 'row', alignItems: 'center', gap: 10,
+  },
+  hookIcon: { fontSize: 20 },
+  hookLabel: { flex: 1, fontSize: 13 },
+  hookTeam: { fontSize: 14, fontWeight: '700' },
+  hookTime: { fontSize: 12, color: BLUE },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared styles
+// ─────────────────────────────────────────────────────────────────────────────
+const base = StyleSheet.create({
+  screen: { flex: 1 },
+  scrollContent: { paddingBottom: 20, paddingTop: 8 },
+  headline: {
+    fontSize: 30, fontWeight: '900',
+    letterSpacing: -0.5, marginBottom: 6,
+  },
+  sub: { fontSize: 14, lineHeight: 20, marginBottom: 8 },
+  counter: { fontSize: 13, fontWeight: '700' },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 200 },
+});
+
+const searchS = StyleSheet.create({
+  wrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 12 : 8,
+    borderRadius: 12, borderWidth: 1,
+    marginBottom: 10,
+  },
+  input: { flex: 1, fontSize: 15, fontWeight: '500', padding: 0 },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main OnboardingScreen component
+// ─────────────────────────────────────────────────────────────────────────────
+export function OnboardingScreen() {
+  const { completeOnboarding } = useOnboarding();
+
+  // ── Data loading ────────────────────────────────────────────────────────────
+  const [teams, setTeams]     = useState<SearchableTeam[]>(FALLBACK_TEAMS);
+  const [leagues, setLeagues] = useState<SearchableLeague[]>(FALLBACK_LEAGUES);
+  const [players, setPlayers] = useState<SearchablePlayer[]>(FALLBACK_PLAYERS);
+  const [teamsLoading, setTeamsLoading]   = useState(true);
+  const [playersLoading, setPlayersLoading] = useState(true);
+
+  useEffect(() => {
+    const timeout3s = (promise: Promise<unknown>) =>
+      Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))]);
+
+    timeout3s(getSearchableTeams())
+      .then(data => { if (Array.isArray(data) && data.length > 0) setTeams(data as SearchableTeam[]); })
+      .catch(() => {})
+      .finally(() => setTeamsLoading(false));
+
+    // Leagues are synchronous
+    const ls = getSearchableLeagues();
+    if (ls.length > 0) setLeagues(ls);
+
+    timeout3s(getSearchablePlayers())
+      .then(data => { if (Array.isArray(data) && data.length > 0) setPlayers(data as SearchablePlayer[]); })
+      .catch(() => {})
+      .finally(() => setPlayersLoading(false));
+  }, []);
+
+  // ── Onboarding state ────────────────────────────────────────────────────────
+  const [screen, setScreen] = useState(1);
+
+  const [obState, setObState] = useState<OnboardingState>({
+    fanLevel: null,
+    teamIds: [],
+    playerIds: [],
+    leagueIds: [],
+    notifications: DEFAULT_NOTIFS_BY_LEVEL.fan,
+    name: '',
+    authMethod: null,
+  });
+
+  const goTo  = (n: number) => setScreen(n);
+  const goNext = () => setScreen(s => s + 1);
+  const goBack = () => setScreen(s => Math.max(1, s - 1));
+
+  // Team names for the "following chip" in players screen
+  const selectedTeamNames = useMemo(
+    () => teams.filter(t2 => obState.teamIds.includes(t2.id)).map(t2 => t2.name),
+    [teams, obState.teamIds],
+  );
+
+  // League suggestion logic
+  const suggestedLeagueIds = useMemo(() => {
+    const ids = new Set<number>();
+    const hasMX = obState.teamIds.some(id => MX_TEAM_IDS.has(id));
+    const hasEU = obState.teamIds.some(id => EU_TEAM_IDS.has(id));
+    if (hasMX) { ids.add(743); ids.add(2); } // Liga MX + Champions
+    if (hasEU) { ids.add(564); ids.add(8); ids.add(2); } // La Liga, Premier, Champions
+    if (!hasMX && !hasEU) { ids.add(743); ids.add(564); ids.add(8); }
+    return ids;
+  }, [obState.teamIds]);
+
+  // Auto-suggest leagues when entering screen 5
+  const leagues5Initialized = useRef(false);
+  useEffect(() => {
+    if (screen === 5 && !leagues5Initialized.current) {
+      leagues5Initialized.current = true;
+      const suggested = [...suggestedLeagueIds].slice(0, 3);
+      setObState(prev => ({
+        ...prev,
+        leagueIds: [...new Set([...prev.leagueIds, ...suggested])],
+      }));
+    }
+  }, [screen, suggestedLeagueIds]);
+
+  // Toggle helpers
+  const toggleTeamId = useCallback((id: number) => {
+    setObState(prev => ({
+      ...prev,
+      teamIds: prev.teamIds.includes(id) ? prev.teamIds.filter(x => x !== id) : [...prev.teamIds, id],
+    }));
+  }, []);
+
+  const togglePlayerId = useCallback((id: number) => {
+    setObState(prev => ({
+      ...prev,
+      playerIds: prev.playerIds.includes(id) ? prev.playerIds.filter(x => x !== id) : [...prev.playerIds, id],
+    }));
+  }, []);
+
+  const toggleLeagueId = useCallback((id: number) => {
+    setObState(prev => ({
+      ...prev,
+      leagueIds: prev.leagueIds.includes(id) ? prev.leagueIds.filter(x => x !== id) : [...prev.leagueIds, id],
+    }));
+  }, []);
+
+  const toggleNotif = useCallback((key: NotifKey) => {
+    setObState(prev => ({
+      ...prev,
+      notifications: { ...prev.notifications, [key]: !prev.notifications[key] },
+    }));
+  }, []);
+
+  // Fan level selection updates notification defaults
+  const selectFanLevel = useCallback((lvl: FanLevel) => {
+    setObState(prev => ({
+      ...prev,
+      fanLevel: lvl,
+      notifications: DEFAULT_NOTIFS_BY_LEVEL[lvl],
+    }));
+  }, []);
+
+  const handleAuth = useCallback((method: AuthMethod) => {
+    setObState(prev => ({ ...prev, authMethod: method }));
+    goTo(9);
+  }, []);
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+  switch (screen) {
+    case 1:
+      return <Screen1Welcome onNext={goNext} />;
+
+    case 2:
+      return (
+        <Screen2FanLevel
+          selected={obState.fanLevel}
+          onSelect={selectFanLevel}
+          onNext={goNext}
+          onBack={goBack}
+          onSkip={goNext}
+        />
+      );
+
+    case 3:
+      return (
+        <Screen3Teams
+          teams={teams}
+          loading={teamsLoading}
+          selectedIds={obState.teamIds}
+          onToggle={toggleTeamId}
+          fanLevel={obState.fanLevel}
+          onNext={goNext}
+          onBack={goBack}
+          onSkip={goNext}
+        />
+      );
+
+    case 4:
+      return (
+        <Screen4Players
+          players={players}
+          loading={playersLoading}
+          selectedTeamIds={obState.teamIds}
+          selectedIds={obState.playerIds}
+          onToggle={togglePlayerId}
+          onNext={goNext}
+          onBack={goBack}
+          onSkip={goNext}
+          teamNames={selectedTeamNames}
+        />
+      );
+
+    case 5:
+      return (
+        <Screen5Leagues
+          leagues={leagues}
+          selectedIds={obState.leagueIds}
+          suggestedIds={suggestedLeagueIds}
+          onToggle={toggleLeagueId}
+          onNext={goNext}
+          onBack={goBack}
+          onSkip={goNext}
+        />
+      );
+
+    case 6:
+      return (
+        <Screen6Feed
+          state={obState}
+          teams={teams}
+          players={players}
+          leagues={leagues}
+          onNext={goNext}
+          onBack={goBack}
+        />
+      );
+
+    case 7:
+      return (
+        <Screen7Notifs
+          notifs={obState.notifications}
+          onToggle={toggleNotif}
+          fanLevel={obState.fanLevel}
+          onNext={goNext}
+          onBack={goBack}
+          onSkip={goNext}
+        />
+      );
+
+    case 8:
+      return (
+        <Screen8Name
+          name={obState.name}
+          onChangeName={n => setObState(prev => ({ ...prev, name: n }))}
+          state={obState}
+          onAuth={handleAuth}
+          onBack={goBack}
+        />
+      );
+
+    case 9:
+      return (
+        <Screen9Personalizing
+          state={obState}
+          teams={teams}
+          players={players}
+          leagues={leagues}
+          onDone={goNext}
+        />
+      );
+
+    case 10:
+    default:
+      return (
+        <Screen10Final
+          name={obState.name}
+          teams={teams}
+          selectedTeamIds={obState.teamIds}
+          onStart={completeOnboarding}
+        />
+      );
+  }
+}
+
+export default OnboardingScreen;

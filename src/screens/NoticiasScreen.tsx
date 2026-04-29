@@ -213,8 +213,13 @@ export const NoticiasScreen: React.FC = () => {
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: c.textPrimary }]}>{t('news.title')}</Text>
+      <View style={[styles.header, { borderBottomWidth: 1, borderBottomColor: c.border, backgroundColor: c.bg }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(59,130,246,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontSize: 14 }}>📰</Text>
+          </View>
+          <Text style={[styles.title, { color: c.textPrimary }]}>{t('news.title')}</Text>
+        </View>
       </View>
 
       {/* Tabs */}
@@ -326,11 +331,11 @@ const styles = StyleSheet.create({
 
   // Header
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 4, paddingBottom: 10,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12,
   },
   title: {
-    fontSize: 28, fontWeight: '800', letterSpacing: -0.8,
+    fontSize: 18, fontWeight: '800',
   },
 
   // Search

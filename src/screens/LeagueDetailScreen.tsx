@@ -661,6 +661,7 @@ const CalendarioTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
 const FixtureRow: React.FC<{ fixture: LeagueFixture; onPress?: () => void }> = ({ fixture: f, onPress }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
+  const { timeFormat } = useTimeFormat();
   const isFinished = f.stateShort === 'FT';
   const isLive = ['1H', '2H', 'HT', 'ET', 'PEN'].includes(f.stateShort);
 

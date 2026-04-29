@@ -25,6 +25,17 @@ export interface LeagueConfig {
   /** true for knockout/cup competitions — shows bracket instead of standings table */
   isCup?: boolean;
   /**
+   * true for leagues that have BOTH a regular-season standings table AND a
+   * knockout playoff bracket (e.g. Liga MX Liguilla, MLS Playoffs, etc.).
+   * When set, TablaTab shows a "Tabla / <playoffsLabel>" toggle.
+   */
+  hasPlayoffs?: boolean;
+  /**
+   * Label for the playoff bracket toggle button (e.g. "Liguilla", "Playoffs",
+   * "Cuadrangulares"). Defaults to "Playoffs" if omitted.
+   */
+  playoffsLabel?: string;
+  /**
    * Colored zones for the standings legend.
    * If omitted, a generic European fallback is used (Champion / CL / EL / Descenso).
    */
@@ -192,11 +203,13 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
 
   // ── Américas — Ligas principales ──────────────────────────────────────────
   { id: 743,  name: 'Liga MX',             country: 'Mexico',    flag: '🇲🇽', currentSeasonId: 25539,
+    hasPlayoffs: true, playoffsLabel: 'Liguilla',
     zones: [
       // Top 8 qualify for Liguilla. Relegation is by cociente (average), not by position.
       { label: 'Liguilla',  color: PO, from: 1,  to: 8 },
     ] },
   { id: 779,  name: 'Major League Soccer', country: 'USA',       flag: '🇺🇸', currentSeasonId: 26720,
+    hasPlayoffs: true, playoffsLabel: 'Playoffs',
     zones: [
       // Top 9 from each conference qualify for playoffs (shown generically here)
       { label: 'Playoffs',  color: PO,  from: 1,  to: 9  },
@@ -214,11 +227,13 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Descenso',           color: REL, from: 17, to: 20 },
     ] },
   { id: 672,  name: 'Liga BetPlay',       country: 'Colombia',  flag: '🇨🇴', currentSeasonId: 26881,
+    hasPlayoffs: true, playoffsLabel: 'Cuadrangulares',
     zones: [
       { label: 'Cuadrangulares',     color: PO,  from: 1,  to: 8  },
       { label: 'Descenso',           color: REL, from: 19, to: 20 },
     ] },
   { id: 663,  name: 'Primera División',   country: 'Chile',     flag: '🇨🇱', currentSeasonId: 26873,
+    hasPlayoffs: true, playoffsLabel: 'Playoffs',
     zones: [
       { label: 'Playoffs',           color: PO,  from: 1,  to: 8  },
       { label: 'Descenso',           color: REL, from: 15, to: 16 },
@@ -236,6 +251,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Descenso',           color: REL, from: 11, to: 12 },
     ] },
   { id: 708,  name: 'Primera División',   country: 'Peru',      flag: '🇵🇪', currentSeasonId: 25594,
+    hasPlayoffs: true, playoffsLabel: 'Playoffs',
     zones: [
       { label: 'Copa Libertadores',  color: CL,  from: 1,  to: 2  },
       { label: 'Copa Sudamericana',  color: EL,  from: 3,  to: 4  },
@@ -243,6 +259,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Descenso',           color: REL, from: 17, to: 18 },
     ] },
   { id: 696,  name: 'Liga Pro',           country: 'Ecuador',   flag: '🇪🇨', currentSeasonId: 27249,
+    hasPlayoffs: true, playoffsLabel: 'Playoffs',
     zones: [
       { label: 'Copa Libertadores',  color: CL,  from: 1,  to: 2  },
       { label: 'Copa Sudamericana',  color: EL,  from: 3,  to: 4  },
@@ -250,6 +267,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Descenso',           color: REL, from: 15, to: 16 },
     ] },
   { id: 734,  name: 'Liga Nacional',      country: 'Honduras',  flag: '🇭🇳', currentSeasonId: 25763,
+    hasPlayoffs: true, playoffsLabel: 'Playoffs',
     zones: [
       { label: 'Playoffs',           color: PO,  from: 1,  to: 8  },
       { label: 'Descenso',           color: REL, from: 17, to: 18 },
@@ -257,6 +275,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
 
   // ── Américas — Segundas divisiones + copas ────────────────────────────────
   { id: 749,  name: 'Liga de Expansión MX',   country: 'Mexico',      flag: '🇲🇽', currentSeasonId: 25886,
+    hasPlayoffs: true, playoffsLabel: 'Playoffs',
     zones: [
       { label: 'Playoffs',           color: PO,  from: 1,  to: 8  },
     ] },
@@ -318,6 +337,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
 
   // ── Femenil ───────────────────────────────────────────────────────────────
   { id: 1579, name: 'Liga MX Femenil',        country: 'Mexico',      flag: '🇲🇽', currentSeasonId: 25595,
+    hasPlayoffs: true, playoffsLabel: 'Liguilla',
     zones: [
       { label: 'Liguilla',           color: PO,  from: 1,  to: 8  },
     ] },
@@ -342,4 +362,80 @@ export function getLeagueConfig(id: number): LeagueConfig | undefined {
 export function getLeagueConfigByName(name: string): LeagueConfig | undefined {
   const lower = name.toLowerCase();
   return AVAILABLE_LEAGUES.find((l) => l.name.toLowerCase() === lower);
+}
+
+// ── "Sugerida" league logic (onboarding) ─────────────────────────────────────
+//
+// A league is marked as "Sugerida" in the onboarding flow only when one of:
+//   (a) It's one of the global top-10 competitions — Premier League, La Liga,
+//       Bundesliga, Serie A, Ligue 1, Champions League, Europa League, MLS,
+//       Liga MX, Brasileirão Serie A.
+//   (b) The league's country matches the device's region (read from
+//       expo-localization — no GPS permission required). E.g. a device with
+//       region "MX" gets Liga MX + Liga de Expansión MX + Liga MX Femenil
+//       suggested. If no region is available, no local suggestions appear.
+
+/** Global top-10 leagues suggested to everyone regardless of location. */
+export const SUGGESTED_GLOBAL_LEAGUE_IDS: ReadonlySet<number> = new Set([
+  8,    // Premier League (England)
+  564,  // La Liga (Spain)
+  82,   // Bundesliga (Germany)
+  384,  // Serie A (Italy)
+  301,  // Ligue 1 (France)
+  2,    // UEFA Champions League
+  5,    // UEFA Europa League
+  779,  // Major League Soccer (USA)
+  743,  // Liga MX (Mexico)
+  648,  // Brasileirão Serie A (Brazil)
+]);
+
+/**
+ * Maps ISO 3166-1 alpha-2 country codes to the `country` strings used in
+ * `AVAILABLE_LEAGUES`. A country can map to multiple strings (e.g. GB matches
+ * both England and Scotland leagues). Extend here as we add new leagues.
+ */
+const COUNTRY_LEAGUE_NAMES: Record<string, ReadonlyArray<string>> = {
+  AR: ['Argentina'],
+  BE: ['Belgium'],
+  BR: ['Brazil'],
+  CL: ['Chile'],
+  CO: ['Colombia'],
+  DE: ['Germany'],
+  DK: ['Denmark'],
+  EC: ['Ecuador'],
+  EG: ['Egypt'],
+  ES: ['Spain'],
+  FR: ['France'],
+  GB: ['England', 'Scotland'],
+  HN: ['Honduras'],
+  IR: ['Iran'],
+  IT: ['Italy'],
+  JP: ['Japan'],
+  KR: ['South Korea'],
+  MA: ['Morocco'],
+  MX: ['Mexico'],
+  NL: ['Netherlands'],
+  PE: ['Peru'],
+  PT: ['Portugal'],
+  PY: ['Paraguay'],
+  RU: ['Russia'],
+  SA: ['Saudi Arabia'],
+  TR: ['Turkey'],
+  US: ['USA'],
+  UY: ['Uruguay'],
+};
+
+/**
+ * Returns true when a league should be flagged as "Sugerida" in onboarding,
+ * given the device's detected country code. Pass `undefined` when the country
+ * can't be determined — in that case, only global top-10 leagues qualify.
+ */
+export function isSuggestedLeague(
+  league: { id: number; country: string },
+  deviceCountry: string | undefined,
+): boolean {
+  if (SUGGESTED_GLOBAL_LEAGUE_IDS.has(league.id)) return true;
+  if (!deviceCountry) return false;
+  const countries = COUNTRY_LEAGUE_NAMES[deviceCountry];
+  return !!countries && countries.includes(league.country);
 }

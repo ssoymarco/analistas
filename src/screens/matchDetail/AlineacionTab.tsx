@@ -11,11 +11,14 @@ import {
   TouchableOpacity,
   Image,
   Dimensions,
+  Modal,
+  Pressable,
+  ScrollView,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
 import { useDarkMode } from '../../contexts/DarkModeContext';
-import type { Match, MatchDetail, LineupPlayer } from '../../data/types';
+import type { Match, MatchDetail, LineupPlayer, MatchLineup, MissingPlayer } from '../../data/types';
 
 // ── Optional packages (graceful degradation if missing) ──────────────────────
 let ViewShot: any = null;
@@ -31,7 +34,7 @@ const PITCH_MARGIN = 16;
 const PITCH_WIDTH  = SCREEN_WIDTH - PITCH_MARGIN * 2;
 const PITCH_HEIGHT = 520;
 const DOT_SIZE     = 32;
-const STRIPE_COUNT = 14;
+const STRIPE_COUNT = 8;
 
 // ── Pitch theme palettes ─────────────────────────────────────────────────────
 interface PitchTheme {
@@ -45,16 +48,16 @@ interface PitchTheme {
 }
 
 const DARK_PITCH: PitchTheme = {
-  grassA: '#14532d', grassB: '#166534',
-  lineColor: 'rgba(255,255,255,0.25)', lineWidth: 1.5,
-  goalFrame: 'rgba(255,255,255,0.35)', shadow: 'rgba(0,0,0,0.4)',
+  grassA: '#1a1a1a', grassB: '#2d2d2d',
+  lineColor: '#FFFFFF', lineWidth: 3,
+  goalFrame: '#FFFFFF', shadow: 'rgba(0,0,0,0.4)',
   dotGlow: 'rgba(0,0,0,0.5)',
 };
 
 const LIGHT_PITCH: PitchTheme = {
-  grassA: '#22c55e', grassB: '#16a34a',
-  lineColor: 'rgba(255,255,255,0.75)', lineWidth: 1.5,
-  goalFrame: 'rgba(255,255,255,0.85)', shadow: 'rgba(0,0,0,0.08)',
+  grassA: '#2D5F3E', grassB: '#3A7A4F',
+  lineColor: '#FFFFFF', lineWidth: 3,
+  goalFrame: '#FFFFFF', shadow: 'rgba(0,0,0,0.08)',
   dotGlow: 'rgba(0,0,0,0.15)',
 };
 
@@ -197,6 +200,255 @@ function positionColor(pos: string): string {
   }
 }
 
+// ── Advertising banner — shown above and below the pitch ─────────────────────
+const MatchBanner: React.FC = () => (
+  <View style={{
+    height: 40, backgroundColor: '#3b82f6',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+  }}>
+    {/* Logo mark */}
+    <View style={{
+      width: 24, height: 24, borderRadius: 6,
+      backgroundColor: 'rgba(255,255,255,0.18)',
+      alignItems: 'center', justifyContent: 'center',
+    }}>
+      <Text style={{ fontSize: 13, fontWeight: '900', color: '#fff', includeFontPadding: false }}>A</Text>
+    </View>
+    {/* Text */}
+    <View>
+      <Text style={{ fontSize: 13, fontWeight: '800', color: '#fff', letterSpacing: 0.6, lineHeight: 16 }}>
+        ANALISTAS APP
+      </Text>
+      <Text style={{ fontSize: 9, fontWeight: '600', color: 'rgba(255,255,255,0.78)', letterSpacing: 0.4, lineHeight: 12 }}>
+        analistasapp.com · DESCARGA YA
+      </Text>
+    </View>
+  </View>
+);
+
+// ── Coach Detail Modal ────────────────────────────────────────────────────────
+interface CoachModalData {
+  lineup: MatchLineup;
+  teamName: string;
+  teamLogo: string;
+  teamColor: string;
+}
+
+const CoachDetailModal: React.FC<{
+  data: CoachModalData | null;
+  visible: boolean;
+  onClose: () => void;
+}> = ({ data, visible, onClose }) => {
+  const c   = useThemeColors();
+  const { t } = useTranslation();
+  const { isDark } = useDarkMode();
+  if (!data) return null;
+  const { lineup, teamName, teamLogo, teamColor } = data;
+  const overlayBg = isDark ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.55)';
+  const sheetBg   = isDark ? '#1c1c1e' : '#f2f2f7';
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={[cdm.overlay, { backgroundColor: overlayBg }]} onPress={onClose} />
+      <View style={[cdm.sheet, { backgroundColor: sheetBg }]}>
+        {/* Handle */}
+        <View style={[cdm.handle, { backgroundColor: c.border }]} />
+
+        {/* Coach photo + name */}
+        <View style={cdm.heroRow}>
+          <View style={[cdm.photoWrap, { borderColor: teamColor + '60', backgroundColor: c.surface }]}>
+            {lineup.coachImageUrl ? (
+              <Image source={{ uri: lineup.coachImageUrl }} style={cdm.photo} resizeMode="cover" />
+            ) : (
+              <Text style={{ fontSize: 48 }}>👨‍💼</Text>
+            )}
+          </View>
+          <View style={cdm.heroInfo}>
+            <Text style={[cdm.coachName, { color: c.textPrimary }]} numberOfLines={2}>
+              {lineup.coach || 'DT'}
+            </Text>
+            {lineup.coachNationality ? (
+              <Text style={[cdm.coachNat, { color: c.textSecondary }]}>
+                {lineup.coachNationality}
+              </Text>
+            ) : null}
+            {/* Team badge */}
+            <View style={cdm.teamRow}>
+              {teamLogo?.startsWith('http') ? (
+                <Image source={{ uri: teamLogo }} style={cdm.teamLogo} resizeMode="contain" />
+              ) : null}
+              <Text style={[cdm.teamName, { color: c.textTertiary }]} numberOfLines={1}>
+                {teamName}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Divider */}
+        <View style={[cdm.divider, { backgroundColor: c.border }]} />
+
+        {/* Title */}
+        <Text style={[cdm.sectionTitle, { color: c.textTertiary }]}>
+          {t('matchInfo.coachDetail').toUpperCase()}
+        </Text>
+
+        {/* Info rows */}
+        <View style={[cdm.infoCard, { backgroundColor: c.card, borderColor: c.border }]}>
+          <View style={cdm.infoRow}>
+            <Text style={[cdm.infoLabel, { color: c.textTertiary }]}>{t('matchInfo.nationality')}</Text>
+            <Text style={[cdm.infoValue, { color: c.textPrimary }]}>
+              {lineup.coachNationality || '—'}
+            </Text>
+          </View>
+          <View style={[cdm.infoRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
+            <Text style={[cdm.infoLabel, { color: c.textTertiary }]}>Equipo</Text>
+            <Text style={[cdm.infoValue, { color: c.textPrimary }]}>{teamName}</Text>
+          </View>
+          <View style={[cdm.infoRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
+            <Text style={[cdm.infoLabel, { color: c.textTertiary }]}>Formación</Text>
+            <Text style={[cdm.infoValue, { color: c.textPrimary }]}>{lineup.formation || '—'}</Text>
+          </View>
+        </View>
+
+        {/* Close button */}
+        <TouchableOpacity
+          style={[cdm.closeBtn, { backgroundColor: c.surface, borderColor: c.border }]}
+          onPress={onClose}
+          activeOpacity={0.7}
+        >
+          <Text style={[cdm.closeBtnText, { color: c.textPrimary }]}>{t('common.close')}</Text>
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+};
+
+const cdm = StyleSheet.create({
+  overlay: { ...StyleSheet.absoluteFillObject },
+  sheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 20, paddingBottom: 36, paddingTop: 12,
+  },
+  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
+  heroRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
+  photoWrap: {
+    width: 90, height: 90, borderRadius: 45,
+    borderWidth: 2, overflow: 'hidden',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  photo: { width: 90, height: 90 },
+  heroInfo: { flex: 1, gap: 4 },
+  coachName: { fontSize: 22, fontWeight: '800', lineHeight: 26 },
+  coachNat: { fontSize: 14, fontWeight: '500' },
+  teamRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  teamLogo: { width: 20, height: 20 },
+  teamName: { fontSize: 13, fontWeight: '500' },
+  divider: { height: 1, marginBottom: 16 },
+  sectionTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 0.8, marginBottom: 10 },
+  infoCard: { borderRadius: 14, borderWidth: 1, marginBottom: 20, overflow: 'hidden' },
+  infoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  infoLabel: { fontSize: 14, fontWeight: '500' },
+  infoValue: { fontSize: 14, fontWeight: '700', textAlign: 'right', flex: 1, marginLeft: 16 },
+  closeBtn: { borderRadius: 14, borderWidth: 1, paddingVertical: 14, alignItems: 'center' },
+  closeBtnText: { fontSize: 15, fontWeight: '700' },
+});
+
+// ── Bajas / Sidelined section ─────────────────────────────────────────────────
+const reasonIcon = (reason: MissingPlayer['reason']) => {
+  switch (reason) {
+    case 'injury':       return '🤕';
+    case 'suspension':   return '🟨';
+    case 'international': return '🌍';
+    default:             return '❓';
+  }
+};
+
+const SidelinedSection: React.FC<{
+  home: MissingPlayer[];
+  away: MissingPlayer[];
+  homeTeamName: string;
+  awayTeamName: string;
+}> = ({ home, away, homeTeamName, awayTeamName }) => {
+  const c = useThemeColors();
+  const { t } = useTranslation();
+
+  if (home.length === 0 && away.length === 0) return null;
+
+  const renderList = (players: MissingPlayer[], color: string) => {
+    if (players.length === 0) {
+      return (
+        <Text style={[sls.noSidelined, { color: c.textTertiary }]}>{t('lineup.noSidelined')}</Text>
+      );
+    }
+    return players.map((p, i) => (
+      <View key={i} style={sls.playerRow}>
+        <Text style={sls.icon}>{reasonIcon(p.reason)}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[sls.playerName, { color: c.textPrimary }]} numberOfLines={1}>{p.name}</Text>
+          <Text style={[sls.playerDetail, { color: c.textTertiary }]}>{p.detail}</Text>
+        </View>
+        <View style={[sls.reasonBadge, { backgroundColor: color + '20' }]}>
+          <Text style={[sls.reasonText, { color }]}>
+            {p.reason === 'injury'        ? t('lineup.sidelinedInjury')
+              : p.reason === 'suspension' ? t('lineup.sidelinedSuspension')
+              : p.reason === 'international' ? t('lineup.sidelinedInternational')
+              : t('lineup.sidelinedOther')}
+          </Text>
+        </View>
+      </View>
+    ));
+  };
+
+  return (
+    <View style={{ marginTop: 4 }}>
+      <Text style={[sls.sectionTitle, { color: c.textTertiary }]}>
+        {t('lineup.sidelinedTitle').toUpperCase()}
+      </Text>
+
+      {/* Home team */}
+      <View style={[sls.card, { backgroundColor: c.card, borderColor: HOME_COLOR + '30' }]}>
+        <View style={[sls.teamHeader, { borderBottomColor: c.border }]}>
+          <View style={[sls.teamDot, { backgroundColor: HOME_COLOR }]} />
+          <Text style={[sls.teamLabel, { color: c.textPrimary }]} numberOfLines={1}>{homeTeamName}</Text>
+        </View>
+        <View style={sls.listBody}>
+          {renderList(home, HOME_COLOR)}
+        </View>
+      </View>
+
+      {/* Away team */}
+      <View style={[sls.card, { backgroundColor: c.card, borderColor: AWAY_COLOR + '30', marginTop: 10 }]}>
+        <View style={[sls.teamHeader, { borderBottomColor: c.border }]}>
+          <View style={[sls.teamDot, { backgroundColor: AWAY_COLOR }]} />
+          <Text style={[sls.teamLabel, { color: c.textPrimary }]} numberOfLines={1}>{awayTeamName}</Text>
+        </View>
+        <View style={sls.listBody}>
+          {renderList(away, AWAY_COLOR)}
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const sls = StyleSheet.create({
+  sectionTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 0.8, marginBottom: 10, marginTop: 6 },
+  card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+  teamHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1,
+  },
+  teamDot: { width: 8, height: 8, borderRadius: 4 },
+  teamLabel: { fontSize: 13, fontWeight: '800' },
+  listBody: { paddingHorizontal: 14, paddingVertical: 8, gap: 10 },
+  playerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 },
+  icon: { fontSize: 16, width: 22, textAlign: 'center' },
+  playerName: { fontSize: 13, fontWeight: '700', lineHeight: 17 },
+  playerDetail: { fontSize: 11, fontWeight: '400', marginTop: 1 },
+  reasonBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  reasonText: { fontSize: 10, fontWeight: '700' },
+  noSidelined: { fontSize: 12, fontStyle: 'italic', paddingVertical: 6 },
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
@@ -221,11 +473,16 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   const [benchTeam, setBenchTeam] = useState<'home' | 'away'>('home');
   const activeBench = benchTeam === 'home' ? homeBench : awayBench;
 
-  // Lineup state:
-  // • scheduled → always "Analistas IA" (covers both expectedlineups and probable lineups)
-  // • live/finished → "Confirmada"
-  const isExpected  = match.status === 'scheduled';
-  const isConfirmed = match.status !== 'scheduled';
+  // Coach detail modal
+  const [coachModalVisible, setCoachModalVisible] = useState(false);
+  const [coachModalData, setCoachModalData] = useState<CoachModalData | null>(null);
+
+  // Lineup state — three buckets:
+  // • AI predicted (SportMonks expectedlineups add-on) → "🤖 Predicción IA"
+  // • live/finished with real lineup data                → "✅ Confirmada"
+  // • scheduled with non-expected data (rare)            → "ℹ️ Probable"
+  const isExpected  = detail.homeLineup?.isExpected ?? detail.awayLineup?.isExpected ?? false;
+  const isConfirmed = !isExpected && match.status !== 'scheduled';
 
   const handleShare = async () => {
     if (!ViewShot || !captureRef.current) return;
@@ -250,37 +507,46 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
     );
   }
 
-  // ── Pitch block (UNCHANGED) ────────────────────────────────────────────────
+  // ── Pitch block ──────────────────────────────────────────────────────────
   const PitchBlock = (
-    <View style={[ms.pitchContainer, { backgroundColor: isDark ? '#0a1f15' : '#15803d' }]}>
-      <View style={[ms.pitchShadow, { borderColor: theme.shadow }]} />
-      <View style={ms.pitch}>
-        <GrassStripes theme={theme} />
-        <PitchMarkings theme={theme} />
-        <View style={ms.topHalf}>
-          {homeRows.map((row, ri) => (
-            <View key={ri} style={ms.playerRow}>
-              {row.map(p => <PlayerDot key={p.id} player={p} color={HOME_COLOR} theme={theme} />)}
-            </View>
-          ))}
-        </View>
-        <View style={ms.halfLabels} pointerEvents="none">
-          <View style={[ms.halfBadge, { backgroundColor: 'rgba(59,130,246,0.85)' }]}>
-            <Text style={ms.halfBadgeText}>{match.homeTeam.shortName}</Text>
+    <View style={{ overflow: 'hidden', borderRadius: 18 }}>
+      {/* Top advertising banner */}
+      <MatchBanner />
+
+      {/* Pitch */}
+      <View style={[ms.pitchContainer, { backgroundColor: theme.grassA, borderRadius: 0 }]}>
+        <View style={[ms.pitchShadow, { borderColor: theme.shadow }]} />
+        <View style={ms.pitch}>
+          <GrassStripes theme={theme} />
+          <PitchMarkings theme={theme} />
+          <View style={ms.topHalf}>
+            {homeRows.map((row, ri) => (
+              <View key={ri} style={ms.playerRow}>
+                {row.map(p => <PlayerDot key={p.id} player={p} color={HOME_COLOR} theme={theme} />)}
+              </View>
+            ))}
           </View>
-          <View style={[ms.halfDot, { backgroundColor: 'rgba(255,255,255,0.3)' }]} />
-          <View style={[ms.halfBadge, { backgroundColor: 'rgba(249,115,22,0.85)' }]}>
-            <Text style={ms.halfBadgeText}>{match.awayTeam.shortName}</Text>
-          </View>
-        </View>
-        <View style={ms.bottomHalf}>
-          {awayRows.map((row, ri) => (
-            <View key={ri} style={ms.playerRow}>
-              {row.map(p => <PlayerDot key={p.id} player={p} color={AWAY_COLOR} theme={theme} />)}
+          <View style={ms.halfLabels} pointerEvents="none">
+            <View style={[ms.halfBadge, { backgroundColor: 'rgba(59,130,246,0.85)' }]}>
+              <Text style={ms.halfBadgeText}>{match.homeTeam.shortName}</Text>
             </View>
-          ))}
+            <View style={[ms.halfDot, { backgroundColor: 'rgba(255,255,255,0.3)' }]} />
+            <View style={[ms.halfBadge, { backgroundColor: 'rgba(249,115,22,0.85)' }]}>
+              <Text style={ms.halfBadgeText}>{match.awayTeam.shortName}</Text>
+            </View>
+          </View>
+          <View style={ms.bottomHalf}>
+            {awayRows.map((row, ri) => (
+              <View key={ri} style={ms.playerRow}>
+                {row.map(p => <PlayerDot key={p.id} player={p} color={AWAY_COLOR} theme={theme} />)}
+              </View>
+            ))}
+          </View>
         </View>
       </View>
+
+      {/* Bottom advertising banner */}
+      <MatchBanner />
     </View>
   );
 
@@ -337,26 +603,50 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
         </ViewShot>
       ) : PitchBlock}
 
-      {/* ── Share section ── */}
-      <Text style={[ms.shareHint, { color: c.textTertiary }]}>
-        {t('lineup.shareHint')}
-      </Text>
+      {/* ── Share card ── */}
       {!!(ViewShot && Sharing) && (
-        <TouchableOpacity
-          style={[ms.shareBtn, { backgroundColor: c.accent }]}
-          onPress={handleShare}
-          activeOpacity={0.82}
-        >
-          <ShareIcon color="#fff" size={16} />
-          <Text style={ms.shareBtnText}>COMPARTIR</Text>
-        </TouchableOpacity>
+        <View style={[ms.shareCard, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <View style={ms.shareCardHeader}>
+            <View style={[ms.shareCardIconWrap, { backgroundColor: 'rgba(0,224,150,0.12)' }]}>
+              <ShareIcon color={c.accent} size={18} />
+            </View>
+            <Text style={[ms.shareCardTitle, { color: c.textPrimary }]}>
+              {t('lineup.shareLineupTitle')}
+            </Text>
+          </View>
+          <Text style={[ms.shareCardDesc, { color: c.textSecondary }]}>
+            {t('lineup.shareLineupDesc')}
+          </Text>
+          <TouchableOpacity
+            style={[ms.shareCardBtn, { backgroundColor: c.accent }]}
+            onPress={handleShare}
+            activeOpacity={0.82}
+          >
+            <ShareIcon color="#000" size={15} />
+            <Text style={ms.shareCardBtnText}>
+              {t('common.share').toUpperCase()}
+            </Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* ── Coaches section ── */}
       <Text style={[ms.sectionTitle, { color: c.textTertiary }]}>ENTRENADORES</Text>
       <View style={ms.coachesRow}>
         {/* Home coach */}
-        <View style={[ms.coachCard, { backgroundColor: c.card, borderColor: HOME_COLOR + '40' }]}>
+        <TouchableOpacity
+          style={[ms.coachCard, { backgroundColor: c.card, borderColor: HOME_COLOR + '40' }]}
+          onPress={() => {
+            setCoachModalData({
+              lineup: detail.homeLineup,
+              teamName: match.homeTeam.name,
+              teamLogo: match.homeTeam.logo,
+              teamColor: HOME_COLOR,
+            });
+            setCoachModalVisible(true);
+          }}
+          activeOpacity={0.7}
+        >
           <View style={[ms.coachAvatarWrap, { borderColor: HOME_COLOR + '60' }]}>
             {detail.homeLineup.coachImageUrl ? (
               <Image source={{ uri: detail.homeLineup.coachImageUrl }} style={ms.coachPhoto} />
@@ -380,10 +670,22 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
             </View>
           )}
           <Text style={[ms.coachTeam, { color: c.textTertiary }]}>{match.homeTeam.name}</Text>
-        </View>
+        </TouchableOpacity>
 
         {/* Away coach */}
-        <View style={[ms.coachCard, { backgroundColor: c.card, borderColor: AWAY_COLOR + '40' }]}>
+        <TouchableOpacity
+          style={[ms.coachCard, { backgroundColor: c.card, borderColor: AWAY_COLOR + '40' }]}
+          onPress={() => {
+            setCoachModalData({
+              lineup: detail.awayLineup,
+              teamName: match.awayTeam.name,
+              teamLogo: match.awayTeam.logo,
+              teamColor: AWAY_COLOR,
+            });
+            setCoachModalVisible(true);
+          }}
+          activeOpacity={0.7}
+        >
           <View style={[ms.coachAvatarWrap, { borderColor: AWAY_COLOR + '60' }]}>
             {detail.awayLineup.coachImageUrl ? (
               <Image source={{ uri: detail.awayLineup.coachImageUrl }} style={ms.coachPhoto} />
@@ -407,7 +709,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
             </View>
           )}
           <Text style={[ms.coachTeam, { color: c.textTertiary }]}>{match.awayTeam.name}</Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       {/* ── Bench / Suplentes — hidden for AI predictions (only starting XI matters) ── */}
@@ -468,25 +770,45 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
         </>
       )}
 
+      {/* ── Bajas y Suspensiones ── */}
+      <SidelinedSection
+        home={detail.missingPlayers?.home ?? []}
+        away={detail.missingPlayers?.away ?? []}
+        homeTeamName={match.homeTeam.name}
+        awayTeamName={match.awayTeam.name}
+      />
+
       <View style={{ height: 20 }} />
+
+      {/* ── Coach detail modal ── */}
+      <CoachDetailModal
+        data={coachModalData}
+        visible={coachModalVisible}
+        onClose={() => setCoachModalVisible(false)}
+      />
     </View>
   );
 };
 
-// ── Share icon mini ──────────────────────────────────────────────────────────
-function ShareIcon({ color, size = 16 }: { color: string; size?: number }) {
+// ── Upload / Export icon — universal share symbol (↑ arrow + base tray) ──────
+function UploadIcon({ color, size = 18 }: { color: string; size?: number }) {
   const s = size;
-  const dotR = s * 0.15;
+  const th = Math.max(1.8, s * 0.1); // stroke thickness
+  const aw = s * 0.28;               // arrowhead arm width
   return (
     <View style={{ width: s, height: s }}>
-      <View style={{ position: 'absolute', top: 0, right: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      <View style={{ position: 'absolute', top: s * 0.36, left: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      <View style={{ position: 'absolute', bottom: 0, right: 0, width: dotR * 2, height: dotR * 2, borderRadius: dotR, backgroundColor: color }} />
-      <View style={{ position: 'absolute', top: s * 0.18, left: s * 0.18, width: s * 0.52, height: 1.5, backgroundColor: color, transform: [{ rotate: '-25deg' }] }} />
-      <View style={{ position: 'absolute', top: s * 0.62, left: s * 0.18, width: s * 0.52, height: 1.5, backgroundColor: color, transform: [{ rotate: '25deg' }] }} />
+      {/* Vertical shaft */}
+      <View style={{ position: 'absolute', top: s * 0.06, left: s / 2 - th / 2, width: th, height: s * 0.58, backgroundColor: color, borderRadius: th }} />
+      {/* Arrowhead — left arm */}
+      <View style={{ position: 'absolute', top: s * 0.06 + aw * 0.28, left: s / 2 - aw - th * 0.2, width: aw, height: th, backgroundColor: color, borderRadius: th, transform: [{ rotate: '-45deg' }] }} />
+      {/* Arrowhead — right arm */}
+      <View style={{ position: 'absolute', top: s * 0.06 + aw * 0.28, right: s / 2 - aw - th * 0.2, width: aw, height: th, backgroundColor: color, borderRadius: th, transform: [{ rotate: '45deg' }] }} />
+      {/* Base tray — horizontal line at bottom */}
+      <View style={{ position: 'absolute', bottom: s * 0.07, left: s * 0.1, right: s * 0.1, height: th, backgroundColor: color, borderRadius: th }} />
     </View>
   );
 }
+const ShareIcon = UploadIcon;
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -534,13 +856,29 @@ const ms = StyleSheet.create({
   halfBadgeText: { fontSize: 10, fontWeight: '800', color: '#fff', letterSpacing: 0.5 },
   halfDot: { width: 4, height: 4, borderRadius: 2 },
 
-  // Share
-  shareHint: { fontSize: 13, textAlign: 'center', marginTop: 14, marginBottom: 8 },
-  shareBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    borderRadius: 14, paddingVertical: 16, marginBottom: 4,
+  // Share card
+  shareCard: {
+    marginTop: 16,
+    marginBottom: 4,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 16,
+    gap: 10,
   },
-  shareBtnText: { fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: 0.8 },
+  shareCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  shareCardIconWrap: {
+    width: 36, height: 36, borderRadius: 10,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  shareCardTitle: { fontSize: 15, fontWeight: '800', flex: 1 },
+  shareCardDesc: { fontSize: 13, lineHeight: 19, fontWeight: '400' },
+  shareCardBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, borderRadius: 12, paddingVertical: 13, marginTop: 2,
+  },
+  shareCardBtnText: { fontSize: 14, fontWeight: '800', color: '#000', letterSpacing: 0.8 },
 
   // Section title
   sectionTitle: {

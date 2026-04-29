@@ -12,6 +12,39 @@ import { useThemeColors } from '../../theme/useTheme';
 import type { Match, MatchDetail, TeamFormEntry, MissingPlayer } from '../../data/types';
 import { PredictionsCarousel, AIPredictionsSection } from './EnVivoTab';
 
+// ── Traduce condiciones meteorológicas de la API (siempre en inglés) ──────────
+function translateWeatherDesc(desc: string, t: (key: string) => string): string {
+  const d = desc.toLowerCase().trim();
+  const map: Record<string, string> = {
+    'clear sky':           t('weather.clearSky'),
+    'clear-day':           t('weather.clearDay'),
+    'clear-night':         t('weather.clearNight'),
+    'few clouds':          t('weather.fewClouds'),
+    'partly-cloudy-day':   t('weather.partlyCloudyDay'),
+    'partly-cloudy-night': t('weather.partlyCloudyNight'),
+    'scattered clouds':    t('weather.scatteredClouds'),
+    'broken clouds':       t('weather.brokenClouds'),
+    'overcast clouds':     t('weather.overcastClouds'),
+    'cloudy':              t('weather.cloudy'),
+    'light rain':          t('weather.lightRain'),
+    'moderate rain':       t('weather.moderateRain'),
+    'heavy rain':          t('weather.heavyRain'),
+    'shower rain':         t('weather.showerRain'),
+    'rain':                t('weather.rain'),
+    'thunderstorm':        t('weather.thunderstorm'),
+    'drizzle':             t('weather.drizzle'),
+    'snow':                t('weather.snow'),
+    'sleet':               t('weather.sleet'),
+    'fog':                 t('weather.fog'),
+    'mist':                t('weather.mist'),
+    'haze':                t('weather.haze'),
+    'wind':                t('weather.windy'),
+    'smoke':               t('weather.smoke'),
+    'dust':                t('weather.dust'),
+  };
+  return map[d] ?? desc;
+}
+
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const HOME_COLOR = '#3b82f6';
 const AWAY_COLOR = '#f97316';
@@ -45,7 +78,11 @@ function MatchInfoCard({ match, detail }: { match: Match; detail: MatchDetail })
 
   if (hasVenue) {
     const { name, city, surface, capacity } = detail.venue!;
-    const meta = [city, surface, capacity > 0 ? t('preview.capacity', { count: capacity.toLocaleString() }) : '']
+    const surfaceStr = !surface ? '' :
+      surface.toLowerCase().includes('artif') ? t('matchInfo.surfaceArtificial') :
+      surface.toLowerCase().includes('hybrid') ? t('matchInfo.surfaceHybrid') :
+      t('matchInfo.surfaceGrass');
+    const meta = [city, surfaceStr, capacity > 0 ? t('preview.capacity', { count: capacity.toLocaleString() }) : '']
       .filter(Boolean)
       .join(' · ');
     rows.push(
@@ -90,6 +127,7 @@ function MatchInfoCard({ match, detail }: { match: Match; detail: MatchDetail })
 
   if (hasWeather) {
     const { icon, temp, description, wind, humidity } = detail.weather!;
+    const descTranslated = translateWeatherDesc(description, t);
     rows.push(
       <View key="weather" style={styles.infoRow}>
         <Text style={styles.infoRowIcon}>{icon}</Text>
@@ -97,7 +135,7 @@ function MatchInfoCard({ match, detail }: { match: Match; detail: MatchDetail })
           <Text style={[styles.infoRowLabel, { color: c.textTertiary }]}>{t('preview.weather').toUpperCase()}</Text>
           <View style={styles.infoRowNameLine}>
             <Text style={[styles.infoRowMain, { color: c.textPrimary }]}>{temp}°</Text>
-            <Text style={[styles.infoRowSub, { color: c.textSecondary, marginLeft: 6 }]}>{description}</Text>
+            <Text style={[styles.infoRowSub, { color: c.textSecondary, marginLeft: 6 }]}>{descTranslated}</Text>
           </View>
           <Text style={[styles.infoRowSub, { color: c.textTertiary }]}>
             {t('preview.wind', { speed: wind })} · {t('preview.humidity', { pct: humidity })}
@@ -152,7 +190,7 @@ function H2HCard({
 
   return (
     <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={[styles.cardTitle, { color: c.textPrimary }]}>
+      <Text style={[styles.cardTitle, { color: c.textTertiary }]}>
         {t('preview.h2h')}
       </Text>
       <Text style={[styles.h2hSubtitle, { color: c.textSecondary }]}>
@@ -282,7 +320,9 @@ function FormCard({
               key={i}
               style={[styles.formDot, { backgroundColor: resultColor(f.result) }]}
             >
-              <Text style={styles.formDotText}>{f.result}</Text>
+              <Text style={styles.formDotText}>
+                {f.result === 'W' ? t('preview.formWin') : f.result === 'D' ? t('preview.formDraw') : t('preview.formLoss')}
+              </Text>
             </View>
           ))}
         </View>
@@ -295,7 +335,7 @@ function FormCard({
 
   return (
     <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={[styles.cardTitle, { color: c.textPrimary }]}>
+      <Text style={[styles.cardTitle, { color: c.textTertiary }]}>
         {t('preview.form')}
       </Text>
       <View style={styles.formRow}>
@@ -346,7 +386,7 @@ function MissingPlayersCard({
 
   return (
     <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={[styles.cardTitle, { color: c.textPrimary }]}>
+      <Text style={[styles.cardTitle, { color: c.textTertiary }]}>
         {t('preview.injuries')}
       </Text>
       <View style={styles.missingColumns}>
@@ -419,9 +459,9 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   cardTitle: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.6,
+    letterSpacing: 0.9,
     textTransform: 'uppercase',
     marginBottom: 12,
   },

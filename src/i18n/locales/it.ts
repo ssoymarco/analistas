@@ -237,8 +237,11 @@ const it: TranslationKeys = {
     madeIn: 'Fatto in Messico 🇲🇽',
     selectLanguage: 'Seleziona una lingua',
     guestMode: 'Sei in modalità ospite',
-    guestModeSub: 'Crea un account per salvare i tuoi progressi',
-    register: 'Registrati',
+    guestModeSub: 'Collega il tuo account per salvare i preferiti su tutti i dispositivi',
+    register: 'Crea account',
+    connectWithGoogle: 'Continua con Google',
+    upgradeSuccess: 'Account collegato! I tuoi preferiti sono salvati.',
+    upgradeError: 'Impossibile collegare l\'account. Riprova.',
     loginPrompt: 'Accedi per più funzionalità',
     signIn: 'Accedi',
     streakActive: 'Serie attiva',
@@ -265,6 +268,7 @@ const it: TranslationKeys = {
     usernameInUse: 'Questo @username è già in uso',
     saveError: 'Errore durante il salvataggio. Riprova.',
     usernameHint: 'Min. 3 caratteri (lettere, numeri, . _)',
+    avatarNote: 'Il tuo avatar viene generato automaticamente dalle tue iniziali',
   },
 
   // ── Streak modal ───────────────────────────────────────────────────────────

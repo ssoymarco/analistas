@@ -16,7 +16,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  getLeaguesByDate, getFixturesByDate, fetchLatestLivescoreUpdates,
+  getFixturesByDate, groupMatchesByLeague, fetchLatestLivescoreUpdates,
+  reapplyLiveStatus,
   type LeagueWithMatches,
 } from '../services/sportsApi';
 import type { Match } from '../data/types';
@@ -60,6 +61,10 @@ export function useFixtures(date: string): UseFixturesResult {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
+  // Tracked as real state (not just a ref) so the polling effect re-runs and
+  // resets the interval speed when live mode ends (prevents the 10s interval
+  // from staying active and firing load() every 10s after all games finish).
+  const [isLive, setIsLive] = useState(false);
 
   const isMounted = useRef(true);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -87,10 +92,10 @@ export function useFixtures(date: string): UseFixturesResult {
     setError(null);
 
     try {
-      const [matchData, leagueData] = await Promise.all([
-        getFixturesByDate(date),
-        getLeaguesByDate(date),
-      ]);
+      // One API call: getFixturesByDate reads/writes cache; leagues are derived
+      // synchronously so we never call fetchFixturesWithLiveState twice.
+      const matchData  = await getFixturesByDate(date);
+      const leagueData = groupMatchesByLeague(matchData);
       if (!isMounted.current) return;
       setMatches(matchData);
       setLeagues(leagueData);
@@ -99,6 +104,7 @@ export function useFixtures(date: string): UseFixturesResult {
       const hasScheduledToday = date === localDateString() &&
                                 matchData.some(m => m.status === 'scheduled');
       isLiveRef.current = hasLive;
+      setIsLive(hasLive);
       tickRef.current = 0; // reset sync counter after a full load
       setIsPolling(hasLive || hasScheduledToday);
     } catch (err: unknown) {
@@ -129,7 +135,9 @@ export function useFixtures(date: string): UseFixturesResult {
     }
     if (!isPolling) return;
 
-    const interval = isLiveRef.current ? SCORE_POLL_MS : SCHEDULED_POLL_MS;
+    // Use isLive state (not ref) here: this line runs when the effect fires,
+    // which is exactly when isLive changed — guaranteeing the right interval.
+    const interval = isLive ? SCORE_POLL_MS : SCHEDULED_POLL_MS;
 
     pollTimerRef.current = setInterval(async () => {
       if (!isMounted.current) return;
@@ -147,10 +155,13 @@ export function useFixtures(date: string): UseFixturesResult {
         // ── Every 60 s: full re-fetch ─────────────────────────────────────
         tickRef.current = 0;
         try {
-          const [matchData, leagueData] = await Promise.all([
-            getFixturesByDate(date),
-            getLeaguesByDate(date),
-          ]);
+          // Invalidate the cache so the full sync always fetches fresh data,
+          // then derive leagues synchronously (zero extra API call).
+          const { AppCache } = await import('../services/cache');
+          AppCache.invalidate(`fixtures_${date}`);
+
+          const matchData  = await getFixturesByDate(date);
+          const leagueData = groupMatchesByLeague(matchData);
           if (!isMounted.current) return;
           setMatches(matchData);
           setLeagues(leagueData);
@@ -160,6 +171,10 @@ export function useFixtures(date: string): UseFixturesResult {
                                   matchData.some(m => m.status === 'scheduled');
 
           isLiveRef.current = stillLive;
+          // Setting isLive as state (not just ref) causes the polling effect to
+          // re-run → resets the interval to SCHEDULED_POLL_MS (60s) if live
+          // mode just ended, preventing 10s polling after all games finish.
+          setIsLive(stillLive);
           if (!stillLive && !stillScheduled) setIsPolling(false);
         } catch { /* keep polling on network error */ }
       } else {
@@ -168,27 +183,37 @@ export function useFixtures(date: string): UseFixturesResult {
           const updates = await fetchLatestLivescoreUpdates();
           if (!isMounted.current || updates.size === 0) return; // nothing changed
 
+          // After the merge we always run reapplyLiveStatus over the whole list.
+          // This re-promotes any match left as 'scheduled' (either in the prev
+          // state or by a weak patch) back to 'live' via time-based inference.
+          // Without this step, a match at minute 70+ whose state_id=1 lags on
+          // the feed stays visually 'scheduled' even as its real minute climbs.
           setMatches(prev => {
             let changed = false;
-            const next = prev.map(m => {
+            const merged = prev.map(m => {
               const u = updates.get(Number(m.id));
               if (!u) return m;
               changed = true;
               return { ...m, ...u };
             });
-            return changed ? next : prev;
+            if (!changed) return prev;
+            return reapplyLiveStatus(merged);
           });
 
           setLeagues(prev => {
             let changed = false;
             const next = prev.map(lg => {
+              let lgChanged = false;
               const updatedMatches = lg.matches.map(m => {
                 const u = updates.get(Number(m.id));
                 if (!u) return m;
+                lgChanged = true;
                 changed = true;
                 return { ...m, ...u };
               });
-              return changed ? { ...lg, matches: updatedMatches } : lg;
+              return lgChanged
+                ? { ...lg, matches: reapplyLiveStatus(updatedMatches) }
+                : lg;
             });
             return changed ? next : prev;
           });
@@ -199,7 +224,9 @@ export function useFixtures(date: string): UseFixturesResult {
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
-  }, [isPolling, date, load]);
+  // isLive in deps: when live mode ends, effect re-runs → interval resets to
+  // SCHEDULED_POLL_MS (60s) instead of staying stuck at the 10s live cadence.
+  }, [isPolling, isLive, date, load]);
 
   const refresh = useCallback(() => { load(true); }, [load]);
 

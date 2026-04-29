@@ -13,7 +13,7 @@
 
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
-import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithCredential, linkWithCredential } from 'firebase/auth';
 import { auth } from './firebase';
 
 // Required: warms up the browser on Android for faster auth
@@ -51,5 +51,42 @@ export function useGoogleAuth() {
     // After this, onAuthStateChanged in AuthContext fires with the real Firebase user
   };
 
-  return { signInWithGoogle, googleAuthReady: !!request };
+  /**
+   * Links the current anonymous session to a Google account.
+   * Falls back to a normal sign-in if the Google account already exists
+   * (auth/credential-already-in-use), in which case Firestore favorites
+   * from the existing account take precedence.
+   */
+  const upgradeWithGoogle = async (): Promise<'linked' | 'signed_in'> => {
+    const result = await promptAsync();
+    if (result.type !== 'success') {
+      if (result.type === 'cancel') throw new Error('cancelled');
+      throw new Error('Google sign-in failed');
+    }
+    const { id_token } = result.params;
+    if (!id_token) throw new Error('No id_token received from Google');
+
+    const credential = GoogleAuthProvider.credential(id_token);
+    const currentUser = auth.currentUser;
+
+    if (currentUser?.isAnonymous) {
+      try {
+        await linkWithCredential(currentUser, credential);
+        return 'linked';
+      } catch (err: unknown) {
+        const firebaseErr = err as { code?: string };
+        if (firebaseErr.code === 'auth/credential-already-in-use') {
+          // Google account exists — sign in to it; FavoritesContext will load its data
+          await signInWithCredential(auth, credential);
+          return 'signed_in';
+        }
+        throw err;
+      }
+    }
+
+    await signInWithCredential(auth, credential);
+    return 'signed_in';
+  };
+
+  return { signInWithGoogle, upgradeWithGoogle, googleAuthReady: !!request };
 }

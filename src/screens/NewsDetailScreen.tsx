@@ -15,6 +15,7 @@ import { useUserStats } from '../contexts/UserStatsContext';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import type { NewsArticle } from '../data/types';
 import type { NoticiasStackParamList } from '../navigation/AppNavigator';
+import { BackArrow, ShareIcon } from '../components/NavIcons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -55,31 +56,6 @@ const LEAGUE_COLORS: Record<string, string> = {
 };
 function leagueColor(cat: string) { return LEAGUE_COLORS[cat] ?? '#3B82F6'; }
 
-// ── Back arrow icon ──────────────────────────────────────────────────────────
-const BackArrow = ({ color }: { color: string }) => (
-  <View style={{ width: 10, height: 18, justifyContent: 'center' }}>
-    <View style={{
-      width: 10, height: 10, borderLeftWidth: 2.5, borderBottomWidth: 2.5,
-      borderColor: color, transform: [{ rotate: '45deg' }], marginLeft: 2,
-    }} />
-  </View>
-);
-
-// ── Share icon ───────────────────────────────────────────────────────────────
-const ShareIcon = ({ color }: { color: string }) => (
-  <View style={{ width: 18, height: 18, alignItems: 'center', justifyContent: 'center' }}>
-    <View style={{
-      width: 12, height: 12, borderWidth: 2, borderColor: color,
-      borderRadius: 3, borderTopWidth: 0, borderRightWidth: 0,
-      transform: [{ rotate: '-45deg' }], marginTop: 4,
-    }} />
-    <View style={{
-      position: 'absolute', top: 1, right: 4,
-      width: 2, height: 10, backgroundColor: color, borderRadius: 1,
-      transform: [{ rotate: '45deg' }],
-    }} />
-  </View>
-);
 
 // ── Bookmark icon ────────────────────────────────────────────────────────────
 const BookmarkIcon = ({ color }: { color: string }) => (

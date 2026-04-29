@@ -248,8 +248,11 @@ const es = {
     madeIn: 'Hecho en México 🇲🇽',
     selectLanguage: 'Selecciona un idioma',
     guestMode: 'Estás en modo visitante',
-    guestModeSub: 'Crea una cuenta para guardar tu progreso',
-    register: 'Registrarse',
+    guestModeSub: 'Conecta tu cuenta para guardar favoritos en todos tus dispositivos',
+    register: 'Crear cuenta',
+    connectWithGoogle: 'Continuar con Google',
+    upgradeSuccess: '¡Cuenta conectada! Tus favoritos están guardados.',
+    upgradeError: 'No se pudo conectar la cuenta. Intenta de nuevo.',
     loginPrompt: 'Inicia sesión para más funciones',
     signIn: 'Iniciar sesión',
     streakActive: 'Racha activa',
@@ -276,6 +279,7 @@ const es = {
     usernameInUse: 'Ese @username ya está en uso',
     saveError: 'Error al guardar. Intenta de nuevo.',
     usernameHint: 'Mín. 3 caracteres (letras, números, . _)',
+    avatarNote: 'Tu avatar se genera automáticamente con tus iniciales',
   },
 
   // ── Streak modal ───────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import { useThemeColors } from '../theme/useTheme';
 import type { ColorPalette } from '../theme/colors';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useGoogleAuth } from '../services/authGoogle';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useUserStats } from '../contexts/UserStatsContext';
@@ -289,6 +290,8 @@ export const PerfilScreen: React.FC = () => {
   const { isDark, toggleDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PerfilStackParamList>>();
   const { user, isAuthenticated, login, logout } = useAuth();
+  const { upgradeWithGoogle, googleAuthReady } = useGoogleAuth();
+  const [upgrading, setUpgrading] = useState(false);
   const { resetOnboarding } = useOnboarding();
   const { followedTeamIds, followedPlayerIds, followedLeagueIds } = useFavorites();
   const { matchesViewed, newsRead, streakDays, streakNotifyEnabled, setStreakNotify } = useUserStats();
@@ -370,6 +373,23 @@ export const PerfilScreen: React.FC = () => {
       }
     : undefined;
   const handleLogout = () => { haptics.heavy(); setLogoutModalVisible(false); logout(); resetOnboarding(); };
+
+  const handleUpgradeWithGoogle = useCallback(async () => {
+    if (!googleAuthReady || upgrading) return;
+    setUpgrading(true);
+    haptics.medium();
+    try {
+      await upgradeWithGoogle();
+      Alert.alert('', t('profile.upgradeSuccess'));
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      if (e.message !== 'cancelled') {
+        Alert.alert(t('common.error'), t('profile.upgradeError'));
+      }
+    } finally {
+      setUpgrading(false);
+    }
+  }, [googleAuthReady, upgrading, upgradeWithGoogle, t]);
 
   const handleShare = useCallback(async () => {
     try { await Share.share({ message: 'Descarga Analistas, la mejor app para seguir el fútbol en tiempo real ⚽\nhttps://analistas.app' }); } catch {}
@@ -508,18 +528,37 @@ export const PerfilScreen: React.FC = () => {
 
         {/* Guest Banner */}
         {!isAuthenticated && (
-          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginTop: 16, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: '#1d4ed8' }} activeOpacity={0.9} onPress={resetOnboarding}>
-            <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ fontSize: 20 }}>👤</Text>
+          <View style={{ marginHorizontal: 16, marginTop: 16, borderRadius: 16, backgroundColor: '#1d4ed8', overflow: 'hidden' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontSize: 20 }}>👤</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('profile.guestMode')}</Text>
+                <Text style={{ fontSize: 12, color: '#bfdbfe', marginTop: 2 }}>{t('profile.guestModeSub')}</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('profile.guestMode')}</Text>
-              <Text style={{ fontSize: 12, color: '#bfdbfe', marginTop: 2 }}>{t('profile.guestModeSub')}</Text>
-            </View>
-            <View style={{ backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6 }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#1d4ed8' }}>{t('profile.register')}</Text>
-            </View>
-          </TouchableOpacity>
+            {/* Connect with Google */}
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 12, marginBottom: 8, borderRadius: 12, paddingVertical: 11, backgroundColor: '#fff', opacity: upgrading ? 0.6 : 1 }}
+              activeOpacity={0.85}
+              onPress={handleUpgradeWithGoogle}
+              disabled={upgrading || !googleAuthReady}
+            >
+              <Text style={{ fontSize: 15, fontWeight: '700' }}>G</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#1d4ed8' }}>
+                {upgrading ? '...' : t('profile.connectWithGoogle')}
+              </Text>
+            </TouchableOpacity>
+            {/* Create account via onboarding */}
+            <TouchableOpacity
+              style={{ alignItems: 'center', paddingBottom: 14 }}
+              activeOpacity={0.7}
+              onPress={resetOnboarding}
+            >
+              <Text style={{ fontSize: 12, color: '#bfdbfe', fontWeight: '600' }}>{t('profile.register')}</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Ajustes */}

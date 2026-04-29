@@ -30,30 +30,11 @@ import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import type { TeamDetailData, SquadPlayer, RecentMatch, FormEntry } from '../hooks/useTeamDetail';
 import type { LeagueStanding } from '../data/types';
 import { SkeletonTeamDetail } from '../components/Skeleton';
+import { BackArrow, ShareIcon } from '../components/NavIcons';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'TeamDetail'>;
 type Tab = 'resumen' | 'plantilla' | 'partidos' | 'tabla';
 
-// ── Back arrow ───────────────────────────────────────────────────────────────
-function BackArrow({ color }: { color: string }) {
-  return (
-    <View style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ position: 'absolute', top: 4, left: 2, width: 9, height: 1.8, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '-45deg' }] }} />
-      <View style={{ position: 'absolute', bottom: 4, left: 2, width: 9, height: 1.8, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '45deg' }] }} />
-    </View>
-  );
-}
-
-// ── Share icon ───────────────────────────────────────────────────────────────
-function ShareIcon({ color, size = 18 }: { color: string; size?: number }) {
-  return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ width: 2, height: size * 0.56, backgroundColor: color, borderRadius: 1, position: 'absolute', bottom: size * 0.11 }} />
-      <View style={{ position: 'absolute', top: 0, left: size * 0.11, width: size * 0.33, height: 1.5, backgroundColor: color, transform: [{ rotate: '-45deg' }] }} />
-      <View style={{ position: 'absolute', top: 0, right: size * 0.11, width: size * 0.33, height: 1.5, backgroundColor: color, transform: [{ rotate: '45deg' }] }} />
-    </View>
-  );
-}
 
 // ── Form badges ──────────────────────────────────────────────────────────────
 const FormBadges: React.FC<{ form: FormEntry[] }> = ({ form }) => {
@@ -861,11 +842,11 @@ const hs = StyleSheet.create({
   },
   logoWrap: {
     width: 72, height: 72,
-    borderRadius: 36,
+    borderRadius: 10,
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 2,
   },
-  logo: { width: 56, height: 56, borderRadius: 28 },
+  logo: { width: 56, height: 56, borderRadius: 6 },
   teamName: {
     fontSize: 20, fontWeight: '800',
     letterSpacing: -0.3,

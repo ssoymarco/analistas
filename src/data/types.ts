@@ -30,7 +30,18 @@ export interface Match {
   seasonId?: number;      // SM season ID — used for standings tab
   homeScoreHT?: number;   // half-time score (home)
   awayScoreHT?: number;   // half-time score (away)
+  homeRedCards?: number;  // number of players sent off (red/second-yellow)
+  awayRedCards?: number;
   stateLabel?: string;    // "1T" | "HT" | "2T" | "ET" | "PEN" — live state
+  /** Server anchor for client-side live-clock extrapolation (only while ticking).
+   *  Lets the UI advance the minute/seconds smoothly between 10-s poll updates
+   *  instead of showing a frozen "41'" until the next server tick. */
+  liveClock?: {
+    /** Unix seconds at which the current period started ticking on the server. */
+    periodStartedAt: number;
+    /** Minute offset at period start (0 for 1H, 45 for 2H, 90 for ET1, etc.). */
+    periodMinuteOffset: number;
+  };
 }
 
 export interface LeagueStanding {
@@ -47,6 +58,21 @@ export interface LeagueStanding {
   /** Group ID for leagues with stage splits (e.g. championship/relegation).
    *  Null for simple single-table leagues. Used for dividers in UI. */
   groupId?: number | null;
+}
+
+/** One group within a cup group stage (e.g. "Grupo A" in Copa Libertadores) */
+export interface CupGroup {
+  id: number;
+  /** Display name — from SportMonks or auto-generated ("Grupo A", "Grupo B"…) */
+  name: string;
+  standings: LeagueStanding[];
+}
+
+/** Result of getCupGroupStandings() */
+export interface CupGroupsResult {
+  /** True when the season has a group-stage phase with ≥1 group */
+  hasGroups: boolean;
+  groups: CupGroup[];
 }
 
 export interface League {
@@ -128,6 +154,7 @@ export interface TeamDetailData {
 // ── Match Detail ──────────────────────────────────────────────────────────────
 
 export interface MatchVenue {
+  id?: number;          // venue_id from fixture — used to fetch extended detail
   name: string;
   city: string;
   capacity: number;
@@ -137,9 +164,11 @@ export interface MatchVenue {
 }
 
 export interface MatchReferee {
+  id?: number;          // referee_id — used to link to extended stats/profile
   name: string;
   nationality: string;
   flag: string;
+  imageUrl?: string;    // referee photo from SM fixture include
 }
 
 export interface MatchWeather {
@@ -257,7 +286,8 @@ export interface MatchLineup {
   coach: string;
   coachNationality: string;
   coachImageUrl?: string;  // photo from participants.coach include
-  isExpected?: boolean; // true when sourced from expectedlineups add-on (AI prediction)
+  coachId?: number;        // SM coach id — used to fetch extended coach profile
+  isExpected?: boolean;    // true when sourced from expectedlineups add-on (AI prediction)
 }
 
 export interface TVStation {
@@ -342,4 +372,11 @@ export interface MatchDetail {
   homeForm?: TeamFormEntry[];
   awayForm?: TeamFormEntry[];
   pressureIndex?: PressureIndex;
+  /**
+   * Aggregate score across all legs of a two-legged knockout tie (e.g. Champions
+   * League QF, Liga MX Liguilla). Present ONLY when the current fixture is the
+   * 2nd leg (or later) of a multi-leg tie — during the 1st leg there is nothing
+   * to aggregate yet. Scored from the current match's home-team perspective.
+   */
+  aggregateScore?: { home: number; away: number };
 }

@@ -7,6 +7,7 @@ const KEYS = {
   leagues:       'analistas_fav_leagues',
   players:       'analistas_fav_players',
   notifications: 'analistas_onboarding_notif_prefs',
+  fanLevel:      'analistas_fan_level',
 } as const;
 
 const DEFAULT_NOTIFS: Record<string, boolean> = {
@@ -27,6 +28,8 @@ interface OnboardingContextType {
   togglePlayer: (playerId: string) => void;
   notifications: Record<string, boolean>;
   toggleNotification: (key: string) => void;
+  fanLevel: 'casual' | 'fan' | 'analista' | null;
+  setFanLevel: (level: 'casual' | 'fan' | 'analista') => void;
 }
 
 const OnboardingContext = createContext<OnboardingContextType>({
@@ -37,6 +40,7 @@ const OnboardingContext = createContext<OnboardingContextType>({
   selectedLeagues: [], toggleLeague: () => {},
   selectedPlayers: [], togglePlayer: () => {},
   notifications: {}, toggleNotification: () => {},
+  fanLevel: null, setFanLevel: () => {},
 });
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
@@ -46,6 +50,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const [selectedLeagues, setSelectedLeagues] = useState<string[]>([]);
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<Record<string, boolean>>(DEFAULT_NOTIFS);
+  const [fanLevel, setFanLevelState] = useState<'casual' | 'fan' | 'analista' | null>(null);
 
   useEffect(() => {
     AsyncStorage.multiGet(Object.values(KEYS)).then(results => {
@@ -62,6 +67,10 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       }
       if (map[KEYS.notifications]) {
         try { setNotifications({ ...DEFAULT_NOTIFS, ...JSON.parse(map[KEYS.notifications]!) }); } catch {}
+      }
+      if (map[KEYS.fanLevel]) {
+        const lvl = map[KEYS.fanLevel] as 'casual' | 'fan' | 'analista';
+        if (lvl === 'casual' || lvl === 'fan' || lvl === 'analista') setFanLevelState(lvl);
       }
       setReady(true);
     });
@@ -109,6 +118,11 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setFanLevel = useCallback((level: 'casual' | 'fan' | 'analista') => {
+    setFanLevelState(level);
+    AsyncStorage.setItem(KEYS.fanLevel, level);
+  }, []);
+
   return (
     <OnboardingContext.Provider value={{
       hasCompletedOnboarding, ready, completeOnboarding, resetOnboarding,
@@ -116,6 +130,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       selectedLeagues, toggleLeague,
       selectedPlayers, togglePlayer,
       notifications, toggleNotification,
+      fanLevel, setFanLevel,
     }}>
       {children}
     </OnboardingContext.Provider>

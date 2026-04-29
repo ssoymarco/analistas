@@ -127,7 +127,7 @@ const qs = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 12 },
   teamAbbr: { fontSize: 13, fontWeight: '800', width: 36 },
   center: { flex: 1, alignItems: 'center', gap: 6 },
-  centerLabel: { fontSize: 10, fontWeight: '600', letterSpacing: 0.5 },
+  centerLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
   possBar: { flexDirection: 'row', height: 6, width: '100%', borderRadius: 3, overflow: 'hidden' },
   possHome: { backgroundColor: '#3b82f6' },
   possAway: { backgroundColor: '#f97316' },
@@ -654,8 +654,7 @@ const PollResultsSection: React.FC<{ match: Match }> = ({ match }) => {
   return (
     <View style={[pr.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <View style={pr.header}>
-        <Text style={{ fontSize: 16 }}>📊</Text>
-        <Text style={[pr.title, { color: c.textPrimary }]}>{t('predictions.communityPredictions')}</Text>
+        <Text style={[pr.title, { color: c.textTertiary }]}>{t('predictions.communityPredictions')}</Text>
         <View style={{ flex: 1 }} />
         <View style={[pr.lockBadge, { backgroundColor: c.surface }]}>
           <Text style={{ fontSize: 10 }}>🔒</Text>
@@ -714,7 +713,7 @@ const pr = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 8,
     paddingHorizontal: 14, paddingVertical: 12,
   },
-  title: { fontSize: 13, fontWeight: '700' },
+  title: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
   lockBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
@@ -747,7 +746,7 @@ export const AIPredictionsSection: React.FC<{ predictions: MatchPrediction[]; ma
           <Text style={{ fontSize: 12 }}>🤖</Text>
         </View>
         <View>
-          <Text style={[ai.title, { color: c.textPrimary }]}>{t('lineup.predictionTitle')}</Text>
+          <Text style={[ai.title, { color: c.textTertiary }]}>{t('lineup.predictionTitle')}</Text>
           <Text style={[ai.subtitle, { color: c.textTertiary }]}>{t('lineup.predictionSubtitle')}</Text>
         </View>
       </View>
@@ -845,7 +844,7 @@ const ai = StyleSheet.create({
     backgroundColor: 'rgba(99,102,241,0.15)',
     alignItems: 'center', justifyContent: 'center',
   },
-  title: { fontSize: 14, fontWeight: '700' },
+  title: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
   subtitle: { fontSize: 10, fontWeight: '500', marginTop: 1 },
   predBlock: { paddingHorizontal: 14, paddingVertical: 12, borderTopWidth: 1, gap: 8 },
   predLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
@@ -869,8 +868,7 @@ const MomiosSection: React.FC<{ odds: OddsMarket[]; match: Match }> = ({ odds, m
     <View style={[od.card, { backgroundColor: c.card, borderColor: c.border }]}>
       {/* Header */}
       <View style={od.header}>
-        <Text style={{ fontSize: 16 }}>📊</Text>
-        <Text style={[od.title, { color: c.textPrimary }]}>Momios</Text>
+        <Text style={[od.title, { color: c.textTertiary }]}>Momios</Text>
         <View style={{ flex: 1 }} />
         <Text style={[od.subtitle, { color: c.textTertiary }]}>Promedio del mercado</Text>
       </View>
@@ -901,9 +899,9 @@ const od = StyleSheet.create({
   card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 14,
+    paddingHorizontal: 16, paddingVertical: 12,
   },
-  title: { fontSize: 16, fontWeight: '800' },
+  title: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
   subtitle: { fontSize: 12, fontWeight: '500' },
   marketBlock: { paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, gap: 10 },
   marketName: { fontSize: 11, fontWeight: '700', letterSpacing: 0.8 },
@@ -942,7 +940,7 @@ const H2HSection: React.FC<{ h2h: MatchDetail['h2h']; match: Match }> = ({ h2h, 
     <View style={[h2.card, { backgroundColor: c.card, borderColor: c.border }]}>
       {/* Header */}
       <View style={h2.header}>
-        <Text style={[h2.title, { color: c.textPrimary }]}>Enfrentamientos directos</Text>
+        <Text style={[h2.title, { color: c.textTertiary }]}>Enfrentamientos directos</Text>
         <Text style={[h2.count, { color: c.textTertiary }]}>Últimos {total}</Text>
       </View>
 
@@ -1008,9 +1006,9 @@ const h2 = StyleSheet.create({
   card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden', paddingBottom: 4 },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 14,
+    paddingHorizontal: 16, paddingVertical: 12,
   },
-  title: { fontSize: 16, fontWeight: '800' },
+  title: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
   count: { fontSize: 12, fontWeight: '500' },
   barWrap: {
     flexDirection: 'row', height: 8, marginHorizontal: 16, borderRadius: 4,
@@ -1078,7 +1076,7 @@ const FormSection: React.FC<{ homeForm?: TeamFormEntry[]; awayForm?: TeamFormEnt
   return (
     <View style={[fm.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <View style={fm.header}>
-        <Text style={[fm.title, { color: c.textPrimary }]}>{t('preview.form')}</Text>
+        <Text style={[fm.title, { color: c.textTertiary }]}>{t('preview.form')}</Text>
         <Text style={[fm.subtitle, { color: c.textTertiary }]}>{t('preview.formLast5')}</Text>
       </View>
       {homeForm && homeForm.length > 0 && renderTeamForm(homeForm, match.homeTeam)}
@@ -1095,9 +1093,9 @@ const fm = StyleSheet.create({
   card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 14,
+    paddingHorizontal: 16, paddingVertical: 12,
   },
-  title: { fontSize: 16, fontWeight: '800' },
+  title: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
   subtitle: { fontSize: 12, fontWeight: '500' },
   teamRow: {
     flexDirection: 'row', alignItems: 'center',
@@ -1419,8 +1417,7 @@ const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match,
     <View style={[mi.card, { backgroundColor: c.card, borderColor: c.border }]}>
       {/* Header */}
       <View style={mi.header}>
-        <Text style={{ fontSize: 16 }}>⚡</Text>
-        <Text style={[mi.title, { color: c.textPrimary }]}>Información del partido</Text>
+        <Text style={[mi.title, { color: c.textTertiary }]}>Información del partido</Text>
         <View style={{ flex: 1 }} />
         <Text style={[mi.round, { color: c.textTertiary }]}>
           {seasonStr ? `${t('matches.matchday')} · ${seasonStr}` : t('matches.matchday')}
@@ -1483,9 +1480,9 @@ const mi = StyleSheet.create({
   card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 14,
+    paddingHorizontal: 16, paddingVertical: 12,
   },
-  title: { fontSize: 16, fontWeight: '800' },
+  title: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
   round: { fontSize: 11, fontWeight: '500' },
   row: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
@@ -1687,7 +1684,6 @@ const PressureSection: React.FC<{
     <View style={[pi.card, { backgroundColor: c.card, borderColor: c.border }]}>
       {/* ── Header ── */}
       <View style={pi.header}>
-        <Text style={pi.icon}>🔥</Text>
         <Text style={[pi.title, { color: c.textTertiary }]}>ÍNDICE DE PRESIÓN</Text>
         <View style={{ flex: 1 }} />
         <View style={pi.legend}>
@@ -1824,7 +1820,7 @@ const pi = StyleSheet.create({
   card:        { borderRadius: 14, borderWidth: 1, overflow: 'hidden', marginBottom: 8 },
   header:      { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
   icon:        { fontSize: 16 },
-  title:       { fontSize: 10, fontWeight: '700', letterSpacing: 1 },
+  title:       { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
   legend:      { flexDirection: 'row', alignItems: 'center' },
   legendDot:   { width: 8, height: 8, borderRadius: 4 },
   legendLabel: { fontSize: 10, fontWeight: '500', marginLeft: 4 },
@@ -1875,7 +1871,6 @@ const InjuriesSection: React.FC<{ home: MissingPlayer[]; away: MissingPlayer[]; 
   return (
     <View style={[injS.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <View style={injS.header}>
-        <Text style={injS.headerIcon}>🏥</Text>
         <Text style={[injS.title, { color: c.textTertiary }]}>BAJAS Y SANCIONES</Text>
       </View>
       <View style={injS.body}>
@@ -1889,8 +1884,7 @@ const InjuriesSection: React.FC<{ home: MissingPlayer[]; away: MissingPlayer[]; 
 const injS = StyleSheet.create({
   card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden', marginBottom: 8 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
-  headerIcon: { fontSize: 16 },
-  title: { fontSize: 10, fontWeight: '700', letterSpacing: 1 },
+  title: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
   body: { paddingHorizontal: 14, paddingBottom: 12, gap: 12 },
   teamBlock: { gap: 4 },
   teamLabel: { fontSize: 12, fontWeight: '800', marginBottom: 2 },
@@ -2073,7 +2067,7 @@ const tl = StyleSheet.create({
   card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
   teamsHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
   teamLabel: { flex: 1, fontSize: 12, fontWeight: '800' },
-  cronLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.3 },
+  cronLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
   halfSep: { paddingVertical: 7, alignItems: 'center' },
   halfSepText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
   resultText: { flex: 1, fontSize: 13, fontWeight: '500', lineHeight: 18 },

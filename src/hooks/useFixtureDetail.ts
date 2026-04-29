@@ -46,6 +46,7 @@ function mapDetail(result: NonNullable<Awaited<ReturnType<typeof getFixtureDetai
     homeForm:         partial.homeForm,
     awayForm:         partial.awayForm,
     pressureIndex:    partial.pressureIndex,
+    aggregateScore:   partial.aggregateScore,
   };
 }
 
@@ -66,6 +67,10 @@ export function useFixtureDetail(
   const [liveMatch, setLiveMatch] = useState<Match | null>(null);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
+  // isActuallyLive starts from nav-params but gets corrected by the first API
+  // response. This prevents the stale-nav-params problem where a match is live
+  // but the list patched the status back to 'scheduled' before navigation.
+  const [isActuallyLive, setIsActuallyLive] = useState(matchStatus === 'live');
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -88,6 +93,8 @@ export function useFixtureDetail(
         } else {
           setDetail(mapDetail(result));
           setLiveMatch(result.match); // ← real score + status from API
+          // Sync live-polling gate with actual API status (nav params may be stale)
+          setIsActuallyLive(result.match.status === 'live');
         }
         setLoading(false);
       })
@@ -101,8 +108,10 @@ export function useFixtureDetail(
   }, [matchId, homeTeamId, awayTeamId]);
 
   // ── Live polling — silent refresh every 10 s ────────────────────────────────
+  // Gated on isActuallyLive (derived from API) rather than nav-params matchStatus
+  // so polling starts even when the user navigated from a stale 'scheduled' card.
   useEffect(() => {
-    if (matchStatus !== 'live') return;
+    if (!isActuallyLive) return;
 
     const poll = setInterval(async () => {
       if (!mounted.current) return;
@@ -111,13 +120,15 @@ export function useFixtureDetail(
         if (!mounted.current || !result) return;
         setDetail(mapDetail(result));
         setLiveMatch(result.match); // ← keeps score/minute fresh
+        // Stop polling once the match is no longer live
+        if (result.match.status !== 'live') setIsActuallyLive(false);
       } catch {
         // Silently ignore polling errors — user still sees last known data
       }
     }, LIVE_POLL_MS);
 
     return () => clearInterval(poll);
-  }, [matchId, matchStatus]);
+  }, [matchId, isActuallyLive]);
 
   return { detail, liveMatch, loading, error };
 }

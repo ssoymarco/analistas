@@ -28,73 +28,94 @@ function positionShort(posId: number): string {
   }
 }
 
-// ── Country flag emoji helper ───────────────────────────────────────────────
-function countryIdToFlag(countryId: number): string {
-  // Common country IDs in SM → flag emoji (best effort)
-  const map: Record<number, string> = {
-    17: '🇧🇪', // Belgium
-    32: '🇧🇷', // Brazil
-    38: '🇨🇲', // Cameroon
-    43: '🇨🇱', // Chile
-    47: '🇨🇴', // Colombia
-    51: '🇭🇷', // Croatia
-    56: '🇩🇰', // Denmark
-    62: '🇬🇧', // England
-    320: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', // England alt
-    64: '🇪🇸', // Spain
-    67: '🇫🇷', // France
-    77: '🇩🇪', // Germany
-    83: '🇬🇭', // Ghana
-    98: '🇮🇹', // Italy
-    118: '🇲🇽', // Mexico
-    125: '🇳🇱', // Netherlands
-    130: '🇳🇬', // Nigeria
-    135: '🇳🇴', // Norway
-    141: '🇵🇱', // Poland
-    144: '🇵🇹', // Portugal
-    164: '🏴󠁧󠁢󠁳󠁣󠁴󠁿', // Scotland
-    175: '🇸🇪', // Sweden
-    178: '🇨🇭', // Switzerland
-    203: '🇺🇸', // USA
-    205: '🇺🇾', // Uruguay
-    211: '🇦🇷', // Argentina
-    214: '🇯🇵', // Japan
-    219: '🇰🇷', // South Korea
-    220: '🇦🇺', // Australia
-    321: '🏴󠁧󠁢󠁷󠁬󠁳󠁿', // Wales
-    322: '🏴󠁧󠁢󠁮󠁩󠁲󠁿', // Northern Ireland
-    327: '🇮🇪', // Ireland
-    381: '🇪🇨', // Ecuador
-    382: '🇵🇾', // Paraguay
-    383: '🇵🇪', // Peru
-    384: '🇻🇪', // Venezuela
-    385: '🇧🇴', // Bolivia
-    462: '🇨🇮', // Ivory Coast
-    463: '🇸🇳', // Senegal
-    464: '🇲🇱', // Mali
-    480: '🇪🇬', // Egypt
-    481: '🇹🇳', // Tunisia
-    482: '🇲🇦', // Morocco
-    483: '🇩🇿', // Algeria
-  };
-  return map[countryId] || '🏳️';
+// ── Country resolver (ISO2-based) ───────────────────────────────────────────
+//
+// We previously mapped SportMonks numeric `country_id` → Spanish name + emoji.
+// That map was wrong (Griezmann showed as Belgian, Kane as Ivorian) because
+// SportMonks numeric IDs don't match the values we'd guessed.
+//
+// This version uses the COUNTRY OBJECT returned by `?include=nationality`,
+// which has a stable `iso2` code. ISO2 → emoji is a deterministic Unicode trick;
+// ISO2 → Spanish name is a small static map. Both are reliable and don't depend
+// on SportMonks' internal IDs.
+
+/** Spanish country names keyed by ISO2 code. Falls back to API's English name. */
+const ISO2_NAME_ES: Record<string, string> = {
+  AR: 'Argentina',  AU: 'Australia',  AT: 'Austria',     BE: 'Bélgica',
+  BO: 'Bolivia',    BR: 'Brasil',     CA: 'Canadá',      CM: 'Camerún',
+  CL: 'Chile',      CN: 'China',      CO: 'Colombia',    CR: 'Costa Rica',
+  HR: 'Croacia',    CU: 'Cuba',       CZ: 'Chequia',     DK: 'Dinamarca',
+  DO: 'R. Dominicana', EC: 'Ecuador', EG: 'Egipto',      SV: 'El Salvador',
+  ES: 'España',     US: 'Estados Unidos', FI: 'Finlandia', FR: 'Francia',
+  GE: 'Georgia',    DE: 'Alemania',   GH: 'Ghana',       GR: 'Grecia',
+  GT: 'Guatemala',  GN: 'Guinea',     HT: 'Haití',       HN: 'Honduras',
+  HU: 'Hungría',    IS: 'Islandia',   IN: 'India',       ID: 'Indonesia',
+  IR: 'Irán',       IQ: 'Irak',       IE: 'Irlanda',     IL: 'Israel',
+  IT: 'Italia',     CI: 'Costa de Marfil', JM: 'Jamaica', JP: 'Japón',
+  KR: 'Corea del Sur', KP: 'Corea del Norte', MA: 'Marruecos', ML: 'Malí',
+  MX: 'México',     NL: 'Países Bajos', NZ: 'Nueva Zelanda', NG: 'Nigeria',
+  NO: 'Noruega',    PK: 'Pakistán',   PA: 'Panamá',      PY: 'Paraguay',
+  PE: 'Perú',       PH: 'Filipinas',  PL: 'Polonia',     PT: 'Portugal',
+  PR: 'Puerto Rico',QA: 'Qatar',      RO: 'Rumanía',     RU: 'Rusia',
+  SA: 'Arabia Saudita', SN: 'Senegal', RS: 'Serbia',     SG: 'Singapur',
+  SK: 'Eslovaquia', SI: 'Eslovenia',  ZA: 'Sudáfrica',   SE: 'Suecia',
+  CH: 'Suiza',      TH: 'Tailandia',  TN: 'Túnez',       TR: 'Turquía',
+  UA: 'Ucrania',    AE: 'EAU',        UY: 'Uruguay',     VE: 'Venezuela',
+  GB: 'Reino Unido', VN: 'Vietnam',   DZ: 'Argelia',     AL: 'Albania',
+  AM: 'Armenia',    AZ: 'Azerbaiyán', BA: 'Bosnia',      BG: 'Bulgaria',
+  CY: 'Chipre',     EE: 'Estonia',    LV: 'Letonia',     LT: 'Lituania',
+  LU: 'Luxemburgo', MT: 'Malta',      ME: 'Montenegro',  MD: 'Moldavia',
+  MK: 'Macedonia del Norte', RW: 'Ruanda',
+};
+
+/** Special-case flag emojis for the UK constituent countries. */
+const SPECIAL_FLAG_BY_NAME: Record<string, string> = {
+  england:          '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
+  scotland:         '🏴󠁧󠁢󠁳󠁣󠁴󠁿',
+  wales:            '🏴󠁧󠁢󠁷󠁬󠁳󠁿',
+  'northern ireland': '🏴󠁧󠁢󠁮󠁩󠁲󠁿',
+};
+
+const SPECIAL_NAME_ES: Record<string, string> = {
+  england:          'Inglaterra',
+  scotland:         'Escocia',
+  wales:            'Gales',
+  'northern ireland': 'Irlanda del Norte',
+};
+
+/** Convert an ISO2 code (e.g. "FR") to its flag emoji (🇫🇷). */
+function iso2ToFlag(iso2: string): string {
+  if (!iso2 || iso2.length !== 2) return '🏳️';
+  const upper = iso2.toUpperCase();
+  // Each letter A-Z maps to a regional indicator symbol (U+1F1E6..U+1F1FF)
+  const cps = upper.split('').map(c => 0x1F1E6 + c.charCodeAt(0) - 65);
+  return String.fromCodePoint(...cps);
 }
 
-function countryIdToName(countryId: number): string {
-  const map: Record<number, string> = {
-    17: 'Bélgica', 32: 'Brasil', 38: 'Camerún', 43: 'Chile', 47: 'Colombia',
-    51: 'Croacia', 56: 'Dinamarca', 62: 'Inglaterra', 320: 'Inglaterra',
-    64: 'España', 67: 'Francia', 77: 'Alemania', 83: 'Ghana', 98: 'Italia',
-    118: 'México', 125: 'Países Bajos', 130: 'Nigeria', 135: 'Noruega',
-    141: 'Polonia', 144: 'Portugal', 164: 'Escocia', 175: 'Suecia',
-    178: 'Suiza', 203: 'Estados Unidos', 205: 'Uruguay', 211: 'Argentina',
-    214: 'Japón', 219: 'Corea del Sur', 220: 'Australia',
-    321: 'Gales', 322: 'Irlanda del Norte', 327: 'Irlanda',
-    381: 'Ecuador', 382: 'Paraguay', 383: 'Perú', 384: 'Venezuela',
-    385: 'Bolivia', 462: 'Costa de Marfil', 463: 'Senegal', 464: 'Malí',
-    480: 'Egipto', 481: 'Túnez', 482: 'Marruecos', 483: 'Argelia',
+/**
+ * Resolve a player's country to (Spanish name, flag emoji) using the
+ * SportMonks country object returned by `?include=nationality`.
+ * Special-cases UK constituent countries which need their non-ISO2 flags.
+ */
+function resolveCountry(
+  country: { name?: string; iso2?: string } | undefined,
+): { name: string; flag: string } {
+  if (!country) return { name: 'Desconocido', flag: '🏳️' };
+
+  const apiNameLower = (country.name || '').toLowerCase();
+  // UK constituent countries: SportMonks names them "England", "Scotland", etc.
+  if (SPECIAL_FLAG_BY_NAME[apiNameLower]) {
+    return {
+      name: SPECIAL_NAME_ES[apiNameLower] || country.name || 'Desconocido',
+      flag: SPECIAL_FLAG_BY_NAME[apiNameLower],
+    };
+  }
+
+  const iso2 = (country.iso2 || '').toUpperCase();
+  return {
+    name: ISO2_NAME_ES[iso2] || country.name || 'Desconocido',
+    flag: iso2 ? iso2ToFlag(iso2) : '🏳️',
   };
-  return map[countryId] || 'Desconocido';
 }
 
 // ── SM Season Stats interface ───────────────────────────────────────────────
@@ -225,10 +246,18 @@ export interface PlayerDetailData {
   currentStats: PlayerSeasonStats | null;
   seasonHistory: PlayerSeasonStats[];
   jerseyNumber: number;
+  /** The player's CLUB (the team they play for week-to-week). */
   teamId: number;
   teamName: string;
   teamLogo: string;
   leagueName: string;
+  /** The player's NATIONAL TEAM, if SportMonks has a record of them being
+   *  called up. Falls back to undefined when the player has never appeared
+   *  in a national team — in that case we still show their nationality
+   *  (info.nationality) but render it without a click target. */
+  nationalTeamId?: number;
+  nationalTeamName?: string;
+  nationalTeamLogo?: string;
 }
 
 // ── Fetch enhanced player data ──────────────────────────────────────────────
@@ -236,7 +265,13 @@ export interface PlayerDetailData {
 async function fetchPlayerEnhanced(playerId: number): Promise<SMPlayer & { statistics?: SMSeasonStatistic[] }> {
   return fetchApi<SMPlayer & { statistics?: SMSeasonStatistic[] }>(
     `players/${playerId}`,
-    { include: 'statistics.details;statistics.season;statistics.team' },
+    {
+      // - statistics.* → season-by-season numbers
+      // - nationality  → country object with iso2 + name (replaces the broken numeric-id map)
+      // - teams.team   → membership history; lets us find the player's CURRENT CLUB
+      //                  and (when called up) their NATIONAL TEAM team_id for navigation
+      include: 'statistics.details;statistics.season;statistics.team;nationality;teams.team',
+    },
   );
 }
 
@@ -359,6 +394,40 @@ export function usePlayerDetail(
 
         const currentStats = sortedStats.length > 0 ? sortedStats[0] : null;
 
+        // ── Country resolution via the `nationality` include ──
+        // Falls back to `country` if nationality is missing on the response.
+        const countryObj = player.nationality ?? player.country;
+        const { name: nationalityName, flag: nationalityFlag } = resolveCountry(countryObj);
+
+        // ── Find the current CLUB and the NATIONAL TEAM from `teams.team` ──
+        // SportMonks tags each team membership entry with a `team.type` of
+        // 'club' / 'national' / 'domestic'. The active club is preferred from
+        // the explicit `active === true` flag; if missing, fall back to the
+        // most recent `start` date among club entries.
+        const memberships = player.teams ?? [];
+        const clubMemberships = memberships.filter(m => m.team && m.team.type !== 'national');
+        const activeClub =
+          clubMemberships.find(m => m.active === true) ??
+          [...clubMemberships].sort((a, b) => {
+            const aStart = a.start ? Date.parse(a.start) : 0;
+            const bStart = b.start ? Date.parse(b.start) : 0;
+            return bStart - aStart;
+          })[0];
+
+        // National team: any membership where team.type === 'national'.
+        // Prefer one whose country_id matches the player's nationality.
+        const nationalMemberships = memberships.filter(m => m.team?.type === 'national');
+        const nationalTeam =
+          nationalMemberships.find(m => m.team?.country_id === player.nationality_id) ??
+          nationalMemberships[0];
+
+        // Resolved club info — the activeClub from teams API takes precedence
+        // over currentStats.team (which can wrongly be a national team if the
+        // player's most recent stat row is a national-team appearance).
+        const clubId   = activeClub?.team?.id ?? (currentStats?.teamId ?? 0);
+        const clubName = activeClub?.team?.name ?? (currentStats?.teamName ?? teamName ?? '');
+        const clubLogo = activeClub?.team?.image_path ?? (currentStats?.teamLogo ?? teamLogo ?? '');
+
         const info: PlayerInfo = {
           id: player.id,
           name: player.name,
@@ -367,8 +436,8 @@ export function usePlayerDetail(
           lastName: player.lastname,
           commonName: player.common_name,
           image: player.image_path,
-          nationality: countryIdToName(player.nationality_id),
-          nationalityFlag: countryIdToFlag(player.nationality_id),
+          nationality: nationalityName,
+          nationalityFlag,
           nationalityId: player.nationality_id,
           position: positionName(player.position_id),
           positionShort: positionShort(player.position_id),
@@ -384,11 +453,14 @@ export function usePlayerDetail(
           info,
           currentStats,
           seasonHistory: sortedStats,
-          jerseyNumber: currentStats?.jerseyNumber ?? jerseyNumber ?? 0,
-          teamId: currentStats?.teamId ?? 0,
-          teamName: currentStats?.teamName ?? teamName ?? '',
-          teamLogo: currentStats?.teamLogo ?? teamLogo ?? '',
+          jerseyNumber: activeClub?.jersey_number ?? currentStats?.jerseyNumber ?? jerseyNumber ?? 0,
+          teamId: clubId,
+          teamName: clubName,
+          teamLogo: clubLogo,
           leagueName: '',
+          nationalTeamId:   nationalTeam?.team?.id,
+          nationalTeamName: nationalTeam?.team?.name,
+          nationalTeamLogo: nationalTeam?.team?.image_path,
         });
       } catch (err: any) {
         if (!mounted.current) return;

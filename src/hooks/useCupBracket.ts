@@ -12,6 +12,7 @@ interface UseCupBracketResult {
 export function useCupBracket(
   seasonId: number | null,
   currentFixtureId?: string,
+  isPlayoffsOnly?: boolean,
 ): UseCupBracketResult {
   const [rounds, setRounds]   = useState<CupRound[]>([]);
   const [loading, setLoading] = useState(false);
@@ -33,7 +34,7 @@ export function useCupBracket(
     setLoading(true);
     setError(null);
 
-    getCupBracket(seasonId, currentFixtureId)
+    getCupBracket(seasonId, currentFixtureId, isPlayoffsOnly)
       .then(data => {
         if (!isMounted.current) return;
         setRounds(data);
@@ -44,7 +45,7 @@ export function useCupBracket(
         setError(err instanceof Error ? err.message : 'Error al cargar el bracket');
         setLoading(false);
       });
-  }, [seasonId, currentFixtureId]);
+  }, [seasonId, currentFixtureId, isPlayoffsOnly]);
 
   return { rounds, loading, error };
 }

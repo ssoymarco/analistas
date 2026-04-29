@@ -86,7 +86,8 @@ const TieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
   const hasAgg = tie.aggregate !== null;
   const isTwoLeg = tie.legs.length > 1;
   const isInferred = tie.id.startsWith('inferred-');
-  const isTBD = tie.homeTeam.name === 'TBD' && tie.awayTeam.name === 'TBD';
+  // id '0' means SportMonks returned no participants at all for this fixture
+  const isTBD = tie.homeTeam.id === '0' && tie.awayTeam.id === '0';
 
   const homeScore = hasAgg ? tie.aggregate!.home : tie.legs[0]?.homeScore;
   const awayScore = hasAgg ? tie.aggregate!.away : tie.legs[0]?.awayScore;

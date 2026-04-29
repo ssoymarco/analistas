@@ -44,6 +44,8 @@ import {
   fetchTeamRecentFixtures,
   fetchPredictions,
   fetchPlayerById,
+  fetchPlayersBySearch,
+  fetchSeasonsByLeagueId,
   SM_STATE_IDS,
   SM_EVENT_TYPES,
   SM_STAT_TYPES,
@@ -72,11 +74,13 @@ import {
   fetchFixturesByStage,
   type SMGroup,
   type SMAggregate,
+  type SMPlayer,
 } from './sportmonks';
 
 import type { NewsArticle, CupGroup, CupGroupsResult } from '../data/types';
 import { AVAILABLE_LEAGUES, getLeagueConfig, LEAGUE_IDS } from '../config/leagues';
 import i18n from '../i18n';
+import { normalize } from '../utils/normalize';
 
 // ── State Mapping ───────────────────────────────────────────────────────────
 
@@ -2375,6 +2379,7 @@ export interface SearchablePlayer {
   teamName?: string;
   teamLogo?: string;
   teamId?: number;
+  leagueName?: string;
   position?: string;
   jerseyNumber?: number;
 }
@@ -2440,27 +2445,358 @@ const POPULAR_TEAMS: SearchableTeam[] = [
 
 ];
 
-// ── Popular Players (hardcoded for instant onboarding) ──
+// ── Popular Players (resolved by name, NOT hardcoded IDs) ───────────────────
+//
+// Why names instead of IDs:
+//   Hardcoded SportMonks IDs go stale. When a player transfers, retires, or
+//   the SportMonks DB is reorganized, an old ID may map to a different player
+//   (this is what made "Santiago Giménez" navigate to "Leonardo Ruiz" before).
+//
+// How the resolver works:
+//   For each name in POPULAR_PLAYER_NAMES, we hit GET /players/search/{name}
+//   and pick the best match (exact name match preferred, otherwise first hit).
+//   Result is cached for 7 days under `popular_player_<normalized_name>`.
+//
+// To add a player: append their canonical name + expected country (English name
+// as returned by SportMonks). The country disambiguates homonyms — without it,
+// a search for "Bernardo Silva" would pick whichever player SportMonks ranks
+// first (which may be the Lithuanian one rather than the Manchester City star).
 
-const POPULAR_PLAYERS: SearchablePlayer[] = [
-  // Global stars
-  { id: 93392, name: 'Lionel Messi', image: 'https://cdn.sportmonks.com/images/soccer/players/24/93392.png' },
-  { id: 85668, name: 'Cristiano Ronaldo', image: 'https://cdn.sportmonks.com/images/soccer/players/20/85668.png' },
-  { id: 159583, name: 'Erling Haaland', image: 'https://cdn.sportmonks.com/images/soccer/players/15/159583.png' },
-  { id: 163637, name: 'Kylian Mbappé', image: 'https://cdn.sportmonks.com/images/soccer/players/21/163637.png' },
-  { id: 316264, name: 'Jude Bellingham', image: 'https://cdn.sportmonks.com/images/soccer/players/24/316264.png' },
-  { id: 284909, name: 'Vinícius Júnior', image: 'https://cdn.sportmonks.com/images/soccer/players/13/284909.png' },
-  { id: 370498, name: 'Lamine Yamal', image: 'https://cdn.sportmonks.com/images/soccer/players/18/370498.png' },
-  { id: 159584, name: 'Florian Wirtz', image: 'https://cdn.sportmonks.com/images/soccer/players/16/159584.png' },
-  { id: 153357, name: 'Pedri', image: 'https://cdn.sportmonks.com/images/soccer/players/13/153357.png' },
-  { id: 37572, name: 'Mohamed Salah', image: 'https://cdn.sportmonks.com/images/soccer/players/20/37572.png' },
-  // Mexico stars
-  { id: 162396, name: 'Santiago Giménez', image: 'https://cdn.sportmonks.com/images/soccer/players/12/162396.png' },
-  { id: 110137, name: 'Raúl Jiménez', image: 'https://cdn.sportmonks.com/images/soccer/players/25/110137.png' },
-  { id: 163535, name: 'Julián Quiñones', image: 'https://cdn.sportmonks.com/images/soccer/players/19/163535.png' },
-  { id: 85966, name: 'Guillermo Ochoa', image: 'https://cdn.sportmonks.com/images/soccer/players/14/85966.png' },
-  { id: 37557, name: 'Hirving Lozano', image: 'https://cdn.sportmonks.com/images/soccer/players/5/37557.png' },
+interface PopularPlayerSpec {
+  name: string;
+  /** Expected nationality, in the canonical English form returned by SportMonks
+   *  (e.g. "Portugal", "England", "Argentina"). Used to disambiguate same-name
+   *  players when resolving by name search. */
+  country: string;
+  /** Hardcoded SportMonks player ID. When set, the resolver skips name search
+   *  entirely and fetches `/players/{id}` directly. This is the most reliable
+   *  way to disambiguate players whose namesakes outrank them in search results
+   *  (e.g. Endrick — the Real Madrid star is id 37647009, but `/players/search/Endrick`
+   *  returns the Vietnamese-league namesake first). IDs were sourced from the
+   *  team's official squad endpoint (`/squads/teams/{teamId}`), which is
+   *  authoritative. If a player transfers, the ID stays the same — only their
+   *  team changes — so these IDs do NOT need maintenance on transfers. */
+  id?: number;
+  /** Optional list of case-insensitive substrings expected in the candidate's
+   *  active club name. When set (and `id` is not), the resolver prefers
+   *  candidates whose club matches one of these keywords — falling back to
+   *  any country-matching candidate if no club match is found. */
+  clubKeywords?: string[];
+}
+
+// Hardcoded SM IDs were sourced from each player's team squad endpoint
+// (`/squads/teams/{teamId}`) on 2026-04-29 — see git log for the lookup queries.
+// IDs are stable across transfers (only `team` changes), so they don't need
+// maintenance when players move clubs.
+const POPULAR_PLAYER_NAMES: PopularPlayerSpec[] = [
+  // ── Global TOP ─────────────────────────────────────────────────────────────
+  { name: 'Lionel Messi',           country: 'Argentina',   id: 184798 },
+  { name: 'Cristiano Ronaldo',      country: 'Portugal',    id: 580 },
+  { name: 'Kylian Mbappé',          country: 'France',      id: 96611 },
+  { name: 'Erling Haaland',         country: 'Norway',      id: 154421 },
+  { name: 'Vinícius Júnior',        country: 'Brazil',      id: 600687 },
+  { name: 'Neymar Jr',              country: 'Brazil',      id: 186320 },
+  { name: 'Mohamed Salah',          country: 'Egypt',       id: 4125 },
+  { name: 'Robert Lewandowski',     country: 'Poland',      id: 31000 },
+  { name: 'Kevin De Bruyne',        country: 'Belgium',     id: 1371 },
+  { name: 'Luka Modrić',            country: 'Croatia',     id: 268 },
+  { name: 'Lamine Yamal',           country: 'Spain',       id: 37656179 },
+  { name: 'Pedri',                  country: 'Spain',       id: 37288001 },
+  { name: 'Jude Bellingham',        country: 'England',     id: 37255840 },
+  { name: 'Rodri',                  country: 'Spain',       id: 186910 },
+  { name: 'Karim Benzema',          country: 'France',      id: 93948 },
+  { name: 'Phil Foden',             country: 'England',     id: 336133 },
+  { name: 'Florian Wirtz',          country: 'Germany',     id: 37429246 },
+  { name: 'Raphinha',               country: 'Brazil',      id: 160258 },
+  { name: 'Bernardo Silva',         country: 'Portugal',    id: 96353 },
+  { name: 'Bukayo Saka',            country: 'England',     id: 16827155 },
+  { name: 'Rúben Dias',             country: 'Portugal',    id: 162536 },
+  { name: 'Virgil van Dijk',        country: 'Netherlands', id: 1743 },
+  { name: 'Trent Alexander-Arnold', country: 'England',     id: 1917 },
+  { name: 'Luis Díaz',              country: 'Colombia',    id: 241036 },
+  { name: 'Dušan Vlahović',         country: 'Serbia',      id: 177988 },
+  { name: 'Gavi',                   country: 'Spain',       id: 37459030 },
+  { name: 'Federico Valverde',      country: 'Uruguay',     id: 260862 },
+  { name: 'Marcus Rashford',        country: 'England',     id: 1878 },
+  { name: 'Antoine Griezmann',      country: 'France',      id: 185658 },
+  { name: 'Harry Kane',             country: 'England',     id: 997 },
+  { name: 'Alejandro Garnacho',     country: 'Argentina',   id: 37316549 },
+  { name: 'Nico Williams',          country: 'Spain',       id: 37297544 },
+  { name: 'Rúben Neves',            country: 'Portugal',    id: 159699 },
+  { name: 'Vitinha',                country: 'Portugal',    id: 4545430 },
+  { name: 'Richarlison',            country: 'Brazil',      id: 219633 },
+  { name: 'Darwin Núñez',           country: 'Uruguay',     id: 6013424 },
+  { name: 'Cody Gakpo',             country: 'Netherlands', id: 30062 },
+  { name: 'Khvicha Kvaratskhelia',  country: 'Georgia',     id: 1479337 },
+  { name: 'Victor Osimhen',         country: 'Nigeria',     id: 455805 },
+  { name: 'Achraf Hakimi',          country: 'Morocco',     id: 187260 },
+  { name: 'Ousmane Dembélé',        country: 'France',      id: 32403 },
+  { name: 'Serhou Guirassy',        country: 'Guinea',      id: 32695 },
+  { name: 'Jonathan David',         country: 'Canada',      id: 16827175 },
+  { name: 'Tijjani Reijnders',      country: 'Netherlands', id: 3156873 },
+  { name: 'Warren Zaïre-Emery',     country: 'France',      id: 37593237 },
+  { name: 'Endrick',                country: 'Brazil',      id: 37647009 },
+  { name: 'Pau Cubarsí',            country: 'Spain',       id: 37656790 },
+  { name: 'Leny Yoro',              country: 'France',      id: 37600357 },
+  { name: 'Mathys Tel',             country: 'France',      id: 37531504 },
+  { name: 'Alejandro Balde',        country: 'Spain',       id: 37316480 },
+  // ── Mexico stars ───────────────────────────────────────────────────────────
+  { name: 'Santiago Giménez',       country: 'Mexico',      id: 2503729 },
+  { name: 'Raúl Jiménez',           country: 'Mexico',      id: 160217 },
+  { name: 'Julián Quiñones',        country: 'Mexico',      id: 254057 },
+  { name: 'Guillermo Ochoa',        country: 'Mexico',      id: 95174 },
+  { name: 'Hirving Lozano',         country: 'Mexico',      id: 253463 },
 ];
+
+/**
+ * Resolves a single player by name via SportMonks search.
+ * Cached for 7 days so we only hit /players/search/{name} once per player
+ * (and only for the 50-ish names in POPULAR_PLAYER_NAMES).
+ *
+ * Tries progressively simpler queries to handle variations:
+ *   1. Full canonical name (e.g. "Neymar Jr")
+ *   2. Stripped of suffixes like Jr/Junior/Sr/II/III (e.g. "Neymar")
+ *   3. Last word alone if multi-word (e.g. "Modrić" for "Luka Modrić")
+ *
+ * Returns `undefined` if SportMonks finds no match — the UI still shows the
+ * player with their canonical name and initials.
+ */
+/** TTL for negative resolution results — we retry these every hour
+ *  in case SportMonks indexes the player later. */
+const RESOLVER_FAILURE_TTL = 60 * 60_000; // 1 hour
+
+async function resolvePlayerByName(spec: PopularPlayerSpec): Promise<SearchablePlayer | undefined> {
+  const { name, country: expectedCountry } = spec;
+  const cacheKey = `popular_player_v11_${normalize(name)}`;
+  const cached = await AppCache.get<SearchablePlayer>(cacheKey);
+  if (cached) {
+    // id === -1 is our sentinel for "we tried and SportMonks returned nothing"
+    return cached.id < 0 ? undefined : cached;
+  }
+
+  // ── Fast path: hardcoded SM ID ──
+  // When the spec pins a specific SportMonks player ID, fetch by ID directly.
+  // This bypasses the name-search flow entirely, so namesakes/homonyms can't
+  // win (e.g. the Vietnamese "Endrick" can't outrank the Real Madrid one).
+  if (typeof spec.id === 'number' && spec.id > 0) {
+    try {
+      const detail = await fetchPlayerById(spec.id, 'teams.team;nationality');
+      if (detail) {
+        const memberships = detail.teams ?? [];
+        const clubMemberships = memberships.filter(m => m.team && m.team.type !== 'national');
+        const activeClub =
+          clubMemberships.find(m => m.active === true) ??
+          [...clubMemberships].sort((a, b) => {
+            const aStart = a.start ? Date.parse(a.start) : 0;
+            const bStart = b.start ? Date.parse(b.start) : 0;
+            return bStart - aStart;
+          })[0];
+
+        const img = (detail.image_path || '').trim();
+        const isPlaceholder = !img ||
+          img.includes('placeholder') ||
+          img.includes('no_player_yet') ||
+          img.includes('silhouette') ||
+          img.includes('/default');
+
+        const player: SearchablePlayer = {
+          id: detail.id,
+          name,
+          image: isPlaceholder ? undefined : img,
+          teamId:   activeClub?.team?.id,
+          teamName: activeClub?.team?.name,
+          teamLogo: activeClub?.team?.image_path,
+        };
+        AppCache.set(cacheKey, player, CacheTTL.players);
+        return player;
+      }
+    } catch {
+      // Fall through to name-search fallback below.
+    }
+  }
+
+  // Build progressive fallback queries to handle SportMonks' indexing quirks.
+  const queries: string[] = [name];
+  const noSuffix = name.replace(/\s+(Jr\.?|Junior|Sr\.?|Senior|II|III)$/i, '').trim();
+  if (noSuffix !== name && noSuffix.length > 0) queries.push(noSuffix);
+  const wordsAll = noSuffix.split(/\s+/).filter(w => w.length >= 3);
+  if (wordsAll.length > 0 && !queries.includes(wordsAll[0])) queries.push(wordsAll[0]);
+  if (wordsAll.length > 1) {
+    const last = wordsAll[wordsAll.length - 1];
+    if (!queries.includes(last)) queries.push(last);
+  }
+
+  const targetWords = normalize(name).split(/\s+/).filter(w => w.length >= 3);
+  const expectedCountryNorm = normalize(expectedCountry);
+
+  /**
+   * Returns true iff the candidate's API name plausibly matches our canonical
+   * name (any significant word ≥3 chars overlaps).
+   */
+  const nameMatches = (p: SMPlayer): boolean => {
+    const apiName = normalize(p.display_name || p.common_name || p.name || '');
+    if (apiName.length === 0) return true;
+    return targetWords.some(w => apiName.includes(w));
+  };
+
+  /**
+   * Country-match check using the SMCountry returned by `?include=nationality`.
+   * Tries `name` (e.g. "Portugal"), `iso2` and `fifa_name` for resilience.
+   */
+  const countryMatches = (p: SMPlayer): boolean => {
+    const nat = p.nationality ?? p.country;
+    if (!nat) return false;
+    const candidates = [nat.name, nat.iso2, nat.iso3, nat.fifa_name].filter(Boolean) as string[];
+    return candidates.some(v => normalize(v) === expectedCountryNorm);
+  };
+
+  // Track already-verified IDs so we don't re-check the same player across queries.
+  const seenIds = new Set<number>();
+
+  // Fallback candidate: first country-matching player whose club doesn't match
+  // the spec's clubKeywords. We use this if NO candidate matches the club, so
+  // we still return the famous player when SportMonks has stale/missing club
+  // data (e.g. Neymar Jr's transfer back to Santos may not be reflected yet).
+  // Prefer a fallback that has a real photo (more likely to be the actual star).
+  let fallbackCandidate: SearchablePlayer | undefined;
+
+  try {
+    for (const q of queries) {
+      let results: SMPlayer[] = [];
+      try {
+        results = await fetchPlayersBySearch(q);
+      } catch {
+        continue;
+      }
+      if (!results || results.length === 0) continue;
+
+      const nameCandidates = results.filter(nameMatches);
+      if (nameCandidates.length === 0) continue;
+
+      // Sort candidates within this query:
+      //   1. Nationality already matches in search result (search honors include)
+      //   2. Exact name match (display_name / common_name / name)
+      //   3. Remaining name-matches (last resort — may be homonyms)
+      const exactTarget = normalize(name);
+      const isExact = (p: SMPlayer) =>
+        normalize(p.display_name || '') === exactTarget ||
+        normalize(p.common_name || '') === exactTarget ||
+        normalize(p.name || '') === exactTarget;
+      const sorted = [
+        ...nameCandidates.filter(countryMatches),
+        ...nameCandidates.filter(p => !countryMatches(p) && isExact(p)),
+        ...nameCandidates.filter(p => !countryMatches(p) && !isExact(p)),
+      ];
+
+      // For the fallback queries (not full name), only try country-confirmed or
+      // exact-name candidates to avoid false positives from short-word searches.
+      const candidatesToTry = q === name ? sorted : sorted.filter(p => countryMatches(p) || isExact(p));
+
+      for (const candidate of candidatesToTry) {
+        if (seenIds.has(candidate.id)) continue;
+        seenIds.add(candidate.id);
+
+        // Verify with a detail call — this gives us current club AND nationality.
+        // We iterate ALL candidates, so a failed country check means "try next
+        // candidate", NOT "skip to next query".
+        let detail: SMPlayer | null = null;
+        try {
+          detail = await fetchPlayerById(candidate.id, 'teams.team;nationality');
+        } catch {
+          detail = null;
+        }
+
+        // ── Country guard ────────────────────────────────────────────────────
+        const detailHasNationality = !!(detail?.nationality || detail?.country);
+        const searchHasNationality = !!(candidate.nationality || candidate.country);
+
+        if (detail && detailHasNationality && !countryMatches(detail)) {
+          // Detail confirmed a DIFFERENT country → definitely the wrong person.
+          continue;
+        }
+        if (!detail && searchHasNationality && !countryMatches(candidate)) {
+          // Detail failed, but the search result itself already says wrong country.
+          continue;
+        }
+        // If neither source has nationality data we accept the candidate
+        // (best-effort — better than returning nothing).
+        // ────────────────────────────────────────────────────────────────────
+
+        // Image filter
+        const img = (detail?.image_path || candidate.image_path || '').trim();
+        const isPlaceholder = !img ||
+          img.includes('placeholder') ||
+          img.includes('no_player_yet') ||
+          img.includes('silhouette') ||
+          img.includes('/default') ||
+          img.endsWith('players/16/93392.png');  // Messi-specific CDN silhouette
+
+        // Current club from teams.team
+        const memberships = detail?.teams ?? candidate.teams ?? [];
+        const clubMemberships = memberships.filter(m => m.team && m.team.type !== 'national');
+        const activeClub =
+          clubMemberships.find(m => m.active === true) ??
+          [...clubMemberships].sort((a, b) => {
+            const aStart = a.start ? Date.parse(a.start) : 0;
+            const bStart = b.start ? Date.parse(b.start) : 0;
+            return bStart - aStart;
+          })[0];
+
+        const player: SearchablePlayer = {
+          id: candidate.id,
+          name,
+          image: isPlaceholder ? undefined : img,
+          teamId:   activeClub?.team?.id,
+          teamName: activeClub?.team?.name,
+          teamLogo: activeClub?.team?.image_path,
+        };
+
+        // ── Club preference (when spec specifies clubKeywords) ───────────────
+        // Country alone isn't enough for popular names — there are Portuguese
+        // homonyms named "Bernardo Silva", "Vitinha", Brazilian "Endrick", etc.
+        // The expected club is a strong signal, but SportMonks club data can
+        // be stale (recent transfers like Neymar → Santos), so we treat club
+        // match as a STRONG PREFERENCE (return immediately) rather than a hard
+        // requirement (the unmatched candidate becomes a fallback).
+        if (spec.clubKeywords && spec.clubKeywords.length > 0) {
+          const clubName = normalize(activeClub?.team?.name ?? '');
+          const matches = clubName.length > 0 &&
+            spec.clubKeywords.some(kw => clubName.includes(normalize(kw)));
+          if (matches) {
+            // Best possible match — pin and return immediately.
+            AppCache.set(cacheKey, player, CacheTTL.players);
+            return player;
+          }
+          // Save as fallback. Prefer candidates with real photos (placeholders
+          // usually mean obscure homonyms with no SportMonks coverage).
+          const candidateHasPhoto = !isPlaceholder;
+          const fallbackHasPhoto = !!fallbackCandidate?.image;
+          if (!fallbackCandidate || (candidateHasPhoto && !fallbackHasPhoto)) {
+            fallbackCandidate = player;
+          }
+          continue;
+        }
+
+        // No clubKeywords specified — accept the first country-matching candidate.
+        AppCache.set(cacheKey, player, CacheTTL.players);
+        return player;
+      }
+    }
+
+    // No club-matching candidate found, but country-matching one(s) exist —
+    // return the best fallback (covers cases where SportMonks club data is stale).
+    if (fallbackCandidate) {
+      AppCache.set(cacheKey, fallbackCandidate, CacheTTL.players);
+      return fallbackCandidate;
+    }
+
+    // No country-confirmed candidate at all — cache the failure briefly.
+    AppCache.set(cacheKey, { id: -1, name, image: undefined }, RESOLVER_FAILURE_TTL);
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Returns popular teams instantly (hardcoded), then optionally loads more from API.
@@ -2566,34 +2902,24 @@ export async function loadMoreTeams(leagueConfigs: typeof AVAILABLE_LEAGUES): Pr
  * (offline on first launch), we return the hardcoded list untouched.
  */
 export async function getSearchablePlayers(): Promise<SearchablePlayer[]> {
-  const cacheKey = 'searchable_players_v2';
-  const cached = await AppCache.get<SearchablePlayer[]>(cacheKey);
-  if (cached && cached.length === POPULAR_PLAYERS.length) {
-    return cached;
-  }
-
+  // No top-level cache here — each name has its own cache inside resolvePlayerByName
+  // (7-day success TTL, 1-hour failure TTL). Composing from per-player caches every
+  // call is fast (parallel AsyncStorage reads) and lets us retry failed lookups
+  // without invalidating the whole list.
   try {
-    const results = await Promise.allSettled(
-      POPULAR_PLAYERS.map(p => fetchPlayerById(p.id)),
+    const resolved = await Promise.all(
+      POPULAR_PLAYER_NAMES.map(async spec => {
+        const sm = await resolvePlayerByName(spec);
+        // Always return SOMETHING for this name so the UI shows it.
+        // If SportMonks couldn't find them, we use id=-1 (sentinel: no navigation).
+        return sm ?? { id: -1, name: spec.name, image: undefined };
+      }),
     );
-
-    const enriched: SearchablePlayer[] = POPULAR_PLAYERS.map((fallback, i) => {
-      const r = results[i];
-      if (r.status === 'fulfilled' && r.value) {
-        const api = r.value;
-        return {
-          ...fallback,
-          name: api.display_name || api.common_name || fallback.name,
-          image: api.image_path || fallback.image,
-        };
-      }
-      return fallback;
-    });
-
-    AppCache.set(cacheKey, enriched, CacheTTL.players);
-    return enriched;
+    return resolved;
   } catch {
-    return POPULAR_PLAYERS;
+    // Total failure (network down, etc.) — return name-only entries so the UI
+    // still renders the curated list (with initials, no photos, no navigation).
+    return POPULAR_PLAYER_NAMES.map(spec => ({ id: -1, name: spec.name, image: undefined }));
   }
 }
 
@@ -2605,12 +2931,12 @@ export async function getSearchablePlayers(): Promise<SearchablePlayer[]> {
  * players on top of the 15 hardcoded, which covers the realistic search
  * space for onboarding while keeping the fan-out bounded.
  *
- * Cached for 7 days under `searchable_players_all_v1`.
+ * Cached for 7 days under `searchable_players_all_v8`.
  */
 export async function getAllSearchablePlayers(): Promise<SearchablePlayer[]> {
-  const cacheKey = 'searchable_players_all_v1';
+  const cacheKey = 'searchable_players_all_v8';
   const cached = await AppCache.get<SearchablePlayer[]>(cacheKey);
-  if (cached && cached.length > POPULAR_PLAYERS.length) {
+  if (cached && cached.length > POPULAR_PLAYER_NAMES.length) {
     return cached;
   }
 
@@ -2620,8 +2946,40 @@ export async function getAllSearchablePlayers(): Promise<SearchablePlayer[]> {
   const merged: SearchablePlayer[] = [...popular];
 
   try {
+    // Resolve the CURRENT season ID for each unique league dynamically.
+    // The hardcoded `seasonId` in POPULAR_TEAMS may point to a previous season,
+    // which means /squads/seasons/{old}/teams/{id} returns a roster that no
+    // longer reflects the current squad (e.g. transfers, retirements).
+    // Cached for 7 days under `current_season_<leagueId>`.
+    const uniqueLeagueIds = Array.from(new Set(POPULAR_TEAMS.map(t => t.leagueId)));
+    const seasonResults = await Promise.allSettled(
+      uniqueLeagueIds.map(async leagueId => {
+        const seasonCacheKey = `current_season_${leagueId}`;
+        const cachedSeason = await AppCache.get<number>(seasonCacheKey);
+        if (cachedSeason) return { leagueId, seasonId: cachedSeason };
+        const r = await fetchSeasonsByLeagueId(leagueId);
+        const seasonId = r.currentSeason?.id;
+        if (seasonId) AppCache.set(seasonCacheKey, seasonId, CacheTTL.players);
+        return { leagueId, seasonId };
+      }),
+    );
+    const currentSeasonByLeague = new Map<number, number>();
+    seasonResults.forEach(r => {
+      if (r.status === 'fulfilled' && r.value.seasonId) {
+        currentSeasonByLeague.set(r.value.leagueId, r.value.seasonId);
+      }
+    });
+
+    // Build team list using the resolved current season ID, falling back to
+    // the hardcoded value only if the API call failed for that league.
+    const teamsWithSeason = POPULAR_TEAMS
+      .map(t => ({
+        ...t,
+        seasonId: currentSeasonByLeague.get(t.leagueId) ?? t.seasonId,
+      }))
+      .filter(t => !!t.seasonId);
+
     // Fetch squads for POPULAR_TEAMS in batches of 8 to avoid hammering the API
-    const teamsWithSeason = POPULAR_TEAMS.filter(t => !!t.seasonId);
     for (let i = 0; i < teamsWithSeason.length; i += 8) {
       const batch = teamsWithSeason.slice(i, i + 8);
       const results = await Promise.allSettled(
@@ -2635,13 +2993,23 @@ export async function getAllSearchablePlayers(): Promise<SearchablePlayer[]> {
           const p = sp.player;
           if (!p || seen.has(p.id)) continue;
           seen.add(p.id);
+          // Filter placeholder/empty images so we show initials instead of silhouettes
+          const rawImg = p.image_path || '';
+          const isPlaceholderImg =
+            !rawImg ||
+            rawImg.trim() === '' ||
+            rawImg.includes('placeholder') ||
+            rawImg.includes('no_player_yet') ||
+            rawImg.includes('silhouette') ||
+            rawImg.includes('/default');
           merged.push({
             id: p.id,
             name: p.display_name || p.common_name || 'Unknown',
-            image: p.image_path || '',
+            image: (!isPlaceholderImg && rawImg.startsWith('http')) ? rawImg : undefined,
             teamName: team.name,
             teamLogo: team.logo,
             teamId: team.id,
+            leagueName: team.leagueName,   // e.g. 'Liga MX', 'La Liga', …
             jerseyNumber: sp.jersey_number,
           });
         }

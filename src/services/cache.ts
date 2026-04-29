@@ -102,8 +102,9 @@ export const CacheTTL = {
   fixturesLive:    2  * 60_000,      //  2 min
   /** Fixtures list for a past/future date — rarely changes */
   fixturesStatic:  12 * 60 * 60_000, // 12 h
-  /** Match detail for a live fixture — short so offline still gets recent data */
-  detailLive:      30_000,           // 30 s
+  /** Match detail for a live fixture — matches the list-view poll cadence (10 s)
+   *  so period transitions (1H→HT→2H) propagate to the detail view quickly. */
+  detailLive:      10_000,           // 10 s
   /** Match detail for a scheduled fixture */
   detailScheduled: 10 * 60_000,      // 10 min
   /** Match detail for a finished fixture — immutable */
@@ -114,4 +115,6 @@ export const CacheTTL = {
   h2h:             60 * 60_000,      //  1 h
   /** Search index (teams, players, leagues) */
   searchIndex:     60 * 60_000,      //  1 h
+  /** Enriched popular players (image_path, position) — rarely changes */
+  players:         7 * 24 * 60 * 60_000, // 7 days
 };
