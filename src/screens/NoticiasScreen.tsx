@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, FlatList, Dimensions, RefreshControl,
+  TextInput, Image, Dimensions, RefreshControl,
 } from 'react-native';
 import { haptics } from '../utils/haptics';
 import { AnimatedPressable } from '../components/AnimatedPressable';
@@ -65,11 +65,17 @@ function HeroCard({ article, onPress, c }: { article: NewsArticle; onPress: () =
       scaleValue={0.97}
       haptic="light"
     >
-      {/* Gradient overlay */}
-      <View style={styles.heroGradient} />
-      {/* Image placeholder with color */}
-      <View style={[styles.heroImage, { backgroundColor: leagueColor(article.category) + '33' }]}>
-        <Text style={styles.heroImageEmoji}>⚽</Text>
+      {/* Hero image */}
+      <View style={styles.heroImage}>
+        {article.image ? (
+          <Image source={{ uri: article.image }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: leagueColor(article.category) + '33', alignItems: 'center', justifyContent: 'center' }]}>
+            <Text style={styles.heroImageEmoji}>⚽</Text>
+          </View>
+        )}
+        {/* Dark gradient overlay for readability */}
+        <View style={styles.heroOverlay} />
       </View>
       {/* Content */}
       <View style={styles.heroContent}>
@@ -100,8 +106,14 @@ function HeroCard({ article, onPress, c }: { article: NewsArticle; onPress: () =
 function StoryCard({ article, onPress, c }: { article: NewsArticle; onPress: () => void; c: ReturnType<typeof useThemeColors> }) {
   return (
     <TouchableOpacity style={[styles.storyCard, { backgroundColor: c.card, borderColor: c.border }]} onPress={onPress} activeOpacity={0.85}>
-      <View style={[styles.storyImage, { backgroundColor: leagueColor(article.category) + '33' }]}>
-        <Text style={styles.storyImageEmoji}>⚽</Text>
+      <View style={styles.storyImage}>
+        {article.image ? (
+          <Image source={{ uri: article.image }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: leagueColor(article.category) + '33', alignItems: 'center', justifyContent: 'center' }]}>
+            <Text style={styles.storyImageEmoji}>⚽</Text>
+          </View>
+        )}
       </View>
       <View style={styles.storyBody}>
         <LeagueBadge category={article.category} />
@@ -122,8 +134,14 @@ function ArticleRow({ article, onPress, c }: { article: NewsArticle; onPress: ()
   return (
     <TouchableOpacity style={[styles.articleRow, { borderBottomColor: c.border }]} onPress={onPress} activeOpacity={0.75}>
       {/* Thumbnail */}
-      <View style={[styles.thumbnail, { backgroundColor: leagueColor(article.category) + '33' }]}>
-        <Text style={styles.thumbnailEmoji}>⚽</Text>
+      <View style={styles.thumbnail}>
+        {article.image ? (
+          <Image source={{ uri: article.image }} style={[StyleSheet.absoluteFill, { borderRadius: 10 }]} resizeMode="cover" />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { borderRadius: 10, backgroundColor: leagueColor(article.category) + '33', alignItems: 'center', justifyContent: 'center' }]}>
+            <Text style={styles.thumbnailEmoji}>⚽</Text>
+          </View>
+        )}
         {isRecent && <View style={[styles.liveIndicator, { backgroundColor: c.live }]} />}
       </View>
       {/* Text */}
@@ -371,12 +389,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 16, borderRadius: 20, overflow: 'hidden',
   },
   heroImage: {
-    height: 220, width: '100%', alignItems: 'center', justifyContent: 'center',
+    height: 220, width: '100%', overflow: 'hidden',
   },
   heroImageEmoji: { fontSize: 48 },
-  heroGradient: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, height: 160,
-    backgroundColor: 'transparent',
+  heroOverlay: {
+    position: 'absolute', bottom: 0, left: 0, right: 0, height: 120,
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   heroContent: { padding: 16, paddingTop: 12 },
   heroMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
@@ -430,7 +448,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   storyImage: {
-    height: 100, alignItems: 'center', justifyContent: 'center',
+    height: 100, overflow: 'hidden',
   },
   storyImageEmoji: { fontSize: 32 },
   storyBody: { padding: 10, gap: 6 },
@@ -453,8 +471,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   thumbnail: {
-    width: 80, height: 64, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center',
+    width: 80, height: 64, borderRadius: 10, overflow: 'hidden',
   },
   thumbnailEmoji: { fontSize: 24 },
   liveIndicator: {
