@@ -1,0 +1,83 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── helpers ────────────────────────────────────────────────────────────────
+
+    // True when the request comes from the authenticated owner of this uid
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // True when the caller is a real (non-anonymous) user
+    function isRealUser() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    // Validates that a favorites map only contains the allowed fields and types
+    function validFavorites(fav) {
+      return fav.keys().hasOnly(['matchIds', 'teamIds', 'playerIds', 'leagueIds'])
+          && (!('matchIds'  in fav) || fav.matchIds  is list)
+          && (!('teamIds'   in fav) || fav.teamIds   is list)
+          && (!('playerIds' in fav) || fav.playerIds is list)
+          && (!('leagueIds' in fav) || fav.leagueIds is list);
+    }
+
+    // ── users/{uid} ─────────────────────────────────────────────────────────────
+    // Profile + favorites live here.
+    match /users/{uid} {
+
+      // Only the owner can read their own profile
+      allow read: if isOwner(uid);
+
+      // Create: only at first sign-in, must include required fields
+      allow create: if isOwner(uid)
+          && request.resource.data.keys().hasAll(['displayName', 'createdAt'])
+          && request.resource.data.displayName is string
+          && request.resource.data.displayName.size() <= 50;
+
+      // Update: owner only; enforce field-level rules
+      allow update: if isOwner(uid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['displayName', 'username', 'email', 'favorites',
+                         'pushToken', 'updatedAt', 'authMethod'])
+          // displayName max 50 chars if changed
+          && (!('displayName' in request.resource.data.diff(resource.data).changedKeys())
+              || request.resource.data.displayName.size() <= 50)
+          // username max 20 chars if changed
+          && (!('username' in request.resource.data.diff(resource.data).changedKeys())
+              || request.resource.data.username.size() <= 20)
+          // favorites must match expected shape if changed
+          && (!('favorites' in request.resource.data.diff(resource.data).changedKeys())
+              || validFavorites(request.resource.data.favorites));
+
+      allow delete: if false; // soft-delete only (handle in Cloud Function later)
+    }
+
+    // ── usernames/{username} ────────────────────────────────────────────────────
+    // Lookup table: username → uid. Enables unique username enforcement.
+    match /usernames/{username} {
+
+      // Anyone can check if a username exists (needed for availability search)
+      allow read: if request.auth != null;
+
+      // Any authenticated user (including anonymous) can claim a username
+      // as long as the uid stored matches their own
+      allow create: if request.auth != null
+          && request.resource.data.keys().hasOnly(['uid'])
+          && request.resource.data.uid == request.auth.uid;
+
+      // Any authenticated user can delete their own username entry
+      allow delete: if request.auth != null
+          && resource.data.uid == request.auth.uid;
+
+      allow update: if false; // always delete + create for username swap
+    }
+
+    // ── Deny everything else ───────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

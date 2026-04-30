@@ -2,195 +2,295 @@ import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
+  Image,
   TouchableOpacity,
   StyleSheet,
   Animated,
 } from 'react-native';
-import { colors } from '../theme/colors';
-import { Match } from '../data/mockData';
+import { useTranslation } from 'react-i18next';
+import { useThemeColors } from '../theme/useTheme';
+import { AnimatedPressable } from './AnimatedPressable';
+import { useLiveTick, computeLiveMinuteSeconds, formatLiveMinute } from '../hooks/useLiveTick';
+import { useTimeFormat } from '../contexts/TimeFormatContext';
+import { formatMatchTime } from '../utils/formatMatchTime';
+import type { Match } from '../data/types';
+
+/** Renders a team logo — Image if URL, Text if emoji/short string */
+const TeamLogo = ({ logo, size = 24 }: { logo: string; size?: number }) => {
+  const isUrl = logo.startsWith('http');
+  if (isUrl) {
+    return (
+      <Image
+        source={{ uri: logo }}
+        style={{ width: size, height: size, borderRadius: 3 }}
+        resizeMode="contain"
+      />
+    );
+  }
+  return <Text style={{ fontSize: size - 4 }}>{logo}</Text>;
+};
 
 interface MatchCardProps {
   match: Match;
   onPress?: (match: Match) => void;
 }
 
-const TeamInitials = ({ name }: { name: string }) => {
-  const initials = name
-    .split(' ')
-    .map((w) => w[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
+export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
+  const c = useThemeColors();
+  const { t } = useTranslation();
+  const { timeFormat } = useTimeFormat();
 
-  // Generate a consistent color from team name
-  const hue = name.charCodeAt(0) * 37 % 360;
-  const bgColor = `hsl(${hue}, 60%, 25%)`;
-  const textColor = `hsl(${hue}, 80%, 75%)`;
+  const isLive      = match.status === 'live';
+  const isFinished  = match.status === 'finished';
+  const isScheduled = match.status === 'scheduled';
+
+  const homeWon = isFinished && match.homeScore > match.awayScore;
+  const awayWon = isFinished && match.awayScore > match.homeScore;
+
+  // Shared 1-Hz tick — advances the minute locally between API polls so the
+  // list view never freezes at the minute it was first loaded. We only
+  // subscribe for live matches so finished/scheduled cards don't re-render.
+  const now = useLiveTick(isLive);
+  const liveDisplay = isLive ? computeLiveMinuteSeconds(match, now) : null;
+  const liveMinuteLabel = liveDisplay ? (formatLiveMinute(liveDisplay) ?? match.time) : match.time;
 
   return (
-    <View style={[styles.teamBadge, { backgroundColor: bgColor }]}>
-      <Text style={[styles.teamInitials, { color: textColor }]}>{initials}</Text>
-    </View>
+    <AnimatedPressable
+      style={[s.card, { backgroundColor: c.card, borderBottomColor: c.border }]}
+      onPress={() => onPress?.(match)}
+      scaleValue={0.98}
+      haptic="none"
+    >
+      <View style={s.row}>
+        {/* Home team (left) */}
+        <View style={s.teamLeft}>
+          <TeamLogo logo={match.homeTeam.logo} />
+          <Text
+            style={[s.teamName, { color: c.textPrimary }, homeWon && s.teamNameBold]}
+            numberOfLines={1}
+          >
+            {match.homeTeam.name}
+          </Text>
+          {!!match.homeRedCards && <RedCards count={match.homeRedCards} />}
+        </View>
+
+        {/* Score / Time (center) */}
+        <View style={[s.center, timeFormat === '12h' && { width: 94 }]}>
+          {isScheduled ? (
+            <View style={[s.timePill, { backgroundColor: c.surface }]}>
+              <Text style={[s.timePillText, { color: c.textSecondary }]} numberOfLines={1}>
+                {formatMatchTime(match.time, timeFormat)}
+              </Text>
+            </View>
+          ) : (
+            <View style={s.scoreRow}>
+              <Text style={[s.scoreNum, { color: c.textPrimary }, (!homeWon && !isLive) && { color: c.textTertiary }]}>
+                {match.homeScore}
+              </Text>
+              <Text style={[s.scoreDash, { color: c.textTertiary }]}>—</Text>
+              <Text style={[s.scoreNum, { color: c.textPrimary }, (!awayWon && !isLive) && { color: c.textTertiary }]}>
+                {match.awayScore}
+              </Text>
+            </View>
+          )}
+          {isLive && (
+            <Text style={s.liveMin}>
+              {match.stateLabel === 'HT' ? t('matchStatus.halfTime') : liveMinuteLabel}
+            </Text>
+          )}
+          {isFinished && <Text style={[s.ftLabel, { color: c.textTertiary }]}>Final</Text>}
+        </View>
+
+        {/* Away team (right) */}
+        <View style={s.teamRight}>
+          {!!match.awayRedCards && <RedCards count={match.awayRedCards} />}
+          <Text
+            style={[s.teamName, s.teamNameRight, { color: c.textPrimary }, awayWon && s.teamNameBold]}
+            numberOfLines={1}
+          >
+            {match.awayTeam.name}
+          </Text>
+          <TeamLogo logo={match.awayTeam.logo} />
+        </View>
+
+        {/* Bell */}
+        <TouchableOpacity style={s.bellBtn} activeOpacity={0.7}>
+          <BellIcon muted={match.isFavorite} c={c} />
+        </TouchableOpacity>
+      </View>
+    </AnimatedPressable>
   );
 };
 
-const LivePulse = () => {
-  const opacity = useRef(new Animated.Value(1)).current;
+// Red card indicator — one small rectangle per expelled player
+const RedCards = ({ count }: { count: number }) => (
+  <View style={s.redCardsWrap}>
+    {Array.from({ length: count }).map((_, i) => (
+      <View key={i} style={[s.redCard, i > 0 && s.redCardStacked]} />
+    ))}
+  </View>
+);
 
+// Live pulse dot
+const LivePulse = ({ color }: { color: string }) => {
+  const opacity = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const anim = Animated.loop(
       Animated.sequence([
-        Animated.timing(opacity, { toValue: 0.3, duration: 700, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.2, duration: 600, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 600, useNativeDriver: true }),
       ])
     );
     anim.start();
     return () => anim.stop();
   }, [opacity]);
-
-  return (
-    <Animated.View style={[styles.liveDot, { opacity }]} />
-  );
+  return <Animated.View style={[s.liveDot, { backgroundColor: color, opacity }]} />;
 };
 
-export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
-  const isLive = match.status === 'live';
-  const isFinished = match.status === 'finished';
-  const isUpcoming = match.status === 'upcoming';
+// Bell icon drawn with View primitives
+const BellIcon = ({ muted, c }: { muted?: boolean; c: ReturnType<typeof useThemeColors> }) => (
+  <View style={[s.bellWrap, muted && s.bellWrapMuted]}>
+    <View style={[s.bellBody, { borderColor: c.textTertiary }]} />
+    <View style={[s.bellClapper, { backgroundColor: c.textTertiary }]} />
+    {muted && <View style={s.bellSlash} />}
+  </View>
+);
 
-  const hasScore = match.homeScore !== null && match.awayScore !== null;
+// We need useThemeColors import for the type
+import type { ColorPalette } from '../theme/colors';
 
-  return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => onPress?.(match)}
-      activeOpacity={0.75}
-    >
-      {/* Home team */}
-      <View style={styles.teamRow}>
-        <TeamInitials name={match.homeTeam} />
-        <Text style={styles.teamName} numberOfLines={1}>
-          {match.homeTeam}
-        </Text>
-        <Text style={[styles.score, isLive && styles.scoreLive]}>
-          {hasScore ? match.homeScore : '-'}
-        </Text>
-      </View>
-
-      {/* Divider */}
-      <View style={styles.divider} />
-
-      {/* Away team */}
-      <View style={styles.teamRow}>
-        <TeamInitials name={match.awayTeam} />
-        <Text style={styles.teamName} numberOfLines={1}>
-          {match.awayTeam}
-        </Text>
-        <Text style={[styles.score, isLive && styles.scoreLive]}>
-          {hasScore ? match.awayScore : '-'}
-        </Text>
-      </View>
-
-      {/* Status badge */}
-      <View style={styles.statusContainer}>
-        {isLive && (
-          <View style={styles.liveContainer}>
-            <LivePulse />
-            <Text style={styles.liveMinute}>{match.minute}'</Text>
-          </View>
-        )}
-        {isFinished && (
-          <Text style={styles.finishedText}>FT</Text>
-        )}
-        {isUpcoming && (
-          <Text style={styles.upcomingText}>{match.time}</Text>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
-};
-
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   card: {
-    backgroundColor: colors.card,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    position: 'relative',
+    borderBottomWidth: 1,
   },
-  teamRow: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingRight: 56,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 6,
   },
-  teamBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  teamInitials: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: -0.3,
-  },
-  teamName: {
+
+  // Teams
+  teamLeft: {
     flex: 1,
-    fontSize: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 0,
+  },
+  teamRight: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    minWidth: 0,
+  },
+  teamLogo: { fontSize: 20 },
+  teamName: {
+    fontSize: 13,
     fontWeight: '500',
-    color: colors.textPrimary,
-    letterSpacing: -0.1,
+    flexShrink: 1,
   },
-  score: {
-    fontSize: 16,
+  teamNameRight: { textAlign: 'right' },
+  teamNameBold: { fontWeight: '700' },
+
+  // Score center
+  center: {
+    width: 76,
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  scoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  scoreNum: {
+    fontSize: 19,
+    fontWeight: '800',
+  },
+  scoreDash: {
+    fontSize: 13,
+  },
+  liveMin: {
+    fontSize: 10,
     fontWeight: '700',
-    color: colors.textPrimary,
-    width: 20,
-    textAlign: 'center',
+    color: '#f87171', // red-400
+    marginTop: 2,
   },
-  scoreLive: {
-    color: colors.accent,
+  ftLabel: {
+    fontSize: 10,
+    marginTop: 2,
   },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginVertical: 8,
-    marginLeft: 38,
+
+  // Time pill (scheduled)
+  timePill: {
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  statusContainer: {
-    position: 'absolute',
-    right: 16,
-    top: 0,
-    bottom: 0,
-    width: 48,
+  timePillText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // Bell
+  bellBtn: { marginLeft: 4, padding: 4 },
+  bellWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  liveContainer: {
+  bellWrapMuted: { backgroundColor: 'rgba(239,68,68,0.1)' },
+  bellBody: {
+    width: 10,
+    height: 9,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderBottomWidth: 0,
+    marginTop: 2,
+  },
+  bellClapper: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    marginTop: -1,
+  },
+  bellSlash: {
+    position: 'absolute',
+    width: 14,
+    height: 1.5,
+    backgroundColor: '#f87171',
+    borderRadius: 1,
+    transform: [{ rotate: '-45deg' }],
+  },
+
+  // Red cards
+  redCardsWrap: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 2,
+    flexShrink: 0,
   },
-  liveDot: {
+  redCard: {
     width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: colors.live,
+    height: 10,
+    borderRadius: 1.5,
+    backgroundColor: '#ef4444',
   },
-  liveMinute: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.live,
+  redCardStacked: {
+    marginLeft: -3,
   },
-  finishedText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textTertiary,
-    letterSpacing: 0.5,
-  },
-  upcomingText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textSecondary,
+
+  // Live pulse
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
 });

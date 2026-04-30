@@ -1,62 +1,965 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+// ── Favoritos Screen ─────────────────────────────────────────────────────────
+// Combined dashboard + management: users can browse, search, follow/unfollow
+// teams, players, and leagues. Tapping items navigates to their detail pages.
+// Two sections: "MIS SEGUIDOS" (top) → "LOS MÁS SEGUIDOS" (suggestions below).
+
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  TextInput, FlatList, Image, SectionList,
+} from 'react-native';
+import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { colors } from '../theme/colors';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useThemeColors } from '../theme/useTheme';
+import { useDarkMode } from '../contexts/DarkModeContext';
+import { SkeletonFavoritos } from '../components/Skeleton';
+import { useFavorites } from '../contexts/FavoritesContext';
+import {
+  getSearchableTeams,
+  getSearchablePlayers,
+  getAllSearchablePlayers,
+  getSearchableLeagues,
+} from '../services/sportsApi';
+import type {
+  SearchableTeam,
+  SearchablePlayer,
+  SearchableLeague,
+} from '../services/sportsApi';
+import type { FavoritosStackParamList } from '../navigation/AppNavigator';
+import { normalize } from '../utils/normalize';
+import { useTranslation } from 'react-i18next';
 
-export const FavoritosScreen: React.FC = () => {
-  return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <StatusBar style="light" />
-      <View style={styles.topBar}>
-        <Text style={styles.title}>Favoritos</Text>
+// ── Types ────────────────────────────────────────────────────────────────────
+
+interface FavItem {
+  id: string;
+  name: string;
+  subtitle: string;
+  emoji: string;
+  smId?: number;
+  image?: string;
+  seasonId?: number;
+  teamName?: string;
+  teamLogo?: string;
+  jerseyNumber?: number;
+  position?: string;
+}
+
+type Tab = 'equipos' | 'ligas' | 'jugadores';
+
+// ── Popular curated lists ─────────────────────────────────────────────────────
+// Ordered by global popularity. IDs verified against SportMonks API.
+
+const POPULAR_TEAMS: FavItem[] = [
+  // Liga MX
+  { id: '2687',  name: 'América',             subtitle: 'Liga MX · México',             emoji: 'AM', smId: 2687,   image: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png' },
+  { id: '427',   name: 'Guadalajara',         subtitle: 'Liga MX · México',             emoji: 'GU', smId: 427,    image: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png' },
+  { id: '609',   name: 'Tigres UANL',         subtitle: 'Liga MX · México',             emoji: 'TI', smId: 609,    image: 'https://cdn.sportmonks.com/images/soccer/teams/1/609.png' },
+  { id: '2626',  name: 'Cruz Azul',           subtitle: 'Liga MX · México',             emoji: 'CA', smId: 2626,   image: 'https://cdn.sportmonks.com/images/soccer/teams/2/2626.png' },
+  { id: '2662',  name: 'Monterrey',           subtitle: 'Liga MX · México',             emoji: 'MO', smId: 2662,   image: 'https://cdn.sportmonks.com/images/soccer/teams/6/2662.png' },
+  { id: '2989',  name: 'Pumas UNAM',          subtitle: 'Liga MX · México',             emoji: 'PU', smId: 2989,   image: 'https://cdn.sportmonks.com/images/soccer/teams/13/2989.png' },
+  // La Liga
+  { id: '3468',  name: 'Real Madrid',         subtitle: 'La Liga · España',             emoji: 'RM', smId: 3468,   image: 'https://cdn.sportmonks.com/images/soccer/teams/12/3468.png' },
+  { id: '83',    name: 'FC Barcelona',        subtitle: 'La Liga · España',             emoji: 'FC', smId: 83,     image: 'https://cdn.sportmonks.com/images/soccer/teams/19/83.png' },
+  // Premier League
+  { id: '8',     name: 'Liverpool',           subtitle: 'Premier League · Inglaterra',  emoji: 'LI', smId: 8,      image: 'https://cdn.sportmonks.com/images/soccer/teams/8/8.png' },
+  { id: '9',     name: 'Manchester City',     subtitle: 'Premier League · Inglaterra',  emoji: 'MC', smId: 9,      image: 'https://cdn.sportmonks.com/images/soccer/teams/9/9.png' },
+  { id: '19',    name: 'Arsenal',             subtitle: 'Premier League · Inglaterra',  emoji: 'AR', smId: 19,     image: 'https://cdn.sportmonks.com/images/soccer/teams/19/19.png' },
+  { id: '18',    name: 'Chelsea',             subtitle: 'Premier League · Inglaterra',  emoji: 'CH', smId: 18,     image: 'https://cdn.sportmonks.com/images/soccer/teams/18/18.png' },
+  { id: '14',    name: 'Manchester United',   subtitle: 'Premier League · Inglaterra',  emoji: 'MU', smId: 14,     image: 'https://cdn.sportmonks.com/images/soccer/teams/14/14.png' },
+  { id: '6',     name: 'Tottenham',           subtitle: 'Premier League · Inglaterra',  emoji: 'TO', smId: 6,      image: 'https://cdn.sportmonks.com/images/soccer/teams/6/6.png' },
+  // Other Europe
+  { id: '591',   name: 'Paris Saint-Germain', subtitle: 'Ligue 1 · Francia',            emoji: 'PS', smId: 591,    image: 'https://cdn.sportmonks.com/images/soccer/teams/15/591.png' },
+  { id: '503',   name: 'Bayern München',      subtitle: 'Bundesliga · Alemania',        emoji: 'BY', smId: 503,    image: 'https://cdn.sportmonks.com/images/soccer/teams/23/503.png' },
+  { id: '625',   name: 'Juventus',            subtitle: 'Serie A · Italia',             emoji: 'JU', smId: 625,    image: 'https://cdn.sportmonks.com/images/soccer/teams/17/625.png' },
+  { id: '113',   name: 'AC Milan',            subtitle: 'Serie A · Italia',             emoji: 'AC', smId: 113,    image: 'https://cdn.sportmonks.com/images/soccer/teams/17/113.png' },
+  { id: '2930',  name: 'Inter',               subtitle: 'Serie A · Italia',             emoji: 'IN', smId: 2930,   image: 'https://cdn.sportmonks.com/images/soccer/teams/18/2930.png' },
+  { id: '676',   name: 'Sevilla',             subtitle: 'La Liga · España',             emoji: 'SE', smId: 676,    image: 'https://cdn.sportmonks.com/images/soccer/teams/4/676.png' },
+  // Americas
+  { id: '587',   name: 'Boca Juniors',        subtitle: 'Liga Profesional · Argentina', emoji: 'BJ', smId: 587,    image: 'https://cdn.sportmonks.com/images/soccer/teams/11/587.png' },
+  { id: '10002', name: 'River Plate',         subtitle: 'Liga Profesional · Argentina', emoji: 'RP', smId: 10002,  image: 'https://cdn.sportmonks.com/images/soccer/teams/18/10002.png' },
+  { id: '1024',  name: 'Flamengo',            subtitle: 'Brasileirão · Brasil',         emoji: 'FL', smId: 1024,   image: 'https://cdn.sportmonks.com/images/soccer/teams/0/1024.png' },
+  { id: '239235',name: 'Inter Miami',         subtitle: 'MLS · EUA',                    emoji: 'IM', smId: 239235, image: 'https://cdn.sportmonks.com/images/soccer/teams/3/239235.png' },
+  // Saudi
+  { id: '2506',  name: 'Al Nassr',            subtitle: 'Saudi Pro League · Arabia',    emoji: 'AN', smId: 2506,   image: 'https://cdn.sportmonks.com/images/soccer/teams/10/2506.png' },
+  { id: '7011',  name: 'Al Hilal',            subtitle: 'Saudi Pro League · Arabia',    emoji: 'AH', smId: 7011,   image: 'https://cdn.sportmonks.com/images/soccer/teams/3/7011.png' },
+  // More Liga MX
+  { id: '2844',  name: 'Santos Laguna',       subtitle: 'Liga MX · México',             emoji: 'SL', smId: 2844,   image: 'https://cdn.sportmonks.com/images/soccer/teams/28/2844.png' },
+  { id: '967',   name: 'Toluca',              subtitle: 'Liga MX · México',             emoji: 'TO', smId: 967,    image: 'https://cdn.sportmonks.com/images/soccer/teams/7/967.png' },
+  { id: '10036', name: 'Pachuca',             subtitle: 'Liga MX · México',             emoji: 'PA', smId: 10036,  image: 'https://cdn.sportmonks.com/images/soccer/teams/20/10036.png' },
+  { id: '680',   name: 'Atlas',               subtitle: 'Liga MX · México',             emoji: 'AT', smId: 680,    image: 'https://cdn.sportmonks.com/images/soccer/teams/8/680.png' },
+];
+
+const POPULAR_LEAGUES: FavItem[] = [
+  { id: '743',  name: 'Liga MX',              subtitle: 'México',           emoji: '🇲🇽', smId: 743 },
+  { id: '8',    name: 'Premier League',       subtitle: 'Inglaterra',       emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', smId: 8 },
+  { id: '564',  name: 'La Liga',              subtitle: 'España',           emoji: '🇪🇸', smId: 564 },
+  { id: '384',  name: 'Serie A',              subtitle: 'Italia',           emoji: '🇮🇹', smId: 384 },
+  { id: '82',   name: 'Bundesliga',           subtitle: 'Alemania',         emoji: '🇩🇪', smId: 82 },
+  { id: '301',  name: 'Ligue 1',              subtitle: 'Francia',          emoji: '🇫🇷', smId: 301 },
+  { id: '648',  name: 'Brasileirão',          subtitle: 'Brasil',           emoji: '🇧🇷', smId: 648 },
+  { id: '779',  name: 'MLS',                  subtitle: 'EUA / Canadá',     emoji: '🇺🇸', smId: 779 },
+  { id: '636',  name: 'Liga Profesional',     subtitle: 'Argentina',        emoji: '🇦🇷', smId: 636 },
+  { id: '1122', name: 'Copa Libertadores',    subtitle: 'Sudamérica',       emoji: '🏆', smId: 1122 },
+  { id: '1111', name: 'CONCACAF Champions',   subtitle: 'CONCACAF',         emoji: '🏆', smId: 1111 },
+  { id: '72',   name: 'Eredivisie',           subtitle: 'Países Bajos',     emoji: '🇳🇱', smId: 72 },
+  { id: '462',  name: 'Liga Portugal',        subtitle: 'Portugal',         emoji: '🇵🇹', smId: 462 },
+  { id: '944',  name: 'Saudi Pro League',     subtitle: 'Arabia Saudita',   emoji: '🇸🇦', smId: 944 },
+  { id: '672',  name: 'Liga BetPlay',         subtitle: 'Colombia',         emoji: '🇨🇴', smId: 672 },
+  { id: '600',  name: 'Süper Lig',            subtitle: 'Turquía',          emoji: '🇹🇷', smId: 600 },
+  { id: '1579', name: 'Liga MX Femenil',      subtitle: 'México',           emoji: '🇲🇽', smId: 1579 },
+  { id: '663',  name: 'Primera División',     subtitle: 'Chile',            emoji: '🇨🇱', smId: 663 },
+  { id: '968',  name: 'J1 League',            subtitle: 'Japón',            emoji: '🇯🇵', smId: 968 },
+  { id: '1082', name: 'Amistosos',            subtitle: 'Internacional',    emoji: '🌍', smId: 1082 },
+];
+
+// Curated list of globally-followed players. The `id` is a stable name-based slug
+// (used as the React key and as the local follow-tracking ID), and `smId` is left
+// undefined here — it gets resolved at runtime via SportMonks /players/search/{name},
+// which avoids the brittleness of hardcoding numeric IDs that may map to the wrong
+// player when the SportMonks DB changes.
+const POPULAR_PLAYERS: FavItem[] = [
+  // ── Global TOP ─────────────────────────────────────────────────────────────
+  { id: 'pop_lionel_messi',           name: 'Lionel Messi',           subtitle: 'Inter Miami · Argentina',                    emoji: '🇦🇷' },
+  { id: 'pop_cristiano_ronaldo',      name: 'Cristiano Ronaldo',      subtitle: 'Al Nassr · Portugal',                        emoji: '🇵🇹' },
+  { id: 'pop_kylian_mbappe',          name: 'Kylian Mbappé',          subtitle: 'Real Madrid · Francia',                      emoji: '🇫🇷' },
+  { id: 'pop_erling_haaland',         name: 'Erling Haaland',         subtitle: 'Manchester City · Noruega',                  emoji: '🇳🇴' },
+  { id: 'pop_vinicius_junior',        name: 'Vinícius Júnior',        subtitle: 'Real Madrid · Brasil',                       emoji: '🇧🇷' },
+  { id: 'pop_neymar_jr',              name: 'Neymar Jr',              subtitle: 'Santos · Brasil',                            emoji: '🇧🇷' },
+  { id: 'pop_mohamed_salah',          name: 'Mohamed Salah',          subtitle: 'Liverpool · Egipto',                         emoji: '🇪🇬' },
+  { id: 'pop_robert_lewandowski',     name: 'Robert Lewandowski',     subtitle: 'Barcelona · Polonia',                        emoji: '🇵🇱' },
+  { id: 'pop_kevin_de_bruyne',        name: 'Kevin De Bruyne',        subtitle: 'Manchester City · Bélgica',                  emoji: '🇧🇪' },
+  { id: 'pop_luka_modric',            name: 'Luka Modrić',            subtitle: 'AC Milan · Croacia',                         emoji: '🇭🇷' },
+  { id: 'pop_lamine_yamal',           name: 'Lamine Yamal',           subtitle: 'Barcelona · España',                         emoji: '🇪🇸' },
+  { id: 'pop_pedri',                  name: 'Pedri',                  subtitle: 'Barcelona · España',                         emoji: '🇪🇸' },
+  { id: 'pop_jude_bellingham',        name: 'Jude Bellingham',        subtitle: 'Real Madrid · Inglaterra',                   emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+  { id: 'pop_rodri',                  name: 'Rodri',                  subtitle: 'Manchester City · España',                   emoji: '🇪🇸' },
+  { id: 'pop_karim_benzema',          name: 'Karim Benzema',          subtitle: 'Al-Ittihad · Francia',                       emoji: '🇫🇷' },
+  { id: 'pop_phil_foden',             name: 'Phil Foden',             subtitle: 'Manchester City · Inglaterra',               emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+  { id: 'pop_florian_wirtz',          name: 'Florian Wirtz',          subtitle: 'Liverpool · Alemania',                       emoji: '🇩🇪' },
+  { id: 'pop_raphinha',               name: 'Raphinha',               subtitle: 'Barcelona · Brasil',                         emoji: '🇧🇷' },
+  { id: 'pop_bernardo_silva',         name: 'Bernardo Silva',         subtitle: 'Manchester City · Portugal',                 emoji: '🇵🇹' },
+  { id: 'pop_bukayo_saka',            name: 'Bukayo Saka',            subtitle: 'Arsenal · Inglaterra',                       emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+  { id: 'pop_ruben_dias',             name: 'Rúben Dias',             subtitle: 'Manchester City · Portugal',                 emoji: '🇵🇹' },
+  { id: 'pop_virgil_van_dijk',        name: 'Virgil van Dijk',        subtitle: 'Liverpool · Países Bajos',                   emoji: '🇳🇱' },
+  { id: 'pop_trent_alexander_arnold', name: 'Trent Alexander-Arnold', subtitle: 'Real Madrid · Inglaterra',                   emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+  { id: 'pop_luis_diaz',              name: 'Luis Díaz',              subtitle: 'Bayern Múnich · Colombia',                   emoji: '🇨🇴' },
+  { id: 'pop_dusan_vlahovic',         name: 'Dušan Vlahović',         subtitle: 'Juventus · Serbia',                          emoji: '🇷🇸' },
+  { id: 'pop_gavi',                   name: 'Gavi',                   subtitle: 'Barcelona · España',                         emoji: '🇪🇸' },
+  { id: 'pop_federico_valverde',      name: 'Federico Valverde',      subtitle: 'Real Madrid · Uruguay',                      emoji: '🇺🇾' },
+  { id: 'pop_marcus_rashford',        name: 'Marcus Rashford',        subtitle: 'Barcelona · Inglaterra',                     emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+  { id: 'pop_antoine_griezmann',      name: 'Antoine Griezmann',      subtitle: 'Atlético Madrid · Francia',                  emoji: '🇫🇷' },
+  { id: 'pop_harry_kane',             name: 'Harry Kane',             subtitle: 'Bayern Múnich · Inglaterra',                 emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+  { id: 'pop_alejandro_garnacho',     name: 'Alejandro Garnacho',     subtitle: 'Chelsea · Argentina',                        emoji: '🇦🇷' },
+  { id: 'pop_nico_williams',          name: 'Nico Williams',          subtitle: 'Athletic Club · España',                     emoji: '🇪🇸' },
+  { id: 'pop_ruben_neves',            name: 'Rúben Neves',            subtitle: 'Al-Hilal · Portugal',                        emoji: '🇵🇹' },
+  { id: 'pop_vitinha',                name: 'Vitinha',                subtitle: 'PSG · Portugal',                             emoji: '🇵🇹' },
+  { id: 'pop_richarlison',            name: 'Richarlison',            subtitle: 'Tottenham · Brasil',                         emoji: '🇧🇷' },
+  { id: 'pop_darwin_nunez',           name: 'Darwin Núñez',           subtitle: 'Al-Hilal · Uruguay',                         emoji: '🇺🇾' },
+  { id: 'pop_cody_gakpo',             name: 'Cody Gakpo',             subtitle: 'Liverpool · Países Bajos',                   emoji: '🇳🇱' },
+  { id: 'pop_khvicha_kvaratskhelia',  name: 'Khvicha Kvaratskhelia',  subtitle: 'PSG · Georgia',                              emoji: '🇬🇪' },
+  { id: 'pop_victor_osimhen',         name: 'Victor Osimhen',         subtitle: 'Galatasaray · Nigeria',                      emoji: '🇳🇬' },
+  { id: 'pop_achraf_hakimi',          name: 'Achraf Hakimi',          subtitle: 'PSG · Marruecos',                            emoji: '🇲🇦' },
+  { id: 'pop_ousmane_dembele',        name: 'Ousmane Dembélé',        subtitle: 'PSG · Francia',                              emoji: '🇫🇷' },
+  { id: 'pop_serhou_guirassy',        name: 'Serhou Guirassy',        subtitle: 'Borussia Dortmund · Guinea',                 emoji: '🇬🇳' },
+  { id: 'pop_jonathan_david',         name: 'Jonathan David',         subtitle: 'Juventus · Canadá',                          emoji: '🇨🇦' },
+  { id: 'pop_tijjani_reijnders',      name: 'Tijjani Reijnders',      subtitle: 'Manchester City · Países Bajos',             emoji: '🇳🇱' },
+  { id: 'pop_warren_zaire_emery',     name: 'Warren Zaïre-Emery',     subtitle: 'PSG · Francia',                              emoji: '🇫🇷' },
+  { id: 'pop_endrick',                name: 'Endrick',                subtitle: 'Real Madrid · Brasil',                       emoji: '🇧🇷' },
+  { id: 'pop_pau_cubarsi',            name: 'Pau Cubarsí',            subtitle: 'Barcelona · España',                         emoji: '🇪🇸' },
+  { id: 'pop_leny_yoro',              name: 'Leny Yoro',              subtitle: 'Manchester United · Francia',                emoji: '🇫🇷' },
+  { id: 'pop_mathys_tel',             name: 'Mathys Tel',             subtitle: 'Tottenham · Francia',                        emoji: '🇫🇷' },
+  { id: 'pop_alejandro_balde',        name: 'Alejandro Balde',        subtitle: 'Barcelona · España',                         emoji: '🇪🇸' },
+  // ── México stars ───────────────────────────────────────────────────────────
+  { id: 'pop_santiago_gimenez',       name: 'Santiago Giménez',       subtitle: 'AC Milan · México',                          emoji: '🇲🇽' },
+  { id: 'pop_raul_jimenez',           name: 'Raúl Jiménez',           subtitle: 'Fulham · México',                            emoji: '🇲🇽' },
+  { id: 'pop_julian_quinones',        name: 'Julián Quiñones',        subtitle: 'Al-Qadsiah · México',                        emoji: '🇲🇽' },
+  { id: 'pop_guillermo_ochoa',        name: 'Guillermo Ochoa',        subtitle: 'AVS · México',                               emoji: '🇲🇽' },
+  { id: 'pop_hirving_lozano',         name: 'Hirving Lozano',         subtitle: 'San Diego FC · México',                      emoji: '🇲🇽' },
+];
+
+// ── Tab config ────────────────────────────────────────────────────────────────
+
+const TABS: { id: Tab; labelKey: string; icon: string }[] = [
+  { id: 'equipos',   labelKey: 'favorites.teams',   icon: '🏟' },
+  { id: 'ligas',     labelKey: 'favorites.leagues', icon: '🏆' },
+  { id: 'jugadores', labelKey: 'favorites.players', icon: '⚽' },
+];
+
+const SEARCH_PLACEHOLDER_KEYS: Record<Tab, string> = {
+  equipos:   'favorites.searchTeams',
+  ligas:     'favorites.searchLeagues',
+  jugadores: 'favorites.searchPlayers',
+};
+
+const INITIAL_SUGGESTED = 10;
+const LOAD_MORE_COUNT   = 10;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Two-letter abbreviation for initials fallback */
+function abbrev(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+/**
+ * Remove duplicate items keeping the first occurrence.
+ * Deduplicates by BOTH numeric smId AND string id so that React key
+ * collisions (e.g. two entries with item.id='85668') are impossible.
+ */
+function deduplicateItems(items: FavItem[]): FavItem[] {
+  const seenEids   = new Set<string>(); // numeric smId or string id
+  const seenStrIds = new Set<string>(); // raw string id (used as React key)
+  return items.filter(item => {
+    const eid = item.smId ? String(item.smId) : item.id;
+    if (seenEids.has(eid) || seenStrIds.has(item.id)) return false;
+    seenEids.add(eid);
+    seenStrIds.add(item.id);
+    return true;
+  });
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+/** Round avatar — image if available, initials/emoji fallback on error */
+const ItemAvatar: React.FC<{
+  name: string;
+  emoji: string;
+  image?: string;
+  size?: number;
+  isDark: boolean;
+  isLeague?: boolean;
+  isPlayer?: boolean;
+}> = ({ name, emoji, image, size = 46, isDark, isLeague, isPlayer }) => {
+  const [imgFailed, setImgFailed] = React.useState(false);
+  const s = size;
+  // Players → circle (s/2), Leagues → rounded-rect (10), Teams → rounded-rect (8)
+  const radius = isLeague ? 10 : (isPlayer ? s / 2 : 8);
+
+  if (image?.startsWith('http') && !imgFailed) {
+    return (
+      <Image
+        source={{ uri: image }}
+        style={{ width: s, height: s, borderRadius: radius }}
+        resizeMode="contain"
+        onError={() => setImgFailed(true)}
+      />
+    );
+  }
+
+  // League: show emoji flag large
+  if (isLeague) {
+    return (
+      <View style={{
+        width: s, height: s, borderRadius: radius,
+        backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+        alignItems: 'center', justifyContent: 'center',
+      }}>
+        <Text style={{ fontSize: s * 0.52 }}>{emoji}</Text>
       </View>
-      <View style={styles.content}>
-        <Text style={styles.emptyIcon}>⭐</Text>
-        <Text style={styles.emptyTitle}>Sin favoritos aún</Text>
-        <Text style={styles.emptySubtitle}>
-          Agrega equipos o ligas a tus favoritos{'\n'}para verlos aquí
+    );
+  }
+
+  // Team / player: initials
+  const letters = abbrev(name);
+  return (
+    <View style={{
+      width: s, height: s, borderRadius: radius,
+      backgroundColor: isDark ? 'rgba(0,224,150,0.12)' : 'rgba(0,150,100,0.10)',
+      alignItems: 'center', justifyContent: 'center',
+    }}>
+      <Text style={{
+        fontSize: s * 0.30,
+        fontWeight: '800',
+        color: '#00E096',
+        letterSpacing: 0.5,
+      }}>
+        {letters}
+      </Text>
+    </View>
+  );
+};
+
+
+/** Section header with optional divider line */
+const SectionHeader: React.FC<{
+  label: string;
+  count?: number;
+  accent?: boolean;
+  isDark: boolean;
+}> = ({ label, count, accent, isDark }) => (
+  <View style={[sh.row, { marginBottom: 6 }]}>
+    {accent && <View style={[sh.accentBar, { backgroundColor: '#00E096' }]} />}
+    <Text style={[sh.label, {
+      color: accent ? '#00E096' : (isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'),
+    }]}>
+      {label}
+    </Text>
+    {count !== undefined && (
+      <View style={[sh.badge, { backgroundColor: accent ? 'rgba(0,224,150,0.15)' : (isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)') }]}>
+        <Text style={[sh.badgeNum, { color: accent ? '#00E096' : (isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.40)') }]}>
+          {count > 99 ? '99+' : count}
         </Text>
       </View>
+    )}
+    <View style={[sh.line, { backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)' }]} />
+  </View>
+);
+
+const sh = StyleSheet.create({
+  row:       { flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 16 },
+  accentBar: { width: 3, height: 13, borderRadius: 2 },
+  label:     { fontSize: 10, fontWeight: '800', letterSpacing: 1.0, textTransform: 'uppercase' },
+  badge:     { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
+  badgeNum:  { fontSize: 10, fontWeight: '700' },
+  line:      { flex: 1, height: 1 },
+});
+
+/** Single item row */
+const ItemRow: React.FC<{
+  item: FavItem;
+  followed: boolean;
+  canNavigate: boolean;
+  isLeague: boolean;
+  isPlayer: boolean;
+  isDark: boolean;
+  onToggle: () => void;
+  onNav: () => void;
+  borderColor: string;
+}> = React.memo(({ item, followed, canNavigate, isLeague, isPlayer, isDark, onToggle, onNav, borderColor }) => (
+  <View style={[
+    ir.row,
+    {
+      backgroundColor: followed
+        ? (isDark ? 'rgba(0,224,150,0.04)' : 'rgba(0,200,120,0.04)')
+        : 'transparent',
+      borderColor: followed
+        ? 'rgba(0,224,150,0.14)'
+        : borderColor,
+      borderWidth: 1,
+    },
+  ]}>
+    {/* Avatar */}
+    <ItemAvatar
+      name={item.name}
+      emoji={item.emoji}
+      image={item.image}
+      size={46}
+      isDark={isDark}
+      isLeague={isLeague}
+      isPlayer={isPlayer}
+    />
+
+    {/* Info — tappable for navigation */}
+    <TouchableOpacity
+      style={ir.info}
+      onPress={onNav}
+      disabled={!canNavigate}
+      activeOpacity={0.7}
+    >
+      <Text style={[ir.name, { color: isDark ? '#FFFFFF' : '#111827' }]} numberOfLines={1}>
+        {item.name}
+      </Text>
+      <Text style={[ir.sub, { color: isDark ? '#8E8E93' : '#6B7280' }]} numberOfLines={1}>
+        {item.subtitle}
+      </Text>
+    </TouchableOpacity>
+
+    {/* Chevron */}
+    {canNavigate && (
+      <TouchableOpacity
+        onPress={onNav}
+        hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+        activeOpacity={0.5}
+      >
+        <Text style={[ir.chevron, { color: isDark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.18)' }]}>›</Text>
+      </TouchableOpacity>
+    )}
+
+    {/* Follow / Unfollow button */}
+    <TouchableOpacity
+      style={[
+        ir.btn,
+        followed
+          ? { backgroundColor: isDark ? 'rgba(255,69,58,0.10)' : 'rgba(255,69,58,0.08)', borderColor: 'rgba(255,69,58,0.35)', borderWidth: 1 }
+          : { backgroundColor: '#00E096' },
+      ]}
+      onPress={onToggle}
+      activeOpacity={0.8}
+    >
+      <Text style={[
+        ir.btnText,
+        { color: followed ? '#FF453A' : '#0D0D0D' },
+      ]}>
+        {followed ? '✓ Siguiendo' : '+ Seguir'}
+      </Text>
+    </TouchableOpacity>
+  </View>
+));
+
+const ir = StyleSheet.create({
+  row: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 9, paddingHorizontal: 12, gap: 11,
+    borderRadius: 14, marginBottom: 6,
+  },
+  info:    { flex: 1, minWidth: 0 },
+  name:    { fontSize: 14, fontWeight: '600' },
+  sub:     { fontSize: 11, fontWeight: '500', marginTop: 1 },
+  chevron: { fontSize: 22, fontWeight: '300', paddingHorizontal: 2 },
+  btn: {
+    paddingHorizontal: 11, paddingVertical: 6,
+    borderRadius: 14,
+  },
+  btnText: { fontSize: 11, fontWeight: '700' },
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ── Main Screen ───────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const FavoritosScreen: React.FC = () => {
+  const { t } = useTranslation();
+  const c = useThemeColors();
+  const { isDark } = useDarkMode();
+  const navigation = useNavigation<NativeStackNavigationProp<FavoritosStackParamList>>();
+  const {
+    followedTeamIds, isFollowingTeam, toggleFollowTeam,
+    followedPlayerIds, isFollowingPlayer, toggleFollowPlayer,
+    followedLeagueIds, isFollowingLeague, toggleFollowLeague,
+  } = useFavorites();
+
+  const [activeTab, setActiveTab] = useState<Tab>('equipos');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [suggestedVisible, setSuggestedVisible] = useState(INITIAL_SUGGESTED);
+
+  const [smTeams,   setSmTeams]   = useState<SearchableTeam[]>([]);
+  const [smPlayers, setSmPlayers] = useState<SearchablePlayer[]>([]);
+  const [smLeagues, setSmLeagues] = useState<SearchableLeague[]>([]);
+  const [loading, setLoading]     = useState(true);
+
+  // ── Load SportMonks enrichment data ──
+  useEffect(() => {
+    // Phase 1: quick results — teams + 15 hardcoded popular players (fast, ~1-2s)
+    Promise.all([
+      getSearchableTeams().then(setSmTeams).catch(() => {}),
+      getSearchablePlayers().then(setSmPlayers).catch(() => {}),
+    ]).finally(() => setLoading(false));
+
+    setSmLeagues(getSearchableLeagues());
+
+    // Phase 2: background enrichment — replaces smPlayers with full squad data
+    // that has CORRECT player IDs sourced directly from live team squad API responses.
+    // This fixes navigation bugs where hardcoded IDs map to the wrong player.
+    getAllSearchablePlayers()
+      .then(full => { if (full.length > 15) setSmPlayers(full); })
+      .catch(() => {});
+  }, []);
+
+  // Reset visible count when tab/search changes
+  useEffect(() => {
+    setSuggestedVisible(INITIAL_SUGGESTED);
+  }, [activeTab, searchQuery]);
+
+  // ── Name lookup maps ──
+  const smTeamMap = useMemo(() => {
+    const m = new Map<string, SearchableTeam>();
+    smTeams.forEach(t => m.set(normalize(t.name), t));
+    return m;
+  }, [smTeams]);
+
+  const smPlayerMap = useMemo(() => {
+    const m = new Map<string, SearchablePlayer>();
+    smPlayers.forEach(p => {
+      const key = normalize(p.name);
+      const existing = m.get(key);
+      if (!existing) {
+        m.set(key, p);
+        return;
+      }
+      // Prefer the entry that has a real HTTP image over one that doesn't.
+      // This prevents Phase 2 squad entries (often have empty image_path) from
+      // overwriting Phase 1 entries that already have a verified real photo URL.
+      const existingHasImg = existing.image?.startsWith('http');
+      const newHasImg      = p.image?.startsWith('http');
+      if (newHasImg && !existingHasImg) {
+        m.set(key, p);
+      }
+    });
+    return m;
+  }, [smPlayers]);
+
+  const smLeagueMap = useMemo(() => {
+    const m = new Map<string, SearchableLeague>();
+    smLeagues.forEach(l => m.set(normalize(l.name), l));
+    return m;
+  }, [smLeagues]);
+
+  // ── Enriched items ──
+  // KEY FIX: API image only overrides hardcoded if it's a valid URL.
+  // Fall back to hardcoded `item.image` instead of setting undefined.
+  const enrichedTeams = useMemo(() => {
+    const names = new Set(POPULAR_TEAMS.map(t => normalize(t.name)));
+    const popular = POPULAR_TEAMS.map(item => {
+      const sm = smTeamMap.get(normalize(item.name));
+      if (!sm) return item;
+      const apiImage = sm.logo?.startsWith('http') ? sm.logo : undefined;
+      return { ...item, smId: sm.id ?? item.smId, image: apiImage ?? item.image, seasonId: sm.seasonId };
+    });
+    const extras: FavItem[] = smTeams
+      .filter(t => !names.has(normalize(t.name)))
+      .map(t => ({
+        id: String(t.id),
+        name: t.name,
+        subtitle: t.leagueName || '',
+        emoji: abbrev(t.name),
+        smId: t.id,
+        image: t.logo?.startsWith('http') ? t.logo : undefined,
+        seasonId: t.seasonId,
+      }));
+    return deduplicateItems([...popular, ...extras]);
+  }, [smTeamMap, smTeams]);
+
+  // ── Players: split into popular (suggestions) vs all (search index) ──
+  // Popular = curated 15 globally top players (Messi, Ronaldo, etc.) → shown as suggestions.
+  // All = popular + Phase 2 squad data (~750 players from popular team rosters) → search only.
+  // This prevents the suggestions list from being flooded with squad players (e.g. all of
+  // América's roster), while still allowing the user to search for any squad player by name.
+  const enrichedPopularPlayers = useMemo(() => {
+    return POPULAR_PLAYERS.map(item => {
+      const sm = smPlayerMap.get(normalize(item.name));
+      if (!sm) return item;
+      // API-verified image only; do NOT fall back to hardcoded CDN path.
+      const apiImage = sm.image?.startsWith('http') ? sm.image : undefined;
+      // Replace the hardcoded "Club · Country" subtitle with a fresh
+      // "{API-club} · {country-from-hardcoded-subtitle}" so transfers don't
+      // leave stale team names visible (e.g. KdB moved Man City → Napoli).
+      // The country is the part AFTER the last " · " in the original subtitle.
+      const country = item.subtitle.includes(' · ')
+        ? item.subtitle.split(' · ').pop() ?? ''
+        : item.subtitle;
+      const subtitle = sm.teamName
+        ? `${sm.teamName} · ${country}`
+        : item.subtitle;
+      return {
+        ...item,
+        subtitle,
+        smId: (sm.id && sm.id > 0) ? sm.id : undefined,
+        image: apiImage,
+        teamName: sm.teamName,
+        teamLogo: sm.teamLogo,
+        jerseyNumber: sm.jerseyNumber,
+        position: sm.position,
+      };
+    });
+  }, [smPlayerMap]);
+
+  const enrichedAllPlayers = useMemo(() => {
+    const names = new Set(POPULAR_PLAYERS.map(p => normalize(p.name)));
+    const extras: FavItem[] = smPlayers
+      .filter(p => !names.has(normalize(p.name)))
+      .map(p => ({
+        id: String(p.id),
+        name: p.name,
+        // Show "Team · League" (e.g. "América · Liga MX") for squad players.
+        subtitle: [p.teamName, p.leagueName || p.position].filter(Boolean).join(' · ') || '',
+        emoji: abbrev(p.name),
+        smId: p.id,
+        image: p.image?.startsWith('http') ? p.image : undefined,
+        teamName: p.teamName,
+        teamLogo: p.teamLogo,
+        jerseyNumber: p.jerseyNumber,
+        position: p.position,
+      }));
+    return deduplicateItems([...enrichedPopularPlayers, ...extras]);
+  }, [enrichedPopularPlayers, smPlayers]);
+
+  const enrichedLeagues = useMemo(() => {
+    const names = new Set(POPULAR_LEAGUES.map(l => normalize(l.name)));
+    const popular = POPULAR_LEAGUES.map(item => {
+      const sm = smLeagueMap.get(normalize(item.name));
+      if (!sm) return item;
+      const apiImage = sm.image?.startsWith('http') ? sm.image : undefined;
+      return { ...item, smId: sm.id ?? item.smId, seasonId: sm.seasonId, image: apiImage ?? item.image };
+    });
+    const extras: FavItem[] = smLeagues
+      .filter(l => !names.has(normalize(l.name)))
+      .map(l => ({
+        id: String(l.id),
+        name: l.name,
+        subtitle: l.country || '',
+        emoji: l.flag || '🏆',
+        smId: l.id,
+        image: l.image?.startsWith('http') ? l.image : undefined,
+        seasonId: l.seasonId,
+      }));
+    return deduplicateItems([...popular, ...extras]);
+  }, [smLeagueMap, smLeagues]);
+
+  // ── Effective ID helper ──
+  // Uses item.id directly (always stable). For teams/leagues, item.id = String(smId)
+  // so behavior is unchanged. For popular players (name-based), item.id = 'pop_<slug>'
+  // which stays stable even before SportMonks resolves the smId — this prevents the
+  // follow toggle from "forgetting" a player when the smId comes back from the API.
+  const getEffectiveId = useCallback((item: FavItem): string => item.id, []);
+
+  // ── Per-tab config ──
+  // `items`       → list shown as suggestions (popular only for jugadores)
+  // `searchItems` → full searchable index (popular + squad data for jugadores).
+  //                 Also used to compute `followed` so squad-followed players still appear.
+  const tabConfig = useMemo(() => ({
+    equipos: {
+      items: enrichedTeams,
+      searchItems: enrichedTeams,
+      isFollowing: (item: FavItem) => isFollowingTeam(getEffectiveId(item)),
+      toggle: (item: FavItem) => toggleFollowTeam(getEffectiveId(item)),
+      count: enrichedTeams.filter(t => isFollowingTeam(getEffectiveId(t))).length,
+    },
+    ligas: {
+      items: enrichedLeagues,
+      searchItems: enrichedLeagues,
+      isFollowing: (item: FavItem) => isFollowingLeague(getEffectiveId(item)),
+      toggle: (item: FavItem) => toggleFollowLeague(getEffectiveId(item)),
+      count: enrichedLeagues.filter(l => isFollowingLeague(getEffectiveId(l))).length,
+    },
+    jugadores: {
+      items: enrichedPopularPlayers,        // suggestions: only the curated 15 TOP players
+      searchItems: enrichedAllPlayers,      // search & followed: popular + squad data (~750)
+      isFollowing: (item: FavItem) => isFollowingPlayer(getEffectiveId(item)),
+      toggle: (item: FavItem) => toggleFollowPlayer(getEffectiveId(item)),
+      count: enrichedAllPlayers.filter(p => isFollowingPlayer(getEffectiveId(p))).length,
+    },
+  }), [
+    enrichedTeams, enrichedLeagues,
+    enrichedPopularPlayers, enrichedAllPlayers,
+    followedTeamIds, followedLeagueIds, followedPlayerIds,
+    isFollowingTeam, isFollowingLeague, isFollowingPlayer,
+    toggleFollowTeam, toggleFollowLeague, toggleFollowPlayer,
+    getEffectiveId,
+  ]);
+
+  const config = tabConfig[activeTab];
+  const isLeague = activeTab === 'ligas';
+  const isPlayer = activeTab === 'jugadores';
+
+  // ── Split: followed vs suggestions ──
+  // Followed comes from `searchItems` (full index) — so a player followed via search
+  // (e.g. Lichnovsky) still appears in "Mis seguidos".
+  // Suggestions come from `items` (curated only) — so we don't flood the screen with
+  // 750+ squad players from Phase 2 data.
+  const { followed, suggestions } = useMemo(() => {
+    const fol = config.searchItems.filter(item => config.isFollowing(item));
+    const sug = config.items.filter(item => !config.isFollowing(item));
+    return { followed: fol, suggestions: sug };
+  }, [config]);
+
+  // ── Search (flat, no section split) ──
+  // Uses `searchItems` (full index) so users can find any player by name —
+  // including squad players that aren't in the curated suggestion list.
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return null;
+    const q = normalize(searchQuery);
+    return config.searchItems.filter(i =>
+      normalize(i.name).includes(q) || normalize(i.subtitle).includes(q)
+    );
+  }, [config.searchItems, searchQuery]);
+
+  // ── Navigation ──
+  const handleItemNav = useCallback((item: FavItem) => {
+    if (!item.smId) return;
+    if (activeTab === 'equipos') {
+      navigation.navigate('TeamDetail', {
+        teamId: item.smId,
+        teamName: item.name,
+        teamLogo: item.image || item.emoji,
+        seasonId: item.seasonId,
+      });
+    } else if (activeTab === 'ligas') {
+      navigation.navigate('LeagueDetail', {
+        leagueId: item.smId,
+        leagueName: item.name,
+        leagueLogo: item.emoji,
+        seasonId: item.seasonId,
+      });
+    } else {
+      navigation.navigate('PlayerDetail', {
+        playerId: item.smId,
+        playerName: item.name,
+        playerImage: item.image,
+        teamName: item.teamName,
+        teamLogo: item.teamLogo,
+        jerseyNumber: item.jerseyNumber,
+      });
+    }
+  }, [activeTab, navigation]);
+
+  const totalCount = tabConfig.equipos.count + tabConfig.ligas.count + tabConfig.jugadores.count;
+
+  // ── Section data for the main (non-search) list ──
+  const visibleSuggestions = suggestions.slice(0, suggestedVisible);
+  const remainingSuggested = suggestions.length - suggestedVisible;
+
+  // ── Render item (shared between search and sectioned list) ──
+  // keyPrefix ensures sibling keys are unique across sections ('f_', 's_', 'q_').
+  const renderItem = useCallback((item: FavItem, keyPrefix: string) => {
+    const fol = config.isFollowing(item);
+    return (
+      <ItemRow
+        key={`${keyPrefix}${item.smId ?? item.id}`}
+        item={item}
+        followed={fol}
+        canNavigate={!!item.smId}
+        isLeague={isLeague}
+        isPlayer={isPlayer}
+        isDark={isDark}
+        onToggle={() => { haptics.medium(); config.toggle(item); }}
+        onNav={() => handleItemNav(item)}
+        borderColor={isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'}
+      />
+    );
+  }, [config, isLeague, isPlayer, isDark, handleItemNav]);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  return (
+    <SafeAreaView style={[st.safe, { backgroundColor: c.bg }]} edges={['top']}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+
+      {/* ── Header ── */}
+      <View style={[st.header, { borderBottomColor: c.border, backgroundColor: c.bg }]}>
+        <View style={st.headerLeft}>
+          <View style={[st.headerIcon, { backgroundColor: 'rgba(251,191,36,0.15)' }]}>
+            <Text style={{ fontSize: 15 }}>⭐</Text>
+          </View>
+          <View>
+            <Text style={[st.headerTitle, { color: c.textPrimary }]}>
+              {t('favorites.title')}
+            </Text>
+            <Text style={[st.headerSub, { color: c.textSecondary }]}>
+              {totalCount > 0
+                ? t('favorites.selected', { count: totalCount })
+                : t('favorites.subtitle')}
+            </Text>
+          </View>
+        </View>
+        {totalCount > 0 && (
+          <View style={[st.headerBadge, { backgroundColor: '#fbbf24' }]}>
+            <Text style={st.headerBadgeStar}>⭐</Text>
+            <Text style={st.headerBadgeNum}>{totalCount}</Text>
+          </View>
+        )}
+      </View>
+
+      {/* ── Tabs ── */}
+      <View style={st.tabBar}>
+        {TABS.map(tab => {
+          const active = activeTab === tab.id;
+          const cnt = tabConfig[tab.id].count;
+          return (
+            <TouchableOpacity
+              key={tab.id}
+              style={[
+                st.tab,
+                { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', borderColor: c.border },
+                active && { backgroundColor: c.accent, borderColor: c.accent },
+              ]}
+              onPress={() => { setActiveTab(tab.id); setSearchQuery(''); }}
+              activeOpacity={0.7}
+            >
+              <Text style={st.tabIcon}>{tab.icon}</Text>
+              <Text style={[st.tabLabel, { color: active ? '#0D0D0D' : c.textSecondary }]}>
+                {t(tab.labelKey)}
+              </Text>
+              {cnt > 0 && (
+                <View style={[
+                  st.tabBadge,
+                  { backgroundColor: active ? 'rgba(0,0,0,0.18)' : 'rgba(0,224,150,0.18)' },
+                ]}>
+                  <Text style={[st.tabBadgeNum, { color: active ? '#0D0D0D' : '#00E096' }]}>
+                    {cnt}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* ── Search ── */}
+      <View style={st.searchWrap}>
+        <View style={[st.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', borderColor: c.border }]}>
+          <Text style={[st.searchIcon, { color: c.textTertiary }]}>⌕</Text>
+          <TextInput
+            style={[st.searchInput, { color: c.textPrimary }]}
+            placeholder={t(SEARCH_PLACEHOLDER_KEYS[activeTab])}
+            placeholderTextColor={c.textTertiary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSearchQuery('')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={[st.searchClearBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)' }]}
+            >
+              <Text style={[st.searchClearText, { color: c.textSecondary }]}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* ── Loading skeleton ── */}
+      {loading ? (
+        <View style={{ paddingTop: 8 }}>
+          <SkeletonFavoritos />
+        </View>
+      ) : (
+        <ScrollView
+          style={{ flex: 1 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={st.scrollContent}
+        >
+          {/* ── SEARCH MODE ── */}
+          {searchResults !== null && (
+            <>
+              {searchResults.length === 0 ? (
+                <View style={st.emptyState}>
+                  <Text style={st.emptyIcon}>🔍</Text>
+                  <Text style={[st.emptyText, { color: c.textSecondary }]}>
+                    Sin resultados para "{searchQuery}"
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <View style={[sh.row, { paddingTop: 4, marginBottom: 10 }]}>
+                    <Text style={[sh.label, { color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)' }]}>
+                      {searchResults.length} resultado{searchResults.length !== 1 ? 's' : ''}
+                    </Text>
+                    <View style={[sh.line, { backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)' }]} />
+                  </View>
+                  {searchResults.map(item => renderItem(item, 'q_'))}
+                </>
+              )}
+            </>
+          )}
+
+          {/* ── NORMAL MODE ── */}
+          {searchResults === null && (
+            <>
+              {/* Section: Mis seguidos */}
+              {followed.length > 0 && (
+                <>
+                  <SectionHeader
+                    label={t('favorites.myFollowed')}
+                    count={followed.length}
+                    accent
+                    isDark={isDark}
+                  />
+                  {followed.map(item => renderItem(item, 'f_'))}
+                </>
+              )}
+
+              {/* Section: Los más seguidos (suggestions) */}
+              <SectionHeader
+                label={followed.length > 0 ? t('favorites.suggested') : t('favorites.mostFollowed')}
+                count={suggestions.length}
+                isDark={isDark}
+              />
+              {visibleSuggestions.map(item => renderItem(item, 's_'))}
+
+              {/* Load more */}
+              {remainingSuggested > 0 && (
+                <TouchableOpacity
+                  style={[st.showMore, { borderColor: c.border }]}
+                  onPress={() => setSuggestedVisible(v => v + LOAD_MORE_COUNT)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[st.showMoreChevron, { color: c.textTertiary }]}>▼</Text>
+                  <Text style={[st.showMoreText, { color: c.textSecondary }]}>
+                    Ver {Math.min(LOAD_MORE_COUNT, remainingSuggested)} más
+                  </Text>
+                  <Text style={[st.showMoreCount, { color: c.textTertiary }]}>
+                    ({remainingSuggested} restantes)
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {remainingSuggested === 0 && suggestions.length > INITIAL_SUGGESTED && (
+                <Text style={[st.allLoaded, { color: c.textTertiary }]}>
+                  ✓ Mostrando todos
+                </Text>
+              )}
+            </>
+          )}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.bg,
+// ─────────────────────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────────────────────
+
+const st = StyleSheet.create({
+  safe: { flex: 1 },
+
+  // Header
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12,
+    borderBottomWidth: 1,
   },
-  topBar: {
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 12,
+  headerLeft:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerIcon:     { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  headerTitle:    { fontSize: 18, fontWeight: '800' },
+  headerSub:      { fontSize: 12, fontWeight: '500', marginTop: 1 },
+  headerBadge:    { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14 },
+  headerBadgeStar:{ fontSize: 12, color: '#000' },
+  headerBadgeNum: { fontSize: 13, fontWeight: '800', color: '#000' },
+
+  // Tabs
+  tabBar:      { flexDirection: 'row', paddingHorizontal: 16, gap: 8, paddingBottom: 12 },
+  tab:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, flex: 1, paddingVertical: 9, paddingHorizontal: 8, borderRadius: 12, borderWidth: 1 },
+  tabIcon:     { fontSize: 13 },
+  tabLabel:    { fontSize: 12, fontWeight: '700' },
+  tabBadge:    { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8 },
+  tabBadgeNum: { fontSize: 10, fontWeight: '800' },
+
+  // Search
+  searchWrap: { paddingHorizontal: 16, marginBottom: 10 },
+  searchBar:  { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, height: 44, borderWidth: 1, gap: 8 },
+  searchIcon: { fontSize: 17 },
+  searchInput:{ flex: 1, fontSize: 14, padding: 0 },
+  searchClearBtn: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  searchClearText:{ fontSize: 10, fontWeight: '700' },
+
+  // Show more
+  showMore: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 14, marginTop: 10,
+    borderWidth: 1, borderRadius: 14,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.textPrimary,
-    letterSpacing: -0.8,
-  },
-  content: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    paddingBottom: 60,
-  },
-  emptyIcon: {
-    fontSize: 52,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
+  showMoreChevron:{ fontSize: 10 },
+  showMoreText:   { fontSize: 13, fontWeight: '600' },
+  showMoreCount:  { fontSize: 11, fontWeight: '400' },
+
+  // All loaded
+  allLoaded: { textAlign: 'center', fontSize: 11, paddingVertical: 16 },
+
+  // Scroll content
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 100 },
+
+  // Empty
+  emptyState: { paddingTop: 60, alignItems: 'center', gap: 10 },
+  emptyIcon:  { fontSize: 36 },
+  emptyText:  { fontSize: 15, textAlign: 'center' },
 });

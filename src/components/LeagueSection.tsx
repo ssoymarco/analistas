@@ -1,166 +1,158 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-} from 'react-native';
-import { colors } from '../theme/colors';
-import { League, Match } from '../data/mockData';
+import React, { useRef, useEffect } from 'react';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Animated, Easing } from 'react-native';
+import { useThemeColors } from '../theme/useTheme';
+import type { Match } from '../data/types';
+import type { LeagueWithMatches } from '../services/sportsApi';
 import { MatchCard } from './MatchCard';
 
-interface LeagueSectionProps {
-  league: League;
-  onMatchPress?: (match: Match) => void;
-}
-
-const ChevronIcon = ({ expanded }: { expanded: boolean }) => (
-  <View style={[styles.chevron, expanded && styles.chevronExpanded]}>
-    <View style={styles.chevronLine1} />
-    <View style={styles.chevronLine2} />
-  </View>
-);
-
-const FlagEmoji: Record<string, string> = {
-  Inglaterra: '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
-  España: '🇪🇸',
-  México: '🇲🇽',
-  Europa: '🇪🇺',
+/** Renders a league flag — Image if URL, Text if emoji */
+const LeagueFlag = ({ logo, size = 18 }: { logo: string; size?: number }) => {
+  const isUrl = logo.startsWith('http');
+  if (isUrl) {
+    return (
+      <Image
+        source={{ uri: logo }}
+        style={{ width: size, height: size, borderRadius: 2 }}
+        resizeMode="contain"
+      />
+    );
+  }
+  return <Text style={{ fontSize: size - 2 }}>{logo}</Text>;
 };
 
-export const LeagueSection: React.FC<LeagueSectionProps> = ({
-  league,
-  onMatchPress,
-}) => {
-  const [expanded, setExpanded] = useState(true);
+interface LeagueSectionProps {
+  league: LeagueWithMatches;
+  onMatchPress?: (match: Match) => void;
+  onLeaguePress?: (league: LeagueWithMatches) => void;
+  /** Index in parent list — drives staggered entry animation */
+  index?: number;
+}
 
-  const liveMatches = league.matches.filter((m) => m.status === 'live').length;
-  const flag = FlagEmoji[league.country] ?? '🏆';
+const LEAGUE_FLAGS: Record<string, string> = {
+  'premier-league':   '🇬🇧',
+  'la-liga':          '🇪🇸',
+  'liga-mx':          '🇲🇽',
+  'serie-a':          '🇮🇹',
+  'ligue-1':          '🇫🇷',
+  'bundesliga':       '🇩🇪',
+  'brasileirao':      '🇧🇷',
+  'champions-league': '🏆',
+};
+
+export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPress, onLeaguePress, index = 0 }) => {
+  const c = useThemeColors();
+  const hasLive = league.matches.some(m => m.status === 'live');
+  const flag = league.logo || LEAGUE_FLAGS[league.id] || '🏆';
+
+  // ── Staggered entry animation ──────────────────────────────────────────────
+  const entryAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(entryAnim, {
+      toValue: 1,
+      duration: 450,
+      delay: index * 80,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const entryStyle = {
+    opacity: entryAnim,
+    transform: [{
+      translateY: entryAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [18, 0],
+      }),
+    }],
+  };
+
+  // Chevron ">" icon
+  const ChevronRight = () => (
+    <View style={s.chevron}>
+      <View style={[s.chevronLine1, { backgroundColor: c.textTertiary }]} />
+      <View style={[s.chevronLine2, { backgroundColor: c.textTertiary }]} />
+    </View>
+  );
 
   return (
-    <View style={styles.section}>
-      {/* League Header */}
-      <TouchableOpacity
-        style={styles.header}
-        onPress={() => setExpanded((prev) => !prev)}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.flag}>{flag}</Text>
-        <View style={styles.headerInfo}>
-          <Text style={styles.leagueName}>{league.name}</Text>
-          <Text style={styles.countryName}>{league.country}</Text>
-        </View>
-        {liveMatches > 0 && (
-          <View style={styles.liveBadge}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveBadgeText}>{liveMatches} en vivo</Text>
+    <Animated.View style={[s.card, { backgroundColor: c.card }, entryStyle]}>
+      {/* Header */}
+      <TouchableOpacity style={[s.header, { backgroundColor: c.surface, borderBottomColor: c.border }]} activeOpacity={0.7} onPress={() => onLeaguePress?.(league)}>
+        <LeagueFlag logo={flag} />
+        <Text style={[s.leagueName, { color: c.textSecondary }]}>{league.name}</Text>
+        {hasLive && (
+          <View style={s.liveBadge}>
+            <View style={[s.liveDot, { backgroundColor: c.live }]} />
+            <Text style={[s.liveText, { color: c.live }]}>EN VIVO</Text>
           </View>
         )}
-        <ChevronIcon expanded={expanded} />
+        <View style={{ flex: 1 }} />
+        <ChevronRight />
       </TouchableOpacity>
 
       {/* Matches */}
-      {expanded && (
-        <View style={styles.matchesList}>
-          {league.matches.map((match, index) => (
-            <View key={match.id}>
-              <MatchCard match={match} onPress={onMatchPress} />
-              {index < league.matches.length - 1 && (
-                <View style={styles.matchDivider} />
-              )}
-            </View>
-          ))}
-        </View>
-      )}
-    </View>
+      {league.matches.map((match) => (
+        <MatchCard key={match.id} match={match} onPress={onMatchPress} />
+      ))}
+    </Animated.View>
   );
 };
 
-const styles = StyleSheet.create({
-  section: {
+const s = StyleSheet.create({
+  card: {
+    marginHorizontal: 16,
     marginBottom: 8,
-    overflow: 'hidden',
     borderRadius: 12,
-    marginHorizontal: 12,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: colors.leagueHeaderBg,
-    gap: 10,
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
   },
-  flag: {
-    fontSize: 20,
-  },
-  headerInfo: {
-    flex: 1,
-    gap: 1,
-  },
+  flag: { fontSize: 16 },
   leagueName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    letterSpacing: -0.2,
-  },
-  countryName: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    fontWeight: '400',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: -0.1,
   },
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.liveDim,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
     gap: 4,
+    marginLeft: 4,
   },
   liveDot: {
     width: 5,
     height: 5,
     borderRadius: 3,
-    backgroundColor: colors.live,
   },
-  liveBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.live,
+  liveText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
   },
   chevron: {
-    width: 16,
-    height: 16,
+    width: 14,
+    height: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chevronExpanded: {
-    transform: [{ rotate: '180deg' }],
-  },
   chevronLine1: {
     position: 'absolute',
-    width: 7,
+    width: 6,
     height: 1.5,
-    backgroundColor: colors.textSecondary,
     borderRadius: 1,
-    transform: [{ rotate: '-45deg' }, { translateX: -2 }],
+    transform: [{ rotate: '45deg' }, { translateY: -2 }],
   },
   chevronLine2: {
     position: 'absolute',
-    width: 7,
+    width: 6,
     height: 1.5,
-    backgroundColor: colors.textSecondary,
     borderRadius: 1,
-    transform: [{ rotate: '45deg' }, { translateX: 2 }],
-  },
-  matchesList: {},
-  matchDivider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginHorizontal: 16,
+    transform: [{ rotate: '-45deg' }, { translateY: 2 }],
   },
 });
