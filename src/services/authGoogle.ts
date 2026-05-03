@@ -9,10 +9,21 @@
  *  2. Receive id_token back via redirect
  *  3. Create Firebase GoogleAuthProvider credential
  *  4. signInWithCredential(auth, credential) → Firebase user
+ *
+ * Android setup (required to enable Google Sign-In on Android):
+ *  1. Firebase Console → Project Settings → Add Android app
+ *     - Package name: app.analistas (must match app.json android.package)
+ *     - Download google-services.json → place at project root
+ *  2. Google Cloud Console → APIs & Services → Credentials
+ *     - Create OAuth 2.0 Client ID → Android
+ *     - Package name: app.analistas
+ *     - SHA-1: run `eas credentials` or get from Firebase Console
+ *  3. Set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID in .env with the Client ID
  */
 
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
+import { Platform } from 'react-native';
 import { GoogleAuthProvider, signInWithCredential, linkWithCredential } from 'firebase/auth';
 import { auth } from './firebase';
 
@@ -29,13 +40,35 @@ const IOS_CLIENT_ID =
 const WEB_CLIENT_ID =
   '562270448336-d3ae5g54347do4nrmsoagjf7jsbc4d38.apps.googleusercontent.com';
 
+// Android Client ID: Firebase Console → Add Android app → google-services.json
+// Set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID in your .env file.
+// The sentinel value 'android_pending' prevents expo-auth-session from throwing
+// a render-time invariant error on Android while this is not yet configured —
+// sign-in attempts will fail gracefully until the real ID is provided.
+const ANDROID_CLIENT_ID =
+  process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? 'android_pending';
+
+/** True once a real Android Client ID has been set in the environment. */
+const ANDROID_GOOGLE_CONFIGURED =
+  Platform.OS !== 'android' ||
+  (!!process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID &&
+    process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID !== 'android_pending');
+
 export function useGoogleAuth() {
   const [request, response, promptAsync] = Google.useAuthRequest({
     iosClientId: IOS_CLIENT_ID,
     webClientId: WEB_CLIENT_ID,
+    // Always provide androidClientId on Android — expo-auth-session throws a
+    // synchronous render error if this is missing, crashing PerfilScreen entirely.
+    // We use the sentinel 'android_pending' until the real ID is configured.
+    androidClientId: Platform.OS === 'android' ? ANDROID_CLIENT_ID : undefined,
   });
 
   const signInWithGoogle = async (): Promise<void> => {
+    if (!ANDROID_GOOGLE_CONFIGURED) {
+      throw new Error('android_not_configured');
+    }
+
     const result = await promptAsync();
 
     if (result.type !== 'success') {
@@ -58,6 +91,10 @@ export function useGoogleAuth() {
    * from the existing account take precedence.
    */
   const upgradeWithGoogle = async (): Promise<'linked' | 'signed_in'> => {
+    if (!ANDROID_GOOGLE_CONFIGURED) {
+      throw new Error('android_not_configured');
+    }
+
     const result = await promptAsync();
     if (result.type !== 'success') {
       if (result.type === 'cancel') throw new Error('cancelled');
@@ -88,5 +125,11 @@ export function useGoogleAuth() {
     return 'signed_in';
   };
 
-  return { signInWithGoogle, upgradeWithGoogle, googleAuthReady: !!request };
+  return {
+    signInWithGoogle,
+    upgradeWithGoogle,
+    googleAuthReady: !!request && ANDROID_GOOGLE_CONFIGURED,
+    /** False on Android until EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID is configured. */
+    androidGoogleConfigured: ANDROID_GOOGLE_CONFIGURED,
+  };
 }

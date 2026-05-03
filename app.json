@@ -32,6 +32,7 @@
       }
     },
     "android": {
+      "package": "app.analistas",
       "adaptiveIcon": {
         "backgroundColor": "#0D1F35",
         "foregroundImage": "./assets/logo-white.png",
