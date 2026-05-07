@@ -16,7 +16,7 @@ const DarkModeContext = createContext<DarkModeContextType>({
 
 export function DarkModeProvider({ children }: { children: ReactNode }) {
   const colorScheme = useColorScheme();
-  const [isDark, setIsDark] = useState(true); // default dark while loading
+  const [isDark, setIsDark] = useState(colorScheme !== 'light'); // follow system while loading
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then(stored => {
