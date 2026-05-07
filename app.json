@@ -26,15 +26,19 @@
     ],
     "ios": {
       "bundleIdentifier": "app.analistas",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": true,
       "infoPlist": {
         "UIBackgroundModes": [
+          "remote-notification",
           "remote-notification"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "app.analistas",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#0D1F35",
         "foregroundImage": "./assets/logo-white.png",
@@ -49,6 +53,11 @@
     },
     "web": {
       "favicon": "./assets/icon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "97403d80-dd71-466d-8a26-43eec99646fd"
+      }
     }
   }
 }

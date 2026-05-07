@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "562270448336",
+    "project_id": "analistas-8ba26",
+    "storage_bucket": "analistas-8ba26.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:562270448336:android:255d1e8fa2604a2fef8cd5",
+        "android_client_info": {
+          "package_name": "app.analistas"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "562270448336-d3ae5g54347do4nrmsoagjf7jsbc4d38.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA12VGfPFwFDGGkMyG7i1r0e8j_IYuAkfw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "562270448336-d3ae5g54347do4nrmsoagjf7jsbc4d38.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "562270448336-7telon5j0pjscfbet7pqo3faq6mu3pc4.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "app.analistas",
+                "app_store_id": "6767097258"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
