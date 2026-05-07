@@ -15,6 +15,7 @@ import type { ColorPalette } from '../theme/colors';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useGoogleAuth } from '../services/authGoogle';
+import { upgradeWithApple, isAppleAuthAvailable } from '../services/authApple';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useUserStats } from '../contexts/UserStatsContext';
@@ -374,6 +375,11 @@ export const PerfilScreen: React.FC = () => {
     : undefined;
   const handleLogout = () => { haptics.heavy(); setLogoutModalVisible(false); logout(); resetOnboarding(); };
 
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  useEffect(() => {
+    isAppleAuthAvailable().then(setAppleAvailable).catch(() => {});
+  }, []);
+
   const handleUpgradeWithGoogle = useCallback(async () => {
     if (!googleAuthReady || upgrading) return;
     setUpgrading(true);
@@ -390,6 +396,24 @@ export const PerfilScreen: React.FC = () => {
       setUpgrading(false);
     }
   }, [googleAuthReady, upgrading, upgradeWithGoogle, t]);
+
+  const handleUpgradeWithApple = useCallback(async () => {
+    if (upgrading) return;
+    setUpgrading(true);
+    haptics.medium();
+    try {
+      await upgradeWithApple();
+      Alert.alert('', t('profile.upgradeSuccess'));
+    } catch (err: unknown) {
+      const e = err as { code?: string; message?: string };
+      // ERR_REQUEST_CANCELED = user dismissed sheet — silent
+      if (e.code !== 'ERR_REQUEST_CANCELED') {
+        Alert.alert(t('common.error'), t('profile.upgradeError'));
+      }
+    } finally {
+      setUpgrading(false);
+    }
+  }, [upgrading, t]);
 
   const handleShare = useCallback(async () => {
     try { await Share.share({ message: 'Descarga Analistas, la mejor app para seguir el fútbol en tiempo real ⚽\nhttps://analistas.app' }); } catch {}
@@ -538,6 +562,20 @@ export const PerfilScreen: React.FC = () => {
                 <Text style={{ fontSize: 12, color: '#bfdbfe', marginTop: 2 }}>{t('profile.guestModeSub')}</Text>
               </View>
             </View>
+            {/* Connect with Apple (iOS only) */}
+            {appleAvailable && (
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 12, marginBottom: 8, borderRadius: 12, paddingVertical: 11, backgroundColor: '#000', opacity: upgrading ? 0.6 : 1 }}
+                activeOpacity={0.85}
+                onPress={handleUpgradeWithApple}
+                disabled={upgrading}
+              >
+                <Text style={{ fontSize: 15, color: '#fff' }}>🍎</Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>
+                  {upgrading ? '...' : t('profile.connectWithApple')}
+                </Text>
+              </TouchableOpacity>
+            )}
             {/* Connect with Google */}
             <TouchableOpacity
               style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 12, marginBottom: 8, borderRadius: 12, paddingVertical: 11, backgroundColor: '#fff', opacity: upgrading ? 0.6 : 1 }}

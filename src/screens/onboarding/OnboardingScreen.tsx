@@ -16,7 +16,7 @@ import React, {
 import {
   View, Text, StyleSheet, Animated, TouchableOpacity, FlatList, ScrollView,
   TextInput, Image, ImageBackground, Dimensions, Platform, ActivityIndicator,
-  Easing, KeyboardAvoidingView,
+  Easing, KeyboardAvoidingView, Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -30,6 +30,8 @@ import { useNotificationPrefs } from '../../contexts/NotificationPrefsContext';
 import { getSearchableTeams, getSearchableLeagues, getSearchablePlayers } from '../../services/sportsApi';
 import { normalize } from '../../utils/normalize';
 import { requestPermissionsAndGetToken } from '../../services/notifications';
+import { useGoogleAuth } from '../../services/authGoogle';
+import { signInWithApple, isAppleAuthAvailable } from '../../services/authApple';
 import type { SearchableTeam, SearchableLeague, SearchablePlayer } from '../../services/sportsApi';
 import type { AuthMethod } from '../../contexts/AuthContext';
 
@@ -1231,7 +1233,9 @@ const Screen8Name: React.FC<{
   state: OnboardingState;
   onAuth: (method: AuthMethod) => void;
   onBack: () => void;
-}> = ({ name, onChangeName, state, onAuth, onBack }) => {
+  authLoading?: boolean;
+  appleAvailable?: boolean;
+}> = ({ name, onChangeName, state, onAuth, onBack, authLoading = false, appleAvailable = true }) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
@@ -1302,21 +1306,44 @@ const Screen8Name: React.FC<{
         <Text style={[s8.registerHint, { color: th.TEXT_DIM }]}>{t('onboarding.nameRegister')}</Text>
 
         {/* Auth buttons */}
-        <TouchableOpacity style={s8.appleBtn} onPress={() => onAuth('apple')} activeOpacity={0.85}>
-          <View style={s8.appleLogo}>
-            {/* Apple logo drawn with View */}
-            <Text style={{ fontSize: 18, color: '#000' }}>🍎</Text>
-          </View>
-          <Text style={s8.appleBtnText}>{t('onboarding.continueWithApple')}</Text>
-        </TouchableOpacity>
+        {appleAvailable && (
+          <TouchableOpacity
+            style={[s8.appleBtn, authLoading && { opacity: 0.6 }]}
+            onPress={() => !authLoading && onAuth('apple')}
+            activeOpacity={0.85}
+            disabled={authLoading}
+          >
+            {authLoading ? (
+              <ActivityIndicator size="small" color="#000" />
+            ) : (
+              <View style={s8.appleLogo}>
+                <Text style={{ fontSize: 18, color: '#000' }}>🍎</Text>
+              </View>
+            )}
+            <Text style={s8.appleBtnText}>{t('onboarding.continueWithApple')}</Text>
+          </TouchableOpacity>
+        )}
 
-        <TouchableOpacity style={[s8.googleBtn, { borderColor: th.isDark ? '#333' : '#E5E7EB' }]} onPress={() => onAuth('google')} activeOpacity={0.85}>
-          <Text style={{ fontSize: 18 }}>🌐</Text>
+        <TouchableOpacity
+          style={[s8.googleBtn, { borderColor: th.isDark ? '#333' : '#E5E7EB' }, authLoading && { opacity: 0.6 }]}
+          onPress={() => !authLoading && onAuth('google')}
+          activeOpacity={0.85}
+          disabled={authLoading}
+        >
+          {authLoading ? (
+            <ActivityIndicator size="small" color={th.TEXT_PRIMARY} />
+          ) : (
+            <Text style={{ fontSize: 18 }}>🌐</Text>
+          )}
           <Text style={[s8.googleBtnText, { color: th.TEXT_PRIMARY }]}>{t('onboarding.continueWithGoogle')}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => onAuth('guest')} style={{ paddingVertical: 16, alignItems: 'center' }}>
-          <Text style={s8.guestLink}>{t('onboarding.continueWithoutAccount')}</Text>
+        <TouchableOpacity
+          onPress={() => !authLoading && onAuth('guest')}
+          style={{ paddingVertical: 16, alignItems: 'center' }}
+          disabled={authLoading}
+        >
+          <Text style={[s8.guestLink, authLoading && { opacity: 0.4 }]}>{t('onboarding.continueWithoutAccount')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -1740,6 +1767,7 @@ const searchS = StyleSheet.create({
 // ─────────────────────────────────────────────────────────────────────────────
 export function OnboardingScreen() {
   const { completeOnboarding } = useOnboarding();
+  const { t } = useTranslation();
 
   // ── Data loading ────────────────────────────────────────────────────────────
   const [teams, setTeams]     = useState<SearchableTeam[]>(FALLBACK_TEAMS);
@@ -1852,10 +1880,57 @@ export function OnboardingScreen() {
     }));
   }, []);
 
-  const handleAuth = useCallback((method: AuthMethod) => {
+  const { signInWithGoogle } = useGoogleAuth();
+  const [authLoading, setAuthLoading]     = useState(false);
+  const [appleAvailable, setAppleAvailable] = useState(false);
+
+  useEffect(() => {
+    isAppleAuthAvailable().then(setAppleAvailable).catch(() => {});
+  }, []);
+
+  const handleAuth = useCallback(async (method: AuthMethod) => {
+    if (method === 'apple') {
+      setAuthLoading(true);
+      try {
+        await signInWithApple();
+        // Firebase onAuthStateChanged fires automatically — just navigate
+        setObState(prev => ({ ...prev, authMethod: 'apple' }));
+        goTo(9);
+      } catch (err: unknown) {
+        const e = err as { code?: string; message?: string };
+        // ERR_REQUEST_CANCELED = user dismissed the Apple sheet — silent
+        if (e.code !== 'ERR_REQUEST_CANCELED') {
+          Alert.alert(t('common.error'), t('onboarding.appleSignInError'));
+        }
+      } finally {
+        setAuthLoading(false);
+      }
+      return;
+    }
+
+    if (method === 'google') {
+      setAuthLoading(true);
+      try {
+        await signInWithGoogle();
+        // Firebase onAuthStateChanged fires automatically — just navigate
+        setObState(prev => ({ ...prev, authMethod: 'google' }));
+        goTo(9);
+      } catch (err: unknown) {
+        const e = err as { message?: string };
+        // 'cancelled' = user dismissed the Google sheet — silent
+        if (e.message !== 'cancelled') {
+          Alert.alert(t('common.error'), t('onboarding.googleSignInError'));
+        }
+      } finally {
+        setAuthLoading(false);
+      }
+      return;
+    }
+
+    // guest
     setObState(prev => ({ ...prev, authMethod: method }));
     goTo(9);
-  }, []);
+  }, [signInWithGoogle, t]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
   switch (screen) {
@@ -1947,6 +2022,8 @@ export function OnboardingScreen() {
           state={obState}
           onAuth={handleAuth}
           onBack={goBack}
+          authLoading={authLoading}
+          appleAvailable={appleAvailable}
         />
       );
 

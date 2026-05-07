@@ -21,9 +21,11 @@
       ],
       "expo-web-browser",
       "expo-localization",
+      "expo-apple-authentication",
       "@sentry/react-native"
     ],
     "ios": {
+      "bundleIdentifier": "app.analistas",
       "supportsTablet": true,
       "infoPlist": {
         "UIBackgroundModes": [
