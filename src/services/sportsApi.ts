@@ -2331,9 +2331,16 @@ export async function getLeagues(): Promise<League[]> {
 
 /**
  * Get news articles — SM doesn't provide news on free plan.
- * Returns mock data for now.
+ * Fetches from WordPress headless CMS. Falls back to mock data if unavailable.
  */
 export async function getNews(): Promise<NewsArticle[]> {
+  try {
+    const { getWPNews } = await import('./wordpressApi');
+    const articles = await getWPNews(20);
+    if (articles.length > 0) return articles;
+  } catch (err) {
+    console.warn('[getNews] WordPress unavailable, using mock data:', err);
+  }
   const { news } = await import('../data/mockData');
   return news;
 }
