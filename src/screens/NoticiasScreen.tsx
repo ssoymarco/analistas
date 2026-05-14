@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, Dimensions, RefreshControl,
+  TextInput, Image, RefreshControl,
 } from 'react-native';
 import { haptics } from '../utils/haptics';
 import { AnimatedPressable } from '../components/AnimatedPressable';
@@ -17,8 +17,7 @@ import type { NewsArticle } from '../data/types';
 import type { NoticiasStackParamList } from '../navigation/AppNavigator';
 import { normalize } from '../utils/normalize';
 import { useTranslation } from 'react-i18next';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
 
 // ── League color map ──────────────────────────────────────────────────────────
 const LEAGUE_COLORS: Record<string, string> = {
@@ -58,6 +57,7 @@ function LeagueBadge({ category }: { category: string }) {
 function HeroCard({ article, onPress, c }: { article: NewsArticle; onPress: () => void; c: ReturnType<typeof useThemeColors> }) {
   const { t } = useTranslation();
   const isRecent = (article.timeAgo ?? 999) <= 90;
+  const [imgFailed, setImgFailed] = useState(false);
   return (
     <AnimatedPressable
       style={[styles.heroCard, { backgroundColor: c.card }]}
@@ -67,8 +67,13 @@ function HeroCard({ article, onPress, c }: { article: NewsArticle; onPress: () =
     >
       {/* Hero image */}
       <View style={styles.heroImage}>
-        {article.image ? (
-          <Image source={{ uri: article.image }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        {article.image && !imgFailed ? (
+          <Image
+            source={{ uri: article.image }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+            onError={() => setImgFailed(true)}
+          />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: leagueColor(article.category) + '33', alignItems: 'center', justifyContent: 'center' }]}>
             <Text style={styles.heroImageEmoji}>⚽</Text>
@@ -104,11 +109,17 @@ function HeroCard({ article, onPress, c }: { article: NewsArticle; onPress: () =
 
 // ── Story card (horizontal scroll) ───────────────────────────────────────────
 function StoryCard({ article, onPress, c }: { article: NewsArticle; onPress: () => void; c: ReturnType<typeof useThemeColors> }) {
+  const [imgFailed, setImgFailed] = useState(false);
   return (
     <TouchableOpacity style={[styles.storyCard, { backgroundColor: c.card, borderColor: c.border }]} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.storyImage}>
-        {article.image ? (
-          <Image source={{ uri: article.image }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        {article.image && !imgFailed ? (
+          <Image
+            source={{ uri: article.image }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+            onError={() => setImgFailed(true)}
+          />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: leagueColor(article.category) + '33', alignItems: 'center', justifyContent: 'center' }]}>
             <Text style={styles.storyImageEmoji}>⚽</Text>
@@ -131,12 +142,18 @@ function StoryCard({ article, onPress, c }: { article: NewsArticle; onPress: () 
 // ── Article row (list) ────────────────────────────────────────────────────────
 function ArticleRow({ article, onPress, c }: { article: NewsArticle; onPress: () => void; c: ReturnType<typeof useThemeColors> }) {
   const isRecent = (article.timeAgo ?? 999) <= 60;
+  const [imgFailed, setImgFailed] = useState(false);
   return (
     <TouchableOpacity style={[styles.articleRow, { borderBottomColor: c.border }]} onPress={onPress} activeOpacity={0.75}>
       {/* Thumbnail */}
       <View style={styles.thumbnail}>
-        {article.image ? (
-          <Image source={{ uri: article.image }} style={[StyleSheet.absoluteFill, { borderRadius: 10 }]} resizeMode="cover" />
+        {article.image && !imgFailed ? (
+          <Image
+            source={{ uri: article.image }}
+            style={[StyleSheet.absoluteFill, { borderRadius: 10 }]}
+            resizeMode="cover"
+            onError={() => setImgFailed(true)}
+          />
         ) : (
           <View style={[StyleSheet.absoluteFill, { borderRadius: 10, backgroundColor: leagueColor(article.category) + '33', alignItems: 'center', justifyContent: 'center' }]}>
             <Text style={styles.thumbnailEmoji}>⚽</Text>
@@ -310,6 +327,9 @@ export const NoticiasScreen: React.FC = () => {
               </View>
             )}
 
+            {/* Banner ad — below hero, above "Más noticias" */}
+            <PlaceholderBannerAd variant="amazon-banner" />
+
             {/* Stories horizontal scroll */}
             {stories.length > 0 && (
               <View style={styles.section}>
@@ -335,6 +355,9 @@ export const NoticiasScreen: React.FC = () => {
                 ))}
               </View>
             )}
+
+            {/* Small banner at bottom of news list */}
+            <PlaceholderBannerAd variant="telcel-banner" />
           </>
         )}
         <View style={{ height: 24 }} />

@@ -106,11 +106,21 @@ function timeLabel(isoDate: string): { label: string; minutesAgo: number } {
   return { label, minutesAgo: diffMin };
 }
 
+/** Force HTTPS — iOS App Transport Security blocks plain HTTP image loads */
+function toHttps(url: string): string {
+  return url ? url.replace(/^http:\/\//i, 'https://') : '';
+}
+
 /** Pick best image URL from WP media embed */
 function pickImage(media?: WPEmbedMedia): string {
   if (!media) return '';
   const sizes = media.media_details?.sizes;
-  return sizes?.large?.source_url ?? sizes?.medium_large?.source_url ?? media.source_url ?? '';
+  const url =
+    sizes?.large?.source_url ??
+    sizes?.medium_large?.source_url ??
+    media.source_url ??
+    '';
+  return toHttps(url);
 }
 
 /** Normalize a raw WP post → NewsArticle */

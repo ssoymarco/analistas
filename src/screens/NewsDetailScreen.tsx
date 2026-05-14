@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Animated, Dimensions, Share, Platform,
+  Animated, Dimensions, Share, Platform, Image,
 } from 'react-native';
+import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
 import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -95,6 +96,7 @@ export const NewsDetailScreen: React.FC = () => {
   const { incrementNewsRead } = useUserStats();
   const accent = leagueColor(article.category);
   const readMins = estimateReadTime(article.content);
+  const [heroImgFailed, setHeroImgFailed] = useState(false);
 
   // Track news read (once per unique article)
   useEffect(() => { incrementNewsRead(article.id); }, [article.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -240,7 +242,20 @@ export const NewsDetailScreen: React.FC = () => {
           { backgroundColor: accent + '18', transform: [{ scale: heroScale }, { translateY: heroTranslateY }] },
         ]}>
           <View style={[s.heroGlow, { backgroundColor: accent + '0D' }]} />
-          <Text style={s.heroEmoji}>{'\u26BD'}</Text>
+          {article.image && !heroImgFailed ? (
+            <Image
+              source={{ uri: article.image }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+              onError={() => setHeroImgFailed(true)}
+            />
+          ) : (
+            <Text style={s.heroEmoji}>{'\u26BD'}</Text>
+          )}
+          {/* Dark overlay so badge/title remain readable over real photos */}
+          {article.image && !heroImgFailed && (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.30)' }]} />
+          )}
           {/* Accent stripe at bottom */}
           <View style={[s.accentStripe, { backgroundColor: accent }]} />
         </Animated.View>
@@ -288,9 +303,13 @@ export const NewsDetailScreen: React.FC = () => {
             </Text>
           </View>
 
-          {/* Article body paragraphs */}
-          {paragraphs.map((p, i) => (
+          {/* Article body paragraphs — MREC ad injected after paragraph 1 */}
+          {paragraphs.slice(0, 1).map((p, i) => (
             <Text key={i} style={[s.paragraph, { color: c.textSecondary }]}>{p}</Text>
+          ))}
+          <PlaceholderBannerAd variant="caliente-mrec" />
+          {paragraphs.slice(1).map((p, i) => (
+            <Text key={i + 1} style={[s.paragraph, { color: c.textSecondary }]}>{p}</Text>
           ))}
 
           {/* Tags row */}
@@ -374,6 +393,9 @@ export const NewsDetailScreen: React.FC = () => {
               </View>
             )}
           </View>
+
+          {/* Small rectangular banner at bottom of every article */}
+          <PlaceholderBannerAd variant="telcel-banner" />
         </View>
       </Animated.ScrollView>
     </View>
