@@ -64,6 +64,15 @@ function stripHtml(html: string): string {
  */
 function htmlToPlainText(html: string): string {
   return html
+    // ── Preserve <img> tags as [IMG:url] markers BEFORE any stripping ────────
+    // We use \ssrc= (space before "src") to avoid matching "srcset=" attributes.
+    // toHttps() ensures iOS ATS never blocks the resulting URL.
+    .replace(/<img\b[^>]*>/gi, (imgTag) => {
+      const m = imgTag.match(/\ssrc=["']([^"']+)["']/i);
+      if (!m) return '';
+      const url = toHttps(m[1].trim());
+      return url ? `\n\n[IMG:${url}]\n\n` : '';
+    })
     // Block-level elements → paragraph break
     .replace(/<\/(p|div|h[1-6]|blockquote|li)>/gi, '\n\n')
     // Line breaks

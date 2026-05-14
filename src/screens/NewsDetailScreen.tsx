@@ -75,6 +75,45 @@ const BookmarkIcon = ({ color }: { color: string }) => (
   </View>
 );
 
+// ── Inline article image (body content) ─────────────────────────────────────
+/**
+ * Renders a single inline image extracted from the WP post body.
+ * Falls back to null (invisible) on load error so the layout stays clean.
+ */
+function ArticleImage({ uri }: { uri: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <Image
+      source={{ uri }}
+      style={s.inlineImage}
+      resizeMode="cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/**
+ * Render one content block — either a plain-text paragraph or an inline image.
+ * Blocks that are just whitespace are skipped.
+ *
+ * The `[IMG:url]` marker format is produced by wordpressApi.htmlToPlainText().
+ */
+function renderBlock(block: string, index: number, textColor: string): React.ReactNode {
+  // Detect an image marker block
+  const imgMatch = block.match(/^\[IMG:(https?:\/\/[^\]]+)\]$/);
+  if (imgMatch) {
+    return <ArticleImage key={`img-${index}`} uri={imgMatch[1]} />;
+  }
+  const trimmed = block.trim();
+  if (!trimmed) return null;
+  return (
+    <Text key={`p-${index}`} style={[s.paragraph, { color: textColor }]}>
+      {trimmed}
+    </Text>
+  );
+}
+
 // ── Reading time estimate ────────────────────────────────────────────────────
 function estimateReadTime(content?: string): number {
   if (!content) return 1;
@@ -100,7 +139,8 @@ export const NewsDetailScreen: React.FC = () => {
 
   // Track news read (once per unique article)
   useEffect(() => { incrementNewsRead(article.id); }, [article.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  const paragraphs = article.content ? article.content.split('\n\n') : [article.summary];
+  // Split content into blocks — some are plain text, some are [IMG:url] markers
+  const blocks = article.content ? article.content.split('\n\n') : [article.summary];
 
   // ── Scroll-driven animations ───────────────────────────────────────────────
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -303,14 +343,11 @@ export const NewsDetailScreen: React.FC = () => {
             </Text>
           </View>
 
-          {/* Article body paragraphs — MREC ad injected after paragraph 1 */}
-          {paragraphs.slice(0, 1).map((p, i) => (
-            <Text key={i} style={[s.paragraph, { color: c.textSecondary }]}>{p}</Text>
-          ))}
+          {/* Article body — text paragraphs and inline images interleaved.
+               MREC ad is injected after the first content block. */}
+          {blocks.slice(0, 1).map((b, i) => renderBlock(b, i, c.textSecondary))}
           <PlaceholderBannerAd variant="caliente-mrec" />
-          {paragraphs.slice(1).map((p, i) => (
-            <Text key={i + 1} style={[s.paragraph, { color: c.textSecondary }]}>{p}</Text>
-          ))}
+          {blocks.slice(1).map((b, i) => renderBlock(b, i + 1, c.textSecondary))}
 
           {/* Tags row */}
           <View style={s.tagsRow}>
@@ -492,6 +529,15 @@ const s = StyleSheet.create({
   // Paragraphs
   paragraph: {
     fontSize: 16, lineHeight: 27, marginBottom: 18, letterSpacing: 0.15,
+  },
+
+  // Inline images inside article body
+  inlineImage: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 12,
+    marginVertical: 10,
+    backgroundColor: '#1A1A1A',   // dark placeholder while loading
   },
 
   // Tags
