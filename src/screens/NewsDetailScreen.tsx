@@ -132,13 +132,18 @@ export const NewsDetailScreen: React.FC = () => {
   const route = useRoute<RouteProp<NoticiasStackParamList, 'NewsDetail'>>();
   const { article } = route.params;
 
-  const { incrementNewsRead } = useUserStats();
+  const { incrementNewsRead, trackNewsOpened } = useUserStats();
   const accent = leagueColor(article.category);
   const readMins = estimateReadTime(article.content);
   const [heroImgFailed, setHeroImgFailed] = useState(false);
 
-  // Track news read (once per unique article)
-  useEffect(() => { incrementNewsRead(article.id); }, [article.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Track news read:
+  // - incrementNewsRead  → all-time unique count (deduplicated by article ID)
+  // - trackNewsOpened    → windowed stats shown in PerfilScreen (7d / 30d) + Wrapped
+  useEffect(() => {
+    incrementNewsRead(article.id);
+    trackNewsOpened({ tags: [article.category] });
+  }, [article.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // Split content into blocks — some are plain text, some are [IMG:url] markers
   const blocks = article.content ? article.content.split('\n\n') : [article.summary];
 
