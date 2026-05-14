@@ -447,7 +447,12 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
   },
   stickyHeaderInner: {
-    paddingHorizontal: 56, paddingBottom: 10, paddingTop: 4, alignItems: 'center',
+    // Height = floatingNavRow paddingTop(8) + navBtn height(42) + bottom(8) = 58
+    // This ensures the header background fully covers the floating button area.
+    paddingHorizontal: 56,
+    height: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   stickyTitle: { fontSize: 14, fontWeight: '700' },
 
@@ -457,7 +462,7 @@ const s = StyleSheet.create({
   },
   floatingNavRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingTop: 8,
+    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8,
   },
   navBtn: {
     width: 42, height: 42, borderRadius: 21,
