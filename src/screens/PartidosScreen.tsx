@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated } from 'react-native';
+import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { StreakModal } from '../components/StreakModal';
 import { SkeletonPartidos } from '../components/Skeleton';
@@ -409,23 +410,33 @@ export const PartidosScreen: React.FC = () => {
               </View>
             )}
 
+            {/* ── Caliente banner — below favorites notice / below priority leagues ── */}
+            <PlaceholderBannerAd variant="caliente-banner" />
+
             {/* ── Tier 1 visible inmediatamente cuando no hay contenido personal ── */}
             {showTier1Immediately && tier1Groups.map((league, idx) => (
-              <LeagueSection
-                key={league.id}
-                league={league}
-                index={idx}
-                onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
-                onLeaguePress={lg => {
-                  const seasonId = lg.matches[0]?.seasonId;
-                  navigation.navigate('LeagueDetail', {
-                    leagueId: Number(lg.id),
-                    leagueName: lg.name,
-                    leagueLogo: lg.logo,
-                    ...(seasonId ? { seasonId } : {}),
-                  });
-                }}
-              />
+              <React.Fragment key={league.id}>
+                <LeagueSection
+                  league={league}
+                  index={idx}
+                  onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
+                  onLeaguePress={lg => {
+                    const seasonId = lg.matches[0]?.seasonId;
+                    navigation.navigate('LeagueDetail', {
+                      leagueId: Number(lg.id),
+                      leagueName: lg.name,
+                      leagueLogo: lg.logo,
+                      ...(seasonId ? { seasonId } : {}),
+                    });
+                  }}
+                />
+                {/* Ad after every 2nd league block */}
+                {(idx + 1) % 2 === 0 && (
+                  <PlaceholderBannerAd
+                    variant={Math.floor((idx + 1) / 2) % 2 === 1 ? 'amazon-banner' : 'corona-banner'}
+                  />
+                )}
+              </React.Fragment>
             ))}
 
             {/* ── Tiers ya revelados (tras clicks en "Ver más") ────────────── */}

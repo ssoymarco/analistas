@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
 import type { Match, MatchDetail, TeamFormEntry, MissingPlayer } from '../../data/types';
 import { PredictionsCarousel, AIPredictionsSection } from './EnVivoTab';
+import { PlaceholderBannerAd } from '../../components/PlaceholderBannerAd';
 
 // ── Traduce condiciones meteorológicas de la API (siempre en inglés) ──────────
 function translateWeatherDesc(desc: string, t: (key: string) => string): string {
@@ -432,6 +433,8 @@ export const PreviewTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
       <PredictionsCarousel match={match} />
       {/* AI predictions — rich multi-type card */}
       <AIPredictionsSection predictions={detail.predictions ?? []} match={match} />
+      {/* Strategic Caliente ad — right below predictions (highest-value placement) */}
+      <PlaceholderBannerAd variant="caliente-mrec" />
       <H2HCard            match={match} detail={detail} />
       <FormCard           match={match} detail={detail} />
       <MissingPlayersCard match={match} detail={detail} />
