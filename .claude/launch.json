@@ -1,0 +1,33 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Expo (universal)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start"],
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "Expo iOS",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "ios"],
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "Expo Android",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "android"],
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "Expo Web",
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": ["node_modules/.bin/expo", "start", "--web"],
+      "port": 8081,
+      "autoPort": true
+    }
+  ]
+}

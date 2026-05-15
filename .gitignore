@@ -39,3 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Claude Code worktrees and local settings (per-session sandboxes; never commit)
+.claude/
+
+# Local experimental copy of the project (not part of the app)
+AnalistasV2/

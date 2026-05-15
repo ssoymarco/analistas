@@ -1,12 +1,8 @@
-import React from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-} from 'react-native';
-import { colors } from '../theme/colors';
+import React, { useMemo } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { useThemeColors } from '../theme/useTheme';
+import { haptics } from '../utils/haptics';
 
 export type FilterTab = 'todos' | 'vivo' | 'finalizados' | 'proximos';
 
@@ -14,44 +10,58 @@ interface FilterTabsProps {
   activeTab: FilterTab;
   onTabChange: (tab: FilterTab) => void;
   liveCounts?: number;
+  totalCount?: number;
+  finishedCount?: number;
 }
-
-const TABS: { key: FilterTab; label: string }[] = [
-  { key: 'todos', label: 'Todos' },
-  { key: 'vivo', label: 'En vivo' },
-  { key: 'finalizados', label: 'Finalizados' },
-  { key: 'proximos', label: 'Próximos' },
-];
 
 export const FilterTabs: React.FC<FilterTabsProps> = ({
   activeTab,
   onTabChange,
-  liveCounts,
+  liveCounts = 0,
+  totalCount = 0,
+  finishedCount = 0,
 }) => {
+  const c = useThemeColors();
+  const { t } = useTranslation();
+
+  const TABS: { key: FilterTab; label: string; emoji: string }[] = useMemo(() => [
+    { key: 'todos',       label: t('filters.all'),      emoji: '⚽' },
+    { key: 'vivo',        label: t('filters.live'),     emoji: '🔴' },
+    { key: 'finalizados', label: t('filters.finished'), emoji: '🏁' },
+    { key: 'proximos',    label: t('filters.upcoming'), emoji: '🕐' },
+  ], [t]);
+
+  const getCount = (key: FilterTab): number | null => {
+    if (key === 'todos' && totalCount > 0) return totalCount;
+    if (key === 'vivo' && liveCounts > 0) return liveCounts;
+    if (key === 'finalizados' && finishedCount > 0) return finishedCount;
+    return null;
+  };
+
   return (
-    <View style={styles.wrapper}>
+    <View style={[s.wrapper, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.container}
+        contentContainerStyle={s.container}
       >
         {TABS.map((tab) => {
           const isActive = activeTab === tab.key;
-          const showBadge = tab.key === 'vivo' && liveCounts && liveCounts > 0;
+          const count = getCount(tab.key);
+          const isLive = tab.key === 'vivo' && liveCounts > 0;
           return (
             <TouchableOpacity
               key={tab.key}
-              style={[styles.tab, isActive && styles.tabActive]}
-              onPress={() => onTabChange(tab.key)}
+              style={[s.tab, isActive && { backgroundColor: c.surface }]}
+              onPress={() => { haptics.selection(); onTabChange(tab.key); }}
               activeOpacity={0.7}
             >
-              <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
-                {tab.label}
-              </Text>
-              {showBadge && (
-                <View style={styles.liveBadge}>
-                  <View style={styles.liveDot} />
-                  <Text style={styles.liveBadgeText}>{liveCounts}</Text>
+              <Text style={s.emoji}>{tab.emoji}</Text>
+              <Text style={[s.label, { color: c.textTertiary }, isActive && { color: c.textPrimary }]}>{tab.label}</Text>
+              {count != null && (
+                <View style={[s.badge, { backgroundColor: c.surface }, isLive && { backgroundColor: c.liveDim }]}>
+                  {isLive && <View style={[s.liveDot, { backgroundColor: c.live }]} />}
+                  <Text style={[s.badgeText, { color: c.textSecondary }, isLive && { color: c.live }]}>{count}</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -62,61 +72,43 @@ export const FilterTabs: React.FC<FilterTabsProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   wrapper: {
-    backgroundColor: colors.bg,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   container: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   tab: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 7,
-    borderRadius: 20,
     gap: 6,
-    borderWidth: 1,
-    borderColor: 'transparent',
-    marginRight: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
   },
-  tabActive: {
-    backgroundColor: colors.surfaceElevated,
-    borderColor: colors.borderLight,
-  },
-  tabText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.textSecondary,
-  },
-  tabTextActive: {
-    color: colors.textPrimary,
+  emoji: { fontSize: 12 },
+  label: {
+    fontSize: 12,
     fontWeight: '600',
   },
-  liveBadge: {
+  badge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.liveDim,
-    borderRadius: 10,
+    gap: 3,
+    borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    gap: 3,
   },
   liveDot: {
     width: 5,
     height: 5,
     borderRadius: 3,
-    backgroundColor: colors.live,
   },
-  liveBadgeText: {
+  badgeText: {
     fontSize: 10,
     fontWeight: '700',
-    color: colors.live,
   },
 });
