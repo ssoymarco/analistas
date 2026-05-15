@@ -74,9 +74,9 @@ function SectionHeader({ label, c }: { label: string; c: ColorPalette }) {
   );
 }
 
-function AvatarView({ initials, size = 68 }: { initials: string; size?: number }) {
+function AvatarView({ initials, size = 68, color = '#6366f1' }: { initials: string; size?: number; color?: string }) {
   return (
-    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#6366f1', alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color, alignItems: 'center', justifyContent: 'center' }}>
       <Text style={{ fontSize: size * 0.3, fontWeight: '900', color: '#ffffff' }}>{initials}</Text>
     </View>
   );
@@ -298,6 +298,28 @@ export const PerfilScreen: React.FC = () => {
   const { matchesViewed, newsRead, streakDays, streakNotifyEnabled, setStreakNotify } = useUserStats();
   const totalFavorites = followedTeamIds.length + followedPlayerIds.length + followedLeagueIds.length;
 
+  // Pick first favorited team's color, or fall back to indigo
+  const avatarColor = React.useMemo(() => {
+    const teamColors: Record<string, string> = {
+      'america': '#FFCC00', 'chivas': '#CC0000', 'cruz_azul': '#0033A0',
+      'pumas': '#003DA5', 'tigres': '#F5A800', 'rayados': '#003DA5',
+      'real_madrid': '#FEBE10', 'barcelona': '#A50044', 'manchester_city': '#6CABDD',
+      'liverpool': '#C8102E', 'arsenal': '#EF0107', 'chelsea': '#034694',
+    };
+    const firstTeam = followedTeamIds[0] ?? '';
+    return teamColors[firstTeam] ?? '#6366f1';
+  }, [followedTeamIds]);
+
+  const [statsPeriod, setStatsPeriod] = useState<'7d' | '30d'>('7d');
+  const {
+    matchesThisWeek,
+    matchesThisMonth,
+    newsThisWeek,
+    newsThisMonth,
+  } = useUserStats() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const displayMatches = statsPeriod === '7d' ? (matchesThisWeek ?? 0) : (matchesThisMonth ?? 0);
+  const displayNews    = statsPeriod === '7d' ? (newsThisWeek   ?? 0) : (newsThisMonth   ?? 0);
+
   const [loading, setLoading] = useState(true);
   useEffect(() => { const t = setTimeout(() => setLoading(false), 400); return () => clearTimeout(t); }, []);
   const [showNameInHeader, setShowNameInHeader] = useState(false);
@@ -305,6 +327,7 @@ export const PerfilScreen: React.FC = () => {
   const [momiosEnabled, setMomiosEnabled] = useState(true);
   const [selectedLang, setSelectedLang] = useState(i18n.language || 'es');
   const [streakModalVisible, setStreakModalVisible] = useState(false);
+  const [levelSheetVisible, setLevelSheetVisible] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
   const [codeModalVisible, setCodeModalVisible] = useState(false);
@@ -474,7 +497,7 @@ export const PerfilScreen: React.FC = () => {
         <View style={{ backgroundColor: userCardBg, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: c.border }}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
             <View style={{ position: 'relative', flexShrink: 0 }}>
-              <AvatarView initials={initials} size={68} />
+              <AvatarView initials={initials} size={68} color={avatarColor} />
               {isAuthenticated && (
                 <View style={{ position: 'absolute', bottom: -2, right: -2, width: 20, height: 20, borderRadius: 10, backgroundColor: '#10b981', borderWidth: 2, borderColor: userCardBg, alignItems: 'center', justifyContent: 'center' }}>
                   <Text style={{ fontSize: 8, fontWeight: '900', color: '#fff' }}>✓</Text>
@@ -487,27 +510,37 @@ export const PerfilScreen: React.FC = () => {
               {!isAuthenticated && <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 2 }}>{t('profile.loginPrompt')}</Text>}
               {isAuthenticated && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(245,158,11,0.1)', borderWidth: 1, borderColor: 'rgba(245,158,11,0.2)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#f59e0b' }}>🛡️ Nivel: Suplente</Text>
-                  </View>
-                </View>
-              )}
-              {isAuthenticated && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}>
-                  <Text style={{ fontSize: 10, color: c.textTertiary }}>
-                  📅 Analistas · Miembro desde {user?.createdAt
-                    ? user.createdAt.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
-                    : 'hoy'}
-                </Text>
+                  <TouchableOpacity
+                    onPress={() => { haptics.light(); setLevelSheetVisible(true); }}
+                    activeOpacity={0.75}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(245,158,11,0.1)', borderWidth: 1, borderColor: 'rgba(245,158,11,0.25)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}
+                  >
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#f59e0b' }}>🛡️ {t('profile.levelSuplente')} </Text>
+                    <Text style={{ fontSize: 9, color: 'rgba(245,158,11,0.6)' }}>›</Text>
+                  </TouchableOpacity>
                 </View>
               )}
             </View>
             {isAuthenticated && (
-              <TouchableOpacity style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', alignItems: 'center', justifyContent: 'center', marginTop: 2 }} activeOpacity={0.7} onPress={() => setEditProfileVisible(true)}>
-                <Text style={{ fontSize: 14 }}>✏️</Text>
+              <TouchableOpacity onPress={() => { haptics.light(); setEditProfileVisible(true); }} activeOpacity={0.7} style={{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10, backgroundColor: 'rgba(0,224,150,0.1)' }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#00E096' }}>{t('common.edit')}</Text>
               </TouchableOpacity>
             )}
           </View>
+
+          {/* Member since — full-width, below avatar row */}
+          {isAuthenticated && (
+            <Text style={{ fontSize: 11.5, color: c.textTertiary, marginTop: 10, textAlign: 'center' }}>
+              {t('profile.memberSince', {
+                date: user?.createdAt
+                  ? user.createdAt.toLocaleDateString(
+                      ({ es: 'es-ES', en: 'en-US', pt: 'pt-BR', fr: 'fr-FR', de: 'de-DE', it: 'it-IT', tr: 'tr-TR' } as Record<string, string>)[i18n.language] ?? 'es-ES',
+                      { month: 'long', year: 'numeric' },
+                    )
+                  : 'hoy',
+              })}
+            </Text>
+          )}
 
           {!isAuthenticated && (
             <TouchableOpacity style={{ backgroundColor: c.accent, paddingHorizontal: 28, paddingVertical: 11, borderRadius: 20, alignSelf: 'center', marginTop: 12 }} onPress={resetOnboarding} activeOpacity={0.8}>
@@ -517,50 +550,113 @@ export const PerfilScreen: React.FC = () => {
 
           {/* Streak pill */}
           <TouchableOpacity
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.bg, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 10, marginTop: 16 }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: streakDays > 0 ? 'rgba(255,122,0,0.08)' : c.surface, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 13, marginTop: 16, borderWidth: 1, borderColor: streakDays > 0 ? 'rgba(255,122,0,0.25)' : c.border }}
             activeOpacity={0.8}
             onPress={() => { handleDevTap?.(); setStreakModalVisible(true); }}
           >
-            <Text style={{ fontSize: 14 }}>🔥</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 12, color: c.textTertiary }}>{t('profile.streakActive')}</Text>
+            <Text style={{ fontSize: 22 }}>🔥</Text>
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+              {streakDays > 0 ? (
+                <>
+                  <Text style={{ fontSize: 17, fontWeight: '900', color: '#ff7a00' }}>{streakDays}</Text>
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#ff7a00' }}>días</Text>
+                  <Text style={{ fontSize: 14, color: 'rgba(255,122,0,0.35)', marginHorizontal: 2 }}>·</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '500', color: c.textSecondary }}>{t('profile.streakActive')}</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.textPrimary }}>{t('profile.streakStart')}</Text>
+                  <Text style={{ fontSize: 14, color: 'rgba(255,122,0,0.35)', marginHorizontal: 2 }}>·</Text>
+                  <Text style={{ fontSize: 13, color: c.textTertiary }}>{t('profile.streakStartSub')}</Text>
+                </>
+              )}
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#ff7a00' }}>{t('streak.days', { count: streakDays })} 🔥</Text>
-              <Text style={{ fontSize: 18, color: c.textTertiary }}>›</Text>
-            </View>
+            <Text style={{ fontSize: 18, color: streakDays > 0 ? 'rgba(255,122,0,0.5)' : c.textTertiary }}>›</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Stats */}
-        <View style={{ flexDirection: 'row', backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, marginTop: 16, borderWidth: isDark ? 0 : 1, borderColor: c.border, overflow: 'hidden' }}>
-          {[
-            { icon: '⭐', value: String(totalFavorites), label: t('favorites.count'), color: '#facc15' },
-            { icon: '👁', value: String(matchesViewed), label: t('matches.matchesViewed'), color: '#60a5fa' },
-            { icon: '📖', value: String(newsRead), label: t('news.newsRead'), color: '#a78bfa' },
-          ].map((stat, idx) => (
-            <React.Fragment key={idx}>
-              {idx > 0 && <View style={{ width: 1, backgroundColor: c.border, marginVertical: 12 }} />}
-              <View style={{ flex: 1, alignItems: 'center', paddingVertical: 16 }}>
-                <Text style={{ fontSize: 18, marginBottom: 4 }}>{stat.icon}</Text>
-                <Text style={{ fontSize: 20, fontWeight: '900', color: stat.color }}>{stat.value}</Text>
-                <Text style={{ fontSize: 10, color: c.textTertiary, marginTop: 2, textAlign: 'center' }}>{stat.label}</Text>
+        {/* Stats Card — horizontal strip */}
+        <View style={{ marginHorizontal: 16, marginTop: 16 }}>
+          {/* Header row with period selector */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <Text style={{ fontSize: 10, fontWeight: '700', color: c.textTertiary, letterSpacing: 1.5, textTransform: 'uppercase' }}>
+              {t('profile.yourStats')}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 4 }}>
+              {(['7d', '30d'] as const).map(p => (
+                <TouchableOpacity
+                  key={p}
+                  onPress={() => { haptics.selection(); setStatsPeriod(p); }}
+                  style={{
+                    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10,
+                    backgroundColor: statsPeriod === p ? c.accent : c.surface,
+                    borderWidth: 1,
+                    borderColor: statsPeriod === p ? c.accent : c.border,
+                  }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: statsPeriod === p ? '#000' : c.textTertiary }}>
+                    {t(p === '7d' ? 'profile.period7d' : 'profile.period30d')}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* 2×2 stats grid */}
+          <View style={{ backgroundColor: c.card, borderRadius: 14, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
+            {/* Row 1 */}
+            <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: c.border }}>
+              <View style={{ flex: 1, alignItems: 'center', paddingVertical: 16, gap: 4 }}>
+                <Text style={{ fontSize: 13 }}>⚽</Text>
+                <Text style={{ fontSize: 24, fontWeight: '900', color: '#60a5fa', lineHeight: 28 }}>{displayMatches}</Text>
+                <Text style={{ fontSize: 11, color: c.textTertiary, textAlign: 'center' }}>{t('profile.statMatches')}</Text>
               </View>
-            </React.Fragment>
-          ))}
+              <View style={{ width: 1, backgroundColor: c.border, marginVertical: 12 }} />
+              <View style={{ flex: 1, alignItems: 'center', paddingVertical: 16, gap: 4 }}>
+                <Text style={{ fontSize: 13 }}>📰</Text>
+                <Text style={{ fontSize: 24, fontWeight: '900', color: '#a78bfa', lineHeight: 28 }}>{displayNews}</Text>
+                <Text style={{ fontSize: 11, color: c.textTertiary, textAlign: 'center' }}>{t('profile.statNews')}</Text>
+              </View>
+            </View>
+            {/* Row 2 */}
+            <View style={{ flexDirection: 'row' }}>
+              <View style={{ flex: 1, alignItems: 'center', paddingVertical: 16, gap: 4 }}>
+                <Text style={{ fontSize: 13 }}>🔥</Text>
+                <Text style={{ fontSize: 24, fontWeight: '900', color: '#ff7a00', lineHeight: 28 }}>{streakDays}</Text>
+                <Text style={{ fontSize: 11, color: c.textTertiary, textAlign: 'center' }}>{t('profile.statStreak')}</Text>
+              </View>
+              <View style={{ width: 1, backgroundColor: c.border, marginVertical: 12 }} />
+              <View style={{ flex: 1, alignItems: 'center', paddingVertical: 16, gap: 4 }}>
+                <Text style={{ fontSize: 13 }}>⭐</Text>
+                <Text style={{ fontSize: 24, fontWeight: '900', color: '#facc15', lineHeight: 28 }}>{totalFavorites}</Text>
+                <Text style={{ fontSize: 11, color: c.textTertiary, textAlign: 'center' }}>{t('profile.statFavorites')}</Text>
+              </View>
+            </View>
+          </View>
         </View>
 
         {/* Guest Banner */}
         {!isAuthenticated && (
           <View style={{ marginHorizontal: 16, marginTop: 16, borderRadius: 16, backgroundColor: '#1d4ed8', overflow: 'hidden' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12 }}>
-              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontSize: 20 }}>👤</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>{t('profile.guestMode')}</Text>
-                <Text style={{ fontSize: 12, color: '#bfdbfe', marginTop: 2 }}>{t('profile.guestModeSub')}</Text>
-              </View>
+            <View style={{ paddingHorizontal: 16, paddingTop: 18, paddingBottom: 4 }}>
+              <Text style={{ fontSize: 16, fontWeight: '900', color: '#fff', marginBottom: 4 }}>
+                {t('profile.guestTitle')}
+              </Text>
+              <Text style={{ fontSize: 13, color: '#bfdbfe', marginBottom: 16, lineHeight: 18 }}>
+                {t('profile.guestSub')}
+              </Text>
+              {[
+                t('profile.guestBenefit1'),
+                t('profile.guestBenefit2'),
+                t('profile.guestBenefit3'),
+              ].map((benefit, i) => (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: '700' }}>✓</Text>
+                  </View>
+                  <Text style={{ fontSize: 13, color: '#dbeafe', flex: 1 }}>{benefit}</Text>
+                </View>
+              ))}
             </View>
             {/* Connect with Apple (iOS only) */}
             {appleAvailable && (
@@ -651,8 +747,9 @@ export const PerfilScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
+
         {/* Footer */}
-        <View style={{ alignItems: 'center', marginTop: 24, gap: 2 }}>
+        <View style={{ alignItems: 'center', marginTop: 16, gap: 2 }}>
           <Text style={{ fontSize: 12, color: c.textTertiary, fontWeight: '500' }}>⚽ Analistas</Text>
           <Text style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)' }}>{t('profile.version', { version: '1.0.0', year: '2026' })}</Text>
           <Text style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', marginTop: 2 }}>{t('profile.madeIn')}</Text>
@@ -786,6 +883,53 @@ export const PerfilScreen: React.FC = () => {
             </View>
           ))}
         </ScrollView>
+      </BottomSheet>
+
+      {/* Level Comparison Sheet */}
+      <BottomSheet visible={levelSheetVisible} onClose={() => setLevelSheetVisible(false)} c={c}>
+        <View style={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 8 }}>
+          <Text style={{ fontSize: 18, fontWeight: '900', color: c.textPrimary, textAlign: 'center', marginBottom: 6 }}>
+            {t('profile.levelTitle')}
+          </Text>
+          <Text style={{ fontSize: 13, color: c.textSecondary, textAlign: 'center', marginBottom: 24 }}>
+            {t('profile.levelSubtitle')}
+          </Text>
+
+          {/* Comparison table */}
+          <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
+            {/* Suplente */}
+            <View style={{ flex: 1, backgroundColor: c.surface, borderRadius: 16, padding: 14, borderWidth: 2, borderColor: '#f59e0b' }}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: '#f59e0b', textAlign: 'center', marginBottom: 12, letterSpacing: 0.5 }}>🛡️ SUPLENTE</Text>
+              {(['profile.feat1', 'profile.feat2', 'profile.feat3', 'profile.feat4'] as const).map(key => (
+                <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <Text style={{ fontSize: 12, color: '#00E096' }}>✓</Text>
+                  <Text style={{ fontSize: 12, color: c.textSecondary, flex: 1 }}>{t(key)}</Text>
+                </View>
+              ))}
+            </View>
+            {/* Titular */}
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,224,150,0.05)', borderRadius: 16, padding: 14, borderWidth: 2, borderColor: '#00E096' }}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: '#00E096', textAlign: 'center', marginBottom: 12, letterSpacing: 0.5 }}>👑 TITULAR</Text>
+              {(['profile.feat1', 'profile.feat2', 'profile.feat3', 'profile.feat4', 'profile.featPro1', 'profile.featPro2', 'profile.featPro3'] as const).map(key => (
+                <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <Text style={{ fontSize: 12, color: '#00E096' }}>✓</Text>
+                  <Text style={{ fontSize: 12, color: key.includes('Pro') ? '#00E096' : c.textSecondary, flex: 1, fontWeight: key.includes('Pro') ? '600' : '400' }}>{t(key)}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={{ backgroundColor: '#00E096', borderRadius: 16, paddingVertical: 14, alignItems: 'center', marginBottom: 8 }}
+            onPress={() => { setLevelSheetVisible(false); navigation.navigate('HazteTitular', { source: 'level_badge' }); }}
+            activeOpacity={0.85}
+          >
+            <Text style={{ fontSize: 15, fontWeight: '800', color: '#000' }}>{t('profile.goTitular')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setLevelSheetVisible(false)} style={{ alignItems: 'center', paddingVertical: 10 }} activeOpacity={0.7}>
+            <Text style={{ fontSize: 14, color: c.textSecondary }}>{t('common.close')}</Text>
+          </TouchableOpacity>
+        </View>
       </BottomSheet>
 
       {/* Términos y condiciones */}

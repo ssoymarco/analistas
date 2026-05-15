@@ -89,7 +89,7 @@ export type NoticiasStackParamList = {
  */
 export type PerfilStackParamList = {
   PerfilHome: undefined;
-  HazteTitular: { source?: 'icon' | 'momios' | 'promo' } | undefined;
+  HazteTitular: { source?: 'icon' | 'momios' | 'promo' | 'level_badge' } | undefined;
 };
 
 export type RootTabParamList = {
