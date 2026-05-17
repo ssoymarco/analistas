@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, Modal, TextInput,
+  View, Text, ScrollView, TouchableOpacity, Modal, TextInput, Switch,
   NativeSyntheticEvent, NativeScrollEvent, Share, Linking, Platform, Alert,
 } from 'react-native';
 import { haptics } from '../utils/haptics';
@@ -82,23 +82,31 @@ function AvatarView({ initials, size = 68, color = '#6366f1' }: { initials: stri
   );
 }
 
-function CustomToggle({ value, onToggle, activeColor, icon }: {
-  value: boolean; onToggle: () => void; activeColor: string; icon?: string;
+/**
+ * Native iOS-style switch. Matches NotificationSettingsScreen so every
+ * toggle in the app looks the same.
+ *
+ * Extra props (`activeColor`, `icon`) are accepted for backwards-compatibility
+ * with existing call sites but intentionally ignored — visual consistency is
+ * the goal.
+ */
+function CustomToggle({ value, onToggle }: {
+  value: boolean;
+  onToggle: () => void;
+  /** @deprecated kept only so legacy call sites still compile — visual is uniform now. */
+  activeColor?: string;
+  /** @deprecated kept only so legacy call sites still compile — no inline icon anymore. */
+  icon?: string;
 }) {
+  const c = useThemeColors();
   return (
-    <TouchableOpacity
-      style={{ width: 48, height: 28, borderRadius: 14, justifyContent: 'center', backgroundColor: value ? activeColor : 'rgba(128,128,128,0.25)' }}
-      onPress={() => { haptics.light(); onToggle(); }} activeOpacity={0.8}
-    >
-      <View style={{
-        width: 22, height: 22, borderRadius: 11, backgroundColor: '#ffffff',
-        alignItems: 'center', justifyContent: 'center',
-        transform: [{ translateX: value ? 22 : 3 }],
-        shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
-      }}>
-        {icon ? <Text style={{ fontSize: 10 }}>{icon}</Text> : null}
-      </View>
-    </TouchableOpacity>
+    <Switch
+      value={value}
+      onValueChange={() => { haptics.selection(); onToggle(); }}
+      trackColor={{ false: c.border, true: c.accent }}
+      thumbColor="#fff"
+      ios_backgroundColor={c.border}
+    />
   );
 }
 
