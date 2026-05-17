@@ -21,6 +21,7 @@ import { PlayerDetailScreen } from '../screens/PlayerDetailScreen';
 import { LeagueDetailScreen } from '../screens/LeagueDetailScreen';
 import { GlobalSearchScreen } from '../screens/GlobalSearchScreen';
 import { NotificationSettingsScreen } from '../screens/NotificationSettingsScreen';
+import { StreakScreen } from '../screens/StreakScreen';
 import type { ColorPalette } from '../theme/colors';
 import type { Match, NewsArticle } from '../data/types';
 
@@ -50,6 +51,7 @@ export type PartidosStackParamList = {
   };
   GlobalSearch: undefined;
   NotificationSettings: undefined;
+  Streak: undefined;
 };
 
 /**
@@ -92,6 +94,7 @@ export type NoticiasStackParamList = {
 export type PerfilStackParamList = {
   PerfilHome: undefined;
   HazteTitular: { source?: 'icon' | 'momios' | 'promo' | 'level_badge' } | undefined;
+  Streak: undefined;
 };
 
 export type RootTabParamList = {
@@ -158,14 +161,23 @@ function PartidosNavigator() {
         name="GlobalSearch"
         component={GlobalSearchScreen}
         options={{
-          animation: 'fade_from_bottom',
+          animation: 'slide_from_bottom',
           gestureEnabled: true,
-          gestureDirection: 'horizontal',
+          gestureDirection: 'vertical',
         }}
       />
       <PartidosStack.Screen
         name="NotificationSettings"
         component={NotificationSettingsScreen}
+        options={{
+          animation: 'slide_from_bottom',
+          gestureEnabled: true,
+          gestureDirection: 'vertical',
+        }}
+      />
+      <PartidosStack.Screen
+        name="Streak"
+        component={StreakScreen}
         options={{
           animation: 'slide_from_bottom',
           gestureEnabled: true,
@@ -214,6 +226,15 @@ function PerfilNavigator() {
     <PerfilStack.Navigator screenOptions={{ headerShown: false }}>
       <PerfilStack.Screen name="PerfilHome" component={PerfilScreen} />
       <PerfilStack.Screen name="HazteTitular" component={HazteTitularScreen} options={detailScreenOpts} />
+      <PerfilStack.Screen
+        name="Streak"
+        component={StreakScreen}
+        options={{
+          animation: 'slide_from_bottom',
+          gestureEnabled: true,
+          gestureDirection: 'vertical',
+        }}
+      />
     </PerfilStack.Navigator>
   );
 }

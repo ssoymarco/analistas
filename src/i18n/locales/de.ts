@@ -331,6 +331,7 @@ const de: TranslationKeys = {
 
   // ── Streak modal ───────────────────────────────────────────────────────────
   streak: {
+    title: 'Deine Serie',
     daySingular: 'Tag Serie',
     dayPlural: 'Tage Serie',
     days: 'Tage',

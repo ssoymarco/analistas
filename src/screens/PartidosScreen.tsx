@@ -2,7 +2,6 @@ import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated } from 'react-native';
 import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
 import { useUserStats } from '../contexts/UserStatsContext';
-import { StreakModal } from '../components/StreakModal';
 import { SkeletonPartidos } from '../components/Skeleton';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -50,8 +49,7 @@ export const PartidosScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
-  const { streakDays, streakNotifyEnabled, setStreakNotify } = useUserStats();
-  const [streakModalVisible, setStreakModalVisible] = useState(false);
+  const { streakDays } = useUserStats();
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [activeTab, setActiveTab] = useState<FilterTab>('todos');
   const [showCalendar, setShowCalendar] = useState(false);
@@ -309,7 +307,7 @@ export const PartidosScreen: React.FC = () => {
               paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12,
             }}
             activeOpacity={0.7}
-            onPress={() => setStreakModalVisible(true)}
+            onPress={() => navigation.navigate('Streak')}
           >
             <Text style={{ fontSize: 14, fontWeight: '800', color: '#ff7a00' }}>{streakDays}</Text>
             <Text style={{ fontSize: 14 }}>🔥</Text>
@@ -522,15 +520,6 @@ export const PartidosScreen: React.FC = () => {
 
       <CalendarPicker visible={showCalendar} selectedDate={selectedDate} onSelectDate={handleCalendarSelect} onClose={() => setShowCalendar(false)} onGoToday={() => { handleGoToday(); setShowCalendar(false); }} />
 
-      <StreakModal
-        visible={streakModalVisible}
-        onClose={() => setStreakModalVisible(false)}
-        streakDays={streakDays}
-        streakNotifyEnabled={streakNotifyEnabled}
-        onToggleNotify={setStreakNotify}
-        c={c}
-        isDark={isDark}
-      />
     </SafeAreaView>
   );
 };

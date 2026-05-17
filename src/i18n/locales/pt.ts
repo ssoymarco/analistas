@@ -332,6 +332,7 @@ const pt: TranslationKeys = {
 
   // ── Streak modal ───────────────────────────────────────────────────────────
   streak: {
+    title: 'Sua sequência',
     daySingular: 'dia de sequência',
     dayPlural: 'dias de sequência',
     days: 'dias',

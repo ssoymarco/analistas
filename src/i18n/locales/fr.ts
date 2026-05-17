@@ -331,6 +331,7 @@ const fr: TranslationKeys = {
 
   // ── Streak modal ───────────────────────────────────────────────────────────
   streak: {
+    title: 'Ta série',
     daySingular: 'jour de série',
     dayPlural: 'jours de série',
     days: 'jours',

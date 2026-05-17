@@ -20,7 +20,6 @@ import { useOnboarding } from '../contexts/OnboardingContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPerfil } from '../components/Skeleton';
-import { StreakModal } from '../components/StreakModal';
 import { EditProfileModal } from '../components/EditProfileModal';
 import { scheduleLocalNotification } from '../services/notifications';
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
@@ -303,7 +302,7 @@ export const PerfilScreen: React.FC = () => {
   const [upgrading, setUpgrading] = useState(false);
   const { resetOnboarding } = useOnboarding();
   const { followedTeamIds, followedPlayerIds, followedLeagueIds } = useFavorites();
-  const { matchesViewed, newsRead, streakDays, streakNotifyEnabled, setStreakNotify } = useUserStats();
+  const { matchesViewed, newsRead, streakDays } = useUserStats();
   const totalFavorites = followedTeamIds.length + followedPlayerIds.length + followedLeagueIds.length;
 
   // Pick first favorited team's color, or fall back to indigo
@@ -334,7 +333,6 @@ export const PerfilScreen: React.FC = () => {
   const { timeFormat, setTimeFormat } = useTimeFormat();
   const [momiosEnabled, setMomiosEnabled] = useState(true);
   const [selectedLang, setSelectedLang] = useState(i18n.language || 'es');
-  const [streakModalVisible, setStreakModalVisible] = useState(false);
   const [levelSheetVisible, setLevelSheetVisible] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
@@ -560,7 +558,7 @@ export const PerfilScreen: React.FC = () => {
           <TouchableOpacity
             style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: streakDays > 0 ? 'rgba(255,122,0,0.08)' : c.surface, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 13, marginTop: 16, borderWidth: 1, borderColor: streakDays > 0 ? 'rgba(255,122,0,0.25)' : c.border }}
             activeOpacity={0.8}
-            onPress={() => { handleDevTap?.(); setStreakModalVisible(true); }}
+            onPress={() => { handleDevTap?.(); navigation.navigate('Streak'); }}
           >
             <Text style={{ fontSize: 22 }}>🔥</Text>
             <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
@@ -768,16 +766,6 @@ export const PerfilScreen: React.FC = () => {
 
       {/* ── MODALS ── */}
 
-      {/* Streak */}
-      <StreakModal
-        visible={streakModalVisible}
-        onClose={() => setStreakModalVisible(false)}
-        streakDays={streakDays}
-        streakNotifyEnabled={streakNotifyEnabled}
-        onToggleNotify={setStreakNotify}
-        c={c}
-        isDark={isDark}
-      />
 
       {/* Edit Profile */}
       <EditProfileModal visible={editProfileVisible} onClose={() => setEditProfileVisible(false)} />

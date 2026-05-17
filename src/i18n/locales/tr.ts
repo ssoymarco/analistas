@@ -328,6 +328,7 @@ const tr: TranslationKeys = {
 
   // ── Streak modal ───────────────────────────────────────────────────────────
   streak: {
+    title: 'Serin',
     daySingular: 'gün serisi',
     dayPlural: 'gün serisi',
     days: 'gün',

@@ -342,6 +342,7 @@ const es = {
 
   // ── Streak modal ───────────────────────────────────────────────────────────
   streak: {
+    title: 'Tu racha',
     daySingular: 'día de racha',
     dayPlural: 'días de racha',
     days: 'días',

@@ -333,6 +333,7 @@ const en: TranslationKeys = {
 
   // ── Streak modal ───────────────────────────────────────────────────────────
   streak: {
+    title: 'Your streak',
     daySingular: 'day streak',
     dayPlural: 'day streak',
     days: 'days',
