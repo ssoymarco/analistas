@@ -12,6 +12,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { SkeletonNoticias } from '../components/Skeleton';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { getNews } from '../services/sportsApi';
 import type { NewsArticle } from '../data/types';
 import type { NoticiasStackParamList } from '../navigation/AppNavigator';
@@ -247,15 +248,12 @@ export const NoticiasScreen: React.FC = () => {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: c.bg }]} edges={['top']}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
-      {/* Header */}
-      <View style={[styles.header, { borderBottomWidth: 1, borderBottomColor: c.border, backgroundColor: c.bg }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(59,130,246,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontSize: 14 }}>📰</Text>
-          </View>
-          <Text style={[styles.title, { color: c.textPrimary }]}>{t('news.title')}</Text>
-        </View>
-      </View>
+      {/* Header — unified (see ScreenHeader) */}
+      <ScreenHeader
+        icon="📰"
+        iconBg="rgba(59,130,246,0.15)"
+        title={t('news.title')}
+      />
 
       {/* Tabs */}
       <View style={styles.tabBar}>
@@ -369,15 +367,6 @@ export const NoticiasScreen: React.FC = () => {
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-
-  // Header
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12,
-  },
-  title: {
-    fontSize: 18, fontWeight: '800',
-  },
 
   // Search
   searchWrap: { paddingHorizontal: 16, marginBottom: 8 },

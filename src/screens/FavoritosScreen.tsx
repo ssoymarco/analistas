@@ -16,6 +16,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { SkeletonFavoritos } from '../components/Skeleton';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { useFavorites } from '../contexts/FavoritesContext';
 import {
   getSearchableTeams,
@@ -730,23 +731,20 @@ export const FavoritosScreen: React.FC = () => {
     <SafeAreaView style={[st.safe, { backgroundColor: c.bg }]} edges={['top']}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
-      {/* ── Header ── Same chrome as Partidos: icon-chip + title left, compact stat pill right */}
-      <View style={[st.header, { borderBottomColor: c.border, backgroundColor: c.bg }]}>
-        <View style={st.headerLeft}>
-          <View style={[st.headerIcon, { backgroundColor: 'rgba(251,191,36,0.15)' }]}>
-            <Text style={{ fontSize: 14 }}>⭐</Text>
-          </View>
-          <Text style={[st.headerTitle, { color: c.textPrimary }]}>
-            {t('favorites.title')}
-          </Text>
-        </View>
-        {totalCount > 0 && (
-          <View style={st.headerCountPill}>
-            <Text style={st.headerCountNum}>{totalCount}</Text>
-            <Text style={st.headerCountStar}>⭐</Text>
-          </View>
-        )}
-      </View>
+      {/* ── Header ── unified (see ScreenHeader) */}
+      <ScreenHeader
+        icon="⭐"
+        iconBg="rgba(251,191,36,0.15)"
+        title={t('favorites.title')}
+        right={
+          totalCount > 0 ? (
+            <View style={st.headerCountPill}>
+              <Text style={st.headerCountNum}>{totalCount}</Text>
+              <Text style={st.headerCountStar}>⭐</Text>
+            </View>
+          ) : undefined
+        }
+      />
 
       {/* ── Tabs ── Accent-green active state mirroring Partidos identity */}
       <View style={st.tabBar}>
@@ -905,15 +903,6 @@ export const FavoritosScreen: React.FC = () => {
 const st = StyleSheet.create({
   safe: { flex: 1 },
 
-  // Header — dimensions match PartidosScreen exactly
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12,
-    borderBottomWidth: 1,
-  },
-  headerLeft:       { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerIcon:       { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  headerTitle:      { fontSize: 18, fontWeight: '800' },
   // Compact stat pill mirroring the Partidos streak pill — same proportions,
   // accent tint matches the favourites identity (gold).
   headerCountPill:  {

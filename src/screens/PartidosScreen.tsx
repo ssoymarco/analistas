@@ -3,6 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated } fr
 import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPartidos } from '../components/Skeleton';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useTranslation } from 'react-i18next';
@@ -263,57 +264,46 @@ export const PartidosScreen: React.FC = () => {
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
-      {/* ── Top Bar ── */}
-      <View style={{
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, backgroundColor: c.bg,
-        borderBottomWidth: 1, borderBottomColor: c.border,
-      }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={{
-            width: 32, height: 32, borderRadius: 10,
-            backgroundColor: 'rgba(16,185,129,0.15)',
-            alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Text style={{ fontSize: 14 }}>⚽</Text>
-          </View>
-          <Text style={{ fontSize: 18, fontWeight: '800', color: c.textPrimary }}>
-            {t('matches.title')}
-          </Text>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <TouchableOpacity
-            style={{
+      {/* ── Top Bar ── unified header (see ScreenHeader) */}
+      <ScreenHeader
+        icon="⚽"
+        iconBg="rgba(16,185,129,0.15)"
+        title={t('matches.title')}
+        right={
+          <>
+            <TouchableOpacity
+              style={{
+                width: 38, height: 38, borderRadius: 19,
+                backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center',
+              }}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('NotificationSettings')}
+              accessibilityRole="button"
+              accessibilityLabel={t('notifications.title')}
+            >
+              <BellIcon color={c.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity style={{
               width: 38, height: 38, borderRadius: 19,
               backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center',
-            }}
-            activeOpacity={0.7}
-            onPress={() => navigation.navigate('NotificationSettings')}
-            accessibilityRole="button"
-            accessibilityLabel={t('notifications.title')}
-          >
-            <BellIcon color={c.textSecondary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={{
-            width: 38, height: 38, borderRadius: 19,
-            backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center',
-          }} activeOpacity={0.7} onPress={() => navigation.navigate('GlobalSearch')}>
-            <SearchIcon color={c.textSecondary} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={{
-              flexDirection: 'row', alignItems: 'center', gap: 2,
-              backgroundColor: 'rgba(255,122,0,0.12)',
-              paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12,
-            }}
-            activeOpacity={0.7}
-            onPress={() => navigation.navigate('Streak')}
-          >
-            <Text style={{ fontSize: 14, fontWeight: '800', color: '#ff7a00' }}>{streakDays}</Text>
-            <Text style={{ fontSize: 14 }}>🔥</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+            }} activeOpacity={0.7} onPress={() => navigation.navigate('GlobalSearch')}>
+              <SearchIcon color={c.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 2,
+                backgroundColor: 'rgba(255,122,0,0.12)',
+                paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12,
+              }}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('Streak')}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '800', color: '#ff7a00' }}>{streakDays}</Text>
+              <Text style={{ fontSize: 14 }}>🔥</Text>
+            </TouchableOpacity>
+          </>
+        }
+      />
 
       <DateNavigator
         selectedDate={selectedDate}

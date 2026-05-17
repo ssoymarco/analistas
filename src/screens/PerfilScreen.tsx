@@ -21,6 +21,7 @@ import { useFavorites } from '../contexts/FavoritesContext';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPerfil } from '../components/Skeleton';
 import { EditProfileModal } from '../components/EditProfileModal';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { scheduleLocalNotification } from '../services/notifications';
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useTranslation } from 'react-i18next';
@@ -478,20 +479,19 @@ export const PerfilScreen: React.FC = () => {
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
       {/* Header */}
-      <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: c.border, backgroundColor: c.bg }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(168,85,247,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontSize: 14 }}>👤</Text>
-          </View>
-          <Text style={{ fontSize: 18, fontWeight: '800', color: c.textPrimary }}>{t('profile.title')}</Text>
-          {showNameInHeader && isAuthenticated && (
+      <ScreenHeader
+        icon="👤"
+        iconBg="rgba(168,85,247,0.15)"
+        title={t('profile.title')}
+        titleSuffix={
+          showNameInHeader && isAuthenticated ? (
             <>
               <Text style={{ fontSize: 15, color: c.textTertiary }}> · </Text>
               <Text style={{ fontSize: 15, fontWeight: '600', color: c.textPrimary, maxWidth: 140 }} numberOfLines={1}>{displayName}</Text>
             </>
-          )}
-        </View>
-      </View>
+          ) : undefined
+        }
+      />
 
       {loading ? (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 16, paddingTop: 8 }} showsVerticalScrollIndicator={false}>
