@@ -28,11 +28,13 @@ function todayISO(): string {
 }
 
 // ── Header icons ──────────────────────────────────────────────────────────────
+// Bell icon — matches the MatchBell shape for visual consistency
 const BellIcon = ({ color }: { color: string }) => (
-  <View style={{ width: 16, height: 18, alignItems: 'center', justifyContent: 'center' }}>
-    <View style={{ position: 'absolute', top: 3, width: 12, height: 10, borderRadius: 6, borderWidth: 1.5, borderColor: color, borderBottomWidth: 0 }} />
-    <View style={{ position: 'absolute', top: 0, width: 3, height: 3, borderRadius: 2, backgroundColor: color }} />
-    <View style={{ position: 'absolute', bottom: 2, width: 14, height: 1.5, borderRadius: 1, backgroundColor: color }} />
+  <View style={{ alignItems: 'center', justifyContent: 'center', width: 18 }}>
+    <View style={{ width: 4, height: 2.5, borderTopLeftRadius: 1.5, borderTopRightRadius: 1.5, backgroundColor: color }} />
+    <View style={{ width: 11, height: 9, borderTopLeftRadius: 5.5, borderTopRightRadius: 5.5, backgroundColor: color, marginTop: -0.5 }} />
+    <View style={{ width: 14, height: 2, borderRadius: 1, backgroundColor: color, marginTop: -0.5 }} />
+    <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: color, marginTop: 1 }} />
   </View>
 );
 const SearchIcon = ({ color }: { color: string }) => (
@@ -282,16 +284,17 @@ export const PartidosScreen: React.FC = () => {
           </Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <TouchableOpacity style={{
-            width: 38, height: 38, borderRadius: 19,
-            backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', position: 'relative',
-          }} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={{
+              width: 38, height: 38, borderRadius: 19,
+              backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center',
+            }}
+            activeOpacity={0.7}
+            onPress={() => navigation.navigate('NotificationSettings')}
+            accessibilityRole="button"
+            accessibilityLabel={t('notifications.title')}
+          >
             <BellIcon color={c.textSecondary} />
-            <View style={{
-              position: 'absolute', top: 6, right: 8,
-              width: 7, height: 7, borderRadius: 4,
-              backgroundColor: c.live, borderWidth: 1.5, borderColor: c.bg,
-            }} />
           </TouchableOpacity>
           <TouchableOpacity style={{
             width: 38, height: 38, borderRadius: 19,

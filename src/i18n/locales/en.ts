@@ -89,6 +89,31 @@ const en: TranslationKeys = {
     unmute: 'Enable notifications for this match',
   },
 
+  notifications: {
+    title: 'Notifications',
+    introTitle: 'You decide what interrupts you',
+    introBody: 'Choose which events you want as push notifications. You only receive them for teams or leagues you follow.',
+    sectionEvents: 'Match events',
+    sectionMatchState: 'Match state',
+    sectionEstadio: 'Stadium Mode',
+    goals: 'Goals',
+    redCards: 'Red cards',
+    substitutions: 'Substitutions',
+    var: 'VAR decisions',
+    varDescription: 'Disallowed goals, penalties awarded or overturned.',
+    matchStart: 'Kick-off',
+    halftime: 'Half time',
+    matchEnd: 'Full time',
+    lineups: 'Confirmed line-ups',
+    lineupsDescription: 'When the starting eleven is announced, ~1 hour before kick-off.',
+    estadioMode: 'Enable Stadium Mode',
+    estadioDescription: 'Delays live notifications to avoid spoilers when you are at the stadium.',
+    estadioDelayLabel: 'Delay',
+    minutes_one: '{{count}} min',
+    minutes_other: '{{count}} min',
+    footnote: 'Any match in your followed list respects these settings. You can silence individual matches with the bell button on each card.',
+  },
+
   // ── PartidosScreen ─────────────────────────────────────────────────────────
   matches: {
     title: 'Matches',

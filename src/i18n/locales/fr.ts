@@ -89,6 +89,31 @@ const fr: TranslationKeys = {
     unmute: 'Activer les notifications de ce match',
   },
 
+  notifications: {
+    title: 'Notifications',
+    introTitle: 'À toi de décider ce qui te dérange',
+    introBody: 'Choisis les événements pour lesquels tu veux recevoir une notification. Tu n\'en recevras que pour les équipes ou ligues que tu suis.',
+    sectionEvents: 'Événements du match',
+    sectionMatchState: 'État du match',
+    sectionEstadio: 'Mode Stade',
+    goals: 'Buts',
+    redCards: 'Cartons rouges',
+    substitutions: 'Remplacements',
+    var: 'Décisions VAR',
+    varDescription: 'Buts refusés, penalties accordés ou annulés.',
+    matchStart: 'Coup d\'envoi',
+    halftime: 'Mi-temps',
+    matchEnd: 'Coup de sifflet final',
+    lineups: 'Compositions confirmées',
+    lineupsDescription: 'Lorsque le onze de départ est annoncé, ~1 heure avant le match.',
+    estadioMode: 'Activer le Mode Stade',
+    estadioDescription: 'Retarde les notifications en direct pour éviter les spoilers lorsque tu es au stade.',
+    estadioDelayLabel: 'Délai',
+    minutes_one: '{{count}} min',
+    minutes_other: '{{count}} min',
+    footnote: 'Tous les matchs de ta liste de suivis respectent ces paramètres. Tu peux désactiver les notifications d\'un match en particulier avec le bouton cloche.',
+  },
+
   // ── PartidosScreen ─────────────────────────────────────────────────────────
   matches: {
     title: 'Matchs',

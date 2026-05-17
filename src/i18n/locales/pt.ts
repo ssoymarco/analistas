@@ -89,6 +89,31 @@ const pt: TranslationKeys = {
     unmute: 'Ativar notificações deste jogo',
   },
 
+  notifications: {
+    title: 'Notificações',
+    introTitle: 'Você decide o que te interrompe',
+    introBody: 'Escolha quais eventos quer receber como notificação. Só recebe de times ou ligas que você segue.',
+    sectionEvents: 'Eventos do jogo',
+    sectionMatchState: 'Estado do jogo',
+    sectionEstadio: 'Modo Estádio',
+    goals: 'Gols',
+    redCards: 'Cartões vermelhos',
+    substitutions: 'Substituições',
+    var: 'Decisões do VAR',
+    varDescription: 'Gols anulados, pênaltis concedidos ou revertidos.',
+    matchStart: 'Início do jogo',
+    halftime: 'Intervalo',
+    matchEnd: 'Final do jogo',
+    lineups: 'Escalações confirmadas',
+    lineupsDescription: 'Quando o time titular é anunciado, ~1 hora antes do jogo.',
+    estadioMode: 'Ativar Modo Estádio',
+    estadioDescription: 'Atrasa as notificações ao vivo para evitar spoilers quando você está no estádio.',
+    estadioDelayLabel: 'Atraso',
+    minutes_one: '{{count}} min',
+    minutes_other: '{{count}} min',
+    footnote: 'Qualquer jogo na sua lista de seguidos respeita estas configurações. Você pode silenciar jogos individuais com o botão de sino em cada cartão.',
+  },
+
   // ── PartidosScreen ─────────────────────────────────────────────────────────
   matches: {
     title: 'Jogos',

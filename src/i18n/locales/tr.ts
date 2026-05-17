@@ -86,6 +86,31 @@ const tr: TranslationKeys = {
     unmute: 'Bu maç için bildirimleri etkinleştir',
   },
 
+  notifications: {
+    title: 'Bildirimler',
+    introTitle: 'Seni neyin böleceğine sen karar ver',
+    introBody: 'Hangi etkinlikler için bildirim almak istediğini seç. Yalnızca takip ettiğin takımlardan veya liglerden alırsın.',
+    sectionEvents: 'Maç etkinlikleri',
+    sectionMatchState: 'Maç durumu',
+    sectionEstadio: 'Stadyum Modu',
+    goals: 'Goller',
+    redCards: 'Kırmızı kartlar',
+    substitutions: 'Oyuncu değişiklikleri',
+    var: 'VAR kararları',
+    varDescription: 'İptal edilen goller, verilen veya kaldırılan penaltılar.',
+    matchStart: 'Başlama vuruşu',
+    halftime: 'Devre arası',
+    matchEnd: 'Maç sonu',
+    lineups: 'Onaylanan kadrolar',
+    lineupsDescription: 'İlk on bir açıklandığında, maçtan ~1 saat önce.',
+    estadioMode: 'Stadyum Modunu Etkinleştir',
+    estadioDescription: 'Stadyumdayken spoylerlerden kaçınmak için canlı bildirimleri geciktirir.',
+    estadioDelayLabel: 'Gecikme',
+    minutes_one: '{{count}} dk',
+    minutes_other: '{{count}} dk',
+    footnote: 'Takip ettiğin tüm maçlar bu ayarlara uyar. Her karttaki çan düğmesiyle tek tek maçları sessize alabilirsin.',
+  },
+
   // ── PartidosScreen ─────────────────────────────────────────────────────────
   matches: {
     title: 'Maçlar',

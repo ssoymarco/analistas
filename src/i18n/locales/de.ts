@@ -89,6 +89,31 @@ const de: TranslationKeys = {
     unmute: 'Benachrichtigungen für dieses Spiel aktivieren',
   },
 
+  notifications: {
+    title: 'Benachrichtigungen',
+    introTitle: 'Du entscheidest, was dich unterbricht',
+    introBody: 'Wähle die Ereignisse aus, für die du Push-Benachrichtigungen erhalten möchtest. Du erhältst sie nur für Mannschaften oder Ligen, denen du folgst.',
+    sectionEvents: 'Spielereignisse',
+    sectionMatchState: 'Spielstatus',
+    sectionEstadio: 'Stadionmodus',
+    goals: 'Tore',
+    redCards: 'Rote Karten',
+    substitutions: 'Auswechslungen',
+    var: 'VAR-Entscheidungen',
+    varDescription: 'Aberkannte Tore, gegebene oder zurückgenommene Elfmeter.',
+    matchStart: 'Anpfiff',
+    halftime: 'Halbzeit',
+    matchEnd: 'Abpfiff',
+    lineups: 'Bestätigte Aufstellungen',
+    lineupsDescription: 'Wenn die Startelf bekanntgegeben wird, ca. 1 Stunde vor Anpfiff.',
+    estadioMode: 'Stadionmodus aktivieren',
+    estadioDescription: 'Verzögert Live-Benachrichtigungen, um Spoiler zu vermeiden, wenn du im Stadion bist.',
+    estadioDelayLabel: 'Verzögerung',
+    minutes_one: '{{count}} Min.',
+    minutes_other: '{{count}} Min.',
+    footnote: 'Jedes Spiel in deiner Verfolgungsliste respektiert diese Einstellungen. Du kannst einzelne Spiele mit der Glocke auf jeder Karte stummschalten.',
+  },
+
   // ── PartidosScreen ─────────────────────────────────────────────────────────
   matches: {
     title: 'Spiele',

@@ -20,6 +20,7 @@ import { TeamDetailScreen } from '../screens/TeamDetailScreen';
 import { PlayerDetailScreen } from '../screens/PlayerDetailScreen';
 import { LeagueDetailScreen } from '../screens/LeagueDetailScreen';
 import { GlobalSearchScreen } from '../screens/GlobalSearchScreen';
+import { NotificationSettingsScreen } from '../screens/NotificationSettingsScreen';
 import type { ColorPalette } from '../theme/colors';
 import type { Match, NewsArticle } from '../data/types';
 
@@ -48,6 +49,7 @@ export type PartidosStackParamList = {
     seasonId?: number;
   };
   GlobalSearch: undefined;
+  NotificationSettings: undefined;
 };
 
 /**
@@ -159,6 +161,15 @@ function PartidosNavigator() {
           animation: 'fade_from_bottom',
           gestureEnabled: true,
           gestureDirection: 'horizontal',
+        }}
+      />
+      <PartidosStack.Screen
+        name="NotificationSettings"
+        component={NotificationSettingsScreen}
+        options={{
+          animation: 'slide_from_bottom',
+          gestureEnabled: true,
+          gestureDirection: 'vertical',
         }}
       />
     </PartidosStack.Navigator>

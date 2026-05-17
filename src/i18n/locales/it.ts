@@ -89,6 +89,31 @@ const it: TranslationKeys = {
     unmute: 'Attiva le notifiche per questa partita',
   },
 
+  notifications: {
+    title: 'Notifiche',
+    introTitle: 'Decidi tu cosa ti interrompe',
+    introBody: 'Scegli per quali eventi vuoi ricevere una notifica. Le ricevi solo per squadre o campionati che segui.',
+    sectionEvents: 'Eventi della partita',
+    sectionMatchState: 'Stato della partita',
+    sectionEstadio: 'Modalità Stadio',
+    goals: 'Gol',
+    redCards: 'Cartellini rossi',
+    substitutions: 'Sostituzioni',
+    var: 'Decisioni del VAR',
+    varDescription: 'Gol annullati, rigori assegnati o revocati.',
+    matchStart: 'Fischio d\'inizio',
+    halftime: 'Intervallo',
+    matchEnd: 'Fischio finale',
+    lineups: 'Formazioni confermate',
+    lineupsDescription: 'Quando viene annunciato l\'undici titolare, ~1 ora prima della partita.',
+    estadioMode: 'Attiva Modalità Stadio',
+    estadioDescription: 'Ritarda le notifiche in diretta per evitare spoiler quando sei allo stadio.',
+    estadioDelayLabel: 'Ritardo',
+    minutes_one: '{{count}} min',
+    minutes_other: '{{count}} min',
+    footnote: 'Tutte le partite nella tua lista di seguite rispettano queste impostazioni. Puoi silenziare le singole partite con il pulsante della campana su ogni scheda.',
+  },
+
   // ── PartidosScreen ─────────────────────────────────────────────────────────
   matches: {
     title: 'Partite',
