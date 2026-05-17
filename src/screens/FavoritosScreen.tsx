@@ -17,6 +17,7 @@ import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { SkeletonFavoritos } from '../components/Skeleton';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { SearchIcon } from '../components/NavIcons';
 import { useFavorites } from '../contexts/FavoritesContext';
 import {
   getSearchableTeams,
@@ -830,7 +831,7 @@ export const FavoritosScreen: React.FC = () => {
       {/* ── Search ── */}
       <View style={st.searchWrap}>
         <View style={[st.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', borderColor: c.border }]}>
-          <Text style={[st.searchIcon, { color: c.textTertiary }]}>⌕</Text>
+          <SearchIcon color={c.textTertiary} size={16} />
           <TextInput
             style={[st.searchInput, { color: c.textPrimary }]}
             placeholder={t(SEARCH_PLACEHOLDER_KEYS[activeTab])}
@@ -976,7 +977,6 @@ const st = StyleSheet.create({
   // Search
   searchWrap: { paddingHorizontal: 16, marginBottom: 10 },
   searchBar:  { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, height: 44, borderWidth: 1, gap: 8 },
-  searchIcon: { fontSize: 17 },
   searchInput:{ flex: 1, fontSize: 14, padding: 0 },
   searchClearBtn: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   searchClearText:{ fontSize: 10, fontWeight: '700' },

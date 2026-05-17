@@ -42,3 +42,37 @@ export const ShareIcon = ({ color, size = 18 }: { color: string; size?: number }
     </View>
   );
 };
+
+// ── Search icon (magnifying glass) ───────────────────────────────────────────
+// Used everywhere a magnifier appears: header buttons, in-screen search bars,
+// dedicated GlobalSearch input. Replaces the mixed bag of 🔍 emoji / ⌕ unicode
+// character so the icon looks identical on every screen.
+//
+// Default sized for inline use in 14–17px text rows; pass `size` for header
+// buttons (~16) or larger contexts.
+export const SearchIcon = ({ color, size = 16 }: { color: string; size?: number }) => {
+  const s = size;
+  const ring = Math.round(s * 0.69);
+  const handle = Math.round(s * 0.31);
+  const sw = Math.max(1.4, s / 11);
+  return (
+    <View style={{ width: s, height: s, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{
+        position: 'absolute',
+        top: 0, left: 0,
+        width: ring, height: ring,
+        borderRadius: ring / 2,
+        borderWidth: sw,
+        borderColor: color,
+      }} />
+      <View style={{
+        position: 'absolute',
+        bottom: 0, right: 0,
+        width: handle, height: sw,
+        backgroundColor: color,
+        borderRadius: 1,
+        transform: [{ rotate: '45deg' }, { translateX: 1 }, { translateY: -2 }],
+      }} />
+    </View>
+  );
+};

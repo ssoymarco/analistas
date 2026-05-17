@@ -18,7 +18,7 @@ import {
   getAllSearchableTeams, getAllSearchablePlayers,
   type SearchableTeam, type SearchablePlayer, type SearchableLeague,
 } from '../services/sportsApi';
-import { BackArrow } from '../components/NavIcons';
+import { BackArrow, SearchIcon } from '../components/NavIcons';
 
 const RECENT_KEY = 'analistas_recent_searches';
 const MAX_RECENT = 8;
@@ -458,11 +458,10 @@ export const GlobalSearchScreen: React.FC = () => {
   );
 
 
-  // ── Search icon for input ─────────────────────────────────────────────────
+  // ── Search icon for input — uses the shared SearchIcon from NavIcons ──────
   const SearchInputIcon = () => (
-    <View style={{ width: 14, height: 14, marginRight: 8 }}>
-      <View style={{ position: 'absolute', top: 0, left: 0, width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: c.textTertiary }} />
-      <View style={{ position: 'absolute', bottom: 0, right: 0, width: 4, height: 1.5, backgroundColor: c.textTertiary, borderRadius: 1, transform: [{ rotate: '45deg' }, { translateX: 0.5 }, { translateY: -1.5 }] }} />
+    <View style={{ marginRight: 8 }}>
+      <SearchIcon color={c.textTertiary} size={14} />
     </View>
   );
 

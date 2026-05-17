@@ -13,6 +13,7 @@ import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { SkeletonNoticias } from '../components/Skeleton';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { SearchIcon } from '../components/NavIcons';
 import { getNews } from '../services/sportsApi';
 import type { NewsArticle } from '../data/types';
 import type { NoticiasStackParamList } from '../navigation/AppNavigator';
@@ -282,7 +283,9 @@ export const NoticiasScreen: React.FC = () => {
       {/* Search bar */}
       <View style={styles.searchWrap}>
         <View style={[styles.searchBar, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <View style={{ marginRight: 8 }}>
+            <SearchIcon color={c.textTertiary} size={16} />
+          </View>
           <TextInput
             style={[styles.searchInput, { color: c.textPrimary }]}
             placeholder={t('news.searchPlaceholder')}
@@ -375,7 +378,6 @@ const styles = StyleSheet.create({
     borderRadius: 12, paddingHorizontal: 12, height: 42,
     borderWidth: 1,
   },
-  searchIcon: { fontSize: 14, marginRight: 8 },
   searchInput: { flex: 1, fontSize: 14, padding: 0 },
   searchClear: { fontSize: 13, paddingLeft: 8, fontWeight: '600' },
 

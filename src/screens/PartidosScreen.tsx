@@ -4,6 +4,7 @@ import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPartidos } from '../components/Skeleton';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { SearchIcon } from '../components/NavIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useTranslation } from 'react-i18next';
@@ -35,12 +36,6 @@ const BellIcon = ({ color }: { color: string }) => (
     <View style={{ width: 11, height: 9, borderTopLeftRadius: 5.5, borderTopRightRadius: 5.5, backgroundColor: color, marginTop: -0.5 }} />
     <View style={{ width: 14, height: 2, borderRadius: 1, backgroundColor: color, marginTop: -0.5 }} />
     <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: color, marginTop: 1 }} />
-  </View>
-);
-const SearchIcon = ({ color }: { color: string }) => (
-  <View style={{ width: 16, height: 16, alignItems: 'center', justifyContent: 'center' }}>
-    <View style={{ position: 'absolute', top: 0, left: 0, width: 11, height: 11, borderRadius: 6, borderWidth: 1.5, borderColor: color }} />
-    <View style={{ position: 'absolute', bottom: 0, right: 0, width: 5, height: 1.5, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '45deg' }, { translateX: 1 }, { translateY: -2 }] }} />
   </View>
 );
 
