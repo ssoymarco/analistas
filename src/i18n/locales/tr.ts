@@ -81,6 +81,11 @@ const tr: TranslationKeys = {
     suspended: 'Askıya Alındı',
   },
 
+  matchBell: {
+    mute: 'Bu maçı sessize al',
+    unmute: 'Bu maç için bildirimleri etkinleştir',
+  },
+
   // ── PartidosScreen ─────────────────────────────────────────────────────────
   matches: {
     title: 'Maçlar',

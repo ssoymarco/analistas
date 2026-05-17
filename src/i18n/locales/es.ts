@@ -92,6 +92,11 @@ const es = {
     suspended: 'Suspendido',
   },
 
+  matchBell: {
+    mute: 'Silenciar este partido',
+    unmute: 'Activar notificaciones de este partido',
+  },
+
   // ── PartidosScreen ─────────────────────────────────────────────────────────
   matches: {
     title: 'Partidos',

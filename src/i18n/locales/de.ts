@@ -84,6 +84,11 @@ const de: TranslationKeys = {
     suspended: 'Unterbrochen',
   },
 
+  matchBell: {
+    mute: 'Dieses Spiel stummschalten',
+    unmute: 'Benachrichtigungen für dieses Spiel aktivieren',
+  },
+
   // ── PartidosScreen ─────────────────────────────────────────────────────────
   matches: {
     title: 'Spiele',

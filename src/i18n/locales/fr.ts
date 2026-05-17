@@ -84,6 +84,11 @@ const fr: TranslationKeys = {
     suspended: 'Suspendu',
   },
 
+  matchBell: {
+    mute: 'Désactiver les notifications de ce match',
+    unmute: 'Activer les notifications de ce match',
+  },
+
   // ── PartidosScreen ─────────────────────────────────────────────────────────
   matches: {
     title: 'Matchs',
