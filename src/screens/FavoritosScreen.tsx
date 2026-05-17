@@ -196,6 +196,12 @@ const SEARCH_PLACEHOLDER_KEYS: Record<Tab, string> = {
   jugadores: 'favorites.searchPlayers',
 };
 
+const EMPTY_MESSAGE_KEYS: Record<Tab, string> = {
+  equipos:   'favorites.emptyTeams',
+  ligas:     'favorites.emptyLeagues',
+  jugadores: 'favorites.emptyPlayers',
+};
+
 const INITIAL_SUGGESTED = 10;
 const LOAD_MORE_COUNT   = 10;
 
@@ -227,7 +233,9 @@ function deduplicateItems(items: FavItem[]): FavItem[] {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-/** Round avatar — image if available, initials/emoji fallback on error */
+/** Round avatar — image if available, initials/emoji fallback on error.
+ *  Always wrapped in a tinted container so logos with white backgrounds
+ *  (Premier League flag, DFB Pokal, etc.) don't clash against the dark theme. */
 const ItemAvatar: React.FC<{
   name: string;
   emoji: string;
@@ -236,29 +244,39 @@ const ItemAvatar: React.FC<{
   isDark: boolean;
   isLeague?: boolean;
   isPlayer?: boolean;
-}> = ({ name, emoji, image, size = 46, isDark, isLeague, isPlayer }) => {
+}> = ({ name, emoji, image, size = 40, isDark, isLeague, isPlayer }) => {
   const [imgFailed, setImgFailed] = React.useState(false);
   const s = size;
-  // Players → circle (s/2), Leagues → rounded-rect (10), Teams → rounded-rect (8)
-  const radius = isLeague ? 10 : (isPlayer ? s / 2 : 8);
+  // Players → circle, Leagues → rounded-rect (9), Teams → rounded-rect (8)
+  const radius = isLeague ? 9 : (isPlayer ? s / 2 : 8);
+
+  // Unified container tint — works for image logos, league flags and initials
+  const containerBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
 
   if (image?.startsWith('http') && !imgFailed) {
     return (
-      <Image
-        source={{ uri: image }}
-        style={{ width: s, height: s, borderRadius: radius }}
-        resizeMode="contain"
-        onError={() => setImgFailed(true)}
-      />
+      <View style={{
+        width: s, height: s, borderRadius: radius,
+        backgroundColor: containerBg,
+        alignItems: 'center', justifyContent: 'center',
+        overflow: 'hidden',
+      }}>
+        <Image
+          source={{ uri: image }}
+          style={{ width: s * 0.86, height: s * 0.86, borderRadius: isPlayer ? s / 2 : radius - 1 }}
+          resizeMode="contain"
+          onError={() => setImgFailed(true)}
+        />
+      </View>
     );
   }
 
-  // League: show emoji flag large
+  // League: show emoji flag inside the same container
   if (isLeague) {
     return (
       <View style={{
         width: s, height: s, borderRadius: radius,
-        backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+        backgroundColor: containerBg,
         alignItems: 'center', justifyContent: 'center',
       }}>
         <Text style={{ fontSize: s * 0.52 }}>{emoji}</Text>
@@ -266,7 +284,7 @@ const ItemAvatar: React.FC<{
     );
   }
 
-  // Team / player: initials
+  // Team / player: initials on accent tint
   const letters = abbrev(name);
   return (
     <View style={{
@@ -275,7 +293,7 @@ const ItemAvatar: React.FC<{
       alignItems: 'center', justifyContent: 'center',
     }}>
       <Text style={{
-        fontSize: s * 0.30,
+        fontSize: s * 0.32,
         fontWeight: '800',
         color: '#00E096',
         letterSpacing: 0.5,
@@ -287,15 +305,19 @@ const ItemAvatar: React.FC<{
 };
 
 
-/** Section header with optional divider line */
+/** Section header with optional divider line + optional leading emoji.
+ *  `accent` paints the bar + label + badge in accent green and is reserved
+ *  for the "Mis seguidos" section so it's visually distinct from suggestions. */
 const SectionHeader: React.FC<{
   label: string;
   count?: number;
   accent?: boolean;
+  icon?: string;
   isDark: boolean;
-}> = ({ label, count, accent, isDark }) => (
+}> = ({ label, count, accent, icon, isDark }) => (
   <View style={[sh.row, { marginBottom: 6 }]}>
     {accent && <View style={[sh.accentBar, { backgroundColor: '#00E096' }]} />}
+    {icon && <Text style={sh.icon}>{icon}</Text>}
     <Text style={[sh.label, {
       color: accent ? '#00E096' : (isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'),
     }]}>
@@ -315,13 +337,44 @@ const SectionHeader: React.FC<{
 const sh = StyleSheet.create({
   row:       { flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 16 },
   accentBar: { width: 3, height: 13, borderRadius: 2 },
+  icon:      { fontSize: 12 },
   label:     { fontSize: 10, fontWeight: '800', letterSpacing: 1.0, textTransform: 'uppercase' },
   badge:     { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
   badgeNum:  { fontSize: 10, fontWeight: '700' },
   line:      { flex: 1, height: 1 },
 });
 
-/** Single item row */
+/** Friendly card shown when the user hasn't followed anything in the current
+ *  tab yet — invites them to explore the suggestions below. */
+const EmptyFollowedCard: React.FC<{ message: string; isDark: boolean }> = ({ message, isDark }) => (
+  <View style={[ef.card, {
+    backgroundColor: isDark ? 'rgba(0,224,150,0.06)' : 'rgba(0,200,120,0.06)',
+    borderColor: 'rgba(0,224,150,0.22)',
+  }]}>
+    <Text style={ef.emoji}>⭐</Text>
+    <Text style={[ef.text, { color: isDark ? '#FFFFFF' : '#111827' }]}>{message}</Text>
+    <Text style={ef.arrow}>↓</Text>
+  </View>
+);
+
+const ef = StyleSheet.create({
+  card: {
+    marginTop: 16, marginBottom: 4,
+    paddingVertical: 16, paddingHorizontal: 16,
+    borderRadius: 14, borderWidth: 1,
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+  },
+  emoji: { fontSize: 24 },
+  text:  { flex: 1, fontSize: 13, fontWeight: '600', lineHeight: 18 },
+  arrow: { fontSize: 18, color: '#00E096', fontWeight: '800' },
+});
+
+/** Single item row — compact, fixed-width follow button, no chevron.
+ *
+ *  Followed state uses accent green (positive "action already taken") instead
+ *  of red (which read as a destructive "delete this" cue). Tap still toggles.
+ *  The whole row is tappable for navigation; the chevron has been removed
+ *  since it duplicated the affordance and added visual noise. */
 const ItemRow: React.FC<{
   item: FavItem;
   followed: boolean;
@@ -333,89 +386,82 @@ const ItemRow: React.FC<{
   onNav: () => void;
   borderColor: string;
 }> = React.memo(({ item, followed, canNavigate, isLeague, isPlayer, isDark, onToggle, onNav, borderColor }) => (
-  <View style={[
-    ir.row,
-    {
-      backgroundColor: followed
-        ? (isDark ? 'rgba(0,224,150,0.04)' : 'rgba(0,200,120,0.04)')
-        : 'transparent',
-      borderColor: followed
-        ? 'rgba(0,224,150,0.14)'
-        : borderColor,
-      borderWidth: 1,
-    },
-  ]}>
+  <TouchableOpacity
+    activeOpacity={canNavigate ? 0.7 : 1}
+    onPress={canNavigate ? onNav : undefined}
+    disabled={!canNavigate}
+    style={[
+      ir.row,
+      {
+        backgroundColor: followed
+          ? (isDark ? 'rgba(0,224,150,0.05)' : 'rgba(0,200,120,0.05)')
+          : 'transparent',
+        borderColor: followed ? 'rgba(0,224,150,0.20)' : borderColor,
+        borderWidth: 1,
+      },
+    ]}
+  >
     {/* Avatar */}
     <ItemAvatar
       name={item.name}
       emoji={item.emoji}
       image={item.image}
-      size={46}
+      size={40}
       isDark={isDark}
       isLeague={isLeague}
       isPlayer={isPlayer}
     />
 
-    {/* Info — tappable for navigation */}
-    <TouchableOpacity
-      style={ir.info}
-      onPress={onNav}
-      disabled={!canNavigate}
-      activeOpacity={0.7}
-    >
+    {/* Info */}
+    <View style={ir.info}>
       <Text style={[ir.name, { color: isDark ? '#FFFFFF' : '#111827' }]} numberOfLines={1}>
         {item.name}
       </Text>
       <Text style={[ir.sub, { color: isDark ? '#8E8E93' : '#6B7280' }]} numberOfLines={1}>
         {item.subtitle}
       </Text>
-    </TouchableOpacity>
+    </View>
 
-    {/* Chevron */}
-    {canNavigate && (
-      <TouchableOpacity
-        onPress={onNav}
-        hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-        activeOpacity={0.5}
-      >
-        <Text style={[ir.chevron, { color: isDark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.18)' }]}>›</Text>
-      </TouchableOpacity>
-    )}
-
-    {/* Follow / Unfollow button */}
+    {/* Follow / Unfollow button — fixed width so columns line up */}
     <TouchableOpacity
       style={[
         ir.btn,
         followed
-          ? { backgroundColor: isDark ? 'rgba(255,69,58,0.10)' : 'rgba(255,69,58,0.08)', borderColor: 'rgba(255,69,58,0.35)', borderWidth: 1 }
+          ? {
+              backgroundColor: isDark ? 'rgba(0,224,150,0.10)' : 'rgba(0,200,120,0.10)',
+              borderColor: 'rgba(0,224,150,0.35)',
+              borderWidth: 1,
+            }
           : { backgroundColor: '#00E096' },
       ]}
       onPress={onToggle}
       activeOpacity={0.8}
+      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
     >
-      <Text style={[
-        ir.btnText,
-        { color: followed ? '#FF453A' : '#0D0D0D' },
-      ]}>
+      <Text
+        style={[ir.btnText, { color: followed ? '#00E096' : '#0D0D0D' }]}
+        numberOfLines={1}
+      >
         {followed ? '✓ Siguiendo' : '+ Seguir'}
       </Text>
     </TouchableOpacity>
-  </View>
+  </TouchableOpacity>
 ));
 
 const ir = StyleSheet.create({
   row: {
     flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 9, paddingHorizontal: 12, gap: 11,
-    borderRadius: 14, marginBottom: 6,
+    paddingVertical: 7, paddingHorizontal: 11, gap: 11,
+    borderRadius: 12, marginBottom: 5,
   },
   info:    { flex: 1, minWidth: 0 },
   name:    { fontSize: 14, fontWeight: '600' },
   sub:     { fontSize: 11, fontWeight: '500', marginTop: 1 },
-  chevron: { fontSize: 22, fontWeight: '300', paddingHorizontal: 2 },
   btn: {
-    paddingHorizontal: 11, paddingVertical: 6,
-    borderRadius: 14,
+    minWidth: 96,
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
   },
   btnText: { fontSize: 11, fontWeight: '700' },
 });
@@ -845,10 +891,11 @@ export const FavoritosScreen: React.FC = () => {
           {/* ── NORMAL MODE ── */}
           {searchResults === null && (
             <>
-              {/* Section: Mis seguidos */}
-              {followed.length > 0 && (
+              {/* Section: Mis seguidos (or empty-state card guiding the user) */}
+              {followed.length > 0 ? (
                 <>
                   <SectionHeader
+                    icon="⭐"
                     label={t('favorites.myFollowed')}
                     count={followed.length}
                     accent
@@ -856,6 +903,11 @@ export const FavoritosScreen: React.FC = () => {
                   />
                   {followed.map(item => renderItem(item, 'f_'))}
                 </>
+              ) : (
+                <EmptyFollowedCard
+                  message={t(EMPTY_MESSAGE_KEYS[activeTab])}
+                  isDark={isDark}
+                />
               )}
 
               {/* Section: Los más seguidos (suggestions) */}
