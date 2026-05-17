@@ -104,7 +104,7 @@ const tr: TranslationKeys = {
     lineups: 'Onaylanan kadrolar',
     lineupsDescription: 'İlk on bir açıklandığında, maçtan ~1 saat önce.',
     estadioMode: 'Stadyum Modunu Etkinleştir',
-    estadioDescription: 'Stadyumdayken spoylerlerden kaçınmak için canlı bildirimleri geciktirir.',
+    estadioDescription: 'Bildirimleri birkaç saniye geciktirir, böylece golü görmeden önce öğrenmezsin. Yayının biraz geriden geliyorsa idealdir.',
     estadioDelayLabel: 'Gecikme',
     minutes_one: '{{count}} dk',
     minutes_other: '{{count}} dk',

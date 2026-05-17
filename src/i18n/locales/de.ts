@@ -107,7 +107,7 @@ const de: TranslationKeys = {
     lineups: 'Bestätigte Aufstellungen',
     lineupsDescription: 'Wenn die Startelf bekanntgegeben wird, ca. 1 Stunde vor Anpfiff.',
     estadioMode: 'Stadionmodus aktivieren',
-    estadioDescription: 'Verzögert Live-Benachrichtigungen, um Spoiler zu vermeiden, wenn du im Stadion bist.',
+    estadioDescription: 'Verzögert Benachrichtigungen um einige Sekunden, damit du nicht vor dem Bild vom Tor erfährst. Ideal, wenn deine Übertragung etwas hinterherläuft.',
     estadioDelayLabel: 'Verzögerung',
     minutes_one: '{{count}} Min.',
     minutes_other: '{{count}} Min.',

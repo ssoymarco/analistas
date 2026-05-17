@@ -107,7 +107,7 @@ const en: TranslationKeys = {
     lineups: 'Confirmed line-ups',
     lineupsDescription: 'When the starting eleven is announced, ~1 hour before kick-off.',
     estadioMode: 'Enable Stadium Mode',
-    estadioDescription: 'Delays live notifications to avoid spoilers when you are at the stadium.',
+    estadioDescription: 'Delays notifications by a few seconds so you don\'t find out about the goal before you see it. Perfect if your broadcast runs slightly behind.',
     estadioDelayLabel: 'Delay',
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',

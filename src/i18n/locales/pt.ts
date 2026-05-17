@@ -107,7 +107,7 @@ const pt: TranslationKeys = {
     lineups: 'Escalações confirmadas',
     lineupsDescription: 'Quando o time titular é anunciado, ~1 hora antes do jogo.',
     estadioMode: 'Ativar Modo Estádio',
-    estadioDescription: 'Atrasa as notificações ao vivo para evitar spoilers quando você está no estádio.',
+    estadioDescription: 'Atrasa as notificações por alguns segundos para que você não descubra o gol antes de vê-lo. Ideal se sua transmissão está com pequeno atraso.',
     estadioDelayLabel: 'Atraso',
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',

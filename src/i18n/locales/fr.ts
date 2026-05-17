@@ -107,7 +107,7 @@ const fr: TranslationKeys = {
     lineups: 'Compositions confirmées',
     lineupsDescription: 'Lorsque le onze de départ est annoncé, ~1 heure avant le match.',
     estadioMode: 'Activer le Mode Stade',
-    estadioDescription: 'Retarde les notifications en direct pour éviter les spoilers lorsque tu es au stade.',
+    estadioDescription: 'Retarde les notifications de quelques secondes pour que tu n\'apprennes pas le but avant de le voir. Idéal si ta diffusion a un peu de retard.',
     estadioDelayLabel: 'Délai',
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',

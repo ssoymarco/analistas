@@ -115,7 +115,7 @@ const es = {
     lineups: 'Alineaciones confirmadas',
     lineupsDescription: 'Cuando se anuncia el once titular, ~1 hora antes del partido.',
     estadioMode: 'Activar Modo Estadio',
-    estadioDescription: 'Retrasa las notificaciones en vivo para evitar spoilers cuando estás en el estadio.',
+    estadioDescription: 'Retrasa las notificaciones unos segundos para que no te enteres del gol antes de verlo. Ideal si tu transmisión va con un poco de retraso.',
     estadioDelayLabel: 'Retraso',
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',

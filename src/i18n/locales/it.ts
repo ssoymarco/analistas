@@ -107,7 +107,7 @@ const it: TranslationKeys = {
     lineups: 'Formazioni confermate',
     lineupsDescription: 'Quando viene annunciato l\'undici titolare, ~1 ora prima della partita.',
     estadioMode: 'Attiva Modalità Stadio',
-    estadioDescription: 'Ritarda le notifiche in diretta per evitare spoiler quando sei allo stadio.',
+    estadioDescription: 'Ritarda le notifiche di qualche secondo così non scopri il gol prima di vederlo. Ideale se la tua trasmissione va leggermente in ritardo.',
     estadioDelayLabel: 'Ritardo',
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',
