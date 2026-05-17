@@ -730,32 +730,25 @@ export const FavoritosScreen: React.FC = () => {
     <SafeAreaView style={[st.safe, { backgroundColor: c.bg }]} edges={['top']}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
-      {/* ── Header ── */}
+      {/* ── Header ── Same chrome as Partidos: icon-chip + title left, compact stat pill right */}
       <View style={[st.header, { borderBottomColor: c.border, backgroundColor: c.bg }]}>
         <View style={st.headerLeft}>
           <View style={[st.headerIcon, { backgroundColor: 'rgba(251,191,36,0.15)' }]}>
-            <Text style={{ fontSize: 15 }}>⭐</Text>
+            <Text style={{ fontSize: 14 }}>⭐</Text>
           </View>
-          <View>
-            <Text style={[st.headerTitle, { color: c.textPrimary }]}>
-              {t('favorites.title')}
-            </Text>
-            <Text style={[st.headerSub, { color: c.textSecondary }]}>
-              {totalCount > 0
-                ? t('favorites.selected', { count: totalCount })
-                : t('favorites.subtitle')}
-            </Text>
-          </View>
+          <Text style={[st.headerTitle, { color: c.textPrimary }]}>
+            {t('favorites.title')}
+          </Text>
         </View>
         {totalCount > 0 && (
-          <View style={[st.headerBadge, { backgroundColor: '#fbbf24' }]}>
-            <Text style={st.headerBadgeStar}>⭐</Text>
-            <Text style={st.headerBadgeNum}>{totalCount}</Text>
+          <View style={st.headerCountPill}>
+            <Text style={st.headerCountNum}>{totalCount}</Text>
+            <Text style={st.headerCountStar}>⭐</Text>
           </View>
         )}
       </View>
 
-      {/* ── Tabs ── */}
+      {/* ── Tabs ── Accent-green active state mirroring Partidos identity */}
       <View style={st.tabBar}>
         {TABS.map(tab => {
           const active = activeTab === tab.id;
@@ -766,7 +759,7 @@ export const FavoritosScreen: React.FC = () => {
               style={[
                 st.tab,
                 { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', borderColor: c.border },
-                active && { backgroundColor: c.accent, borderColor: c.accent },
+                active && { backgroundColor: '#00E096', borderColor: '#00E096' },
               ]}
               onPress={() => { setActiveTab(tab.id); setSearchQuery(''); }}
               activeOpacity={0.7}
@@ -778,7 +771,7 @@ export const FavoritosScreen: React.FC = () => {
               {cnt > 0 && (
                 <View style={[
                   st.tabBadge,
-                  { backgroundColor: active ? 'rgba(0,0,0,0.18)' : 'rgba(0,224,150,0.18)' },
+                  { backgroundColor: active ? 'rgba(0,0,0,0.22)' : 'rgba(0,224,150,0.18)' },
                 ]}>
                   <Text style={[st.tabBadgeNum, { color: active ? '#0D0D0D' : '#00E096' }]}>
                     {cnt}
@@ -912,19 +905,24 @@ export const FavoritosScreen: React.FC = () => {
 const st = StyleSheet.create({
   safe: { flex: 1 },
 
-  // Header
+  // Header — dimensions match PartidosScreen exactly
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12,
     borderBottomWidth: 1,
   },
-  headerLeft:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerIcon:     { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  headerTitle:    { fontSize: 18, fontWeight: '800' },
-  headerSub:      { fontSize: 12, fontWeight: '500', marginTop: 1 },
-  headerBadge:    { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14 },
-  headerBadgeStar:{ fontSize: 12, color: '#000' },
-  headerBadgeNum: { fontSize: 13, fontWeight: '800', color: '#000' },
+  headerLeft:       { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerIcon:       { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  headerTitle:      { fontSize: 18, fontWeight: '800' },
+  // Compact stat pill mirroring the Partidos streak pill — same proportions,
+  // accent tint matches the favourites identity (gold).
+  headerCountPill:  {
+    flexDirection: 'row', alignItems: 'center', gap: 2,
+    backgroundColor: 'rgba(251,191,36,0.15)',
+    paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12,
+  },
+  headerCountNum:   { fontSize: 14, fontWeight: '800', color: '#fbbf24' },
+  headerCountStar:  { fontSize: 14 },
 
   // Tabs
   tabBar:      { flexDirection: 'row', paddingHorizontal: 16, gap: 8, paddingBottom: 12 },
