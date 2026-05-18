@@ -49,6 +49,22 @@ interface RecentSearch {
 
 import { normalize } from '../utils/normalize';
 
+/** Drop later occurrences of any id we've already seen.
+ *  Defensive against SportMonks data where multiple records can share a
+ *  fallback id like `-1` (unknown player), which would otherwise produce
+ *  duplicate React keys when rendered through `.map()`. */
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    if (!seen.has(item.id)) {
+      seen.add(item.id);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
 /**
  * Bidirectional country name translations.
  * Key = normalized English name → value = normalized Spanish name.
@@ -155,7 +171,10 @@ export const GlobalSearchScreen: React.FC = () => {
       setTeams(clubTeams);
       setPlayers(p);
       if (stored) {
-        try { setRecentSearches(JSON.parse(stored)); } catch { /* ignore */ }
+        // Dedupe defensively — legacy storage may have entries with the
+        // same id (e.g. multiple players that share a fallback `-1` id).
+        // Duplicates produce React-key collisions downstream.
+        try { setRecentSearches(dedupeById(JSON.parse(stored))); } catch { /* ignore */ }
       }
       setLoading(false);
 
@@ -258,7 +277,8 @@ export const GlobalSearchScreen: React.FC = () => {
       }
     }
 
-    return out;
+    // Dedupe — guards against e.g. two players sharing a fallback `-1` id.
+    return dedupeById(out);
   }, [debouncedQuery, teams, players, leagues]);
 
   // ── Grouped results ───────────────────────────────────────────────────────
@@ -307,7 +327,7 @@ export const GlobalSearchScreen: React.FC = () => {
         });
       }
     }
-    return items;
+    return dedupeById(items);
   }, [teams, players, t]);
 
   // ── Navigate to result ────────────────────────────────────────────────────
@@ -322,7 +342,10 @@ export const GlobalSearchScreen: React.FC = () => {
       image: item.image,
     };
     setRecentSearches(prev => {
-      const next = [recent, ...prev.filter(r => r.id !== item.id)].slice(0, MAX_RECENT);
+      // `prev` is already deduped on load, but run dedupeById again as a
+      // safety net so AsyncStorage never persists a duplicate even if some
+      // legacy code path slipped one in.
+      const next = dedupeById([recent, ...prev.filter(r => r.id !== item.id)]).slice(0, MAX_RECENT);
       AsyncStorage.setItem(RECENT_KEY, JSON.stringify(next));
       return next;
     });
