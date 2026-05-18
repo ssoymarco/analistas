@@ -22,6 +22,7 @@ import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPerfil } from '../components/Skeleton';
 import { EditProfileModal } from '../components/EditProfileModal';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { SectionHeader } from '../components/SectionHeader';
 import { scheduleLocalNotification } from '../services/notifications';
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useTranslation } from 'react-i18next';
@@ -61,16 +62,6 @@ function MenuRow({ emoji, label, sublabel, iconBg, rightElement, onPress, accent
       </View>
       {rightElement ?? <Text style={{ fontSize: 22, color: accent ? '#60a5fa' : c.textTertiary }}>›</Text>}
     </TouchableOpacity>
-  );
-}
-
-function SectionHeader({ label, c }: { label: string; c: ColorPalette }) {
-  return (
-    <Text style={{
-      fontSize: 10, fontWeight: '700', color: c.textTertiary,
-      letterSpacing: 1.5, textTransform: 'uppercase',
-      marginBottom: 8, marginTop: 20, paddingHorizontal: 20,
-    }}>{label}</Text>
   );
 }
 
@@ -702,7 +693,7 @@ export const PerfilScreen: React.FC = () => {
         )}
 
         {/* Ajustes */}
-        <SectionHeader label={t('profile.settings')} c={c} />
+        <SectionHeader label={t('profile.settings')} />
         <View style={{ backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
           <MenuRow c={c} emoji="🔔" label={t('profile.notifications')} iconBg="rgba(249,115,22,0.15)" />
           <MenuRow c={c} emoji={isDark ? '🌙' : '☀️'} label={t('profile.appearance')} sublabel={isDark ? t('profile.darkMode') : t('profile.lightMode')} iconBg={isDark ? 'rgba(99,102,241,0.15)' : 'rgba(234,179,8,0.15)'} rightElement={<CustomToggle value={isDark} onToggle={toggleDark} activeColor={isDark ? '#6366f1' : '#eab308'} icon={isDark ? '🌙' : '☀️'} />} />
@@ -730,7 +721,7 @@ export const PerfilScreen: React.FC = () => {
         <PromoBanner onPress={() => navigation.navigate('HazteTitular', { source: 'promo' })} />
 
         {/* Información */}
-        <SectionHeader label={t('profile.information')} c={c} />
+        <SectionHeader label={t('profile.information')} />
         <View style={{ backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
           <MenuRow c={c} emoji="ℹ️" label={t('profile.aboutApp')} sublabel={t('profile.aboutAppSub')} iconBg="rgba(59,130,246,0.15)" onPress={() => setAboutModalVisible(true)} />
           <MenuRow c={c} emoji="⭐" label={t('profile.rateApp')} sublabel={t('profile.rateSub')} iconBg="rgba(234,179,8,0.15)" onPress={handleRateApp} />

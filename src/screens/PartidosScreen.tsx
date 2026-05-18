@@ -4,7 +4,7 @@ import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPartidos } from '../components/Skeleton';
 import { ScreenHeader } from '../components/ScreenHeader';
-import { SearchIcon } from '../components/NavIcons';
+import { BellIcon, SearchIcon } from '../components/NavIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useTranslation } from 'react-i18next';
@@ -14,7 +14,11 @@ import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import type { Match, MatchStatus } from '../data/types';
 import { DateNavigator, formatFullDate, isToday } from '../components/DateNavigator';
-import { FilterTabs, FilterTab } from '../components/FilterTabs';
+import { CategoryTabs, type CategoryTab as PillTab } from '../components/CategoryTabs';
+
+/** Filter keys for Partidos. Kept exported for callers that still type the
+ *  active tab (e.g. analytics, persisted state). */
+export type FilterTab = 'todos' | 'vivo' | 'finalizados' | 'proximos';
 import { LeagueSection } from '../components/LeagueSection';
 import { CalendarPicker } from '../components/CalendarPicker';
 import { useFixtures } from '../hooks/useFixtures';
@@ -27,17 +31,6 @@ function todayISO(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-
-// ── Header icons ──────────────────────────────────────────────────────────────
-// Bell icon — matches the MatchBell shape for visual consistency
-const BellIcon = ({ color }: { color: string }) => (
-  <View style={{ alignItems: 'center', justifyContent: 'center', width: 18 }}>
-    <View style={{ width: 4, height: 2.5, borderTopLeftRadius: 1.5, borderTopRightRadius: 1.5, backgroundColor: color }} />
-    <View style={{ width: 11, height: 9, borderTopLeftRadius: 5.5, borderTopRightRadius: 5.5, backgroundColor: color, marginTop: -0.5 }} />
-    <View style={{ width: 14, height: 2, borderRadius: 1, backgroundColor: color, marginTop: -0.5 }} />
-    <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: color, marginTop: 1 }} />
-  </View>
-);
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 export const PartidosScreen: React.FC = () => {
@@ -81,6 +74,14 @@ export const PartidosScreen: React.FC = () => {
     counts[selectedDate] = totalCount;
     return counts;
   }, [selectedDate, totalCount]);
+
+  // ── Filter pills — unified CategoryTabs ────────────────────────────────────
+  const filterTabs = useMemo<PillTab<FilterTab>[]>(() => [
+    { key: 'todos',       label: t('filters.all'),      emoji: '⚽', badge: totalCount > 0 ? totalCount : null },
+    { key: 'vivo',        label: t('filters.live'),     emoji: '🔴', badge: liveCount > 0 ? liveCount : null, liveBadge: liveCount > 0 },
+    { key: 'finalizados', label: t('filters.finished'), emoji: '🏁', badge: finishedCount > 0 ? finishedCount : null },
+    { key: 'proximos',    label: t('filters.upcoming'), emoji: '🕐' },
+  ], [t, totalCount, liveCount, finishedCount]);
 
   const filterStatus = useMemo<MatchStatus | null>(() => {
     if (activeTab === 'todos') return null;
@@ -321,7 +322,14 @@ export const PartidosScreen: React.FC = () => {
       )}
 
       {isToday(selectedDate) && (
-        <FilterTabs activeTab={activeTab} onTabChange={setActiveTab} liveCounts={liveCount} totalCount={totalCount} finishedCount={finishedCount} />
+        <View style={{ paddingTop: 10, backgroundColor: c.bg }}>
+          <CategoryTabs<FilterTab>
+            tabs={filterTabs}
+            activeKey={activeTab}
+            onChange={setActiveTab}
+            layout="scroll"
+          />
+        </View>
       )}
 
       {/* Live auto-refresh indicator removed */}

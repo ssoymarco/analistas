@@ -18,6 +18,9 @@ import { useDarkMode } from '../contexts/DarkModeContext';
 import { SkeletonFavoritos } from '../components/Skeleton';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { SearchIcon } from '../components/NavIcons';
+import { SectionHeader } from '../components/SectionHeader';
+import { CategoryTabs } from '../components/CategoryTabs';
+import { radius, ui } from '../theme/tokens';
 import { useFavorites } from '../contexts/FavoritesContext';
 import {
   getSearchableTeams,
@@ -305,45 +308,6 @@ const ItemAvatar: React.FC<{
   );
 };
 
-
-/** Section header with optional divider line + optional leading emoji.
- *  `accent` paints the bar + label + badge in accent green and is reserved
- *  for the "Mis seguidos" section so it's visually distinct from suggestions. */
-const SectionHeader: React.FC<{
-  label: string;
-  count?: number;
-  accent?: boolean;
-  icon?: string;
-  isDark: boolean;
-}> = ({ label, count, accent, icon, isDark }) => (
-  <View style={[sh.row, { marginBottom: 6 }]}>
-    {accent && <View style={[sh.accentBar, { backgroundColor: '#00E096' }]} />}
-    {icon && <Text style={sh.icon}>{icon}</Text>}
-    <Text style={[sh.label, {
-      color: accent ? '#00E096' : (isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'),
-    }]}>
-      {label}
-    </Text>
-    {count !== undefined && (
-      <View style={[sh.badge, { backgroundColor: accent ? 'rgba(0,224,150,0.15)' : (isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)') }]}>
-        <Text style={[sh.badgeNum, { color: accent ? '#00E096' : (isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.40)') }]}>
-          {count > 99 ? '99+' : count}
-        </Text>
-      </View>
-    )}
-    <View style={[sh.line, { backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)' }]} />
-  </View>
-);
-
-const sh = StyleSheet.create({
-  row:       { flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 16 },
-  accentBar: { width: 3, height: 13, borderRadius: 2 },
-  icon:      { fontSize: 12 },
-  label:     { fontSize: 10, fontWeight: '800', letterSpacing: 1.0, textTransform: 'uppercase' },
-  badge:     { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
-  badgeNum:  { fontSize: 10, fontWeight: '700' },
-  line:      { flex: 1, height: 1 },
-});
 
 /** Friendly card shown when the user hasn't followed anything in the current
  *  tab yet — invites them to explore the suggestions below. */
@@ -793,40 +757,18 @@ export const FavoritosScreen: React.FC = () => {
         }
       />
 
-      {/* ── Tabs ── Accent-green active state mirroring Partidos identity */}
-      <View style={st.tabBar}>
-        {TABS.map(tab => {
-          const active = activeTab === tab.id;
-          const cnt = tabConfig[tab.id].count;
-          return (
-            <TouchableOpacity
-              key={tab.id}
-              style={[
-                st.tab,
-                { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', borderColor: c.border },
-                active && { backgroundColor: '#00E096', borderColor: '#00E096' },
-              ]}
-              onPress={() => { setActiveTab(tab.id); setSearchQuery(''); }}
-              activeOpacity={0.7}
-            >
-              <Text style={st.tabIcon}>{tab.icon}</Text>
-              <Text style={[st.tabLabel, { color: active ? '#0D0D0D' : c.textSecondary }]}>
-                {t(tab.labelKey)}
-              </Text>
-              {cnt > 0 && (
-                <View style={[
-                  st.tabBadge,
-                  { backgroundColor: active ? 'rgba(0,0,0,0.22)' : 'rgba(0,224,150,0.18)' },
-                ]}>
-                  <Text style={[st.tabBadgeNum, { color: active ? '#0D0D0D' : '#00E096' }]}>
-                    {cnt}
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {/* ── Tabs ── unified CategoryTabs (see CategoryTabs.tsx) */}
+      <CategoryTabs<Tab>
+        tabs={TABS.map(tab => ({
+          key: tab.id,
+          label: t(tab.labelKey),
+          emoji: tab.icon,
+          badge: tabConfig[tab.id].count,
+        }))}
+        activeKey={activeTab}
+        onChange={(key) => { setActiveTab(key); setSearchQuery(''); }}
+        layout="fill"
+      />
 
       {/* ── Search ── */}
       <View style={st.searchWrap}>
@@ -877,12 +819,13 @@ export const FavoritosScreen: React.FC = () => {
                 </View>
               ) : (
                 <>
-                  <View style={[sh.row, { paddingTop: 4, marginBottom: 10 }]}>
-                    <Text style={[sh.label, { color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)' }]}>
-                      {searchResults.length} resultado{searchResults.length !== 1 ? 's' : ''}
-                    </Text>
-                    <View style={[sh.line, { backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)' }]} />
-                  </View>
+                  <SectionHeader
+                    label={`${searchResults.length} resultado${searchResults.length !== 1 ? 's' : ''}`}
+                    line
+                    paddingHorizontal={0}
+                    marginTop={4}
+                    marginBottom={10}
+                  />
                   {searchResults.map(item => renderItem(item, 'q_'))}
                 </>
               )}
@@ -900,7 +843,10 @@ export const FavoritosScreen: React.FC = () => {
                     label={t('favorites.myFollowed')}
                     count={followed.length}
                     accent
-                    isDark={isDark}
+                    line
+                    paddingHorizontal={0}
+                    marginTop={16}
+                    marginBottom={6}
                   />
                   {followed.map(item => renderItem(item, 'f_'))}
                 </>
@@ -915,7 +861,10 @@ export const FavoritosScreen: React.FC = () => {
               <SectionHeader
                 label={followed.length > 0 ? t('favorites.suggested') : t('favorites.mostFollowed')}
                 count={suggestions.length}
-                isDark={isDark}
+                line
+                paddingHorizontal={0}
+                marginTop={16}
+                marginBottom={6}
               />
               {visibleSuggestions.map(item => renderItem(item, 's_'))}
 
@@ -966,17 +915,9 @@ const st = StyleSheet.create({
   headerCountNum:   { fontSize: 14, fontWeight: '800', color: '#fbbf24' },
   headerCountStar:  { fontSize: 14 },
 
-  // Tabs
-  tabBar:      { flexDirection: 'row', paddingHorizontal: 16, gap: 8, paddingBottom: 12 },
-  tab:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, flex: 1, paddingVertical: 9, paddingHorizontal: 8, borderRadius: 12, borderWidth: 1 },
-  tabIcon:     { fontSize: 13 },
-  tabLabel:    { fontSize: 12, fontWeight: '700' },
-  tabBadge:    { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8 },
-  tabBadgeNum: { fontSize: 10, fontWeight: '800' },
-
   // Search
   searchWrap: { paddingHorizontal: 16, marginBottom: 10 },
-  searchBar:  { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, height: 44, borderWidth: 1, gap: 8 },
+  searchBar:  { flexDirection: 'row', alignItems: 'center', borderRadius: radius.md, paddingHorizontal: 12, height: ui.searchBarHeight, borderWidth: 1, gap: 8 },
   searchInput:{ flex: 1, fontSize: 14, padding: 0 },
   searchClearBtn: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   searchClearText:{ fontSize: 10, fontWeight: '700' },
@@ -999,6 +940,6 @@ const st = StyleSheet.create({
 
   // Empty
   emptyState: { paddingTop: 60, alignItems: 'center', gap: 10 },
-  emptyIcon:  { fontSize: 36 },
+  emptyIcon:  { fontSize: 48 },
   emptyText:  { fontSize: 15, textAlign: 'center' },
 });

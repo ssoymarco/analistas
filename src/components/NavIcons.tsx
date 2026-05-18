@@ -50,6 +50,24 @@ export const ShareIcon = ({ color, size = 18 }: { color: string; size?: number }
 //
 // Default sized for inline use in 14–17px text rows; pass `size` for header
 // buttons (~16) or larger contexts.
+// ── Bell icon ────────────────────────────────────────────────────────────────
+// Notification bell used in header buttons. Geometry matches the active
+// `MatchBell` shape so the per-match bell and the header bell read as the
+// same family at a glance.
+export const BellIcon = ({ color, size = 18 }: { color: string; size?: number }) => {
+  // Geometry is calibrated for size=18 (the header default); other sizes scale
+  // proportionally so the bell stays well-balanced.
+  const k = size / 18;
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'center', width: size }}>
+      <View style={{ width: 4 * k,  height: 2.5 * k, borderTopLeftRadius: 1.5 * k, borderTopRightRadius: 1.5 * k, backgroundColor: color }} />
+      <View style={{ width: 11 * k, height: 9 * k,   borderTopLeftRadius: 5.5 * k, borderTopRightRadius: 5.5 * k, backgroundColor: color, marginTop: -0.5 * k }} />
+      <View style={{ width: 14 * k, height: 2 * k,   borderRadius: 1 * k,                                          backgroundColor: color, marginTop: -0.5 * k }} />
+      <View style={{ width: 3 * k,  height: 3 * k,   borderRadius: 1.5 * k,                                        backgroundColor: color, marginTop: 1 * k }} />
+    </View>
+  );
+};
+
 export const SearchIcon = ({ color, size = 16 }: { color: string; size?: number }) => {
   const s = size;
   const ring = Math.round(s * 0.69);

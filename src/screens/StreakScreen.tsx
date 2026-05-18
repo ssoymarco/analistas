@@ -119,12 +119,9 @@ export const StreakScreen: React.FC = () => {
     setMotivationalCopy(pickMotivationalCopy(copies));
   }, [streakDays, t]);
 
-  // Local color tokens
-  const SURFACE = c.card;
-  const BORDER  = c.border;
-  const TEXT    = c.textPrimary;
-  const TEXTSUB = c.textSecondary;
-  const SHADOW  = isDark
+  // Subtle elevation for cards in light mode — in dark mode borders carry the
+  // visual weight, so we skip the shadow entirely.
+  const cardShadow = isDark
     ? null
     : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 3 };
 
@@ -211,7 +208,7 @@ export const StreakScreen: React.FC = () => {
           </LinearGradient>
 
           <Text style={{
-            fontSize: 12, color: TEXTSUB, lineHeight: 17,
+            fontSize: 12, color: c.textSecondary, lineHeight: 17,
             textAlign: 'center', marginTop: 10, paddingHorizontal: 4,
           }}>
             {t('streak.description')}
@@ -222,13 +219,13 @@ export const StreakScreen: React.FC = () => {
         {nextMilestone && (
           <View style={[{
             marginHorizontal: 16, marginTop: 14,
-            backgroundColor: SURFACE,
+            backgroundColor: c.card,
             borderRadius: 20, padding: 20,
-            borderWidth: isDark ? 1 : 0, borderColor: BORDER,
-          }, SHADOW]}>
+            borderWidth: isDark ? 1 : 0, borderColor: c.border,
+          }, cardShadow]}>
             <Text style={{
               fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
-              textTransform: 'uppercase', color: TEXTSUB, marginBottom: 16,
+              textTransform: 'uppercase', color: c.textSecondary, marginBottom: 16,
             }}>
               {t('streak.nextAchievement')}
             </Text>
@@ -245,12 +242,12 @@ export const StreakScreen: React.FC = () => {
 
               <View style={{ flex: 1 }}>
                 <Text style={{
-                  fontSize: 22, fontWeight: '800', color: TEXT,
+                  fontSize: 22, fontWeight: '800', color: c.textPrimary,
                   lineHeight: 26, marginBottom: 3, letterSpacing: -0.4,
                 }}>
                   {nextMilestone.name}
                 </Text>
-                <Text style={{ fontSize: 12, color: TEXTSUB }}>{nextMilestone.desc}</Text>
+                <Text style={{ fontSize: 12, color: c.textSecondary }}>{nextMilestone.desc}</Text>
               </View>
 
               <View style={{ alignItems: 'flex-end', flexShrink: 0 }}>
@@ -259,7 +256,7 @@ export const StreakScreen: React.FC = () => {
                 }}>
                   {nextMilestone.days - streakDays}
                 </Text>
-                <Text style={{ fontSize: 11, fontWeight: '500', color: TEXTSUB }}>
+                <Text style={{ fontSize: 11, fontWeight: '500', color: c.textSecondary }}>
                   {t('streak.days')}
                 </Text>
               </View>
@@ -282,13 +279,13 @@ export const StreakScreen: React.FC = () => {
             </View>
 
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 10, color: TEXTSUB }}>
+              <Text style={{ fontSize: 10, color: c.textSecondary }}>
                 {progressBase} {t('streak.days')}
               </Text>
               <Text style={{ fontSize: 10, fontWeight: '700', color: '#8B5CF6' }}>
                 {Math.round(progressPct * 100)}%
               </Text>
-              <Text style={{ fontSize: 10, color: TEXTSUB }}>
+              <Text style={{ fontSize: 10, color: c.textSecondary }}>
                 {nextMilestone.days} {t('streak.days')}
               </Text>
             </View>
@@ -298,7 +295,7 @@ export const StreakScreen: React.FC = () => {
         {/* Your achievements */}
         <View style={{ marginTop: 22 }}>
           <Text style={{
-            fontSize: 13, fontWeight: '800', color: TEXT,
+            fontSize: 13, fontWeight: '800', color: c.textPrimary,
             letterSpacing: 1.2, textTransform: 'uppercase',
             paddingHorizontal: 20, marginBottom: 14,
           }}>
@@ -336,7 +333,7 @@ export const StreakScreen: React.FC = () => {
                     <Text style={{
                       fontSize: achieved ? 10 : 8,
                       fontWeight: '700',
-                      color: achieved ? '#fff' : TEXTSUB,
+                      color: achieved ? '#fff' : c.textSecondary,
                     }}>
                       {achieved ? '✓' : '🔒'}
                     </Text>
@@ -357,7 +354,7 @@ export const StreakScreen: React.FC = () => {
                   </Text>
 
                   <Text style={{
-                    fontSize: 10, fontWeight: '600', color: TEXT,
+                    fontSize: 10, fontWeight: '600', color: c.textPrimary,
                     textAlign: 'center', lineHeight: 14,
                     opacity: achieved ? 0.9 : 0.5,
                   }} numberOfLines={2}>
@@ -373,11 +370,11 @@ export const StreakScreen: React.FC = () => {
         {motivationalCopy.length > 0 && (
           <View style={[{
             marginHorizontal: 16, marginTop: 16,
-            backgroundColor: SURFACE, borderRadius: 20,
+            backgroundColor: c.card, borderRadius: 20,
             paddingVertical: 28, paddingHorizontal: 24,
-            borderWidth: isDark ? 1 : 0, borderColor: BORDER,
+            borderWidth: isDark ? 1 : 0, borderColor: c.border,
             overflow: 'hidden',
-          }, SHADOW]}>
+          }, cardShadow]}>
             <Text style={{
               position: 'absolute', top: 8, left: 16,
               fontSize: 72, fontWeight: '900', lineHeight: 72,
@@ -387,7 +384,7 @@ export const StreakScreen: React.FC = () => {
             </Text>
             <Text style={{
               fontStyle: 'italic', fontWeight: '500',
-              fontSize: 17, color: TEXT, lineHeight: 27,
+              fontSize: 17, color: c.textPrimary, lineHeight: 27,
               textAlign: 'center', paddingTop: 4,
             }}>
               {motivationalCopy}
@@ -398,18 +395,18 @@ export const StreakScreen: React.FC = () => {
         {/* Streak notification toggle — native Switch for consistency */}
         <View style={[{
           marginHorizontal: 16, marginTop: 14,
-          backgroundColor: SURFACE, borderRadius: 20, padding: 20,
-          borderWidth: isDark ? 1 : 0, borderColor: BORDER,
-        }, SHADOW]}>
+          backgroundColor: c.card, borderRadius: 20, padding: 20,
+          borderWidth: isDark ? 1 : 0, borderColor: c.border,
+        }, cardShadow]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                 <Text style={{ fontSize: 20, lineHeight: 24 }}>🔔</Text>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: TEXT, flexShrink: 1 }}>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: c.textPrimary, flexShrink: 1 }}>
                   {t('streak.dontBreakStreak')}
                 </Text>
               </View>
-              <Text style={{ fontSize: 13, color: TEXTSUB, lineHeight: 20 }}>
+              <Text style={{ fontSize: 13, color: c.textSecondary, lineHeight: 20 }}>
                 {t('streak.streakNotification')}
               </Text>
             </View>

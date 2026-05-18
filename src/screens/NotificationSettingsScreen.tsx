@@ -16,12 +16,10 @@ import { haptics } from '../utils/haptics';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useNotificationPrefs, type NotificationPrefs } from '../contexts/NotificationPrefsContext';
+import { SectionHeader } from '../components/SectionHeader';
+import { radius } from '../theme/tokens';
 
 // ── Row primitives ─────────────────────────────────────────────────────────
-
-const SectionHeader: React.FC<{ label: string; c: ReturnType<typeof useThemeColors> }> = ({ label, c }) => (
-  <Text style={[s.sectionHeader, { color: c.textTertiary }]}>{label.toUpperCase()}</Text>
-);
 
 interface ToggleRowProps {
   icon: string;
@@ -87,7 +85,7 @@ export const NotificationSettingsScreen: React.FC = () => {
         </View>
 
         {/* In-match events */}
-        <SectionHeader label={t('notifications.sectionEvents')} c={c} />
+        <SectionHeader label={t('notifications.sectionEvents')} />
         <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
           <ToggleRow icon="⚽" label={t('notifications.goals')} value={prefs.goals} onValueChange={toggle('goals')} c={c} />
           <ToggleRow icon="🟥" label={t('notifications.redCards')} value={prefs.redCards} onValueChange={toggle('redCards')} c={c} />
@@ -96,7 +94,7 @@ export const NotificationSettingsScreen: React.FC = () => {
         </View>
 
         {/* Match state */}
-        <SectionHeader label={t('notifications.sectionMatchState')} c={c} />
+        <SectionHeader label={t('notifications.sectionMatchState')} />
         <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
           <ToggleRow icon="🏁" label={t('notifications.matchStart')} value={prefs.matchStart} onValueChange={toggle('matchStart')} c={c} />
           <ToggleRow icon="⏱️" label={t('notifications.halftime')} value={prefs.halftime} onValueChange={toggle('halftime')} c={c} />
@@ -105,7 +103,7 @@ export const NotificationSettingsScreen: React.FC = () => {
         </View>
 
         {/* Estadio mode */}
-        <SectionHeader label={t('notifications.sectionEstadio')} c={c} />
+        <SectionHeader label={t('notifications.sectionEstadio')} />
         <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
           <ToggleRow
             icon="🏟️"
@@ -185,24 +183,15 @@ const s = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 20,
     padding: 14,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
   },
   introTitle: { fontSize: 14, fontWeight: '700', marginBottom: 4 },
   introBody: { fontSize: 12, lineHeight: 17 },
 
-  sectionHeader: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    paddingHorizontal: 20,
-    marginBottom: 8,
-    marginTop: 4,
-  },
-
   card: {
     marginHorizontal: 16,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
     marginBottom: 20,
@@ -233,7 +222,7 @@ const s = StyleSheet.create({
   delayPill: {
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
   },
   delayPillText: { fontSize: 13, fontWeight: '700' },

@@ -18,7 +18,8 @@ import {
   getAllSearchableTeams, getAllSearchablePlayers,
   type SearchableTeam, type SearchablePlayer, type SearchableLeague,
 } from '../services/sportsApi';
-import { BackArrow, SearchIcon } from '../components/NavIcons';
+import { SearchIcon } from '../components/NavIcons';
+import { radius, ui } from '../theme/tokens';
 
 const RECENT_KEY = 'analistas_recent_searches';
 const MAX_RECENT = 8;
@@ -483,8 +484,8 @@ export const GlobalSearchScreen: React.FC = () => {
 
       {/* ── Header with search bar ── */}
       <View style={[s.header, { borderBottomColor: c.border }]}>
-        <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
-          <BackArrow color={c.textPrimary} />
+        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={12} activeOpacity={0.7}>
+          <Text style={[s.backText, { color: c.accent }]}>{t('common.back')}</Text>
         </TouchableOpacity>
         <View style={[s.inputWrap, { backgroundColor: inputBg }]}>
           <SearchInputIcon />
@@ -681,17 +682,18 @@ const s = StyleSheet.create({
     gap: 10,
     borderBottomWidth: 0,
   },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
+  backText: {
+    fontSize: 15,
+    fontWeight: '600',
+    paddingHorizontal: 4,
   },
   inputWrap: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: radius.md,
     paddingHorizontal: 12,
-    height: 42,
+    height: ui.searchBarHeight,
   },
   input: {
     flex: 1,
