@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, Modal, TextInput, Switch,
+  View, Text, ScrollView, TouchableOpacity, Pressable, Modal, TextInput, Switch,
   NativeSyntheticEvent, NativeScrollEvent, Share, Linking, Platform, Alert,
+  StyleSheet,
 } from 'react-native';
 import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -104,23 +105,46 @@ function CustomToggle({ value, onToggle }: {
 }
 
 // ── Bottom Sheet Modal ───────────────────────────────────────────────────────
+// Previous implementation wrapped the inner panel in a TouchableOpacity to
+// prevent backdrop-taps from closing the modal. That worked for the tap
+// case but stole the gesture responder from any ScrollView inside, so long
+// content (Privacy / Terms) couldn't be scrolled on iOS.
+//
+// Fixed by splitting backdrop and panel into separate siblings:
+//   - Pressable backdrop fills the screen behind the panel and handles
+//     the tap-to-close interaction.
+//   - Panel is a plain View on top of it. Taps inside the panel never
+//     reach the backdrop (no overlap in the responder tree), and the
+//     ScrollView inside is free to claim vertical pan as usual.
 function BottomSheet({ visible, onClose, c, children }: {
   visible: boolean; onClose: () => void; c: ColorPalette; children: React.ReactNode;
 }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={{
-          backgroundColor: c.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-          paddingTop: 8, paddingBottom: Platform.OS === 'ios' ? 40 : 24, maxHeight: '85%',
+      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+        {/* Backdrop — sits behind the panel, fills the rest of the screen. */}
+        <Pressable
+          onPress={onClose}
+          style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
+        />
+        {/* Panel — plain View so the ScrollView inside owns its gestures. */}
+        <View style={{
+          backgroundColor: c.card,
+          borderTopLeftRadius: 24, borderTopRightRadius: 24,
+          paddingTop: 8, paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+          maxHeight: '85%',
         }}>
           <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 12 }} />
-          <TouchableOpacity style={{ position: 'absolute', top: 16, right: 16, width: 28, height: 28, borderRadius: 14, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', zIndex: 10 }} onPress={onClose}>
+          <TouchableOpacity
+            style={{ position: 'absolute', top: 16, right: 16, width: 28, height: 28, borderRadius: 14, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', zIndex: 10 }}
+            onPress={onClose}
+            hitSlop={8}
+          >
             <Text style={{ fontSize: 14, color: c.textSecondary, fontWeight: '600' }}>✕</Text>
           </TouchableOpacity>
           {children}
-        </TouchableOpacity>
-      </TouchableOpacity>
+        </View>
+      </View>
     </Modal>
   );
 }
