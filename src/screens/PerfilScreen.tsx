@@ -847,28 +847,26 @@ export const PerfilScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Eliminar cuenta — visible for every authenticated user (including
-            guests with anonymous Firebase sessions). Apple App Store review
-            wants this entry point reachable for ANY account, so we don't
-            hide it conditionally — even for a guest, deletion wipes their
-            anonymous UID + local data, which is the user-meaningful action. */}
+        {/* Eliminar cuenta — discreet text link, centered, no card.
+            Findable enough for Apple/Google review but not visually
+            screaming. The destructive intent is gated behind the
+            two-step confirmation modal, so the entry point doesn't
+            need to be loud here. Visible for every authenticated user
+            (including guest sessions — Apple wants this reachable
+            for any account). */}
         {isAuthenticated && (
-          <View style={{ backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, marginTop: 10, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 13 }}
-              activeOpacity={0.7}
-              onPress={handleStartDelete}
-              accessibilityRole="button"
-              accessibilityLabel={t('profile.deleteAccount')}
-            >
-              <IconCircle emoji="🗑" bg="rgba(220,38,38,0.15)" />
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#dc2626' }}>{t('profile.deleteAccount')}</Text>
-                <Text style={{ fontSize: 11, color: c.textTertiary, marginTop: 1 }}>{t('profile.deleteAccountSub')}</Text>
-              </View>
-              <Text style={{ fontSize: 22, color: 'rgba(220,38,38,0.5)' }}>›</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            onPress={handleStartDelete}
+            activeOpacity={0.6}
+            style={{ alignItems: 'center', paddingVertical: 14, marginTop: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel={t('profile.deleteAccount')}
+            hitSlop={8}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '500', color: '#dc2626', opacity: 0.85 }}>
+              {t('profile.deleteAccount')}
+            </Text>
+          </TouchableOpacity>
         )}
 
 
