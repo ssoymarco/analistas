@@ -23,6 +23,7 @@ import { SkeletonPerfil } from '../components/Skeleton';
 import { EditProfileModal } from '../components/EditProfileModal';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { SectionHeader } from '../components/SectionHeader';
+import { PrivacyPolicyBody } from '../components/PrivacyPolicyBody';
 import { scheduleLocalNotification } from '../services/notifications';
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useTranslation } from 'react-i18next';
@@ -861,35 +862,23 @@ export const PerfilScreen: React.FC = () => {
         })}
       </CenterModal>
 
-      {/* Política de privacidad */}
+      {/* Política de privacidad — see PrivacyPolicyBody.tsx for the actual
+          legal text. This block is only the modal chrome (title + date +
+          Spanish-notice for non-ES locales + the canonical-version link). */}
       <BottomSheet visible={privacyModalVisible} onClose={() => setPrivacyModalVisible(false)} c={c}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }}>
           <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 8 }}>{t('profile.privacyTitle')}</Text>
           <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 16 }}>{t('profile.legalLastUpdated')}</Text>
-          {/* Show the "Document in Spanish" notice only when the UI isn't already in Spanish. */}
           {i18n.language !== 'es' && (
             <View style={{ backgroundColor: c.surface, borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: c.border }}>
               <Text style={{ fontSize: 12, color: c.textSecondary, lineHeight: 17 }}>🇲🇽 {t('profile.legalSpanishNotice')}</Text>
             </View>
           )}
-          {[
-            { title: '1. Información que recopilamos', body: 'Recopilamos información que nos proporcionas directamente, como tu nombre, dirección de correo electrónico y preferencias de equipos cuando creas una cuenta. También recopilamos datos de uso de forma automática, como los partidos que consultas y las noticias que lees.' },
-            { title: '2. Cómo usamos tu información', body: 'Utilizamos tu información para: personalizar tu experiencia con contenido relevante de fútbol, enviar notificaciones de partidos y alertas que configures, mejorar nuestros servicios y funcionalidades, y comunicarnos contigo sobre tu cuenta.' },
-            { title: '3. Compartir información', body: 'No vendemos ni compartimos tu información personal con terceros con fines de marketing. Podemos compartir datos agregados y anónimos con socios analíticos para mejorar el servicio.' },
-            { title: '4. Seguridad', body: 'Implementamos medidas de seguridad estándar de la industria para proteger tu información personal contra acceso no autorizado, alteración o destrucción.' },
-            { title: '5. Tus derechos', body: 'Puedes acceder, corregir o eliminar tu información personal en cualquier momento desde la configuración de tu cuenta. También puedes solicitar la eliminación completa de tus datos contactándonos a comercial@somosanalistas.com.' },
-            { title: '6. Contacto', body: 'Para cualquier pregunta sobre esta política, contáctanos en comercial@somosanalistas.com.' },
-          ].map((section, i) => (
-            <View key={i} style={{ marginBottom: 16 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: c.textPrimary, marginBottom: 6 }}>{section.title}</Text>
-              <Text style={{ fontSize: 13, color: c.textSecondary, lineHeight: 20 }}>{section.body}</Text>
-            </View>
-          ))}
-          {/* "View full version online" — opens the canonical WordPress page. */}
+          <PrivacyPolicyBody />
           <TouchableOpacity
             onPress={() => Linking.openURL(LEGAL_PRIVACY_URL)}
             activeOpacity={0.7}
-            style={{ marginTop: 4, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }}
+            style={{ marginTop: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }}
           >
             <Text style={{ fontSize: 13, fontWeight: '600', color: c.accent }}>{t('profile.legalViewFullOnline')}</Text>
           </TouchableOpacity>

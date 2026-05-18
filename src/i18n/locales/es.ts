@@ -326,7 +326,7 @@ const es = {
     aboutTitle: 'Sobre Analistas',
     privacyTitle: 'Política de privacidad',
     termsTitle: 'Términos y condiciones',
-    legalLastUpdated: 'Última actualización: mayo de 2026',
+    legalLastUpdated: 'Última actualización: 13 de mayo de 2025',
     legalSpanishNotice: 'Documento en español. Este texto refleja la versión legalmente vigente.',
     legalViewFullOnline: 'Ver versión completa en somosanalistas.com →',
     yourStats: 'Tus estadísticas',
