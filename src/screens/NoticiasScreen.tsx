@@ -260,21 +260,21 @@ export const NoticiasScreen: React.FC = () => {
         layout="fill"
       />
 
-      {/* Search bar */}
+      {/* Search bar — same markup as FavoritosScreen for pixel parity */}
       <View style={styles.searchWrap}>
         <View style={[styles.searchBar, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <View style={{ marginRight: 8 }}>
-            <SearchIcon color={c.textTertiary} size={16} />
-          </View>
+          <SearchIcon color={c.textTertiary} size={16} />
           <TextInput
             style={[styles.searchInput, { color: c.textPrimary }]}
             placeholder={t('news.searchPlaceholder')}
             placeholderTextColor={c.textTertiary}
             value={searchQuery}
             onChangeText={setSearchQuery}
+            autoCorrect={false}
+            autoCapitalize="none"
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={8}>
               <Text style={[styles.searchClear, { color: c.textSecondary }]}>✕</Text>
             </TouchableOpacity>
           )}
@@ -351,15 +351,17 @@ export const NoticiasScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
 
-  // Search
+  // Search — structure mirrors FavoritosScreen so the two search bars look
+  // pixel-identical: same paddingHorizontal, same icon→text `gap`, same
+  // input height and font.
   searchWrap: { paddingHorizontal: 16, marginBottom: 8 },
   searchBar: {
     flexDirection: 'row', alignItems: 'center',
     borderRadius: radius.md, paddingHorizontal: 12, height: ui.searchBarHeight,
-    borderWidth: 1,
+    borderWidth: 1, gap: 8,
   },
   searchInput: { flex: 1, fontSize: 14, padding: 0 },
-  searchClear: { fontSize: 13, paddingLeft: 8, fontWeight: '600' },
+  searchClear: { fontSize: 13, fontWeight: '600' },
 
   // Scroll
   scroll: { flex: 1 },
