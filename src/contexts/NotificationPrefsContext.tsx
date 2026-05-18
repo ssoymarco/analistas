@@ -3,6 +3,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { cancelAllNotificationsForMatch, PUSH_TOKEN_KEY } from '../services/notifications';
 
 export interface NotificationPrefs {
+  /** Master kill-switch. When `false`, no notification is dispatched
+   *  regardless of the per-event toggles below. Phrased positively so the
+   *  UI label reads naturally ("Recibir notificaciones" ON by default). */
+  notificationsEnabled: boolean;
+  /** ⏰ Pre-match reminder — fires `matchReminderMinutes` before kickoff
+   *  for followed matches. */
+  matchReminder: boolean;
+  /** How many minutes before kickoff the reminder fires (5 | 15 | 30). */
+  matchReminderMinutes: number;
   goals: boolean;
   matchStart: boolean;
   halftime: boolean;
@@ -18,9 +27,14 @@ export interface NotificationPrefs {
   estadioDelay: number;
 }
 
-// Yellow cards default to OFF — they fire 4-5× more often than red cards, so
-// opting-in is the polite default. Users can flip it on from settings.
+// Defaults reflect the polite happy-path:
+//   - Master switch ON (the user opened settings because they want alerts)
+//   - Match reminder ON at 15 min (the universal sweet spot in competitor apps)
+//   - Yellow cards OFF (4-5× noisier than reds; opt-in)
 const DEFAULT_PREFS: NotificationPrefs = {
+  notificationsEnabled: true,
+  matchReminder: true,
+  matchReminderMinutes: 15,
   goals: true, matchStart: true, halftime: false,
   matchEnd: true, lineups: true,
   yellowCards: false, redCards: true,
@@ -31,9 +45,11 @@ const DEFAULT_PREFS: NotificationPrefs = {
 
 interface NotificationPrefsContextType {
   prefs: NotificationPrefs;
-  togglePref: (key: keyof Pick<NotificationPrefs, 'goals' | 'matchStart' | 'halftime' | 'matchEnd' | 'lineups' | 'yellowCards' | 'redCards' | 'substitutions' | 'var' | 'estadioMode'>) => void;
+  togglePref: (key: keyof Pick<NotificationPrefs, 'notificationsEnabled' | 'matchReminder' | 'goals' | 'matchStart' | 'halftime' | 'matchEnd' | 'lineups' | 'yellowCards' | 'redCards' | 'substitutions' | 'var' | 'estadioMode'>) => void;
   /** Set the Modo Estadio delay in minutes */
   setEstadioDelay: (minutes: number) => void;
+  /** Set how many minutes before kickoff the match reminder fires */
+  setMatchReminderMinutes: (minutes: number) => void;
   mutedMatchIds: Set<string>;
   toggleMatchMute: (matchId: string) => void;
   isMatchMuted: (matchId: string) => boolean;
@@ -57,6 +73,7 @@ const NotificationPrefsContext = createContext<NotificationPrefsContextType>({
   prefs: DEFAULT_PREFS,
   togglePref: () => {},
   setEstadioDelay: () => {},
+  setMatchReminderMinutes: () => {},
   mutedMatchIds: new Set(),
   toggleMatchMute: () => {},
   isMatchMuted: () => false,
@@ -120,6 +137,14 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   const setEstadioDelay = useCallback((minutes: number) => {
     setPrefs(p => {
       const next = { ...p, estadioDelay: minutes };
+      AsyncStorage.setItem(PREFS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const setMatchReminderMinutes = useCallback((minutes: number) => {
+    setPrefs(p => {
+      const next = { ...p, matchReminderMinutes: minutes };
       AsyncStorage.setItem(PREFS_KEY, JSON.stringify(next));
       return next;
     });
@@ -191,7 +216,7 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   return (
     <NotificationPrefsContext.Provider
       value={{
-        prefs, togglePref, setEstadioDelay,
+        prefs, togglePref, setEstadioDelay, setMatchReminderMinutes,
         mutedMatchIds, toggleMatchMute, isMatchMuted,
         estadioMatchIds, toggleMatchEstadio, isMatchEstadio,
         estadioMatchDelays, setMatchEstadioDelay, getMatchEstadioDelay,

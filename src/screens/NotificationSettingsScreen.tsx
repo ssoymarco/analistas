@@ -19,6 +19,12 @@ import { useNotificationPrefs, type NotificationPrefs } from '../contexts/Notifi
 import { SectionHeader } from '../components/SectionHeader';
 import { radius } from '../theme/tokens';
 
+// ── Pill picker options ────────────────────────────────────────────────────
+/** Minutes-before-kickoff offered by the pre-match reminder picker. */
+const MATCH_REMINDER_OPTIONS = [5, 15, 30] as const;
+/** Delay options for Modo Estadio (broadcast lag compensation). */
+const ESTADIO_DELAY_OPTIONS  = [1, 2, 5, 10] as const;
+
 // ── Row primitives ─────────────────────────────────────────────────────────
 
 interface ToggleRowProps {
@@ -30,6 +36,53 @@ interface ToggleRowProps {
   c: ReturnType<typeof useThemeColors>;
   isLast?: boolean;
 }
+
+interface DelayPickerProps {
+  label: string;
+  options: readonly number[];
+  value: number;
+  onChange: (minutes: number) => void;
+  /** Label key used to format each pill — defaults to `notifications.minutes`
+   *  which renders "5 min", "15 min", etc. Override to e.g. show "X min antes"
+   *  when the same picker is reused in a different context. */
+  formatKey?: string;
+  c: ReturnType<typeof useThemeColors>;
+}
+
+const DelayPicker: React.FC<DelayPickerProps> = ({ label, options, value, onChange, formatKey = 'notifications.minutes', c }) => {
+  const { t } = useTranslation();
+  return (
+    <View style={[s.card, s.delayCard, { backgroundColor: c.card, borderColor: c.border }]}>
+      <Text style={[s.delayLabel, { color: c.textSecondary }]}>{label}</Text>
+      <View style={s.delayRow}>
+        {options.map(minutes => {
+          const active = value === minutes;
+          return (
+            <Pressable
+              key={minutes}
+              onPress={() => { haptics.selection(); onChange(minutes); }}
+              style={({ pressed }) => [
+                s.delayPill,
+                {
+                  backgroundColor: active ? c.accent : c.surface,
+                  borderColor: active ? c.accent : c.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Text style={[
+                s.delayPillText,
+                { color: active ? '#fff' : c.textPrimary },
+              ]}>
+                {t(formatKey, { count: minutes })}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+};
 
 const ToggleRow: React.FC<ToggleRowProps> = ({ icon, label, description, value, onValueChange, c, isLast }) => (
   <View style={[s.row, { borderBottomColor: c.border, borderBottomWidth: isLast ? 0 : StyleSheet.hairlineWidth }]}>
@@ -57,7 +110,7 @@ export const NotificationSettingsScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const navigation = useNavigation();
-  const { prefs, togglePref, setEstadioDelay } = useNotificationPrefs();
+  const { prefs, togglePref, setEstadioDelay, setMatchReminderMinutes } = useNotificationPrefs();
 
   const handleClose = useCallback(() => { haptics.light(); navigation.goBack(); }, [navigation]);
 
@@ -83,6 +136,45 @@ export const NotificationSettingsScreen: React.FC = () => {
           <Text style={[s.introTitle, { color: c.textPrimary }]}>{t('notifications.introTitle')}</Text>
           <Text style={[s.introBody, { color: c.textSecondary }]}>{t('notifications.introBody')}</Text>
         </View>
+
+        {/* Master switch — "Recibir notificaciones".
+            Phrased positively so the toggle ON state means "yes, send me alerts"
+            (consistent with all the per-event toggles below). When OFF the
+            notification dispatcher early-exits regardless of the rest. */}
+        <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
+          <ToggleRow
+            icon="🔔"
+            label={t('notifications.notificationsEnabled')}
+            description={t('notifications.notificationsEnabledDescription')}
+            value={prefs.notificationsEnabled}
+            onValueChange={toggle('notificationsEnabled')}
+            c={c}
+            isLast
+          />
+        </View>
+
+        {/* Before the match — pre-kickoff reminder */}
+        <SectionHeader label={t('notifications.sectionBeforeMatch')} />
+        <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
+          <ToggleRow
+            icon="⏰"
+            label={t('notifications.matchReminder')}
+            description={t('notifications.matchReminderDescription')}
+            value={prefs.matchReminder}
+            onValueChange={toggle('matchReminder')}
+            c={c}
+            isLast
+          />
+        </View>
+        {prefs.matchReminder && (
+          <DelayPicker
+            label={t('notifications.matchReminderDelayLabel')}
+            options={MATCH_REMINDER_OPTIONS}
+            value={prefs.matchReminderMinutes}
+            onChange={setMatchReminderMinutes}
+            c={c}
+          />
+        )}
 
         {/* In-match events */}
         <SectionHeader label={t('notifications.sectionEvents')} />
@@ -119,35 +211,13 @@ export const NotificationSettingsScreen: React.FC = () => {
 
         {/* Delay selector — only shown when estadio mode is on */}
         {prefs.estadioMode && (
-          <View style={[s.card, s.delayCard, { backgroundColor: c.card, borderColor: c.border }]}>
-            <Text style={[s.delayLabel, { color: c.textSecondary }]}>{t('notifications.estadioDelayLabel')}</Text>
-            <View style={s.delayRow}>
-              {[1, 2, 5, 10].map(minutes => {
-                const active = prefs.estadioDelay === minutes;
-                return (
-                  <Pressable
-                    key={minutes}
-                    onPress={() => { haptics.selection(); setEstadioDelay(minutes); }}
-                    style={({ pressed }) => [
-                      s.delayPill,
-                      {
-                        backgroundColor: active ? c.accent : c.surface,
-                        borderColor: active ? c.accent : c.border,
-                        opacity: pressed ? 0.7 : 1,
-                      },
-                    ]}
-                  >
-                    <Text style={[
-                      s.delayPillText,
-                      { color: active ? '#fff' : c.textPrimary },
-                    ]}>
-                      {t('notifications.minutes', { count: minutes })}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
+          <DelayPicker
+            label={t('notifications.estadioDelayLabel')}
+            options={ESTADIO_DELAY_OPTIONS}
+            value={prefs.estadioDelay}
+            onChange={setEstadioDelay}
+            c={c}
+          />
         )}
 
         {/* Footer note */}
