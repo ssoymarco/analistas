@@ -326,7 +326,7 @@ export const PerfilScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark, toggleDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PerfilStackParamList>>();
-  const { user, isAuthenticated, isGuest, login, logout, deleteAccount } = useAuth();
+  const { user, isAuthenticated, login, logout, deleteAccount } = useAuth();
   const { upgradeWithGoogle, googleAuthReady } = useGoogleAuth();
   const [upgrading, setUpgrading] = useState(false);
   const { resetOnboarding } = useOnboarding();
@@ -847,10 +847,12 @@ export const PerfilScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Eliminar cuenta — only shown for non-guest authenticated users.
-            Guests have no persistent account, so the action is meaningless
-            for them; "Cerrar sesión" already wipes their anonymous data. */}
-        {isAuthenticated && !isGuest && (
+        {/* Eliminar cuenta — visible for every authenticated user (including
+            guests with anonymous Firebase sessions). Apple App Store review
+            wants this entry point reachable for ANY account, so we don't
+            hide it conditionally — even for a guest, deletion wipes their
+            anonymous UID + local data, which is the user-meaningful action. */}
+        {isAuthenticated && (
           <View style={{ backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, marginTop: 10, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
             <TouchableOpacity
               style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 13 }}
