@@ -402,8 +402,10 @@ export const GlobalSearchScreen: React.FC = () => {
   }, []);
 
   // ── Theme-aware colors ────────────────────────────────────────────────────
-  const inputBg = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
-  const badgeBg = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+  // `c.surface` matches the search bar in Favoritos and Noticias so all three
+  // search inputs across the app share the exact same look.
+  const inputBg = c.surface;
+  const badgeBg = c.surface;
   const typeLabelColor = c.accent;
 
   // ── Render helpers ────────────────────────────────────────────────────────

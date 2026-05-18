@@ -772,7 +772,7 @@ export const FavoritosScreen: React.FC = () => {
 
       {/* ── Search ── */}
       <View style={st.searchWrap}>
-        <View style={[st.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', borderColor: c.border }]}>
+        <View style={[st.searchBar, { backgroundColor: c.surface, borderColor: c.border }]}>
           <SearchIcon color={c.textTertiary} size={16} />
           <TextInput
             style={[st.searchInput, { color: c.textPrimary }]}
