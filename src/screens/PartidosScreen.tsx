@@ -267,6 +267,25 @@ export const PartidosScreen: React.FC = () => {
         title={t('matches.title')}
         right={
           <>
+            {/* Order: Streak · Bell · Search.
+                Search lives rightmost because it's the most-tapped action
+                in this header (multiple times per session vs. once-a-week
+                for the bell). The streak pill is a status indicator, not
+                an action, so it sits on the leftmost edge of the cluster
+                where it stays visible without being the strongest visual
+                anchor. */}
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 2,
+                backgroundColor: 'rgba(255,122,0,0.12)',
+                paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12,
+              }}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('Streak')}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '800', color: '#ff7a00' }}>{streakDays}</Text>
+              <Text style={{ fontSize: 14 }}>🔥</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={{
                 width: 38, height: 38, borderRadius: 19,
@@ -284,18 +303,6 @@ export const PartidosScreen: React.FC = () => {
               backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center',
             }} activeOpacity={0.7} onPress={() => navigation.navigate('GlobalSearch')}>
               <SearchIcon color={c.textSecondary} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: 2,
-                backgroundColor: 'rgba(255,122,0,0.12)',
-                paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12,
-              }}
-              activeOpacity={0.7}
-              onPress={() => navigation.navigate('Streak')}
-            >
-              <Text style={{ fontSize: 14, fontWeight: '800', color: '#ff7a00' }}>{streakDays}</Text>
-              <Text style={{ fontSize: 14 }}>🔥</Text>
             </TouchableOpacity>
           </>
         }
