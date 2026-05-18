@@ -544,7 +544,37 @@ export const PerfilScreen: React.FC = () => {
     try { await Share.share({ message: 'Descarga Analistas, la mejor app para seguir el fútbol en tiempo real ⚽\nhttps://analistas.app' }); } catch {}
   }, []);
 
-  const handleContact = useCallback(() => { Linking.openURL('mailto:comercial@somosanalistas.com?subject=Contacto%20desde%20Analistas'); }, []);
+  // ── Contact ───────────────────────────────────────────────────────────────
+  // Opens the device's default mail app pre-filled with our contact address,
+  // a platform-tagged subject (so we can filter incoming "app contacts" by
+  // subject in Gmail/Outlook) and a body template that includes the user's
+  // app version + platform — handy when triaging support requests.
+  //
+  // If the device has no mail app configured (common in iOS Simulator), the
+  // mailto URL fails to open. We catch that and surface the email in an
+  // Alert so the user can copy it manually.
+  const handleContact = useCallback(async () => {
+    haptics.selection();
+    const email = 'contacto@somosanalistas.com';
+    const platform = Platform.OS === 'ios' ? 'iOS' : 'Android';
+    const subject = `[App ${platform}] ${t('profile.contactSubject')}`;
+    const body =
+      `${t('profile.contactBodyGreeting')}\n\n` +
+      `${t('profile.contactBodyPlaceholder')}\n\n` +
+      `---\n` +
+      `${t('profile.contactBodyFooter', { version: '1.0.0', platform })}`;
+    const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(
+        t('profile.contactFallbackTitle'),
+        t('profile.contactFallbackBody', { email }),
+        [{ text: t('common.close') }],
+      );
+    }
+  }, [t]);
 
   const handleRateApp = useCallback(() => {
     const url = Platform.OS === 'ios' ? 'https://apps.apple.com/app/analistas' : 'https://play.google.com/store/apps/details?id=com.analistas';
