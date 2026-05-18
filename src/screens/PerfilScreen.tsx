@@ -272,6 +272,17 @@ function PromoBanner({ onPress }: { onPress?: () => void }) {
   );
 }
 
+// ── Legal documents ─────────────────────────────────────────────────────────
+// In-app text is the canonical version (works offline, available to app store
+// reviewers without a network round-trip). The website URLs below are the
+// "full version" link offered at the bottom of each modal — the WordPress
+// pages should mirror this text and act as a public-facing reference.
+//
+// Privacy already exists at `/politica-privacidad/`. Terms still needs to be
+// created on WordPress at the matching `/terminos-y-condiciones/` slug.
+const LEGAL_PRIVACY_URL = 'https://somosanalistas.com/politica-privacidad/';
+const LEGAL_TERMS_URL   = 'https://somosanalistas.com/terminos-y-condiciones/';
+
 // ── Languages ────────────────────────────────────────────────────────────────
 const LANGUAGES = [
   { id: 'es', flag: '🇲🇽', name: 'Español' },
@@ -725,7 +736,6 @@ export const PerfilScreen: React.FC = () => {
         <View style={{ backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
           <MenuRow c={c} emoji="ℹ️" label={t('profile.aboutApp')} sublabel={t('profile.aboutAppSub')} iconBg="rgba(59,130,246,0.15)" onPress={() => setAboutModalVisible(true)} />
           <MenuRow c={c} emoji="⭐" label={t('profile.rateApp')} sublabel={t('profile.rateSub')} iconBg="rgba(234,179,8,0.15)" onPress={handleRateApp} />
-          <MenuRow c={c} emoji="❓" label={t('profile.helpCenter')} iconBg="rgba(14,165,233,0.15)" />
           <MenuRow c={c} emoji="✉️" label={t('profile.contactUs')} iconBg="rgba(20,184,166,0.15)" onPress={handleContact} />
           <MenuRow c={c} emoji="🛡️" label={t('profile.privacy')} iconBg="rgba(34,197,94,0.15)" onPress={() => setPrivacyModalVisible(true)} />
           <MenuRow c={c} emoji="📄" label={t('profile.terms')} iconBg="rgba(107,114,128,0.15)" onPress={() => setTermsModalVisible(true)} />
@@ -854,8 +864,14 @@ export const PerfilScreen: React.FC = () => {
       {/* Política de privacidad */}
       <BottomSheet visible={privacyModalVisible} onClose={() => setPrivacyModalVisible(false)} c={c}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }}>
-          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 16 }}>{t('profile.privacyTitle')}</Text>
-          <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 16 }}>Última actualización: 1 de enero de 2026</Text>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 8 }}>{t('profile.privacyTitle')}</Text>
+          <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 16 }}>{t('profile.legalLastUpdated')}</Text>
+          {/* Show the "Document in Spanish" notice only when the UI isn't already in Spanish. */}
+          {i18n.language !== 'es' && (
+            <View style={{ backgroundColor: c.surface, borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: c.border }}>
+              <Text style={{ fontSize: 12, color: c.textSecondary, lineHeight: 17 }}>🇲🇽 {t('profile.legalSpanishNotice')}</Text>
+            </View>
+          )}
           {[
             { title: '1. Información que recopilamos', body: 'Recopilamos información que nos proporcionas directamente, como tu nombre, dirección de correo electrónico y preferencias de equipos cuando creas una cuenta. También recopilamos datos de uso de forma automática, como los partidos que consultas y las noticias que lees.' },
             { title: '2. Cómo usamos tu información', body: 'Utilizamos tu información para: personalizar tu experiencia con contenido relevante de fútbol, enviar notificaciones de partidos y alertas que configures, mejorar nuestros servicios y funcionalidades, y comunicarnos contigo sobre tu cuenta.' },
@@ -869,6 +885,14 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 13, color: c.textSecondary, lineHeight: 20 }}>{section.body}</Text>
             </View>
           ))}
+          {/* "View full version online" — opens the canonical WordPress page. */}
+          <TouchableOpacity
+            onPress={() => Linking.openURL(LEGAL_PRIVACY_URL)}
+            activeOpacity={0.7}
+            style={{ marginTop: 4, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '600', color: c.accent }}>{t('profile.legalViewFullOnline')}</Text>
+          </TouchableOpacity>
         </ScrollView>
       </BottomSheet>
 
@@ -922,8 +946,13 @@ export const PerfilScreen: React.FC = () => {
       {/* Términos y condiciones */}
       <BottomSheet visible={termsModalVisible} onClose={() => setTermsModalVisible(false)} c={c}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }}>
-          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 16 }}>{t('profile.termsTitle')}</Text>
-          <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 16 }}>Última actualización: 1 de enero de 2026</Text>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 8 }}>{t('profile.termsTitle')}</Text>
+          <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 16 }}>{t('profile.legalLastUpdated')}</Text>
+          {i18n.language !== 'es' && (
+            <View style={{ backgroundColor: c.surface, borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: c.border }}>
+              <Text style={{ fontSize: 12, color: c.textSecondary, lineHeight: 17 }}>🇲🇽 {t('profile.legalSpanishNotice')}</Text>
+            </View>
+          )}
           {[
             { title: '1. Aceptación', body: 'Al utilizar Analistas, aceptas estos términos y condiciones en su totalidad. Si no estás de acuerdo, no utilices la aplicación.' },
             { title: '2. Uso del servicio', body: 'Analistas es una plataforma informativa de fútbol. El contenido es con fines informativos y de entretenimiento. No nos hacemos responsables de decisiones tomadas con base en la información proporcionada.' },
@@ -939,6 +968,13 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 13, color: c.textSecondary, lineHeight: 20 }}>{section.body}</Text>
             </View>
           ))}
+          <TouchableOpacity
+            onPress={() => Linking.openURL(LEGAL_TERMS_URL)}
+            activeOpacity={0.7}
+            style={{ marginTop: 4, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '600', color: c.accent }}>{t('profile.legalViewFullOnline')}</Text>
+          </TouchableOpacity>
         </ScrollView>
       </BottomSheet>
     </SafeAreaView>
