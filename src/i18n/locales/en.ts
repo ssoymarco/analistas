@@ -317,7 +317,7 @@ const en: TranslationKeys = {
     aboutTitle: 'About Analistas',
     privacyTitle: 'Privacy policy',
     termsTitle: 'Terms and conditions',
-    legalLastUpdated: 'Last updated: May 13, 2025',
+    legalLastUpdated: 'Last updated: May 18, 2025',
     legalSpanishNotice: 'Document in Spanish. This text reflects the legally binding version.',
     legalViewFullOnline: 'View full version on somosanalistas.com →',
     yourStats: 'Your stats',

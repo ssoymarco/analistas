@@ -312,7 +312,7 @@ const tr: TranslationKeys = {
     aboutTitle: 'Analistas Hakkında',
     privacyTitle: 'Gizlilik Politikası',
     termsTitle: 'Kullanım Koşulları',
-    legalLastUpdated: 'Son güncelleme: 13 Mayıs 2025',
+    legalLastUpdated: 'Son güncelleme: 18 Mayıs 2025',
     legalSpanishNotice: 'Belge İspanyolca. Bu metin yasal olarak bağlayıcı sürümü yansıtır.',
     legalViewFullOnline: 'Tam sürümü somosanalistas.com adresinde görüntüle →',
     yourStats: 'İstatistikleriniz',

@@ -24,6 +24,7 @@ import { EditProfileModal } from '../components/EditProfileModal';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { SectionHeader } from '../components/SectionHeader';
 import { PrivacyPolicyBody } from '../components/PrivacyPolicyBody';
+import { TermsOfServiceBody } from '../components/TermsOfServiceBody';
 import { scheduleLocalNotification } from '../services/notifications';
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useTranslation } from 'react-i18next';
@@ -932,7 +933,9 @@ export const PerfilScreen: React.FC = () => {
         </View>
       </BottomSheet>
 
-      {/* Términos y condiciones */}
+      {/* Términos y condiciones — see TermsOfServiceBody.tsx for the actual
+          legal text. This block is only the modal chrome (title + date +
+          Spanish-notice for non-ES locales + the canonical-version link). */}
       <BottomSheet visible={termsModalVisible} onClose={() => setTermsModalVisible(false)} c={c}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }}>
           <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 8 }}>{t('profile.termsTitle')}</Text>
@@ -942,25 +945,11 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 12, color: c.textSecondary, lineHeight: 17 }}>🇲🇽 {t('profile.legalSpanishNotice')}</Text>
             </View>
           )}
-          {[
-            { title: '1. Aceptación', body: 'Al utilizar Analistas, aceptas estos términos y condiciones en su totalidad. Si no estás de acuerdo, no utilices la aplicación.' },
-            { title: '2. Uso del servicio', body: 'Analistas es una plataforma informativa de fútbol. El contenido es con fines informativos y de entretenimiento. No nos hacemos responsables de decisiones tomadas con base en la información proporcionada.' },
-            { title: '3. Cuentas de usuario', body: 'Eres responsable de mantener la confidencialidad de tu cuenta. Debes tener al menos 13 años de edad para usar la aplicación. El contenido de apuestas (momios) solo está disponible para mayores de 18 años.' },
-            { title: '4. Contenido de apuestas', body: 'La información sobre momios y cuotas de apuestas se proporciona con fines informativos. Analistas no es una casa de apuestas ni promueve las apuestas. El usuario es responsable de cumplir con las leyes locales sobre apuestas.' },
-            { title: '5. Suscripciones', body: 'La suscripción "Titular" (premium) se cobra de forma recurrente. Puedes cancelar en cualquier momento desde la configuración de tu tienda de aplicaciones. Los reembolsos se procesan según las políticas de Apple o Google.' },
-            { title: '6. Propiedad intelectual', body: 'Todo el contenido, diseño y funcionalidad de Analistas están protegidos por derechos de autor. Los logos de equipos y ligas pertenecen a sus respectivos dueños.' },
-            { title: '7. Modificaciones', body: 'Nos reservamos el derecho de modificar estos términos en cualquier momento. Los cambios serán notificados dentro de la aplicación.' },
-            { title: '8. Contacto', body: 'Para cualquier pregunta sobre estos términos, contáctanos en comercial@somosanalistas.com.' },
-          ].map((section, i) => (
-            <View key={i} style={{ marginBottom: 16 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: c.textPrimary, marginBottom: 6 }}>{section.title}</Text>
-              <Text style={{ fontSize: 13, color: c.textSecondary, lineHeight: 20 }}>{section.body}</Text>
-            </View>
-          ))}
+          <TermsOfServiceBody />
           <TouchableOpacity
             onPress={() => Linking.openURL(LEGAL_TERMS_URL)}
             activeOpacity={0.7}
-            style={{ marginTop: 4, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }}
+            style={{ marginTop: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }}
           >
             <Text style={{ fontSize: 13, fontWeight: '600', color: c.accent }}>{t('profile.legalViewFullOnline')}</Text>
           </TouchableOpacity>
