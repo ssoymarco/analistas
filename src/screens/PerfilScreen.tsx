@@ -872,11 +872,14 @@ export const PerfilScreen: React.FC = () => {
         )}
 
 
-        {/* Footer */}
-        <View style={{ alignItems: 'center', marginTop: 16, gap: 2 }}>
-          <Text style={{ fontSize: 12, color: c.textTertiary, fontWeight: '500' }}>⚽ Analistas</Text>
-          <Text style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)' }}>{t('profile.version', { version: '1.0.0', year: '2026' })}</Text>
-          <Text style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', marginTop: 2 }}>{t('profile.madeIn')}</Text>
+        {/* Footer — brand · version · made-in. All three use theme tokens
+            instead of hand-rolled rgba so the contrast is readable in both
+            dark and light modes (previously the bottom two lines used
+            opacity 0.12-0.15, basically invisible). */}
+        <View style={{ alignItems: 'center', marginTop: 16, gap: 4 }}>
+          <Text style={{ fontSize: 13, color: c.textSecondary, fontWeight: '700', letterSpacing: 0.3 }}>Analistas APP</Text>
+          <Text style={{ fontSize: 11, color: c.textTertiary, fontWeight: '500' }}>{t('profile.version', { version: '1.0.0', year: '2026' })}</Text>
+          <Text style={{ fontSize: 11, color: c.textTertiary, fontWeight: '500' }}>{t('profile.madeIn')}</Text>
         </View>
         <View style={{ height: 32 }} />
       </ScrollView>
