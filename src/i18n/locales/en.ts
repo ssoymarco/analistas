@@ -97,6 +97,7 @@ const en: TranslationKeys = {
     sectionMatchState: 'Match state',
     sectionEstadio: 'Stadium Mode',
     goals: 'Goals',
+    yellowCards: 'Yellow cards',
     redCards: 'Red cards',
     substitutions: 'Substitutions',
     var: 'VAR decisions',

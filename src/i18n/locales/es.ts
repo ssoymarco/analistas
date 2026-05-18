@@ -105,6 +105,7 @@ const es = {
     sectionMatchState: 'Estado del partido',
     sectionEstadio: 'Modo Estadio',
     goals: 'Goles',
+    yellowCards: 'Tarjetas amarillas',
     redCards: 'Tarjetas rojas',
     substitutions: 'Sustituciones',
     var: 'Decisiones del VAR',

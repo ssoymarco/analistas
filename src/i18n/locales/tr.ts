@@ -94,6 +94,7 @@ const tr: TranslationKeys = {
     sectionMatchState: 'Maç durumu',
     sectionEstadio: 'Stadyum Modu',
     goals: 'Goller',
+    yellowCards: 'Sarı kartlar',
     redCards: 'Kırmızı kartlar',
     substitutions: 'Oyuncu değişiklikleri',
     var: 'VAR kararları',

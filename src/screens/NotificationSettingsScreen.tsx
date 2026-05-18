@@ -88,6 +88,7 @@ export const NotificationSettingsScreen: React.FC = () => {
         <SectionHeader label={t('notifications.sectionEvents')} />
         <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
           <ToggleRow icon="⚽" label={t('notifications.goals')} value={prefs.goals} onValueChange={toggle('goals')} c={c} />
+          <ToggleRow icon="🟨" label={t('notifications.yellowCards')} value={prefs.yellowCards} onValueChange={toggle('yellowCards')} c={c} />
           <ToggleRow icon="🟥" label={t('notifications.redCards')} value={prefs.redCards} onValueChange={toggle('redCards')} c={c} />
           <ToggleRow icon="🔄" label={t('notifications.substitutions')} value={prefs.substitutions} onValueChange={toggle('substitutions')} c={c} />
           <ToggleRow icon="🏳️" label={t('notifications.var')} description={t('notifications.varDescription')} value={prefs.var} onValueChange={toggle('var')} c={c} isLast />

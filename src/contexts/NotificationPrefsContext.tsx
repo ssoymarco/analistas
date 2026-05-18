@@ -8,6 +8,7 @@ export interface NotificationPrefs {
   halftime: boolean;
   matchEnd: boolean;
   lineups: boolean;
+  yellowCards: boolean;
   redCards: boolean;
   substitutions: boolean;
   var: boolean;
@@ -17,9 +18,12 @@ export interface NotificationPrefs {
   estadioDelay: number;
 }
 
+// Yellow cards default to OFF — they fire 4-5× more often than red cards, so
+// opting-in is the polite default. Users can flip it on from settings.
 const DEFAULT_PREFS: NotificationPrefs = {
   goals: true, matchStart: true, halftime: false,
-  matchEnd: true, lineups: true, redCards: true,
+  matchEnd: true, lineups: true,
+  yellowCards: false, redCards: true,
   substitutions: false, var: true,
   estadioMode: false,
   estadioDelay: 2,
@@ -27,7 +31,7 @@ const DEFAULT_PREFS: NotificationPrefs = {
 
 interface NotificationPrefsContextType {
   prefs: NotificationPrefs;
-  togglePref: (key: keyof Pick<NotificationPrefs, 'goals' | 'matchStart' | 'halftime' | 'matchEnd' | 'lineups' | 'redCards' | 'substitutions' | 'var' | 'estadioMode'>) => void;
+  togglePref: (key: keyof Pick<NotificationPrefs, 'goals' | 'matchStart' | 'halftime' | 'matchEnd' | 'lineups' | 'yellowCards' | 'redCards' | 'substitutions' | 'var' | 'estadioMode'>) => void;
   /** Set the Modo Estadio delay in minutes */
   setEstadioDelay: (minutes: number) => void;
   mutedMatchIds: Set<string>;
