@@ -322,14 +322,12 @@ export const PartidosScreen: React.FC = () => {
       )}
 
       {isToday(selectedDate) && (
-        <View style={{ paddingTop: 10, backgroundColor: c.bg }}>
-          <CategoryTabs<FilterTab>
-            tabs={filterTabs}
-            activeKey={activeTab}
-            onChange={setActiveTab}
-            layout="scroll"
-          />
-        </View>
+        <CategoryTabs<FilterTab>
+          tabs={filterTabs}
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          layout="scroll"
+        />
       )}
 
       {/* Live auto-refresh indicator removed */}

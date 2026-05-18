@@ -146,6 +146,10 @@ export function CategoryTabs<K extends string = string>({
 
 const s = StyleSheet.create({
   wrapper: {
+    // Symmetric vertical padding keeps the pill row from colliding with
+    // whatever sits above it (ScreenHeader divider, DateNavigator, etc.)
+    // and from squishing into the content below.
+    paddingTop: ui.tabBarPaddingBottom,
     paddingBottom: ui.tabBarPaddingBottom,
   },
   fillRow: {
