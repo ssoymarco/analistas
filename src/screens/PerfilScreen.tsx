@@ -326,7 +326,7 @@ export const PerfilScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark, toggleDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PerfilStackParamList>>();
-  const { user, isAuthenticated, login, logout } = useAuth();
+  const { user, isAuthenticated, isGuest, login, logout, deleteAccount } = useAuth();
   const { upgradeWithGoogle, googleAuthReady } = useGoogleAuth();
   const [upgrading, setUpgrading] = useState(false);
   const { resetOnboarding } = useOnboarding();
@@ -371,6 +371,13 @@ export const PerfilScreen: React.FC = () => {
   const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
   const [termsModalVisible, setTermsModalVisible] = useState(false);
   const [redeemCode, setRedeemCode] = useState('');
+  // ── Delete-account 2-step modal ────────────────────────────────────────────
+  // Step 1: warning Alert. Step 2: typing modal (CenterModal) that requires
+  // the user to type the localised confirmation word (ELIMINAR / DELETE / …)
+  // before the destructive button enables. See `handleDeleteAccount` below.
+  const [deleteStep, setDeleteStep] = useState<'closed' | 'typing'>('closed');
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [deleteInFlight, setDeleteInFlight] = useState(false);
 
   const displayName = user?.name ?? 'Visitante';
   const displayEmail = user?.email ?? '';
@@ -432,6 +439,66 @@ export const PerfilScreen: React.FC = () => {
       }
     : undefined;
   const handleLogout = () => { haptics.heavy(); setLogoutModalVisible(false); logout(); resetOnboarding(); };
+
+  // ── Delete account ────────────────────────────────────────────────────────
+  // Step 1 — show the destructive Alert. If the user accepts, advance to the
+  // typing-confirmation modal (step 2).
+  const handleStartDelete = useCallback(() => {
+    haptics.heavy();
+    Alert.alert(
+      t('profile.deleteAccountTitle'),
+      t('profile.deleteAccountBody', { streak: streakDays }),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('common.continue'),
+          style: 'destructive',
+          onPress: () => { setDeleteConfirmInput(''); setDeleteStep('typing'); },
+        },
+      ],
+    );
+  }, [t, streakDays]);
+
+  // Step 2 — fire the actual deletion. The button is only enabled when the
+  // user has typed the localised confirmation word verbatim.
+  const handleConfirmDelete = useCallback(async () => {
+    if (deleteInFlight) return;
+    setDeleteInFlight(true);
+    haptics.heavy();
+    const result = await deleteAccount();
+    setDeleteInFlight(false);
+    setDeleteStep('closed');
+    setDeleteConfirmInput('');
+
+    if (result.ok) {
+      // The auth-state-change listener will navigate the user out
+      // automatically when `user` becomes null.
+      resetOnboarding();
+      return;
+    }
+
+    if (result.reason === 'requires-recent-login') {
+      // Firebase requires a fresh credential — we ask the user to sign in
+      // again and then retry. We can't transparently re-auth them here
+      // because the credential lives on the OAuth provider (Apple/Google),
+      // not in our app. Signing out and showing the onboarding sign-in
+      // flow is the standard workaround.
+      Alert.alert(
+        t('profile.deleteAccountReauthTitle'),
+        t('profile.deleteAccountReauthBody'),
+        [
+          { text: t('common.cancel'), style: 'cancel' },
+          {
+            text: t('profile.deleteAccountReauthAction'),
+            onPress: async () => { await logout(); resetOnboarding(); },
+          },
+        ],
+      );
+      return;
+    }
+
+    Alert.alert(t('common.error'), t('profile.deleteAccountError'));
+  }, [deleteAccount, deleteInFlight, logout, resetOnboarding, t]);
 
   const [appleAvailable, setAppleAvailable] = useState(false);
   useEffect(() => {
@@ -780,6 +847,28 @@ export const PerfilScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
+        {/* Eliminar cuenta — only shown for non-guest authenticated users.
+            Guests have no persistent account, so the action is meaningless
+            for them; "Cerrar sesión" already wipes their anonymous data. */}
+        {isAuthenticated && !isGuest && (
+          <View style={{ backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, marginTop: 10, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 13 }}
+              activeOpacity={0.7}
+              onPress={handleStartDelete}
+              accessibilityRole="button"
+              accessibilityLabel={t('profile.deleteAccount')}
+            >
+              <IconCircle emoji="🗑" bg="rgba(220,38,38,0.15)" />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#dc2626' }}>{t('profile.deleteAccount')}</Text>
+                <Text style={{ fontSize: 11, color: c.textTertiary, marginTop: 1 }}>{t('profile.deleteAccountSub')}</Text>
+              </View>
+              <Text style={{ fontSize: 22, color: 'rgba(220,38,38,0.5)' }}>›</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
 
         {/* Footer */}
         <View style={{ alignItems: 'center', marginTop: 16, gap: 2 }}>
@@ -814,6 +903,77 @@ export const PerfilScreen: React.FC = () => {
             </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Delete account — step 2 (typing confirmation). Step 1 is a native
+          Alert.alert fired from `handleStartDelete`. We show this modal only
+          after the user has acknowledged the warning. The destructive button
+          stays disabled until they type the localised confirmation word
+          (ELIMINAR / DELETE / LÖSCHEN / …) verbatim, case-insensitive. */}
+      <Modal visible={deleteStep === 'typing'} transparent animationType="fade" onRequestClose={() => !deleteInFlight && setDeleteStep('closed')}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+          <Pressable
+            onPress={() => !deleteInFlight && setDeleteStep('closed')}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <View style={{ backgroundColor: c.card, borderRadius: 24, paddingTop: 24, paddingBottom: 20, paddingHorizontal: 20, width: '100%', maxWidth: 360, alignItems: 'center' }}>
+            <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: 'rgba(220,38,38,0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+              <Text style={{ fontSize: 28 }}>🗑</Text>
+            </View>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, textAlign: 'center' }}>
+              {t('profile.deleteAccountConfirmTitle')}
+            </Text>
+            <Text style={{ fontSize: 13, color: c.textSecondary, textAlign: 'center', marginTop: 8, lineHeight: 19, paddingHorizontal: 4 }}>
+              {t('profile.deleteAccountConfirmHint', { word: t('profile.deleteAccountConfirmWord') })}
+            </Text>
+            <TextInput
+              value={deleteConfirmInput}
+              onChangeText={setDeleteConfirmInput}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              placeholder={t('profile.deleteAccountConfirmWord')}
+              placeholderTextColor={c.textTertiary}
+              editable={!deleteInFlight}
+              style={{
+                width: '100%', marginTop: 16,
+                backgroundColor: c.surface,
+                borderWidth: 1, borderColor: c.border,
+                borderRadius: 14, paddingHorizontal: 14, height: 48,
+                fontSize: 15, fontWeight: '600', color: c.textPrimary,
+                textAlign: 'center', letterSpacing: 1,
+              }}
+            />
+            {(() => {
+              const expectedWord = t('profile.deleteAccountConfirmWord').toUpperCase();
+              const canDelete = deleteConfirmInput.trim().toUpperCase() === expectedWord && !deleteInFlight;
+              return (
+                <TouchableOpacity
+                  style={{
+                    width: '100%', marginTop: 14, paddingVertical: 14, borderRadius: 16,
+                    alignItems: 'center',
+                    backgroundColor: canDelete ? '#dc2626' : (isDark ? 'rgba(220,38,38,0.25)' : 'rgba(220,38,38,0.18)'),
+                    opacity: canDelete ? 1 : 0.6,
+                  }}
+                  onPress={handleConfirmDelete}
+                  disabled={!canDelete}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>
+                    {deleteInFlight ? t('profile.deleteAccountInProgress') : t('profile.deleteAccountButton')}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })()}
+            <TouchableOpacity
+              style={{ width: '100%', backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', borderRadius: 16, paddingVertical: 12, alignItems: 'center', marginTop: 8 }}
+              onPress={() => !deleteInFlight && setDeleteStep('closed')}
+              disabled={deleteInFlight}
+              activeOpacity={0.8}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '500', color: c.textTertiary }}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* Canjea un código */}
