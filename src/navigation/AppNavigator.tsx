@@ -95,6 +95,7 @@ export type PerfilStackParamList = {
   PerfilHome: undefined;
   HazteTitular: { source?: 'icon' | 'momios' | 'promo' | 'level_badge' } | undefined;
   Streak: undefined;
+  NotificationSettings: undefined;
 };
 
 export type RootTabParamList = {
@@ -229,6 +230,15 @@ function PerfilNavigator() {
       <PerfilStack.Screen
         name="Streak"
         component={StreakScreen}
+        options={{
+          animation: 'slide_from_bottom',
+          gestureEnabled: true,
+          gestureDirection: 'vertical',
+        }}
+      />
+      <PerfilStack.Screen
+        name="NotificationSettings"
+        component={NotificationSettingsScreen}
         options={{
           animation: 'slide_from_bottom',
           gestureEnabled: true,
