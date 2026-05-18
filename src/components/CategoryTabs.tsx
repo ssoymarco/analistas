@@ -74,7 +74,7 @@ export function CategoryTabs<K extends string = string>({
         onPress={() => handlePress(tab.key)}
         style={[
           s.tab,
-          layout === 'fill' && s.tabFill,
+          layout === 'fill' ? s.tabFill : s.tabScroll,
           {
             backgroundColor: active ? CATEGORY_TAB_ACTIVE_BG : c.surface,
             borderColor:     active ? CATEGORY_TAB_ACTIVE_BG : c.border,
@@ -87,6 +87,11 @@ export function CategoryTabs<K extends string = string>({
         <Text
           style={[
             s.label,
+            // `flexShrink: 1` lets the label truncate before the badge gets
+            // pushed past the tab's right edge — only matters in `fill`
+            // mode, where 3 equal-width slots can be < the natural content
+            // width on narrow phones (e.g. "Jugadores · 3").
+            layout === 'fill' && s.labelShrink,
             { color: active ? CATEGORY_TAB_ACTIVE_TEXT : c.textSecondary },
           ]}
           numberOfLines={1}
@@ -166,23 +171,31 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: radius.md,
     borderWidth: 1,
+    overflow: 'hidden',
   },
-  tabFill: { flex: 1 },
+  /** Equal-width tabs (3-tab rows). Tighter horizontal padding because each
+   *  slot is only ~110px on a 375px screen — at the default 14px pad the
+   *  badge gets pushed past the tab's right edge. */
+  tabFill:   { flex: 1, minWidth: 0, paddingHorizontal: 10 },
+  /** Intrinsic-width tabs (Partidos: 4 tabs + badges). Roomier pad reads
+   *  better when each tab sizes to its own content. */
+  tabScroll: { paddingHorizontal: 14 },
   emoji: { fontSize: 13 },
   label: { fontSize: 13, fontWeight: '600' },
+  labelShrink: { flexShrink: 1, minWidth: 0 },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    minWidth: 22,
+    minWidth: 20,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 8,
     justifyContent: 'center',
+    flexShrink: 0,
   },
   liveDot: { width: 5, height: 5, borderRadius: 3 },
   badgeText: { fontSize: 11, fontWeight: '700' },
