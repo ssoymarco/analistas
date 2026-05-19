@@ -1,15 +1,14 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   Image,
-  TouchableOpacity,
   StyleSheet,
-  Animated,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { AnimatedPressable } from './AnimatedPressable';
+import { MatchBell } from './MatchBell';
 import { useLiveTick, computeLiveMinuteSeconds, formatLiveMinute } from '../hooks/useLiveTick';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatMatchTime } from '../utils/formatMatchTime';
@@ -113,10 +112,8 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
           <TeamLogo logo={match.awayTeam.logo} />
         </View>
 
-        {/* Bell */}
-        <TouchableOpacity style={s.bellBtn} activeOpacity={0.7}>
-          <BellIcon muted={match.isFavorite} c={c} />
-        </TouchableOpacity>
+        {/* Per-match notification toggle — only renders for followed matches */}
+        <MatchBell match={match} />
       </View>
     </AnimatedPressable>
   );
@@ -130,34 +127,6 @@ const RedCards = ({ count }: { count: number }) => (
     ))}
   </View>
 );
-
-// Live pulse dot
-const LivePulse = ({ color }: { color: string }) => {
-  const opacity = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 0.2, duration: 600, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 1, duration: 600, useNativeDriver: true }),
-      ])
-    );
-    anim.start();
-    return () => anim.stop();
-  }, [opacity]);
-  return <Animated.View style={[s.liveDot, { backgroundColor: color, opacity }]} />;
-};
-
-// Bell icon drawn with View primitives
-const BellIcon = ({ muted, c }: { muted?: boolean; c: ReturnType<typeof useThemeColors> }) => (
-  <View style={[s.bellWrap, muted && s.bellWrapMuted]}>
-    <View style={[s.bellBody, { borderColor: c.textTertiary }]} />
-    <View style={[s.bellClapper, { backgroundColor: c.textTertiary }]} />
-    {muted && <View style={s.bellSlash} />}
-  </View>
-);
-
-// We need useThemeColors import for the type
-import type { ColorPalette } from '../theme/colors';
 
 const s = StyleSheet.create({
   card: {
@@ -236,40 +205,6 @@ const s = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Bell
-  bellBtn: { marginLeft: 4, padding: 4 },
-  bellWrap: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bellWrapMuted: { backgroundColor: 'rgba(239,68,68,0.1)' },
-  bellBody: {
-    width: 10,
-    height: 9,
-    borderRadius: 5,
-    borderWidth: 1.5,
-    borderBottomWidth: 0,
-    marginTop: 2,
-  },
-  bellClapper: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    marginTop: -1,
-  },
-  bellSlash: {
-    position: 'absolute',
-    width: 14,
-    height: 1.5,
-    backgroundColor: '#f87171',
-    borderRadius: 1,
-    transform: [{ rotate: '-45deg' }],
-  },
-
   // Red cards
   redCardsWrap: {
     flexDirection: 'row',
@@ -285,12 +220,5 @@ const s = StyleSheet.create({
   },
   redCardStacked: {
     marginLeft: -3,
-  },
-
-  // Live pulse
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
   },
 });

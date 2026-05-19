@@ -2,8 +2,9 @@ import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated } from 'react-native';
 import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
 import { useUserStats } from '../contexts/UserStatsContext';
-import { StreakModal } from '../components/StreakModal';
 import { SkeletonPartidos } from '../components/Skeleton';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { BellIcon, SearchIcon } from '../components/NavIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useTranslation } from 'react-i18next';
@@ -13,7 +14,11 @@ import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import type { Match, MatchStatus } from '../data/types';
 import { DateNavigator, formatFullDate, isToday } from '../components/DateNavigator';
-import { FilterTabs, FilterTab } from '../components/FilterTabs';
+import { CategoryTabs, type CategoryTab as PillTab } from '../components/CategoryTabs';
+
+/** Filter keys for Partidos. Kept exported for callers that still type the
+ *  active tab (e.g. analytics, persisted state). */
+export type FilterTab = 'todos' | 'vivo' | 'finalizados' | 'proximos';
 import { LeagueSection } from '../components/LeagueSection';
 import { CalendarPicker } from '../components/CalendarPicker';
 import { useFixtures } from '../hooks/useFixtures';
@@ -27,29 +32,13 @@ function todayISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-// ── Header icons ──────────────────────────────────────────────────────────────
-const BellIcon = ({ color }: { color: string }) => (
-  <View style={{ width: 16, height: 18, alignItems: 'center', justifyContent: 'center' }}>
-    <View style={{ position: 'absolute', top: 3, width: 12, height: 10, borderRadius: 6, borderWidth: 1.5, borderColor: color, borderBottomWidth: 0 }} />
-    <View style={{ position: 'absolute', top: 0, width: 3, height: 3, borderRadius: 2, backgroundColor: color }} />
-    <View style={{ position: 'absolute', bottom: 2, width: 14, height: 1.5, borderRadius: 1, backgroundColor: color }} />
-  </View>
-);
-const SearchIcon = ({ color }: { color: string }) => (
-  <View style={{ width: 16, height: 16, alignItems: 'center', justifyContent: 'center' }}>
-    <View style={{ position: 'absolute', top: 0, left: 0, width: 11, height: 11, borderRadius: 6, borderWidth: 1.5, borderColor: color }} />
-    <View style={{ position: 'absolute', bottom: 0, right: 0, width: 5, height: 1.5, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '45deg' }, { translateX: 1 }, { translateY: -2 }] }} />
-  </View>
-);
-
 // ── Screen ────────────────────────────────────────────────────────────────────
 export const PartidosScreen: React.FC = () => {
   const { t } = useTranslation();
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
-  const { streakDays, streakNotifyEnabled, setStreakNotify } = useUserStats();
-  const [streakModalVisible, setStreakModalVisible] = useState(false);
+  const { streakDays } = useUserStats();
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [activeTab, setActiveTab] = useState<FilterTab>('todos');
   const [showCalendar, setShowCalendar] = useState(false);
@@ -85,6 +74,14 @@ export const PartidosScreen: React.FC = () => {
     counts[selectedDate] = totalCount;
     return counts;
   }, [selectedDate, totalCount]);
+
+  // ── Filter pills — unified CategoryTabs ────────────────────────────────────
+  const filterTabs = useMemo<PillTab<FilterTab>[]>(() => [
+    { key: 'todos',       label: t('filters.all'),      emoji: '⚽', badge: totalCount > 0 ? totalCount : null },
+    { key: 'vivo',        label: t('filters.live'),     emoji: '🔴', badge: liveCount > 0 ? liveCount : null, liveBadge: liveCount > 0 },
+    { key: 'finalizados', label: t('filters.finished'), emoji: '🏁', badge: finishedCount > 0 ? finishedCount : null },
+    { key: 'proximos',    label: t('filters.upcoming'), emoji: '🕐' },
+  ], [t, totalCount, liveCount, finishedCount]);
 
   const filterStatus = useMemo<MatchStatus | null>(() => {
     if (activeTab === 'todos') return null;
@@ -263,56 +260,53 @@ export const PartidosScreen: React.FC = () => {
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
-      {/* ── Top Bar ── */}
-      <View style={{
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, backgroundColor: c.bg,
-        borderBottomWidth: 1, borderBottomColor: c.border,
-      }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={{
-            width: 32, height: 32, borderRadius: 10,
-            backgroundColor: 'rgba(16,185,129,0.15)',
-            alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Text style={{ fontSize: 14 }}>⚽</Text>
-          </View>
-          <Text style={{ fontSize: 18, fontWeight: '800', color: c.textPrimary }}>
-            {t('matches.title')}
-          </Text>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <TouchableOpacity style={{
-            width: 38, height: 38, borderRadius: 19,
-            backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', position: 'relative',
-          }} activeOpacity={0.7}>
-            <BellIcon color={c.textSecondary} />
-            <View style={{
-              position: 'absolute', top: 6, right: 8,
-              width: 7, height: 7, borderRadius: 4,
-              backgroundColor: c.live, borderWidth: 1.5, borderColor: c.bg,
-            }} />
-          </TouchableOpacity>
-          <TouchableOpacity style={{
-            width: 38, height: 38, borderRadius: 19,
-            backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center',
-          }} activeOpacity={0.7} onPress={() => navigation.navigate('GlobalSearch')}>
-            <SearchIcon color={c.textSecondary} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={{
-              flexDirection: 'row', alignItems: 'center', gap: 2,
-              backgroundColor: 'rgba(255,122,0,0.12)',
-              paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12,
-            }}
-            activeOpacity={0.7}
-            onPress={() => setStreakModalVisible(true)}
-          >
-            <Text style={{ fontSize: 14, fontWeight: '800', color: '#ff7a00' }}>{streakDays}</Text>
-            <Text style={{ fontSize: 14 }}>🔥</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      {/* ── Top Bar ── unified header (see ScreenHeader) */}
+      <ScreenHeader
+        icon="⚽"
+        iconBg="rgba(16,185,129,0.15)"
+        title={t('matches.title')}
+        right={
+          <>
+            {/* Order: Streak · Bell · Search.
+                Search lives rightmost because it's the most-tapped action
+                in this header (multiple times per session vs. once-a-week
+                for the bell). The streak pill is a status indicator, not
+                an action, so it sits on the leftmost edge of the cluster
+                where it stays visible without being the strongest visual
+                anchor. */}
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 2,
+                backgroundColor: 'rgba(255,122,0,0.12)',
+                paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12,
+              }}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('Streak')}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '800', color: '#ff7a00' }}>{streakDays}</Text>
+              <Text style={{ fontSize: 14 }}>🔥</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{
+                width: 38, height: 38, borderRadius: 19,
+                backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center',
+              }}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('NotificationSettings')}
+              accessibilityRole="button"
+              accessibilityLabel={t('notifications.title')}
+            >
+              <BellIcon color={c.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity style={{
+              width: 38, height: 38, borderRadius: 19,
+              backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center',
+            }} activeOpacity={0.7} onPress={() => navigation.navigate('GlobalSearch')}>
+              <SearchIcon color={c.textSecondary} />
+            </TouchableOpacity>
+          </>
+        }
+      />
 
       <DateNavigator
         selectedDate={selectedDate}
@@ -335,7 +329,12 @@ export const PartidosScreen: React.FC = () => {
       )}
 
       {isToday(selectedDate) && (
-        <FilterTabs activeTab={activeTab} onTabChange={setActiveTab} liveCounts={liveCount} totalCount={totalCount} finishedCount={finishedCount} />
+        <CategoryTabs<FilterTab>
+          tabs={filterTabs}
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          layout="scroll"
+        />
       )}
 
       {/* Live auto-refresh indicator removed */}
@@ -519,15 +518,6 @@ export const PartidosScreen: React.FC = () => {
 
       <CalendarPicker visible={showCalendar} selectedDate={selectedDate} onSelectDate={handleCalendarSelect} onClose={() => setShowCalendar(false)} onGoToday={() => { handleGoToday(); setShowCalendar(false); }} />
 
-      <StreakModal
-        visible={streakModalVisible}
-        onClose={() => setStreakModalVisible(false)}
-        streakDays={streakDays}
-        streakNotifyEnabled={streakNotifyEnabled}
-        onToggleNotify={setStreakNotify}
-        c={c}
-        isDark={isDark}
-      />
     </SafeAreaView>
   );
 };

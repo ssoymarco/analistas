@@ -18,12 +18,13 @@ import {
 } from 'react';
 import {
   onAuthStateChanged, signOut, signInAnonymously,
-  User as FirebaseUser,
+  deleteUser, User as FirebaseUser,
 } from 'firebase/auth';
 import {
-  doc, getDoc, setDoc, updateDoc,
+  doc, getDoc, setDoc, updateDoc, deleteDoc,
   serverTimestamp, runTransaction,
 } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../services/firebase';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -41,6 +42,13 @@ export interface AuthUser {
   createdAt?: Date;
 }
 
+/** Result of an account-deletion attempt. `requires-recent-login` means
+ *  Firebase wants the user to re-authenticate before deletion can proceed —
+ *  the caller should prompt them to sign in again and retry. */
+export type DeleteAccountResult =
+  | { ok: true }
+  | { ok: false; reason: 'requires-recent-login' | 'unknown'; message?: string };
+
 interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
@@ -48,6 +56,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (method: AuthMethod, displayName?: string) => Promise<void>;
   logout: () => Promise<void>;
+  deleteAccount: () => Promise<DeleteAccountResult>;
   updateProfile: (updates: { displayName?: string; username?: string }) => Promise<void>;
   checkUsernameAvailable: (username: string) => Promise<boolean>;
 }
@@ -106,8 +115,20 @@ interface FirestoreProfile {
 const AuthContext = createContext<AuthContextType>({
   user: null, isAuthenticated: false, isGuest: false, isLoading: true,
   login: async () => {}, logout: async () => {},
+  deleteAccount: async () => ({ ok: false, reason: 'unknown' }),
   updateProfile: async () => {}, checkUsernameAvailable: async () => false,
 });
+
+/** AsyncStorage keys NOT to wipe on account deletion — these are device-level
+ *  preferences that should survive (language, theme, time format) so the
+ *  device behaves the same after a user signs out, not be jarringly reset
+ *  to defaults. Everything else under the `analistas` prefix is user data
+ *  and gets cleared. */
+const PRESERVE_ON_DELETE = new Set<string>([
+  'analistas_language',
+  'analistas_time_format',
+  'analistas-dark-mode',
+]);
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -215,6 +236,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  // ── deleteAccount ──────────────────────────────────────────────────────────
+  //
+  // Apple App Store and Google Play require apps that allow account creation
+  // to also allow in-app deletion (no "email us" loophole). This is the
+  // implementation.
+  //
+  // Order matters:
+  //   1) Firestore — delete the user doc + free up the username so it can be
+  //      claimed again. We delete these BEFORE the auth user because once
+  //      `deleteUser` succeeds we lose the credentials needed to write.
+  //   2) AsyncStorage — wipe user data (favourites, streak, viewing
+  //      history, notification prefs) while keeping device-level UX
+  //      preferences (language, theme, time format).
+  //   3) Firebase Auth — the destructive step. Apple/Google credentials
+  //      linked to this Firebase user are dropped server-side.
+  //
+  // Apple-specific note: full revocation of the Apple ID token requires a
+  // backend call to https://appleid.apple.com/auth/revoke with the original
+  // authorization code. That code isn't available client-side once the
+  // session is established, so we rely on `deleteUser()` severing the
+  // Firebase ↔ Apple binding. The user can also revoke Analistas under
+  // Settings → Apple ID → Sign in with Apple. This is the same compromise
+  // every Firebase + Apple Sign In app makes; App Store review accepts it.
+  const deleteAccount = useCallback(async (): Promise<DeleteAccountResult> => {
+    const fbUser = auth.currentUser;
+    if (!fbUser || !user) return { ok: false, reason: 'unknown', message: 'no-user' };
+
+    // 1) Firestore cleanup — username doc first, then user doc.
+    //    Wrapped in try/catch individually so a missing/already-gone doc
+    //    doesn't block the deletion chain.
+    if (user.username) {
+      try { await deleteDoc(doc(db, 'usernames', user.username)); } catch {}
+    }
+    try { await deleteDoc(doc(db, 'users', user.id)); } catch {}
+
+    // 2) Local AsyncStorage cleanup — wipe everything under the `analistas`
+    //    prefix except the device-level preferences listed above.
+    try {
+      const allKeys = await AsyncStorage.getAllKeys();
+      const toRemove = allKeys.filter(
+        k => k.startsWith('analistas') && !PRESERVE_ON_DELETE.has(k),
+      );
+      if (toRemove.length > 0) {
+        await AsyncStorage.multiRemove(toRemove);
+      }
+    } catch {}
+
+    // 3) Firebase Auth — the destructive step. Throws
+    //    `auth/requires-recent-login` if the user's session is too old
+    //    to delete without re-authentication. The caller catches that and
+    //    prompts the user to sign in again.
+    try {
+      await deleteUser(fbUser);
+      setUser(null);
+      return { ok: true };
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'auth/requires-recent-login') {
+        return { ok: false, reason: 'requires-recent-login' };
+      }
+      return { ok: false, reason: 'unknown', message: String(code ?? err) };
+    }
+  }, [user]);
+
   // ── updateProfile ──────────────────────────────────────────────────────────
 
   const updateProfile = useCallback(async (updates: { displayName?: string; username?: string }) => {
@@ -272,6 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading,
       login,
       logout,
+      deleteAccount,
       updateProfile,
       checkUsernameAvailable,
     }}>

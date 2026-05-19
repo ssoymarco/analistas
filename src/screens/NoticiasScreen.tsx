@@ -12,6 +12,11 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { SkeletonNoticias } from '../components/Skeleton';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { SearchIcon } from '../components/NavIcons';
+import { SectionHeader } from '../components/SectionHeader';
+import { CategoryTabs } from '../components/CategoryTabs';
+import { radius, ui } from '../theme/tokens';
 import { getNews } from '../services/sportsApi';
 import type { NewsArticle } from '../data/types';
 import type { NoticiasStackParamList } from '../navigation/AppNavigator';
@@ -176,17 +181,6 @@ function ArticleRow({ article, onPress, c }: { article: NewsArticle; onPress: ()
   );
 }
 
-// ── Section label ─────────────────────────────────────────────────────────────
-function SectionLabel({ label, emoji, c }: { label: string; emoji?: string; c: ReturnType<typeof useThemeColors> }) {
-  return (
-    <View style={styles.sectionLabel}>
-      {emoji && <Text style={styles.sectionEmoji}>{emoji}</Text>}
-      <Text style={[styles.sectionText, { color: c.textTertiary }]}>{label}</Text>
-      <View style={[styles.sectionLine, { backgroundColor: c.border }]} />
-    </View>
-  );
-}
-
 // ── Main screen ───────────────────────────────────────────────────────────────
 export const NoticiasScreen: React.FC = () => {
   const { t } = useTranslation();
@@ -247,53 +241,40 @@ export const NoticiasScreen: React.FC = () => {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: c.bg }]} edges={['top']}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
-      {/* Header */}
-      <View style={[styles.header, { borderBottomWidth: 1, borderBottomColor: c.border, backgroundColor: c.bg }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(59,130,246,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontSize: 14 }}>📰</Text>
-          </View>
-          <Text style={[styles.title, { color: c.textPrimary }]}>{t('news.title')}</Text>
-        </View>
-      </View>
+      {/* Header — unified (see ScreenHeader) */}
+      <ScreenHeader
+        icon="📰"
+        iconBg="rgba(59,130,246,0.15)"
+        title={t('news.title')}
+      />
 
-      {/* Tabs */}
-      <View style={styles.tabBar}>
-        {TABS.map(tab => {
-          const active = activeTab === tab.id;
-          return (
-            <TouchableOpacity
-              key={tab.id}
-              style={[
-                styles.tab,
-                { backgroundColor: c.surface, borderColor: c.border },
-                active && { backgroundColor: c.accent, borderColor: c.accent },
-              ]}
-              onPress={() => { haptics.selection(); setActiveTab(tab.id); }}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.tabEmoji}>{tab.emoji}</Text>
-              <Text style={[styles.tabLabel, { color: c.textSecondary }, active && { color: '#fff' }]}>
-                {t(tab.labelKey)}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {/* Tabs — unified CategoryTabs (see CategoryTabs.tsx) */}
+      <CategoryTabs<Tab>
+        tabs={TABS.map(tab => ({
+          key: tab.id,
+          label: t(tab.labelKey),
+          emoji: tab.emoji,
+        }))}
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        layout="fill"
+      />
 
-      {/* Search bar */}
+      {/* Search bar — same markup as FavoritosScreen for pixel parity */}
       <View style={styles.searchWrap}>
         <View style={[styles.searchBar, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <SearchIcon color={c.textTertiary} size={16} />
           <TextInput
             style={[styles.searchInput, { color: c.textPrimary }]}
             placeholder={t('news.searchPlaceholder')}
             placeholderTextColor={c.textTertiary}
             value={searchQuery}
             onChangeText={setSearchQuery}
+            autoCorrect={false}
+            autoCapitalize="none"
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={8}>
               <Text style={[styles.searchClear, { color: c.textSecondary }]}>✕</Text>
             </TouchableOpacity>
           )}
@@ -333,7 +314,7 @@ export const NoticiasScreen: React.FC = () => {
             {/* Stories horizontal scroll */}
             {stories.length > 0 && (
               <View style={styles.section}>
-                <SectionLabel label={t('news.moreNews')} emoji="📌" c={c} />
+                <SectionHeader label={t('news.moreNews')} icon="📌" line paddingHorizontal={16} />
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -349,7 +330,7 @@ export const NoticiasScreen: React.FC = () => {
             {/* Article list */}
             {rest.length > 0 && (
               <View style={[styles.section, styles.articleList, { backgroundColor: c.card, borderColor: c.border }]}>
-                <SectionLabel label={t('news.allNews')} emoji="📋" c={c} />
+                <SectionHeader label={t('news.allNews')} icon="📋" line paddingHorizontal={16} />
                 {rest.map(a => (
                   <ArticleRow key={a.id} article={a} onPress={() => handlePress(a)} c={c} />
                 ))}
@@ -370,37 +351,17 @@ export const NoticiasScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
 
-  // Header
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12,
-  },
-  title: {
-    fontSize: 18, fontWeight: '800',
-  },
-
-  // Search
+  // Search — structure mirrors FavoritosScreen so the two search bars look
+  // pixel-identical: same paddingHorizontal, same icon→text `gap`, same
+  // input height and font.
   searchWrap: { paddingHorizontal: 16, marginBottom: 8 },
   searchBar: {
     flexDirection: 'row', alignItems: 'center',
-    borderRadius: 12, paddingHorizontal: 12, height: 42,
-    borderWidth: 1,
+    borderRadius: radius.md, paddingHorizontal: 12, height: ui.searchBarHeight,
+    borderWidth: 1, gap: 8,
   },
-  searchIcon: { fontSize: 14, marginRight: 8 },
   searchInput: { flex: 1, fontSize: 14, padding: 0 },
-  searchClear: { fontSize: 13, paddingLeft: 8, fontWeight: '600' },
-
-  // Tabs
-  tabBar: {
-    flexDirection: 'row', paddingHorizontal: 16, gap: 8, paddingBottom: 10,
-  },
-  tab: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
-    borderWidth: 1,
-  },
-  tabEmoji: { fontSize: 12 },
-  tabLabel: { fontSize: 13, fontWeight: '600' },
+  searchClear: { fontSize: 13, fontWeight: '600' },
 
   // Scroll
   scroll: { flex: 1 },
@@ -409,7 +370,7 @@ const styles = StyleSheet.create({
 
   // Hero card
   heroCard: {
-    marginHorizontal: 16, borderRadius: 20, overflow: 'hidden',
+    marginHorizontal: 16, borderRadius: radius.xxl, overflow: 'hidden',
   },
   heroImage: {
     height: 220, width: '100%', overflow: 'hidden',
@@ -452,22 +413,10 @@ const styles = StyleSheet.create({
   badgeDot: { width: 5, height: 5, borderRadius: 3 },
   badgeText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2 },
 
-  // Section label
-  sectionLabel: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 16, marginBottom: 10, marginTop: 4,
-  },
-  sectionEmoji: { fontSize: 13 },
-  sectionText: {
-    fontSize: 10, fontWeight: '700',
-    letterSpacing: 1, textTransform: 'uppercase',
-  },
-  sectionLine: { flex: 1, height: 1 },
-
   // Story cards
   storiesScroll: { paddingHorizontal: 16, gap: 12 },
   storyCard: {
-    width: 180, borderRadius: 16, overflow: 'hidden',
+    width: 180, borderRadius: radius.xl, overflow: 'hidden',
     borderWidth: 1,
   },
   storyImage: {
@@ -485,7 +434,7 @@ const styles = StyleSheet.create({
 
   // Article rows
   articleList: {
-    marginHorizontal: 16, borderRadius: 16, overflow: 'hidden',
+    marginHorizontal: 16, borderRadius: radius.xl, overflow: 'hidden',
     borderWidth: 1,
   },
   articleRow: {

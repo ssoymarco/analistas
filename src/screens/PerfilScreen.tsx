@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, Modal, TextInput,
+  View, Text, ScrollView, TouchableOpacity, Pressable, Modal, TextInput, Switch,
   NativeSyntheticEvent, NativeScrollEvent, Share, Linking, Platform, Alert,
+  StyleSheet,
 } from 'react-native';
 import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,8 +21,11 @@ import { useOnboarding } from '../contexts/OnboardingContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPerfil } from '../components/Skeleton';
-import { StreakModal } from '../components/StreakModal';
 import { EditProfileModal } from '../components/EditProfileModal';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { SectionHeader } from '../components/SectionHeader';
+import { PrivacyPolicyBody } from '../components/PrivacyPolicyBody';
+import { TermsOfServiceBody } from '../components/TermsOfServiceBody';
 import { scheduleLocalNotification } from '../services/notifications';
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useTranslation } from 'react-i18next';
@@ -64,16 +68,6 @@ function MenuRow({ emoji, label, sublabel, iconBg, rightElement, onPress, accent
   );
 }
 
-function SectionHeader({ label, c }: { label: string; c: ColorPalette }) {
-  return (
-    <Text style={{
-      fontSize: 10, fontWeight: '700', color: c.textTertiary,
-      letterSpacing: 1.5, textTransform: 'uppercase',
-      marginBottom: 8, marginTop: 20, paddingHorizontal: 20,
-    }}>{label}</Text>
-  );
-}
-
 function AvatarView({ initials, size = 68, color = '#6366f1' }: { initials: string; size?: number; color?: string }) {
   return (
     <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color, alignItems: 'center', justifyContent: 'center' }}>
@@ -82,44 +76,75 @@ function AvatarView({ initials, size = 68, color = '#6366f1' }: { initials: stri
   );
 }
 
-function CustomToggle({ value, onToggle, activeColor, icon }: {
-  value: boolean; onToggle: () => void; activeColor: string; icon?: string;
+/**
+ * Native iOS-style switch. Matches NotificationSettingsScreen so every
+ * toggle in the app looks the same.
+ *
+ * Extra props (`activeColor`, `icon`) are accepted for backwards-compatibility
+ * with existing call sites but intentionally ignored — visual consistency is
+ * the goal.
+ */
+function CustomToggle({ value, onToggle }: {
+  value: boolean;
+  onToggle: () => void;
+  /** @deprecated kept only so legacy call sites still compile — visual is uniform now. */
+  activeColor?: string;
+  /** @deprecated kept only so legacy call sites still compile — no inline icon anymore. */
+  icon?: string;
 }) {
+  const c = useThemeColors();
   return (
-    <TouchableOpacity
-      style={{ width: 48, height: 28, borderRadius: 14, justifyContent: 'center', backgroundColor: value ? activeColor : 'rgba(128,128,128,0.25)' }}
-      onPress={() => { haptics.light(); onToggle(); }} activeOpacity={0.8}
-    >
-      <View style={{
-        width: 22, height: 22, borderRadius: 11, backgroundColor: '#ffffff',
-        alignItems: 'center', justifyContent: 'center',
-        transform: [{ translateX: value ? 22 : 3 }],
-        shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
-      }}>
-        {icon ? <Text style={{ fontSize: 10 }}>{icon}</Text> : null}
-      </View>
-    </TouchableOpacity>
+    <Switch
+      value={value}
+      onValueChange={() => { haptics.selection(); onToggle(); }}
+      trackColor={{ false: c.border, true: c.accent }}
+      thumbColor="#fff"
+      ios_backgroundColor={c.border}
+    />
   );
 }
 
 // ── Bottom Sheet Modal ───────────────────────────────────────────────────────
+// Previous implementation wrapped the inner panel in a TouchableOpacity to
+// prevent backdrop-taps from closing the modal. That worked for the tap
+// case but stole the gesture responder from any ScrollView inside, so long
+// content (Privacy / Terms) couldn't be scrolled on iOS.
+//
+// Fixed by splitting backdrop and panel into separate siblings:
+//   - Pressable backdrop fills the screen behind the panel and handles
+//     the tap-to-close interaction.
+//   - Panel is a plain View on top of it. Taps inside the panel never
+//     reach the backdrop (no overlap in the responder tree), and the
+//     ScrollView inside is free to claim vertical pan as usual.
 function BottomSheet({ visible, onClose, c, children }: {
   visible: boolean; onClose: () => void; c: ColorPalette; children: React.ReactNode;
 }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={{
-          backgroundColor: c.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-          paddingTop: 8, paddingBottom: Platform.OS === 'ios' ? 40 : 24, maxHeight: '85%',
+      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+        {/* Backdrop — sits behind the panel, fills the rest of the screen. */}
+        <Pressable
+          onPress={onClose}
+          style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
+        />
+        {/* Panel — plain View so the ScrollView inside owns its gestures. */}
+        <View style={{
+          backgroundColor: c.card,
+          borderTopLeftRadius: 24, borderTopRightRadius: 24,
+          paddingTop: 8, paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+          maxHeight: '85%',
         }}>
           <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 12 }} />
-          <TouchableOpacity style={{ position: 'absolute', top: 16, right: 16, width: 28, height: 28, borderRadius: 14, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', zIndex: 10 }} onPress={onClose}>
+          <TouchableOpacity
+            style={{ position: 'absolute', top: 16, right: 16, width: 28, height: 28, borderRadius: 14, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', zIndex: 10 }}
+            onPress={onClose}
+            hitSlop={8}
+          >
             <Text style={{ fontSize: 14, color: c.textSecondary, fontWeight: '600' }}>✕</Text>
           </TouchableOpacity>
           {children}
-        </TouchableOpacity>
-      </TouchableOpacity>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -273,6 +298,17 @@ function PromoBanner({ onPress }: { onPress?: () => void }) {
   );
 }
 
+// ── Legal documents ─────────────────────────────────────────────────────────
+// In-app text is the canonical version (works offline, available to app store
+// reviewers without a network round-trip). The website URLs below are the
+// "full version" link offered at the bottom of each modal — the WordPress
+// pages should mirror this text and act as a public-facing reference.
+//
+// Privacy already exists at `/politica-privacidad/`. Terms still needs to be
+// created on WordPress at the matching `/terminos-y-condiciones/` slug.
+const LEGAL_PRIVACY_URL = 'https://somosanalistas.com/politica-privacidad/';
+const LEGAL_TERMS_URL   = 'https://somosanalistas.com/terminos-y-condiciones/';
+
 // ── Languages ────────────────────────────────────────────────────────────────
 const LANGUAGES = [
   { id: 'es', flag: '🇲🇽', name: 'Español' },
@@ -290,12 +326,12 @@ export const PerfilScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark, toggleDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PerfilStackParamList>>();
-  const { user, isAuthenticated, login, logout } = useAuth();
+  const { user, isAuthenticated, login, logout, deleteAccount } = useAuth();
   const { upgradeWithGoogle, googleAuthReady } = useGoogleAuth();
   const [upgrading, setUpgrading] = useState(false);
   const { resetOnboarding } = useOnboarding();
   const { followedTeamIds, followedPlayerIds, followedLeagueIds } = useFavorites();
-  const { matchesViewed, newsRead, streakDays, streakNotifyEnabled, setStreakNotify } = useUserStats();
+  const { matchesViewed, newsRead, streakDays } = useUserStats();
   const totalFavorites = followedTeamIds.length + followedPlayerIds.length + followedLeagueIds.length;
 
   // Pick first favorited team's color, or fall back to indigo
@@ -326,7 +362,6 @@ export const PerfilScreen: React.FC = () => {
   const { timeFormat, setTimeFormat } = useTimeFormat();
   const [momiosEnabled, setMomiosEnabled] = useState(true);
   const [selectedLang, setSelectedLang] = useState(i18n.language || 'es');
-  const [streakModalVisible, setStreakModalVisible] = useState(false);
   const [levelSheetVisible, setLevelSheetVisible] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
@@ -336,6 +371,13 @@ export const PerfilScreen: React.FC = () => {
   const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
   const [termsModalVisible, setTermsModalVisible] = useState(false);
   const [redeemCode, setRedeemCode] = useState('');
+  // ── Delete-account 2-step modal ────────────────────────────────────────────
+  // Step 1: warning Alert. Step 2: typing modal (CenterModal) that requires
+  // the user to type the localised confirmation word (ELIMINAR / DELETE / …)
+  // before the destructive button enables. See `handleDeleteAccount` below.
+  const [deleteStep, setDeleteStep] = useState<'closed' | 'typing'>('closed');
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [deleteInFlight, setDeleteInFlight] = useState(false);
 
   const displayName = user?.name ?? 'Visitante';
   const displayEmail = user?.email ?? '';
@@ -398,6 +440,66 @@ export const PerfilScreen: React.FC = () => {
     : undefined;
   const handleLogout = () => { haptics.heavy(); setLogoutModalVisible(false); logout(); resetOnboarding(); };
 
+  // ── Delete account ────────────────────────────────────────────────────────
+  // Step 1 — show the destructive Alert. If the user accepts, advance to the
+  // typing-confirmation modal (step 2).
+  const handleStartDelete = useCallback(() => {
+    haptics.heavy();
+    Alert.alert(
+      t('profile.deleteAccountTitle'),
+      t('profile.deleteAccountBody', { streak: streakDays }),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('common.continue'),
+          style: 'destructive',
+          onPress: () => { setDeleteConfirmInput(''); setDeleteStep('typing'); },
+        },
+      ],
+    );
+  }, [t, streakDays]);
+
+  // Step 2 — fire the actual deletion. The button is only enabled when the
+  // user has typed the localised confirmation word verbatim.
+  const handleConfirmDelete = useCallback(async () => {
+    if (deleteInFlight) return;
+    setDeleteInFlight(true);
+    haptics.heavy();
+    const result = await deleteAccount();
+    setDeleteInFlight(false);
+    setDeleteStep('closed');
+    setDeleteConfirmInput('');
+
+    if (result.ok) {
+      // The auth-state-change listener will navigate the user out
+      // automatically when `user` becomes null.
+      resetOnboarding();
+      return;
+    }
+
+    if (result.reason === 'requires-recent-login') {
+      // Firebase requires a fresh credential — we ask the user to sign in
+      // again and then retry. We can't transparently re-auth them here
+      // because the credential lives on the OAuth provider (Apple/Google),
+      // not in our app. Signing out and showing the onboarding sign-in
+      // flow is the standard workaround.
+      Alert.alert(
+        t('profile.deleteAccountReauthTitle'),
+        t('profile.deleteAccountReauthBody'),
+        [
+          { text: t('common.cancel'), style: 'cancel' },
+          {
+            text: t('profile.deleteAccountReauthAction'),
+            onPress: async () => { await logout(); resetOnboarding(); },
+          },
+        ],
+      );
+      return;
+    }
+
+    Alert.alert(t('common.error'), t('profile.deleteAccountError'));
+  }, [deleteAccount, deleteInFlight, logout, resetOnboarding, t]);
+
   const [appleAvailable, setAppleAvailable] = useState(false);
   useEffect(() => {
     isAppleAuthAvailable().then(setAppleAvailable).catch(() => {});
@@ -442,7 +544,37 @@ export const PerfilScreen: React.FC = () => {
     try { await Share.share({ message: 'Descarga Analistas, la mejor app para seguir el fútbol en tiempo real ⚽\nhttps://analistas.app' }); } catch {}
   }, []);
 
-  const handleContact = useCallback(() => { Linking.openURL('mailto:comercial@somosanalistas.com?subject=Contacto%20desde%20Analistas'); }, []);
+  // ── Contact ───────────────────────────────────────────────────────────────
+  // Opens the device's default mail app pre-filled with our contact address,
+  // a platform-tagged subject (so we can filter incoming "app contacts" by
+  // subject in Gmail/Outlook) and a body template that includes the user's
+  // app version + platform — handy when triaging support requests.
+  //
+  // If the device has no mail app configured (common in iOS Simulator), the
+  // mailto URL fails to open. We catch that and surface the email in an
+  // Alert so the user can copy it manually.
+  const handleContact = useCallback(async () => {
+    haptics.selection();
+    const email = 'contacto@somosanalistas.com';
+    const platform = Platform.OS === 'ios' ? 'iOS' : 'Android';
+    const subject = `[App ${platform}] ${t('profile.contactSubject')}`;
+    const body =
+      `${t('profile.contactBodyGreeting')}\n\n` +
+      `${t('profile.contactBodyPlaceholder')}\n\n` +
+      `---\n` +
+      `${t('profile.contactBodyFooter', { version: '1.0.0', platform })}`;
+    const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(
+        t('profile.contactFallbackTitle'),
+        t('profile.contactFallbackBody', { email }),
+        [{ text: t('common.close') }],
+      );
+    }
+  }, [t]);
 
   const handleRateApp = useCallback(() => {
     const url = Platform.OS === 'ios' ? 'https://apps.apple.com/app/analistas' : 'https://play.google.com/store/apps/details?id=com.analistas';
@@ -472,20 +604,19 @@ export const PerfilScreen: React.FC = () => {
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
       {/* Header */}
-      <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: c.border, backgroundColor: c.bg }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(168,85,247,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontSize: 14 }}>👤</Text>
-          </View>
-          <Text style={{ fontSize: 18, fontWeight: '800', color: c.textPrimary }}>{t('profile.title')}</Text>
-          {showNameInHeader && isAuthenticated && (
+      <ScreenHeader
+        icon="👤"
+        iconBg="rgba(168,85,247,0.15)"
+        title={t('profile.title')}
+        titleSuffix={
+          showNameInHeader && isAuthenticated ? (
             <>
               <Text style={{ fontSize: 15, color: c.textTertiary }}> · </Text>
               <Text style={{ fontSize: 15, fontWeight: '600', color: c.textPrimary, maxWidth: 140 }} numberOfLines={1}>{displayName}</Text>
             </>
-          )}
-        </View>
-      </View>
+          ) : undefined
+        }
+      />
 
       {loading ? (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 16, paddingTop: 8 }} showsVerticalScrollIndicator={false}>
@@ -552,7 +683,7 @@ export const PerfilScreen: React.FC = () => {
           <TouchableOpacity
             style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: streakDays > 0 ? 'rgba(255,122,0,0.08)' : c.surface, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 13, marginTop: 16, borderWidth: 1, borderColor: streakDays > 0 ? 'rgba(255,122,0,0.25)' : c.border }}
             activeOpacity={0.8}
-            onPress={() => { handleDevTap?.(); setStreakModalVisible(true); }}
+            onPress={() => { handleDevTap?.(); navigation.navigate('Streak'); }}
           >
             <Text style={{ fontSize: 22 }}>🔥</Text>
             <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
@@ -696,9 +827,9 @@ export const PerfilScreen: React.FC = () => {
         )}
 
         {/* Ajustes */}
-        <SectionHeader label={t('profile.settings')} c={c} />
+        <SectionHeader label={t('profile.settings')} />
         <View style={{ backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
-          <MenuRow c={c} emoji="🔔" label={t('profile.notifications')} iconBg="rgba(249,115,22,0.15)" />
+          <MenuRow c={c} emoji="🔔" label={t('profile.notifications')} iconBg="rgba(249,115,22,0.15)" onPress={() => navigation.navigate('NotificationSettings')} />
           <MenuRow c={c} emoji={isDark ? '🌙' : '☀️'} label={t('profile.appearance')} sublabel={isDark ? t('profile.darkMode') : t('profile.lightMode')} iconBg={isDark ? 'rgba(99,102,241,0.15)' : 'rgba(234,179,8,0.15)'} rightElement={<CustomToggle value={isDark} onToggle={toggleDark} activeColor={isDark ? '#6366f1' : '#eab308'} icon={isDark ? '🌙' : '☀️'} />} />
           <MenuRow c={c} emoji="🕐" label={t('profile.timeFormat')} sublabel={timeFormat === '24h' ? '14:30' : '2:30 PM'} iconBg="rgba(6,182,212,0.15)" rightElement={
             <TouchableOpacity style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: 'rgba(6,182,212,0.15)', borderWidth: 1, borderColor: 'rgba(6,182,212,0.2)' }} onPress={() => { haptics.selection(); setTimeFormat(timeFormat === '24h' ? '12h' : '24h'); }} activeOpacity={0.7}>
@@ -724,11 +855,10 @@ export const PerfilScreen: React.FC = () => {
         <PromoBanner onPress={() => navigation.navigate('HazteTitular', { source: 'promo' })} />
 
         {/* Información */}
-        <SectionHeader label={t('profile.information')} c={c} />
+        <SectionHeader label={t('profile.information')} />
         <View style={{ backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, overflow: 'hidden', borderWidth: isDark ? 0 : 1, borderColor: c.border }}>
           <MenuRow c={c} emoji="ℹ️" label={t('profile.aboutApp')} sublabel={t('profile.aboutAppSub')} iconBg="rgba(59,130,246,0.15)" onPress={() => setAboutModalVisible(true)} />
           <MenuRow c={c} emoji="⭐" label={t('profile.rateApp')} sublabel={t('profile.rateSub')} iconBg="rgba(234,179,8,0.15)" onPress={handleRateApp} />
-          <MenuRow c={c} emoji="❓" label={t('profile.helpCenter')} iconBg="rgba(14,165,233,0.15)" />
           <MenuRow c={c} emoji="✉️" label={t('profile.contactUs')} iconBg="rgba(20,184,166,0.15)" onPress={handleContact} />
           <MenuRow c={c} emoji="🛡️" label={t('profile.privacy')} iconBg="rgba(34,197,94,0.15)" onPress={() => setPrivacyModalVisible(true)} />
           <MenuRow c={c} emoji="📄" label={t('profile.terms')} iconBg="rgba(107,114,128,0.15)" onPress={() => setTermsModalVisible(true)} />
@@ -747,12 +877,37 @@ export const PerfilScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
+        {/* Eliminar cuenta — discreet text link, centered, no card.
+            Findable enough for Apple/Google review but not visually
+            screaming. The destructive intent is gated behind the
+            two-step confirmation modal, so the entry point doesn't
+            need to be loud here. Visible for every authenticated user
+            (including guest sessions — Apple wants this reachable
+            for any account). */}
+        {isAuthenticated && (
+          <TouchableOpacity
+            onPress={handleStartDelete}
+            activeOpacity={0.6}
+            style={{ alignItems: 'center', paddingVertical: 14, marginTop: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel={t('profile.deleteAccount')}
+            hitSlop={8}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '500', color: '#dc2626', opacity: 0.85 }}>
+              {t('profile.deleteAccount')}
+            </Text>
+          </TouchableOpacity>
+        )}
 
-        {/* Footer */}
-        <View style={{ alignItems: 'center', marginTop: 16, gap: 2 }}>
-          <Text style={{ fontSize: 12, color: c.textTertiary, fontWeight: '500' }}>⚽ Analistas</Text>
-          <Text style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)' }}>{t('profile.version', { version: '1.0.0', year: '2026' })}</Text>
-          <Text style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', marginTop: 2 }}>{t('profile.madeIn')}</Text>
+
+        {/* Footer — brand · version · made-in. All three use theme tokens
+            instead of hand-rolled rgba so the contrast is readable in both
+            dark and light modes (previously the bottom two lines used
+            opacity 0.12-0.15, basically invisible). */}
+        <View style={{ alignItems: 'center', marginTop: 16, gap: 4 }}>
+          <Text style={{ fontSize: 13, color: c.textSecondary, fontWeight: '700', letterSpacing: 0.3 }}>Analistas APP</Text>
+          <Text style={{ fontSize: 11, color: c.textTertiary, fontWeight: '500' }}>{t('profile.version', { version: '1.0.0', year: '2026' })}</Text>
+          <Text style={{ fontSize: 11, color: c.textTertiary, fontWeight: '500' }}>{t('profile.madeIn')}</Text>
         </View>
         <View style={{ height: 32 }} />
       </ScrollView>
@@ -760,16 +915,6 @@ export const PerfilScreen: React.FC = () => {
 
       {/* ── MODALS ── */}
 
-      {/* Streak */}
-      <StreakModal
-        visible={streakModalVisible}
-        onClose={() => setStreakModalVisible(false)}
-        streakDays={streakDays}
-        streakNotifyEnabled={streakNotifyEnabled}
-        onToggleNotify={setStreakNotify}
-        c={c}
-        isDark={isDark}
-      />
 
       {/* Edit Profile */}
       <EditProfileModal visible={editProfileVisible} onClose={() => setEditProfileVisible(false)} />
@@ -791,6 +936,77 @@ export const PerfilScreen: React.FC = () => {
             </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Delete account — step 2 (typing confirmation). Step 1 is a native
+          Alert.alert fired from `handleStartDelete`. We show this modal only
+          after the user has acknowledged the warning. The destructive button
+          stays disabled until they type the localised confirmation word
+          (ELIMINAR / DELETE / LÖSCHEN / …) verbatim, case-insensitive. */}
+      <Modal visible={deleteStep === 'typing'} transparent animationType="fade" onRequestClose={() => !deleteInFlight && setDeleteStep('closed')}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+          <Pressable
+            onPress={() => !deleteInFlight && setDeleteStep('closed')}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <View style={{ backgroundColor: c.card, borderRadius: 24, paddingTop: 24, paddingBottom: 20, paddingHorizontal: 20, width: '100%', maxWidth: 360, alignItems: 'center' }}>
+            <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: 'rgba(220,38,38,0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+              <Text style={{ fontSize: 28 }}>🗑</Text>
+            </View>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, textAlign: 'center' }}>
+              {t('profile.deleteAccountConfirmTitle')}
+            </Text>
+            <Text style={{ fontSize: 13, color: c.textSecondary, textAlign: 'center', marginTop: 8, lineHeight: 19, paddingHorizontal: 4 }}>
+              {t('profile.deleteAccountConfirmHint', { word: t('profile.deleteAccountConfirmWord') })}
+            </Text>
+            <TextInput
+              value={deleteConfirmInput}
+              onChangeText={setDeleteConfirmInput}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              placeholder={t('profile.deleteAccountConfirmWord')}
+              placeholderTextColor={c.textTertiary}
+              editable={!deleteInFlight}
+              style={{
+                width: '100%', marginTop: 16,
+                backgroundColor: c.surface,
+                borderWidth: 1, borderColor: c.border,
+                borderRadius: 14, paddingHorizontal: 14, height: 48,
+                fontSize: 15, fontWeight: '600', color: c.textPrimary,
+                textAlign: 'center', letterSpacing: 1,
+              }}
+            />
+            {(() => {
+              const expectedWord = t('profile.deleteAccountConfirmWord').toUpperCase();
+              const canDelete = deleteConfirmInput.trim().toUpperCase() === expectedWord && !deleteInFlight;
+              return (
+                <TouchableOpacity
+                  style={{
+                    width: '100%', marginTop: 14, paddingVertical: 14, borderRadius: 16,
+                    alignItems: 'center',
+                    backgroundColor: canDelete ? '#dc2626' : (isDark ? 'rgba(220,38,38,0.25)' : 'rgba(220,38,38,0.18)'),
+                    opacity: canDelete ? 1 : 0.6,
+                  }}
+                  onPress={handleConfirmDelete}
+                  disabled={!canDelete}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>
+                    {deleteInFlight ? t('profile.deleteAccountInProgress') : t('profile.deleteAccountButton')}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })()}
+            <TouchableOpacity
+              style={{ width: '100%', backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', borderRadius: 16, paddingVertical: 12, alignItems: 'center', marginTop: 8 }}
+              onPress={() => !deleteInFlight && setDeleteStep('closed')}
+              disabled={deleteInFlight}
+              activeOpacity={0.8}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '500', color: c.textTertiary }}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* Canjea un código */}
@@ -864,24 +1080,26 @@ export const PerfilScreen: React.FC = () => {
         })}
       </CenterModal>
 
-      {/* Política de privacidad */}
+      {/* Política de privacidad — see PrivacyPolicyBody.tsx for the actual
+          legal text. This block is only the modal chrome (title + date +
+          Spanish-notice for non-ES locales + the canonical-version link). */}
       <BottomSheet visible={privacyModalVisible} onClose={() => setPrivacyModalVisible(false)} c={c}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }}>
-          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 16 }}>{t('profile.privacyTitle')}</Text>
-          <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 16 }}>Última actualización: 1 de enero de 2026</Text>
-          {[
-            { title: '1. Información que recopilamos', body: 'Recopilamos información que nos proporcionas directamente, como tu nombre, dirección de correo electrónico y preferencias de equipos cuando creas una cuenta. También recopilamos datos de uso de forma automática, como los partidos que consultas y las noticias que lees.' },
-            { title: '2. Cómo usamos tu información', body: 'Utilizamos tu información para: personalizar tu experiencia con contenido relevante de fútbol, enviar notificaciones de partidos y alertas que configures, mejorar nuestros servicios y funcionalidades, y comunicarnos contigo sobre tu cuenta.' },
-            { title: '3. Compartir información', body: 'No vendemos ni compartimos tu información personal con terceros con fines de marketing. Podemos compartir datos agregados y anónimos con socios analíticos para mejorar el servicio.' },
-            { title: '4. Seguridad', body: 'Implementamos medidas de seguridad estándar de la industria para proteger tu información personal contra acceso no autorizado, alteración o destrucción.' },
-            { title: '5. Tus derechos', body: 'Puedes acceder, corregir o eliminar tu información personal en cualquier momento desde la configuración de tu cuenta. También puedes solicitar la eliminación completa de tus datos contactándonos a comercial@somosanalistas.com.' },
-            { title: '6. Contacto', body: 'Para cualquier pregunta sobre esta política, contáctanos en comercial@somosanalistas.com.' },
-          ].map((section, i) => (
-            <View key={i} style={{ marginBottom: 16 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: c.textPrimary, marginBottom: 6 }}>{section.title}</Text>
-              <Text style={{ fontSize: 13, color: c.textSecondary, lineHeight: 20 }}>{section.body}</Text>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 8 }}>{t('profile.privacyTitle')}</Text>
+          <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 16 }}>{t('profile.legalLastUpdated')}</Text>
+          {i18n.language !== 'es' && (
+            <View style={{ backgroundColor: c.surface, borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: c.border }}>
+              <Text style={{ fontSize: 12, color: c.textSecondary, lineHeight: 17 }}>🇲🇽 {t('profile.legalSpanishNotice')}</Text>
             </View>
-          ))}
+          )}
+          <PrivacyPolicyBody />
+          <TouchableOpacity
+            onPress={() => Linking.openURL(LEGAL_PRIVACY_URL)}
+            activeOpacity={0.7}
+            style={{ marginTop: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '600', color: c.accent }}>{t('profile.legalViewFullOnline')}</Text>
+          </TouchableOpacity>
         </ScrollView>
       </BottomSheet>
 
@@ -932,26 +1150,26 @@ export const PerfilScreen: React.FC = () => {
         </View>
       </BottomSheet>
 
-      {/* Términos y condiciones */}
+      {/* Términos y condiciones — see TermsOfServiceBody.tsx for the actual
+          legal text. This block is only the modal chrome (title + date +
+          Spanish-notice for non-ES locales + the canonical-version link). */}
       <BottomSheet visible={termsModalVisible} onClose={() => setTermsModalVisible(false)} c={c}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }}>
-          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 16 }}>{t('profile.termsTitle')}</Text>
-          <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 16 }}>Última actualización: 1 de enero de 2026</Text>
-          {[
-            { title: '1. Aceptación', body: 'Al utilizar Analistas, aceptas estos términos y condiciones en su totalidad. Si no estás de acuerdo, no utilices la aplicación.' },
-            { title: '2. Uso del servicio', body: 'Analistas es una plataforma informativa de fútbol. El contenido es con fines informativos y de entretenimiento. No nos hacemos responsables de decisiones tomadas con base en la información proporcionada.' },
-            { title: '3. Cuentas de usuario', body: 'Eres responsable de mantener la confidencialidad de tu cuenta. Debes tener al menos 13 años de edad para usar la aplicación. El contenido de apuestas (momios) solo está disponible para mayores de 18 años.' },
-            { title: '4. Contenido de apuestas', body: 'La información sobre momios y cuotas de apuestas se proporciona con fines informativos. Analistas no es una casa de apuestas ni promueve las apuestas. El usuario es responsable de cumplir con las leyes locales sobre apuestas.' },
-            { title: '5. Suscripciones', body: 'La suscripción "Titular" (premium) se cobra de forma recurrente. Puedes cancelar en cualquier momento desde la configuración de tu tienda de aplicaciones. Los reembolsos se procesan según las políticas de Apple o Google.' },
-            { title: '6. Propiedad intelectual', body: 'Todo el contenido, diseño y funcionalidad de Analistas están protegidos por derechos de autor. Los logos de equipos y ligas pertenecen a sus respectivos dueños.' },
-            { title: '7. Modificaciones', body: 'Nos reservamos el derecho de modificar estos términos en cualquier momento. Los cambios serán notificados dentro de la aplicación.' },
-            { title: '8. Contacto', body: 'Para cualquier pregunta sobre estos términos, contáctanos en comercial@somosanalistas.com.' },
-          ].map((section, i) => (
-            <View key={i} style={{ marginBottom: 16 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: c.textPrimary, marginBottom: 6 }}>{section.title}</Text>
-              <Text style={{ fontSize: 13, color: c.textSecondary, lineHeight: 20 }}>{section.body}</Text>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 8 }}>{t('profile.termsTitle')}</Text>
+          <Text style={{ fontSize: 11, color: c.textTertiary, marginBottom: 16 }}>{t('profile.legalLastUpdated')}</Text>
+          {i18n.language !== 'es' && (
+            <View style={{ backgroundColor: c.surface, borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: c.border }}>
+              <Text style={{ fontSize: 12, color: c.textSecondary, lineHeight: 17 }}>🇲🇽 {t('profile.legalSpanishNotice')}</Text>
             </View>
-          ))}
+          )}
+          <TermsOfServiceBody />
+          <TouchableOpacity
+            onPress={() => Linking.openURL(LEGAL_TERMS_URL)}
+            activeOpacity={0.7}
+            style={{ marginTop: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '600', color: c.accent }}>{t('profile.legalViewFullOnline')}</Text>
+          </TouchableOpacity>
         </ScrollView>
       </BottomSheet>
     </SafeAreaView>

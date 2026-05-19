@@ -18,7 +18,8 @@ import {
   getAllSearchableTeams, getAllSearchablePlayers,
   type SearchableTeam, type SearchablePlayer, type SearchableLeague,
 } from '../services/sportsApi';
-import { BackArrow } from '../components/NavIcons';
+import { SearchIcon } from '../components/NavIcons';
+import { radius, ui } from '../theme/tokens';
 
 const RECENT_KEY = 'analistas_recent_searches';
 const MAX_RECENT = 8;
@@ -47,6 +48,22 @@ interface RecentSearch {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 import { normalize } from '../utils/normalize';
+
+/** Drop later occurrences of any id we've already seen.
+ *  Defensive against SportMonks data where multiple records can share a
+ *  fallback id like `-1` (unknown player), which would otherwise produce
+ *  duplicate React keys when rendered through `.map()`. */
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    if (!seen.has(item.id)) {
+      seen.add(item.id);
+      out.push(item);
+    }
+  }
+  return out;
+}
 
 /**
  * Bidirectional country name translations.
@@ -154,7 +171,10 @@ export const GlobalSearchScreen: React.FC = () => {
       setTeams(clubTeams);
       setPlayers(p);
       if (stored) {
-        try { setRecentSearches(JSON.parse(stored)); } catch { /* ignore */ }
+        // Dedupe defensively — legacy storage may have entries with the
+        // same id (e.g. multiple players that share a fallback `-1` id).
+        // Duplicates produce React-key collisions downstream.
+        try { setRecentSearches(dedupeById(JSON.parse(stored))); } catch { /* ignore */ }
       }
       setLoading(false);
 
@@ -257,7 +277,8 @@ export const GlobalSearchScreen: React.FC = () => {
       }
     }
 
-    return out;
+    // Dedupe — guards against e.g. two players sharing a fallback `-1` id.
+    return dedupeById(out);
   }, [debouncedQuery, teams, players, leagues]);
 
   // ── Grouped results ───────────────────────────────────────────────────────
@@ -306,7 +327,7 @@ export const GlobalSearchScreen: React.FC = () => {
         });
       }
     }
-    return items;
+    return dedupeById(items);
   }, [teams, players, t]);
 
   // ── Navigate to result ────────────────────────────────────────────────────
@@ -321,7 +342,10 @@ export const GlobalSearchScreen: React.FC = () => {
       image: item.image,
     };
     setRecentSearches(prev => {
-      const next = [recent, ...prev.filter(r => r.id !== item.id)].slice(0, MAX_RECENT);
+      // `prev` is already deduped on load, but run dedupeById again as a
+      // safety net so AsyncStorage never persists a duplicate even if some
+      // legacy code path slipped one in.
+      const next = dedupeById([recent, ...prev.filter(r => r.id !== item.id)]).slice(0, MAX_RECENT);
       AsyncStorage.setItem(RECENT_KEY, JSON.stringify(next));
       return next;
     });
@@ -401,8 +425,10 @@ export const GlobalSearchScreen: React.FC = () => {
   }, []);
 
   // ── Theme-aware colors ────────────────────────────────────────────────────
-  const inputBg = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
-  const badgeBg = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+  // `c.surface` matches the search bar in Favoritos and Noticias so all three
+  // search inputs across the app share the exact same look.
+  const inputBg = c.surface;
+  const badgeBg = c.surface;
   const typeLabelColor = c.accent;
 
   // ── Render helpers ────────────────────────────────────────────────────────
@@ -458,11 +484,10 @@ export const GlobalSearchScreen: React.FC = () => {
   );
 
 
-  // ── Search icon for input ─────────────────────────────────────────────────
+  // ── Search icon for input — uses the shared SearchIcon from NavIcons ──────
   const SearchInputIcon = () => (
-    <View style={{ width: 14, height: 14, marginRight: 8 }}>
-      <View style={{ position: 'absolute', top: 0, left: 0, width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: c.textTertiary }} />
-      <View style={{ position: 'absolute', bottom: 0, right: 0, width: 4, height: 1.5, backgroundColor: c.textTertiary, borderRadius: 1, transform: [{ rotate: '45deg' }, { translateX: 0.5 }, { translateY: -1.5 }] }} />
+    <View style={{ marginRight: 8 }}>
+      <SearchIcon color={c.textTertiary} size={14} />
     </View>
   );
 
@@ -484,8 +509,8 @@ export const GlobalSearchScreen: React.FC = () => {
 
       {/* ── Header with search bar ── */}
       <View style={[s.header, { borderBottomColor: c.border }]}>
-        <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
-          <BackArrow color={c.textPrimary} />
+        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={12} activeOpacity={0.7}>
+          <Text style={[s.backText, { color: c.accent }]}>{t('common.back')}</Text>
         </TouchableOpacity>
         <View style={[s.inputWrap, { backgroundColor: inputBg }]}>
           <SearchInputIcon />
@@ -682,17 +707,18 @@ const s = StyleSheet.create({
     gap: 10,
     borderBottomWidth: 0,
   },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
+  backText: {
+    fontSize: 15,
+    fontWeight: '600',
+    paddingHorizontal: 4,
   },
   inputWrap: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: radius.md,
     paddingHorizontal: 12,
-    height: 42,
+    height: ui.searchBarHeight,
   },
   input: {
     flex: 1,
