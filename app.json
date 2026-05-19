@@ -26,11 +26,11 @@
     ],
     "ios": {
       "bundleIdentifier": "app.analistas",
+      "buildNumber": "3",
       "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": true,
       "infoPlist": {
         "UIBackgroundModes": [
-          "remote-notification",
           "remote-notification"
         ],
         "ITSAppUsesNonExemptEncryption": false
@@ -38,6 +38,7 @@
     },
     "android": {
       "package": "app.analistas",
+      "versionCode": 3,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#0D1F35",
