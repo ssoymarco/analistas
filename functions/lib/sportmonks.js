@@ -11,6 +11,9 @@ exports.fetchFixturesByDate = fetchFixturesByDate;
 exports.fetchFixtureById = fetchFixtureById;
 exports.fetchStandings = fetchStandings;
 exports.fetchTopScorers = fetchTopScorers;
+exports.fetchFixtureFullDetail = fetchFixtureFullDetail;
+exports.fetchH2H = fetchH2H;
+exports.fetchSidelined = fetchSidelined;
 exports.fetchTeamsForSeason = fetchTeamsForSeason;
 exports.fetchSquadForSeasonAndTeam = fetchSquadForSeasonAndTeam;
 const config_1 = require("./config");
@@ -81,8 +84,11 @@ async function fetchAllPages(endpoint, params = {}, maxPages = 200) {
  * Single API call returns everything.
  */
 async function fetchLivescores() {
+    // `events;statistics` are included so the per-user MatchDetail polling
+    // (every 10s) can be replaced by Firestore onSnapshot reads. Payload is
+    // bigger (~300KB on busy match days) but it's still ONE API call.
     const res = await fetchApi('/livescores/inplay', {
-        include: 'participants;scores;league;state',
+        include: 'participants;scores;league;state;events;statistics;periods',
     });
     return Array.isArray(res.data) ? res.data : [];
 }
@@ -140,6 +146,62 @@ async function fetchTopScorers(seasonId) {
         include: 'player;participant',
         filters: 'seasontopscorerTypes:208',
     });
+}
+/**
+ * GET /fixtures/{id} with full enrichment includes — fetches everything the
+ * MatchDetailScreen needs in a single call. Used by syncMatchEnrichment
+ * to populate matches/{id}.detail so the client never has to hit SportMonks
+ * for match detail.
+ *
+ * Note: `odds` is omitted — 403 on Pro plan. Fetch separately if needed.
+ */
+async function fetchFixtureFullDetail(id) {
+    try {
+        const res = await fetchApi(`/fixtures/${id}`, {
+            include: [
+                'participants',
+                'scores',
+                'events',
+                'statistics',
+                'lineups.player',
+                'expectedLineups.player',
+                'coaches.nationality',
+                'venue',
+                'league',
+                'referees.referee',
+                'tvstations.tvstation',
+                'weatherreport',
+                'predictions',
+                'periods',
+                'aggregate.fixtures.scores',
+                'aggregate.fixtures.participants',
+            ].join(';'),
+        });
+        return res.data ?? null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * GET /fixtures/head-to-head/{id1}/{id2} — direct historical meetings.
+ * Used by syncMatchEnrichment to populate the H2H section.
+ */
+async function fetchH2H(teamId1, teamId2) {
+    return fetchAllPages(`/fixtures/head-to-head/${teamId1}/${teamId2}`, { include: 'participants;scores' });
+}
+/**
+ * GET /sidelined/seasons/{seasonId}/teams/{teamId} — injuries / suspensions
+ * for a team in a given season. Used by syncMatchEnrichment.
+ */
+async function fetchSidelined(seasonId, teamId) {
+    try {
+        const res = await fetchApi(`/sidelined/seasons/${seasonId}/teams/${teamId}`, { include: 'player' });
+        return Array.isArray(res.data) ? res.data : [];
+    }
+    catch {
+        return [];
+    }
 }
 async function fetchTeamsForSeason(seasonId) {
     return fetchAllPages(`/teams/seasons/${seasonId}`, {

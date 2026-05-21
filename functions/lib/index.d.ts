@@ -70,3 +70,15 @@ export declare const syncTeams: import("firebase-functions/v2/scheduler").Schedu
  * day's run picks up where it left off (every write is idempotent).
  */
 export declare const syncSquads: import("firebase-functions/v2/scheduler").ScheduleFunction;
+/**
+ * Enrich "hot" matches (live, near-kickoff, or recently-finished) with the
+ * full /fixtures/{id} payload so MatchDetail can render from Firestore.
+ *
+ * Closes the per-user-polling leak — useFixtureDetail used to call SportMonks
+ * every 10s while a match was live (360 calls/hour PER concurrent viewer).
+ * This Cloud Function runs at a fixed cadence regardless of user count.
+ *
+ * Schedule: every 5 minutes. Cost: ~30-80 SM calls per run for the
+ * `fixtures` entity. Well below the 3,000/hour cap.
+ */
+export declare const syncMatchEnrichment: import("firebase-functions/v2/scheduler").ScheduleFunction;

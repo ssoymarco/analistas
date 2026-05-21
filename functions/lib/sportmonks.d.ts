@@ -39,6 +39,25 @@ export declare function fetchStandings(seasonId: number): Promise<SMStandingGrou
  */
 export declare function fetchTopScorers(seasonId: number): Promise<SMTopScorer[]>;
 /**
+ * GET /fixtures/{id} with full enrichment includes — fetches everything the
+ * MatchDetailScreen needs in a single call. Used by syncMatchEnrichment
+ * to populate matches/{id}.detail so the client never has to hit SportMonks
+ * for match detail.
+ *
+ * Note: `odds` is omitted — 403 on Pro plan. Fetch separately if needed.
+ */
+export declare function fetchFixtureFullDetail(id: number): Promise<SMFixture | null>;
+/**
+ * GET /fixtures/head-to-head/{id1}/{id2} — direct historical meetings.
+ * Used by syncMatchEnrichment to populate the H2H section.
+ */
+export declare function fetchH2H(teamId1: number, teamId2: number): Promise<SMFixture[]>;
+/**
+ * GET /sidelined/seasons/{seasonId}/teams/{teamId} — injuries / suspensions
+ * for a team in a given season. Used by syncMatchEnrichment.
+ */
+export declare function fetchSidelined(seasonId: number, teamId: number): Promise<unknown[]>;
+/**
  * GET /teams/seasons/{seasonId} — every team in a season.
  *
  * Uses `include=venue;coaches` so the response carries enough info to fill

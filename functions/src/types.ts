@@ -36,6 +36,24 @@ export interface MatchDoc {
   startingAtUtc: string;      // raw SM starting_at
   seasonId: number | null;
   updatedAt: Timestamp;
+
+  // ── Enrichment (populated by syncMatchEnrichment + pollLivescores) ──
+  // Raw SM fixture payload with all includes. Stored as opaque JSON because
+  // the shape is complex (20+ sub-types) and the client already knows how to
+  // unpack a raw SMFixture into MatchDetail via the existing sportsApi mapper.
+  // Null when the match hasn't been enriched yet (will be populated by the
+  // next sync run if the match is in the hot window: live, near-kickoff, or
+  // recently-finished).
+  detail?: unknown;
+  /** ISO/Timestamp of last enrichment fetch — used by the sync to skip
+   *  matches that were updated very recently. */
+  detailUpdatedAt?: Timestamp;
+  /** H2H fixtures between home and away — fetched separately because
+   *  /fixtures/{id} doesn't include it. Lightweight payload. */
+  h2h?: unknown[];
+  /** Cached injury / suspension lists per team. Updated alongside detail. */
+  sidelinedHome?: unknown[];
+  sidelinedAway?: unknown[];
 }
 
 export interface StandingRowDoc {

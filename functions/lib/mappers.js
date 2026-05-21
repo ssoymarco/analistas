@@ -85,6 +85,29 @@ function extractScores(fixture) {
     }
     return { homeScore, awayScore, homeScoreHT, awayScoreHT };
 }
+// ── Live enrichment extractor ───────────────────────────────────────────────
+// Pulls the subset of SMFixture fields that change during a live match —
+// events, statistics, periods. Returned as a plain object suitable for
+// nesting under MatchDoc.detail. Skips undefined values to keep Firestore
+// happy.
+function extractLiveEnrichment(fixture) {
+    const f = fixture;
+    const out = {};
+    let any = false;
+    if (Array.isArray(f.events)) {
+        out.events = f.events;
+        any = true;
+    }
+    if (Array.isArray(f.statistics)) {
+        out.statistics = f.statistics;
+        any = true;
+    }
+    if (Array.isArray(f.periods)) {
+        out.periods = f.periods;
+        any = true;
+    }
+    return any ? out : null;
+}
 // ── Fixture → MatchDoc ──────────────────────────────────────────────────────
 function mapFixtureToMatchDoc(fixture) {
     const participants = fixture.participants ?? [];
@@ -111,7 +134,7 @@ function mapFixtureToMatchDoc(fixture) {
         shortName: away.short_code || away.name.slice(0, 3).toUpperCase(),
         logo: away.image_path,
     };
-    return {
+    const doc = {
         id: String(fixture.id),
         homeTeam,
         awayTeam,
@@ -132,6 +155,14 @@ function mapFixtureToMatchDoc(fixture) {
         seasonId: fixture.season_id ?? null,
         updatedAt: firestore_1.Timestamp.now(),
     };
+    // Optional live enrichment — only present when called from pollLivescores
+    // (which pulls events/statistics/periods on /livescores/inplay).
+    const liveEnrich = extractLiveEnrichment(fixture);
+    if (liveEnrich) {
+        doc.detail = liveEnrich;
+        doc.detailUpdatedAt = firestore_1.Timestamp.now();
+    }
+    return doc;
 }
 // ── Standings → StandingsDoc ────────────────────────────────────────────────
 function getDetailValue(details, typeId) {

@@ -1498,20 +1498,209 @@ function pickCoachName(coach: { name?: string; firstname?: string; lastname?: st
  * events, stats, lineups, venue, referee, weather, TV, H2H, pressure,
  * injuries, form, predictions, referee stats.
  */
+// ── Pure assembler ─────────────────────────────────────────────────────────
+// Given a fully-populated SMFixture plus the side-data normally fetched from
+// secondary SportMonks endpoints (h2h, sidelined, team form, etc.), assembles
+// the MatchDetail shape the UI consumes. NO network calls — pure transform.
+//
+// Both `getFixtureDetail` (which fetches everything live) and
+// `buildFixtureDetailFromFirestoreData` (which pulls everything from Firestore)
+// delegate the assembly here so the mapping logic stays in one place.
+interface AssembleArgs {
+  fixture: SMFixture;
+  h2hResults: SMFixture[];
+  homeSidelined: SMSidelined[];
+  awaySidelined: SMSidelined[];
+  homeFixtures: SMFixture[];
+  awayFixtures: SMFixture[];
+  refStats: { id?: number; statistics?: SMRefereeStats[] };
+  predictions: SMPrediction[];
+  aggregateData: SMAggregate | null;
+  stageFixtures: SMFixture[];
+  matchFacts: MatchFact[];
+}
+
+function assembleFixtureDetail({
+  fixture,
+  h2hResults,
+  homeSidelined,
+  awaySidelined,
+  homeFixtures,
+  awayFixtures,
+  refStats,
+  predictions,
+  aggregateData,
+  stageFixtures,
+  matchFacts,
+}: AssembleArgs): { match: Match; detail: Partial<MatchDetail> } {
+  const match = reapplyLiveStatus([mapFixtureToMatch(fixture)])[0];
+  const homeTeam = getParticipant(fixture, 'home');
+  const awayTeam = getParticipant(fixture, 'away');
+  const refereeData = mapReferee(fixture.referees);
+  const mainRefereeId = fixture.referees?.find(r => r.type_id === 6)?.referee_id;
+
+  // Filter sidelined to players who were unavailable at match time.
+  const matchDateTime = fixture.starting_at ? new Date(fixture.starting_at) : new Date();
+  const isActiveForMatch = (s: SMSidelined) => {
+    const start = s.start_date ? new Date(s.start_date) : null;
+    if (start && start > matchDateTime) return false;
+    if (!s.end_date) return true;
+    return new Date(s.end_date) >= matchDateTime;
+  };
+  const activeHomeSidelined = homeSidelined.filter(isActiveForMatch);
+  const activeAwaySidelined = awaySidelined.filter(isActiveForMatch);
+
+  // Patch fixture with separately-fetched aggregate data when the nested
+  // include didn't return both legs.
+  const effectiveFixture: SMFixture = aggregateData
+    ? { ...fixture, aggregate: aggregateData }
+    : fixture;
+
+  const detail: Partial<MatchDetail> = {
+    matchId: String(fixture.id),
+    venue: mapVenue(fixture.venue, fixture.venue_id),
+    referee: refereeData.referee,
+    assistantReferees: refereeData.assistants.length > 0 ? refereeData.assistants : undefined,
+    fourthOfficial: refereeData.fourthOfficial,
+    refereeStats: mainRefereeId ? mapRefereeStats(refStats as { statistics?: SMRefereeStats[] }) : undefined,
+    weather: mapWeather(fixture.weatherreport),
+    events: mapEvents(fixture.events, fixture),
+    statistics: mapStatistics(fixture.statistics, fixture),
+    homeLineup: (() => {
+      const confirmed = fixture.lineups ?? [];
+      const homeHas = confirmed.some(e => e.team_id === (homeTeam?.id ?? 0) && e.type_id === 11);
+      const awayHas = confirmed.some(e => e.team_id === (awayTeam?.id ?? 0) && e.type_id === 11);
+      const useExpected = !homeHas && !awayHas && (fixture.expectedlineups?.length ?? 0) > 0;
+      const entries: SMLineupEntry[] = useExpected
+        ? (fixture.expectedlineups ?? []).map(e => ({ ...e, type_id: e.formation_field != null ? 11 : 12 }))
+        : confirmed;
+      const homeCoach = fixture.coaches?.find(c => c.meta?.participant_id === homeTeam?.id);
+      const homeCoachImg = homeCoach?.image_path?.includes('placeholder') ? undefined : homeCoach?.image_path;
+      const homeCoachName = pickCoachName(homeCoach);
+      return {
+        ...mapLineup(entries, homeTeam?.id ?? 0, fixture.events),
+        isExpected: useExpected,
+        coach: homeCoachName,
+        coachNationality: homeCoach?.nationality?.name ?? '',
+        coachNationalityCode: homeCoach?.nationality?.iso2,
+        coachNationalityFlag: homeCoach?.nationality?.image_path,
+        coachDateOfBirth: homeCoach?.date_of_birth,
+        coachImageUrl: homeCoachImg,
+        coachId: homeCoach?.meta?.coach_id ?? homeCoach?.id,
+      };
+    })(),
+    awayLineup: (() => {
+      const confirmed = fixture.lineups ?? [];
+      const homeHas = confirmed.some(e => e.team_id === (homeTeam?.id ?? 0) && e.type_id === 11);
+      const awayHas = confirmed.some(e => e.team_id === (awayTeam?.id ?? 0) && e.type_id === 11);
+      const useExpected = !homeHas && !awayHas && (fixture.expectedlineups?.length ?? 0) > 0;
+      const entries: SMLineupEntry[] = useExpected
+        ? (fixture.expectedlineups ?? []).map(e => ({ ...e, type_id: e.formation_field != null ? 11 : 12 }))
+        : confirmed;
+      const awayCoach = fixture.coaches?.find(c => c.meta?.participant_id === awayTeam?.id);
+      const awayCoachImg = awayCoach?.image_path?.includes('placeholder') ? undefined : awayCoach?.image_path;
+      const awayCoachName = pickCoachName(awayCoach);
+      return {
+        ...mapLineup(entries, awayTeam?.id ?? 0, fixture.events),
+        isExpected: useExpected,
+        coach: awayCoachName,
+        coachNationality: awayCoach?.nationality?.name ?? '',
+        coachNationalityCode: awayCoach?.nationality?.iso2,
+        coachNationalityFlag: awayCoach?.nationality?.image_path,
+        coachDateOfBirth: awayCoach?.date_of_birth,
+        coachImageUrl: awayCoachImg,
+        coachId: awayCoach?.meta?.coach_id ?? awayCoach?.id,
+      };
+    })(),
+    tvStations: mapTVStations(fixture.tvstations),
+    resultInfo: fixture.result_info ?? undefined,
+    odds: mapOdds(fixture.odds),
+    pressureIndex: computePressureIndex(fixture.statistics, homeTeam?.id ?? 0),
+    missingPlayers: {
+      home: mapSidelined(activeHomeSidelined),
+      away: mapSidelined(activeAwaySidelined),
+    },
+    predictions: predictions.length > 0 ? mapPredictions(predictions) : undefined,
+    matchFacts: matchFacts.length > 0 ? matchFacts : undefined,
+    homeForm: homeTeam ? mapTeamForm(homeFixtures, homeTeam.id) : undefined,
+    awayForm: awayTeam ? mapTeamForm(awayFixtures, awayTeam.id) : undefined,
+    h2h: {
+      homeTeam: homeTeam?.name ?? '',
+      awayTeam: awayTeam?.name ?? '',
+      results: h2hResults.map(f => ({
+        date: f.starting_at.split(' ')[0],
+        homeScore: getGoals(f.scores, 'home'),
+        awayScore: getGoals(f.scores, 'away'),
+        competition: f.league?.name ?? '',
+        venue: '',
+      })),
+    },
+    aggregateScore: (() => {
+      let agg = computeAggregateScore(effectiveFixture);
+      if (!agg && match.status === 'finished') {
+        const seen = new Set<number>();
+        const allCandidates: SMFixture[] = [];
+        for (const f of [...h2hResults, ...stageFixtures]) {
+          if (!seen.has(f.id)) { seen.add(f.id); allCandidates.push(f); }
+        }
+        if (allCandidates.length > 0) {
+          agg = computeAggregateFromH2H(fixture, allCandidates);
+        }
+      }
+      if (__DEV__ && fixture.aggregate_id && !agg) {
+        console.warn(
+          `[aggregate] couldn't compute for fixture=${fixture.id} league=${fixture.league_id} stage=${fixture.stage_id} agg_id=${fixture.aggregate_id}`,
+          `\n  nested fixtures:`, fixture.aggregate?.fixtures?.length ?? 'none',
+          `\n  separate agg fetched:`, aggregateData ? `yes (${aggregateData.fixtures?.length ?? 0} legs)` : 'no',
+          `\n  h2h candidates:`, h2hResults.length,
+          `\n  stage fixtures:`, stageFixtures.length,
+        );
+      }
+      return agg;
+    })(),
+  };
+
+  return { match, detail };
+}
+
+/**
+ * Pure: assembles a MatchDetail from data already present in Firestore.
+ * Pollers and sync functions populate matches/{id}.detail with a full
+ * SMFixture-shaped object plus side data (h2h, sidelined) — this lets the
+ * client render the screen with ZERO SportMonks calls.
+ */
+export function buildFixtureDetailFromFirestoreData(
+  rawFixture: SMFixture,
+  opts: {
+    h2hResults?: SMFixture[];
+    homeSidelined?: SMSidelined[];
+    awaySidelined?: SMSidelined[];
+    homeFixtures?: SMFixture[];
+    awayFixtures?: SMFixture[];
+    matchFacts?: MatchFact[];
+  } = {},
+): { match: Match; detail: Partial<MatchDetail> } {
+  return assembleFixtureDetail({
+    fixture: rawFixture,
+    h2hResults: opts.h2hResults ?? [],
+    homeSidelined: opts.homeSidelined ?? [],
+    awaySidelined: opts.awaySidelined ?? [],
+    homeFixtures: opts.homeFixtures ?? [],
+    awayFixtures: opts.awayFixtures ?? [],
+    refStats: { id: 0 },
+    predictions: (((rawFixture as unknown) as { predictions?: SMPrediction[] }).predictions ?? []) as SMPrediction[],
+    aggregateData: null,
+    stageFixtures: [],
+    matchFacts: opts.matchFacts ?? [],
+  });
+}
+
 export async function getFixtureDetail(id: number): Promise<{ match: Match; detail: Partial<MatchDetail> } | null> {
   try {
     const fixture = await fetchFixtureById(id);
-    // reapplyLiveStatus is defense-in-depth: mapStateToStatus already handles
-    // time-based inference when state_id lags, but if the API returns an
-    // unexpected state_id combo, reapplyLiveStatus ensures the match gets
-    // flagged live whenever starting_at is within the expected window.
-    const match = reapplyLiveStatus([mapFixtureToMatch(fixture)])[0];
     const homeTeam = getParticipant(fixture, 'home');
     const awayTeam = getParticipant(fixture, 'away');
-
-    const refereeData = mapReferee(fixture.referees);
     const mainRefereeId = fixture.referees?.find(r => r.type_id === 6)?.referee_id;
-
     const isCupLeague = getLeagueConfig(fixture.league_id)?.isCup === true;
 
     // Fire ALL secondary requests in parallel
@@ -1558,144 +1747,19 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
         : Promise.resolve([] as MatchFact[]),
     ]);
 
-    // Filter sidelined to players who were unavailable at match time.
-    // We use the fixture date rather than the `completed` flag because SportMonks
-    // sometimes sets completed=true before the player has actually returned.
-    const matchDateTime = fixture.starting_at ? new Date(fixture.starting_at) : new Date();
-    const isActiveForMatch = (s: SMSidelined) => {
-      const start = s.start_date ? new Date(s.start_date) : null;
-      if (start && start > matchDateTime) return false; // injury begins after this match
-      if (!s.end_date) return true;                      // open-ended → still out
-      return new Date(s.end_date) >= matchDateTime;      // return date is on/after match day
-    };
-    const activeHomeSidelined = homeSidelined.filter(isActiveForMatch);
-    const activeAwaySidelined = awaySidelined.filter(isActiveForMatch);
-
-    // Patch fixture with separately-fetched aggregate data when the nested include
-    // didn't return both legs (common in domestic cups like Coppa Italia where
-    // SportMonks doesn't embed AGGREGATE score entries in the fixture's scores array).
-    const effectiveFixture: SMFixture = aggregateData
-      ? { ...fixture, aggregate: aggregateData }
-      : fixture;
-
-    const detail: Partial<MatchDetail> = {
-      matchId: String(fixture.id),
-      venue: mapVenue(fixture.venue, fixture.venue_id),
-      referee: refereeData.referee,
-      assistantReferees: refereeData.assistants.length > 0 ? refereeData.assistants : undefined,
-      fourthOfficial: refereeData.fourthOfficial,
-      refereeStats: mainRefereeId ? mapRefereeStats(refStats as { statistics?: SMRefereeStats[] }) : undefined,
-      weather: mapWeather(fixture.weatherreport),
-      events: mapEvents(fixture.events, fixture),
-      statistics: mapStatistics(fixture.statistics, fixture),
-      homeLineup: (() => {
-        const confirmed = fixture.lineups ?? [];
-        const homeHas = confirmed.some(e => e.team_id === (homeTeam?.id ?? 0) && e.type_id === 11);
-        const awayHas = confirmed.some(e => e.team_id === (awayTeam?.id ?? 0) && e.type_id === 11);
-        const useExpected = !homeHas && !awayHas && (fixture.expectedlineups?.length ?? 0) > 0;
-        // formation_field present → starter (11); absent → bench (12)
-        const entries: SMLineupEntry[] = useExpected
-          ? (fixture.expectedlineups ?? []).map(e => ({ ...e, type_id: e.formation_field != null ? 11 : 12 }))
-          : confirmed;
-        // Find coach via fixture.coaches (meta.participant_id links to team)
-        const homeCoach = fixture.coaches?.find(c => c.meta?.participant_id === homeTeam?.id);
-        const homeCoachImg = homeCoach?.image_path?.includes('placeholder') ? undefined : homeCoach?.image_path;
-        const homeCoachName = pickCoachName(homeCoach);
-        return {
-          ...mapLineup(entries, homeTeam?.id ?? 0, fixture.events),
-          isExpected: useExpected,
-          coach: homeCoachName,
-          coachNationality: homeCoach?.nationality?.name ?? '',
-          coachNationalityCode: homeCoach?.nationality?.iso2,
-          coachNationalityFlag: homeCoach?.nationality?.image_path,
-          coachDateOfBirth: homeCoach?.date_of_birth,
-          coachImageUrl: homeCoachImg,
-          coachId: homeCoach?.meta?.coach_id ?? homeCoach?.id,
-        };
-      })(),
-      awayLineup: (() => {
-        const confirmed = fixture.lineups ?? [];
-        const homeHas = confirmed.some(e => e.team_id === (homeTeam?.id ?? 0) && e.type_id === 11);
-        const awayHas = confirmed.some(e => e.team_id === (awayTeam?.id ?? 0) && e.type_id === 11);
-        const useExpected = !homeHas && !awayHas && (fixture.expectedlineups?.length ?? 0) > 0;
-        // formation_field present → starter (11); absent → bench (12)
-        const entries: SMLineupEntry[] = useExpected
-          ? (fixture.expectedlineups ?? []).map(e => ({ ...e, type_id: e.formation_field != null ? 11 : 12 }))
-          : confirmed;
-        // Find coach via fixture.coaches (meta.participant_id links to team)
-        const awayCoach = fixture.coaches?.find(c => c.meta?.participant_id === awayTeam?.id);
-        const awayCoachImg = awayCoach?.image_path?.includes('placeholder') ? undefined : awayCoach?.image_path;
-        const awayCoachName = pickCoachName(awayCoach);
-        return {
-          ...mapLineup(entries, awayTeam?.id ?? 0, fixture.events),
-          isExpected: useExpected,
-          coach: awayCoachName,
-          coachNationality: awayCoach?.nationality?.name ?? '',
-          coachNationalityCode: awayCoach?.nationality?.iso2,
-          coachNationalityFlag: awayCoach?.nationality?.image_path,
-          coachDateOfBirth: awayCoach?.date_of_birth,
-          coachImageUrl: awayCoachImg,
-          coachId: awayCoach?.meta?.coach_id ?? awayCoach?.id,
-        };
-      })(),
-      tvStations: mapTVStations(fixture.tvstations),
-      resultInfo: fixture.result_info ?? undefined,
-      odds: mapOdds(fixture.odds),
-      pressureIndex: computePressureIndex(fixture.statistics, homeTeam?.id ?? 0),
-      missingPlayers: {
-        home: mapSidelined(activeHomeSidelined),
-        away: mapSidelined(activeAwaySidelined),
-      },
-      predictions: predictions.length > 0 ? mapPredictions(predictions) : undefined,
-      matchFacts: matchFacts.length > 0 ? matchFacts : undefined,
-      homeForm: homeTeam ? mapTeamForm(homeFixtures, homeTeam.id) : undefined,
-      awayForm: awayTeam ? mapTeamForm(awayFixtures, awayTeam.id) : undefined,
-      h2h: {
-        homeTeam: homeTeam?.name ?? '',
-        awayTeam: awayTeam?.name ?? '',
-        results: h2hResults.map(f => ({
-          date: f.starting_at.split(' ')[0],
-          homeScore: getGoals(f.scores, 'home'),
-          awayScore: getGoals(f.scores, 'away'),
-          competition: f.league?.name ?? '',
-          venue: '',
-        })),
-      },
-      aggregateScore: (() => {
-        // Strategy A (AGGREGATE score entry) + Strategy B (nested legs / fetched aggregate)
-        let agg = computeAggregateScore(effectiveFixture);
-
-        // Strategy C+D: pair with the other leg from H2H results and/or stage fixtures.
-        // Stage fixtures (Strategy D) directly fetches all fixtures in the same cup stage
-        // — this catches Coppa Italia and similar competitions where SportMonks leaves
-        // aggregate_id null, omits AGGREGATE score entries, and H2H coverage is sparse.
-        if (!agg && match.status === 'finished') {
-          // Deduplicate by id before searching (H2H and stage may overlap)
-          const seen = new Set<number>();
-          const allCandidates: SMFixture[] = [];
-          for (const f of [...h2hResults, ...stageFixtures]) {
-            if (!seen.has(f.id)) { seen.add(f.id); allCandidates.push(f); }
-          }
-          if (allCandidates.length > 0) {
-            agg = computeAggregateFromH2H(fixture, allCandidates);
-          }
-        }
-
-        // Only log when an aggregate WAS expected but couldn't be computed —
-        // that's the diagnostic case worth surfacing during development. Skip
-        // the noise for every finished single-leg league fixture.
-        if (__DEV__ && fixture.aggregate_id && !agg) {
-          console.warn(
-            `[aggregate] couldn't compute for fixture=${fixture.id} league=${fixture.league_id} stage=${fixture.stage_id} agg_id=${fixture.aggregate_id}`,
-            `\n  nested fixtures:`, fixture.aggregate?.fixtures?.length ?? 'none',
-            `\n  separate agg fetched:`, aggregateData ? `yes (${aggregateData.fixtures?.length ?? 0} legs)` : 'no',
-            `\n  h2h candidates:`, h2hResults.length,
-            `\n  stage fixtures:`, stageFixtures.length,
-          );
-        }
-        return agg;
-      })(),
-    };
+    const { match, detail } = assembleFixtureDetail({
+      fixture,
+      h2hResults,
+      homeSidelined,
+      awaySidelined,
+      homeFixtures,
+      awayFixtures,
+      refStats,
+      predictions,
+      aggregateData,
+      stageFixtures,
+      matchFacts,
+    });
 
     // Pick TTL based on match status
     const detailTtl =

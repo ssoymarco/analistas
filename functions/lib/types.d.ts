@@ -31,6 +31,16 @@ export interface MatchDoc {
     startingAtUtc: string;
     seasonId: number | null;
     updatedAt: Timestamp;
+    detail?: unknown;
+    /** ISO/Timestamp of last enrichment fetch — used by the sync to skip
+     *  matches that were updated very recently. */
+    detailUpdatedAt?: Timestamp;
+    /** H2H fixtures between home and away — fetched separately because
+     *  /fixtures/{id} doesn't include it. Lightweight payload. */
+    h2h?: unknown[];
+    /** Cached injury / suspension lists per team. Updated alongside detail. */
+    sidelinedHome?: unknown[];
+    sidelinedAway?: unknown[];
 }
 export interface StandingRowDoc {
     position: number;

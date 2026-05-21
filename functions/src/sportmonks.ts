@@ -94,8 +94,11 @@ async function fetchAllPages<T>(
  * Single API call returns everything.
  */
 export async function fetchLivescores(): Promise<SMFixture[]> {
+  // `events;statistics` are included so the per-user MatchDetail polling
+  // (every 10s) can be replaced by Firestore onSnapshot reads. Payload is
+  // bigger (~300KB on busy match days) but it's still ONE API call.
   const res = await fetchApi<SMFixture[]>('/livescores/inplay', {
-    include: 'participants;scores;league;state',
+    include: 'participants;scores;league;state;events;statistics;periods',
   });
   return Array.isArray(res.data) ? res.data : [];
 }
@@ -159,6 +162,69 @@ export async function fetchTopScorers(seasonId: number): Promise<SMTopScorer[]> 
     include: 'player;participant',
     filters: 'seasontopscorerTypes:208',
   });
+}
+
+/**
+ * GET /fixtures/{id} with full enrichment includes — fetches everything the
+ * MatchDetailScreen needs in a single call. Used by syncMatchEnrichment
+ * to populate matches/{id}.detail so the client never has to hit SportMonks
+ * for match detail.
+ *
+ * Note: `odds` is omitted — 403 on Pro plan. Fetch separately if needed.
+ */
+export async function fetchFixtureFullDetail(id: number): Promise<SMFixture | null> {
+  try {
+    const res = await fetchApi<SMFixture>(`/fixtures/${id}`, {
+      include: [
+        'participants',
+        'scores',
+        'events',
+        'statistics',
+        'lineups.player',
+        'expectedLineups.player',
+        'coaches.nationality',
+        'venue',
+        'league',
+        'referees.referee',
+        'tvstations.tvstation',
+        'weatherreport',
+        'predictions',
+        'periods',
+        'aggregate.fixtures.scores',
+        'aggregate.fixtures.participants',
+      ].join(';'),
+    });
+    return res.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * GET /fixtures/head-to-head/{id1}/{id2} — direct historical meetings.
+ * Used by syncMatchEnrichment to populate the H2H section.
+ */
+export async function fetchH2H(teamId1: number, teamId2: number): Promise<SMFixture[]> {
+  return fetchAllPages<SMFixture>(
+    `/fixtures/head-to-head/${teamId1}/${teamId2}`,
+    { include: 'participants;scores' },
+  );
+}
+
+/**
+ * GET /sidelined/seasons/{seasonId}/teams/{teamId} — injuries / suspensions
+ * for a team in a given season. Used by syncMatchEnrichment.
+ */
+export async function fetchSidelined(seasonId: number, teamId: number): Promise<unknown[]> {
+  try {
+    const res = await fetchApi<unknown[]>(
+      `/sidelined/seasons/${seasonId}/teams/${teamId}`,
+      { include: 'player' },
+    );
+    return Array.isArray(res.data) ? res.data : [];
+  } catch {
+    return [];
+  }
 }
 
 /**

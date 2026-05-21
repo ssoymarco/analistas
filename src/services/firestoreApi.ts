@@ -40,6 +40,8 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { resolveTeamLogo } from '../utils/teamLogoOverrides';
+import { buildFixtureDetailFromFirestoreData } from './sportsApi';
+import type { MatchDetail } from '../data/types';
 import type {
   Match,
   MatchStatus,
@@ -644,6 +646,72 @@ export function subscribeTopScorers(
       if (!snap.exists()) { onChange([]); return; }
       const data = snap.data() as TopScorersDoc;
       onChange((data.scorers ?? []).map(topScorerFromDoc));
+    },
+    err => onError?.(err),
+  );
+}
+
+// ── Full match detail (enriched by syncMatchEnrichment + pollLivescores) ───
+
+export interface MatchDetailSubscription {
+  match: Match | null;
+  detail: Partial<MatchDetail> | null;
+  /** True while the enrichment doc is being populated by syncMatchEnrichment.
+   *  The hook should keep its loading state UNTIL detail is present, then
+   *  flip it off and let onSnapshot stream subsequent updates. */
+  isEnriched: boolean;
+}
+
+/**
+ * Subscribe to a match's full detail (lineups, events, stats, h2h, etc.)
+ * sourced entirely from Firestore. The server populates `matches/{id}.detail`
+ * via pollLivescores (every 15s for live data) + syncMatchEnrichment (every
+ * 5 min for static data). Client renders directly from this stream — NO
+ * SportMonks calls per user, no polling.
+ *
+ * If the doc has the basic match but not the enrichment yet (e.g. cold
+ * match that hasn't entered the hot window), emits match-only updates with
+ * `isEnriched: false` so the consumer can fall back to the proxy if desired.
+ */
+export function subscribeMatchDetail(
+  matchId: string,
+  onChange: (sub: MatchDetailSubscription) => void,
+  onError?: (err: Error) => void,
+): Unsubscribe {
+  const ref = doc(db, 'matches', matchId);
+  return onSnapshot(
+    ref,
+    snap => {
+      if (!snap.exists()) {
+        onChange({ match: null, detail: null, isEnriched: false });
+        return;
+      }
+      const data = snap.data() as MatchDoc;
+      const match = matchFromDoc(data);
+      const rawDetail = (data as MatchDoc & { detail?: unknown }).detail;
+      if (!rawDetail) {
+        onChange({ match, detail: null, isEnriched: false });
+        return;
+      }
+      try {
+        const h2h    = ((data as MatchDoc & { h2h?: unknown[] }).h2h            ?? []) as any[];
+        const sideH  = ((data as MatchDoc & { sidelinedHome?: unknown[] }).sidelinedHome ?? []) as any[];
+        const sideA  = ((data as MatchDoc & { sidelinedAway?: unknown[] }).sidelinedAway ?? []) as any[];
+        const assembled = buildFixtureDetailFromFirestoreData(rawDetail as any, {
+          h2hResults:     h2h,
+          homeSidelined:  sideH,
+          awaySidelined:  sideA,
+        });
+        // The assembled `match` is derived from the enriched fixture, but
+        // basic fields (score/minute) may be more up-to-date in MatchDoc
+        // (pollLivescores writes them directly). Prefer the doc-derived one.
+        onChange({ match, detail: assembled.detail, isEnriched: true });
+      } catch (err) {
+        // Assembly failed — likely the detail blob is malformed. Surface as
+        // not-enriched so the consumer can fall back.
+        console.warn('[subscribeMatchDetail] assembly failed:', err);
+        onChange({ match, detail: null, isEnriched: false });
+      }
     },
     err => onError?.(err),
   );

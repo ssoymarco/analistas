@@ -12,7 +12,7 @@
  * - syncTopScorers:   Every 12 hours → top scorers for all configured leagues
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.syncFixtures = exports.pollLivescores = void 0;
+exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.syncFixtures = exports.pollLivescores = void 0;
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
 // before any other module touches admin.firestore().
 require("./admin-init");
@@ -23,6 +23,7 @@ const sync_fixtures_1 = require("./sync-fixtures");
 const sync_standings_1 = require("./sync-standings");
 const sync_teams_1 = require("./sync-teams");
 const sync_squads_1 = require("./sync-squads");
+const sync_match_enrichment_1 = require("./sync-match-enrichment");
 // ── Scheduled Functions ─────────────────────────────────────────────────────
 /**
  * Poll livescores every 1 minute.
@@ -136,5 +137,26 @@ exports.syncSquads = (0, scheduler_1.onSchedule)({
     secrets: [config_1.SPORTMONKS_TOKEN],
 }, async () => {
     await (0, sync_squads_1.syncSquadsHandler)();
+});
+/**
+ * Enrich "hot" matches (live, near-kickoff, or recently-finished) with the
+ * full /fixtures/{id} payload so MatchDetail can render from Firestore.
+ *
+ * Closes the per-user-polling leak — useFixtureDetail used to call SportMonks
+ * every 10s while a match was live (360 calls/hour PER concurrent viewer).
+ * This Cloud Function runs at a fixed cadence regardless of user count.
+ *
+ * Schedule: every 5 minutes. Cost: ~30-80 SM calls per run for the
+ * `fixtures` entity. Well below the 3,000/hour cap.
+ */
+exports.syncMatchEnrichment = (0, scheduler_1.onSchedule)({
+    schedule: 'every 5 minutes',
+    timeoutSeconds: 300,
+    memory: '512MiB',
+    region: 'us-central1',
+    retryCount: 0, // next invocation is in 5 min anyway
+    secrets: [config_1.SPORTMONKS_TOKEN],
+}, async () => {
+    await (0, sync_match_enrichment_1.syncMatchEnrichmentHandler)();
 });
 //# sourceMappingURL=index.js.map

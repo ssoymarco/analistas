@@ -22,6 +22,7 @@ import { syncFixturesHandler } from './sync-fixtures';
 import { syncStandingsHandler, syncTopScorersHandler } from './sync-standings';
 import { syncTeamsHandler } from './sync-teams';
 import { syncSquadsHandler } from './sync-squads';
+import { syncMatchEnrichmentHandler } from './sync-match-enrichment';
 
 // ── Scheduled Functions ─────────────────────────────────────────────────────
 
@@ -159,5 +160,30 @@ export const syncSquads = onSchedule(
   },
   async () => {
     await syncSquadsHandler();
+  },
+);
+
+/**
+ * Enrich "hot" matches (live, near-kickoff, or recently-finished) with the
+ * full /fixtures/{id} payload so MatchDetail can render from Firestore.
+ *
+ * Closes the per-user-polling leak — useFixtureDetail used to call SportMonks
+ * every 10s while a match was live (360 calls/hour PER concurrent viewer).
+ * This Cloud Function runs at a fixed cadence regardless of user count.
+ *
+ * Schedule: every 5 minutes. Cost: ~30-80 SM calls per run for the
+ * `fixtures` entity. Well below the 3,000/hour cap.
+ */
+export const syncMatchEnrichment = onSchedule(
+  {
+    schedule: 'every 5 minutes',
+    timeoutSeconds: 300,
+    memory: '512MiB',
+    region: 'us-central1',
+    retryCount: 0, // next invocation is in 5 min anyway
+    secrets: [SPORTMONKS_TOKEN],
+  },
+  async () => {
+    await syncMatchEnrichmentHandler();
   },
 );

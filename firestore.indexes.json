@@ -15,6 +15,14 @@
         { "fieldPath": "awayTeam.id",   "order": "ASCENDING" },
         { "fieldPath": "startingAtUtc", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",        "order": "ASCENDING" },
+        { "fieldPath": "startingAtUtc", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
