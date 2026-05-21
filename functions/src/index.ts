@@ -20,6 +20,8 @@ import { SPORTMONKS_TOKEN } from './config';
 import { pollLivescoresHandler } from './poll-livescores';
 import { syncFixturesHandler } from './sync-fixtures';
 import { syncStandingsHandler, syncTopScorersHandler } from './sync-standings';
+import { syncTeamsHandler } from './sync-teams';
+import { syncSquadsHandler } from './sync-squads';
 
 // ── Scheduled Functions ─────────────────────────────────────────────────────
 
@@ -104,5 +106,58 @@ export const syncTopScorers = onSchedule(
   },
   async () => {
     await syncTopScorersHandler();
+  },
+);
+
+/**
+ * Sync full team info (stadium, coach, founded, logo) for every team in
+ * the configured leagues. Replaces per-user fetchTeamById proxy calls.
+ *
+ * Runs every 24 hours. Team metadata changes on a weekly-to-yearly scale,
+ * so daily is generous.
+ *
+ * Cost: ~51 leagues × 1 paginated call/league = ~60-100 SM calls/day.
+ * Timeout 540s; the handler sleeps 500ms between leagues to be a polite
+ * API neighbour.
+ */
+export const syncTeams = onSchedule(
+  {
+    schedule: 'every 24 hours',
+    timeoutSeconds: 540,
+    memory: '256MiB',
+    region: 'us-central1',
+    retryCount: 1,
+    secrets: [SPORTMONKS_TOKEN],
+  },
+  async () => {
+    await syncTeamsHandler();
+  },
+);
+
+/**
+ * Sync the full roster for every team in the configured leagues. One doc
+ * per (seasonId, teamId) at squads/{seasonId}_{teamId}. Replaces per-user
+ * fetchSquad calls.
+ *
+ * Runs every 24 hours. Higher SM cost than syncTeams (one call per team)
+ * but still bounded — ~51 leagues × ~25 teams ≈ 1,300 calls/day, which
+ * sits at ~1.8% of the Pro plan.
+ *
+ * Timeout: 9 minutes (540s). Sequential per-team fetches with a 250ms
+ * pause between each. ~1,300 × 0.5s = ~11 min worst-case, which would
+ * tip over the timeout — handler logs partial progress and the next
+ * day's run picks up where it left off (every write is idempotent).
+ */
+export const syncSquads = onSchedule(
+  {
+    schedule: 'every 24 hours',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    retryCount: 1,
+    secrets: [SPORTMONKS_TOKEN],
+  },
+  async () => {
+    await syncSquadsHandler();
   },
 );

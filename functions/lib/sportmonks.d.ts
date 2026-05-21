@@ -38,3 +38,66 @@ export declare function fetchStandings(seasonId: number): Promise<SMStandingGrou
  * Includes `participant` so we get the team name/logo alongside the player.
  */
 export declare function fetchTopScorers(seasonId: number): Promise<SMTopScorer[]>;
+/**
+ * GET /teams/seasons/{seasonId} — every team in a season.
+ *
+ * Uses `include=venue;coaches` so the response carries enough info to fill
+ * a team-detail page (stadium + coach). Returns ~20-50 teams per league
+ * (or 48 for the World Cup) in a single paginated call.
+ */
+export interface SMTeamFull {
+    id: number;
+    name: string;
+    short_code?: string;
+    image_path: string;
+    country_id?: number;
+    founded?: number;
+    venue?: {
+        id?: number;
+        name?: string;
+        city_name?: string;
+        capacity?: number;
+        image_path?: string;
+    };
+    coaches?: Array<{
+        id?: number;
+        display_name?: string;
+        common_name?: string;
+        name?: string;
+        image_path?: string;
+        date_of_birth?: string;
+        active?: boolean;
+    }>;
+}
+export declare function fetchTeamsForSeason(seasonId: number): Promise<SMTeamFull[]>;
+/**
+ * GET /squads/seasons/{seasonId}/teams/{teamId} — full roster for a team in
+ * a given season. Used by syncSquads. Includes player metadata + the
+ * player's other team memberships (so we can show "current club" alongside
+ * a national-team player).
+ */
+export interface SMSquadPlayerFull {
+    id: number;
+    player_id: number;
+    jersey_number: number;
+    position_id: number;
+    captain: boolean;
+    player?: {
+        id?: number;
+        name?: string;
+        common_name?: string;
+        display_name?: string;
+        date_of_birth?: string;
+        image_path?: string;
+        teams?: Array<{
+            end?: string;
+            team?: {
+                id?: number;
+                name?: string;
+                image_path?: string;
+                type?: string;
+            };
+        }>;
+    };
+}
+export declare function fetchSquadForSeasonAndTeam(seasonId: number, teamId: number): Promise<SMSquadPlayerFull[]>;

@@ -1,4 +1,21 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "homeTeam.id",   "order": "ASCENDING" },
+        { "fieldPath": "startingAtUtc", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "awayTeam.id",   "order": "ASCENDING" },
+        { "fieldPath": "startingAtUtc", "order": "DESCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": []
 }

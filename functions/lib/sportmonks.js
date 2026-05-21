@@ -11,6 +11,8 @@ exports.fetchFixturesByDate = fetchFixturesByDate;
 exports.fetchFixtureById = fetchFixtureById;
 exports.fetchStandings = fetchStandings;
 exports.fetchTopScorers = fetchTopScorers;
+exports.fetchTeamsForSeason = fetchTeamsForSeason;
+exports.fetchSquadForSeasonAndTeam = fetchSquadForSeasonAndTeam;
 const config_1 = require("./config");
 // ── Internal Helpers ────────────────────────────────────────────────────────
 /**
@@ -138,5 +140,13 @@ async function fetchTopScorers(seasonId) {
         include: 'player;participant',
         filters: 'seasontopscorerTypes:208',
     });
+}
+async function fetchTeamsForSeason(seasonId) {
+    return fetchAllPages(`/teams/seasons/${seasonId}`, {
+        include: 'venue;coaches',
+    });
+}
+async function fetchSquadForSeasonAndTeam(seasonId, teamId) {
+    return fetchAllPages(`/squads/seasons/${seasonId}/teams/${teamId}`, { include: 'player;player.teams.team' });
 }
 //# sourceMappingURL=sportmonks.js.map

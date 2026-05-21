@@ -77,6 +77,62 @@ export interface TopScorersDoc {
   updatedAt: Timestamp;
 }
 
+/** Full team info — stored in teams/{teamId}. Written by syncTeams (~daily).
+ *  Replaces per-user fetchTeamById calls from the client. */
+export interface TeamFullDoc {
+  id:           string;
+  name:         string;
+  shortName:    string;
+  logo:         string;
+  /** Trinational teams have `country: ''` (no single country). */
+  country:      string;
+  founded:      number;            // 0 when unknown
+  venueName:    string;
+  venueCity:    string;
+  venueCapacity: number;
+  venueImage:   string;
+  coachName:    string;
+  coachImage:   string;
+  coachAge:     number;            // 0 when unknown
+  /** League this team is associated with — derived from the seed season used
+   *  by syncTeams. Most teams belong to exactly one league, so this is fine
+   *  as a denormalised field. */
+  leagueId:     number;
+  leagueName:   string;
+  currentSeasonId: number | null;
+  updatedAt:    Timestamp;
+}
+
+/** One player's membership in a team's squad for a given season — stored
+ *  inside SquadDoc.players. */
+export interface SquadPlayerDoc {
+  /** Squad entry id (unique per player-season-team) */
+  id:           number;
+  playerId:     number;
+  name:         string;
+  displayName:  string;
+  number:       number;
+  positionId:   number;
+  /** ISO date of birth — empty string when unknown. Client computes age. */
+  dateOfBirth:  string;
+  image:        string;
+  isCaptain:    boolean;
+  /** Current club (non-national) when this is a national-team squad — used
+   *  to show e.g. "Real Madrid" next to a Brazil player. Empty for club
+   *  squads (where the squad's own team IS the player's club). */
+  clubName:     string;
+  clubLogo:     string;
+}
+
+/** Full squad for a given (seasonId, teamId) — stored in squads/{seasonId}_{teamId}.
+ *  Written by syncSquads (~daily). Replaces per-user fetchSquad calls. */
+export interface SquadDoc {
+  seasonId:  number;
+  teamId:    number;
+  players:   SquadPlayerDoc[];
+  updatedAt: Timestamp;
+}
+
 /** Snapshot for diff detection — stored in _meta/livescoresSnapshot */
 export interface LivescoresSnapshot {
   matches: Record<string, {

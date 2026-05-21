@@ -32,6 +32,8 @@ import {
   getDoc,
   getDocs,
   onSnapshot,
+  orderBy,
+  limit,
   query,
   where,
   type Unsubscribe,
@@ -113,6 +115,87 @@ interface TopScorersDoc {
   leagueId: number;
   scorers: TopScorerDoc[];
   updatedAt: unknown;
+}
+
+/** Mirrors functions/src/types.ts TeamFullDoc. Written by syncTeams. */
+interface TeamFullDoc {
+  id: string;
+  name: string;
+  shortName: string;
+  logo: string;
+  country: string;
+  founded: number;
+  venueName: string;
+  venueCity: string;
+  venueCapacity: number;
+  venueImage: string;
+  coachName: string;
+  coachImage: string;
+  coachAge: number;
+  leagueId: number;
+  leagueName: string;
+  currentSeasonId: number | null;
+  updatedAt: unknown;
+}
+
+/** Mirrors functions/src/types.ts SquadPlayerDoc. */
+interface SquadPlayerDoc {
+  id: number;
+  playerId: number;
+  name: string;
+  displayName: string;
+  number: number;
+  positionId: number;
+  dateOfBirth: string;
+  image: string;
+  isCaptain: boolean;
+  clubName: string;
+  clubLogo: string;
+}
+
+/** Mirrors functions/src/types.ts SquadDoc. Written by syncSquads. */
+interface SquadDoc {
+  seasonId: number;
+  teamId: number;
+  players: SquadPlayerDoc[];
+  updatedAt: unknown;
+}
+
+// ── App-facing team-detail shapes (mirror useTeamDetail.ts interfaces) ──────
+
+export interface FirestoreTeamInfo {
+  id:              number;
+  name:            string;
+  shortCode:       string;
+  logo:            string;
+  country:         string;
+  city:            string;
+  founded:         number;
+  coach:           string;
+  coachImage:      string;
+  coachAge:        number;
+  venueName:       string;
+  venueCapacity:   number;
+  venueImage?:     string;
+  leagueId:        number;
+  leagueName:      string;
+  currentSeasonId: number | null;
+}
+
+export interface FirestoreSquadPlayer {
+  id:           number;
+  playerId:     number;
+  name:         string;
+  displayName:  string;
+  number:       number;
+  position:     string;     // PSG / DEF / MED / DEL / JUG label
+  positionId:   number;
+  nationality:  string;
+  age:          number;
+  image:        string;
+  isCaptain:    boolean;
+  clubName:     string;
+  clubLogo:     string;
 }
 
 // ── App-facing TopScorer shape (matches sportsApi.getTopScorers result) ──────
@@ -226,6 +309,98 @@ function topScorerFromDoc(t: TopScorerDoc): FirestoreTopScorer {
   };
 }
 
+// ── Team-detail readers (powered by syncTeams + syncSquads) ─────────────────
+
+function calculateAgeFromDob(dob: string): number {
+  if (!dob) return 0;
+  const birth = new Date(dob);
+  if (isNaN(birth.getTime())) return 0;
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  if (now.getMonth() < birth.getMonth() ||
+      (now.getMonth() === birth.getMonth() && now.getDate() < birth.getDate())) {
+    age--;
+  }
+  return age;
+}
+
+function positionLabelFromId(posId: number): string {
+  switch (posId) {
+    case 24: return 'POR';
+    case 25: return 'DEF';
+    case 26: return 'MED';
+    case 27: return 'DEL';
+    default: return 'JUG';
+  }
+}
+
+function teamFullFromDoc(d: TeamFullDoc): FirestoreTeamInfo {
+  return {
+    id:              Number(d.id) || 0,
+    name:            d.name,
+    shortCode:       d.shortName,
+    logo:            resolveTeamLogo(d.id, d.logo),
+    country:         d.country,
+    city:            d.venueCity,
+    founded:         d.founded,
+    coach:           d.coachName,
+    coachImage:      d.coachImage,
+    coachAge:        d.coachAge,
+    venueName:       d.venueName,
+    venueCapacity:   d.venueCapacity,
+    venueImage:      d.venueImage || undefined,
+    leagueId:        d.leagueId,
+    leagueName:      d.leagueName,
+    currentSeasonId: d.currentSeasonId,
+  };
+}
+
+function squadPlayerFromDoc(p: SquadPlayerDoc): FirestoreSquadPlayer {
+  return {
+    id:          p.id,
+    playerId:    p.playerId,
+    name:        p.name,
+    displayName: p.displayName,
+    number:      p.number,
+    position:    positionLabelFromId(p.positionId),
+    positionId:  p.positionId,
+    nationality: '',
+    age:         calculateAgeFromDob(p.dateOfBirth),
+    image:       p.image,
+    isCaptain:   p.isCaptain,
+    clubName:    p.clubName,
+    clubLogo:    p.clubLogo,
+  };
+}
+
+/**
+ * Fetch one team's metadata (info + venue + coach). Returns null if the
+ * doc hasn't been written yet (e.g. team is in a league not yet synced).
+ */
+export async function getTeamFromFirestore(teamId: number | string): Promise<FirestoreTeamInfo | null> {
+  const ref = doc(db, 'teams', String(teamId));
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  return teamFullFromDoc(snap.data() as TeamFullDoc);
+}
+
+/**
+ * Fetch a team's full squad for a given season. Returns an empty array if
+ * the (seasonId, teamId) combination hasn't been synced — caller can fall
+ * back to the proxy.
+ */
+export async function getSquadFromFirestore(
+  seasonId: number,
+  teamId: number | string,
+): Promise<FirestoreSquadPlayer[]> {
+  const docId = `${seasonId}_${teamId}`;
+  const ref = doc(db, 'squads', docId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return [];
+  const data = snap.data() as SquadDoc;
+  return (data.players ?? []).map(squadPlayerFromDoc);
+}
+
 // ── One-shot fetches (use when you don't need real-time) ─────────────────────
 
 /**
@@ -280,6 +455,59 @@ export async function getFixturesByDateFromFirestore(localDate: string): Promise
     }
   }));
   return results;
+}
+
+/**
+ * Fetch the most recent fixtures for a team, regardless of competition.
+ *
+ * Firestore doesn't support OR queries on different fields, so we fan out two
+ * parallel queries — one for `homeTeam.id == teamId`, one for `awayTeam.id ==
+ * teamId` — each ordered by kickoff descending. The two result sets are
+ * merged, deduped (a doc shouldn't appear in both, but defensive anyway),
+ * and re-sorted before applying the final limit.
+ *
+ * Composite indexes required (declared in firestore.indexes.json):
+ *   - homeTeam.id ASC + startingAtUtc DESC
+ *   - awayTeam.id ASC + startingAtUtc DESC
+ *
+ * The teamId param is stringified — MatchDoc stores team IDs as strings
+ * (e.g. "2626"), not numbers.
+ */
+export async function getRecentFixturesByTeam(
+  teamId: string | number,
+  count = 25,
+): Promise<Match[]> {
+  const idStr = String(teamId);
+  // Fetch up to `count` per side so we have plenty of headroom for the merge.
+  const homeQ = query(
+    collection(db, 'matches'),
+    where('homeTeam.id', '==', idStr),
+    orderBy('startingAtUtc', 'desc'),
+    limit(count),
+  );
+  const awayQ = query(
+    collection(db, 'matches'),
+    where('awayTeam.id', '==', idStr),
+    orderBy('startingAtUtc', 'desc'),
+    limit(count),
+  );
+
+  const [homeSnap, awaySnap] = await Promise.all([getDocs(homeQ), getDocs(awayQ)]);
+
+  const byId = new Map<string, Match>();
+  for (const d of [...homeSnap.docs, ...awaySnap.docs]) {
+    const m = matchFromDoc(d.data() as MatchDoc);
+    if (!byId.has(m.id)) byId.set(m.id, m);
+  }
+
+  // Sort by kickoff desc; missing startingAtUtc sinks to the bottom.
+  const merged = Array.from(byId.values()).sort((a, b) => {
+    const ta = a.startingAtUtc ?? '';
+    const tb = b.startingAtUtc ?? '';
+    return tb.localeCompare(ta);
+  });
+
+  return merged.slice(0, count);
 }
 
 /**
