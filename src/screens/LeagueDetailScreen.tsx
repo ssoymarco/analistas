@@ -1383,11 +1383,17 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   const [showCompact, setShowCompact] = useState(false);
 
   // ── Header theme colors ──
-  const headerBg   = c.bg;
-  const hText      = isDark ? '#fff' : '#111827';
-  const hTextSoft  = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(17,24,39,0.5)';
-  const hBtnBg     = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)';
-  const hBorderCol = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.2)';
+  // The World Cup hero uses a fixed dark-navy gradient (FIFA brand identity).
+  // In light mode the topBar/status-bar area used to be white, which made the
+  // navy hero look like a floating block. For WC we force the top region to
+  // dark-on-dark in both themes so the whole header reads as one panel.
+  const isWC = leagueId === 732;
+  const WC_NAVY = '#05101E';
+  const headerBg   = isWC ? WC_NAVY : c.bg;
+  const hText      = isWC ? '#fff'  : (isDark ? '#fff' : '#111827');
+  const hTextSoft  = isWC ? 'rgba(255,255,255,0.6)' : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(17,24,39,0.5)');
+  const hBtnBg     = isWC ? 'rgba(255,255,255,0.12)' : (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)');
+  const hBorderCol = isWC ? 'rgba(255,255,255,0.4)'  : (isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.2)');
 
   // ── Display values ──
   // Trademark-sensitive overrides (e.g. FIFA World Cup) come from the shared
@@ -1465,7 +1471,25 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
 
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: c.bg }]} edges={['top']}>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <StatusBar style={isWC || isDark ? 'light' : 'dark'} />
+
+      {/* WC: paint a navy backdrop behind the status bar + topBar so the
+          FIFA-brand dark hero feels like one continuous panel from the very
+          top of the screen down to the gold separator. Without this the
+          navy gradient looks like a floating block on a white app in light
+          mode. The backdrop sits behind topBar (rendered first in JSX) and
+          stops where the WC gradient takes over inside the ScrollView. */}
+      {isWC && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 0, left: 0, right: 0,
+            height: 200, // generous: covers any status-bar inset + topBar
+            backgroundColor: WC_NAVY,
+          }}
+        />
+      )}
 
       {/* ── Back + Actions bar (with compact league name on scroll) ── */}
       <View style={[s.topBar, { backgroundColor: headerBg }]}>
