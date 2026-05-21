@@ -105,7 +105,7 @@ const FormBadges: React.FC<{ form: FormEntry[]; recentMatches: RecentMatch[] }> 
 // RESUMEN TAB
 // ════════════════════════════════════════════════════════════════════════════
 
-const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, teamId }) => {
+const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTable?: () => void }> = ({ data, teamId, onSeeFullTable }) => {
   const { t } = useTranslation();
   const c = useThemeColors();
   const { isDark } = useDarkMode();
@@ -260,6 +260,13 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, 
   // pulled from the league's `zones` config in src/config/leagues.ts.
   // Falls back to top-5 if the team's position isn't found in standings.
   const MiniGroupTable: React.FC = () => {
+    // Tappable wrapper that takes the user to the full Tabla tab.
+    const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+      <TouchableOpacity activeOpacity={0.7} onPress={onSeeFullTable} disabled={!onSeeFullTable}>
+        {children}
+      </TouchableOpacity>
+    );
+
     if (isGroupBased) {
       // ── WC / group-stage cup branch ──
       if (groupStandings.length === 0) return null;
@@ -269,26 +276,34 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, 
       const rows = groupStandings.slice(0, 4);
       const groupSize = groupStandings.length;
       return (
-        <View style={[rs.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>
-          <View style={rs.sectionHeader}>
-            <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>{t('team.groupIn')}</Text>
-            {letter ? <Text style={[rs.sectionBadge, { color: c.accent }]}>GRUPO {letter}</Text> : null}
+        <Wrapper>
+          <View style={[rs.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>
+            <View style={rs.sectionHeader}>
+              <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>{t('team.groupIn')}</Text>
+              {letter ? <Text style={[rs.sectionBadge, { color: c.accent }]}>GRUPO {letter}</Text> : null}
+            </View>
+            <StandingsHeaderRow />
+            {rows.map(s => (
+              <StandingsRow
+                key={s.team.id}
+                s={s}
+                zoneColor={getZoneColorForPosition(s.position, groupSize)}
+              />
+            ))}
+            {/* WC zone legend */}
+            <View style={[rs.zoneLegend, { borderTopColor: border }]}>
+              <LegendItem color={c.accent}  label={t('team.advanceZone')} />
+              <LegendItem color='#f59e0b'   label={t('team.bestThirdZone')} />
+              <LegendItem color='#ef4444'   label={t('team.eliminatedZone')} />
+            </View>
+            {/* Tap hint */}
+            {onSeeFullTable && (
+              <View style={[rs.seeFullRow, { borderTopColor: border }]}>
+                <Text style={[rs.seeFullText, { color: c.accent }]}>{t('team.seeFullTable')} ›</Text>
+              </View>
+            )}
           </View>
-          <StandingsHeaderRow />
-          {rows.map(s => (
-            <StandingsRow
-              key={s.team.id}
-              s={s}
-              zoneColor={getZoneColorForPosition(s.position, groupSize)}
-            />
-          ))}
-          {/* WC zone legend */}
-          <View style={[rs.zoneLegend, { borderTopColor: border }]}>
-            <LegendItem color={c.accent}  label={t('team.advanceZone')} />
-            <LegendItem color='#f59e0b'   label={t('team.bestThirdZone')} />
-            <LegendItem color='#ef4444'   label={t('team.eliminatedZone')} />
-          </View>
-        </View>
+        </Wrapper>
       );
     }
 
@@ -300,34 +315,42 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, 
     // the team is near the bottom). For simplicity show ALL configured zones
     // — the legend educates the user about the rules of THEIR league.
     return (
-      <View style={[rs.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>
-        <View style={rs.sectionHeader}>
-          <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>
-            {t('team.tournamentPosition')}
-          </Text>
-          {teamStanding ? (
-            <Text style={[rs.sectionBadge, { color: c.accent }]}>
-              #{teamStanding.position}
+      <Wrapper>
+        <View style={[rs.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>
+          <View style={rs.sectionHeader}>
+            <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>
+              {t('team.tournamentPosition')}
             </Text>
-          ) : null}
-        </View>
-        <StandingsHeaderRow />
-        {tableWindow.map(s => (
-          <StandingsRow
-            key={s.team.id}
-            s={s}
-            zoneColor={getZoneColorForPosition(s.position, groupSize)}
-          />
-        ))}
-        {/* League-specific zone legend (if configured) */}
-        {leagueZones && leagueZones.length > 0 && (
-          <View style={[rs.zoneLegend, { borderTopColor: border }]}>
-            {leagueZones.map(z => (
-              <LegendItem key={z.label} color={z.color} label={z.label} />
-            ))}
+            {teamStanding ? (
+              <Text style={[rs.sectionBadge, { color: c.accent }]}>
+                #{teamStanding.position}
+              </Text>
+            ) : null}
           </View>
-        )}
-      </View>
+          <StandingsHeaderRow />
+          {tableWindow.map(s => (
+            <StandingsRow
+              key={s.team.id}
+              s={s}
+              zoneColor={getZoneColorForPosition(s.position, groupSize)}
+            />
+          ))}
+          {/* League-specific zone legend (if configured) */}
+          {leagueZones && leagueZones.length > 0 && (
+            <View style={[rs.zoneLegend, { borderTopColor: border }]}>
+              {leagueZones.map(z => (
+                <LegendItem key={z.label} color={z.color} label={z.label} />
+              ))}
+            </View>
+          )}
+          {/* Tap hint */}
+          {onSeeFullTable && (
+            <View style={[rs.seeFullRow, { borderTopColor: border }]}>
+              <Text style={[rs.seeFullText, { color: c.accent }]}>{t('team.seeFullTable')} ›</Text>
+            </View>
+          )}
+        </View>
+      </Wrapper>
     );
   };
 
@@ -571,6 +594,12 @@ const rs = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendDot: { width: 7, height: 7, borderRadius: 4 },
   legendText: { fontSize: 10 },
+  seeFullRow: {
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+  },
+  seeFullText: { fontSize: 12, fontWeight: '600' },
 
   // Coach
   coachRow: {
@@ -1612,7 +1641,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
           </View>
         ) : data ? (
           <View style={{ paddingTop: 12 }}>
-            {activeTab === 'resumen'   && <ResumenTab   data={data} teamId={teamId} />}
+            {activeTab === 'resumen'   && <ResumenTab   data={data} teamId={teamId} onSeeFullTable={() => setActiveTab('tabla')} />}
             {activeTab === 'partidos'  && <PartidosTab  data={data} teamId={teamId} />}
             {activeTab === 'plantilla' && <PlantillaTab data={data} />}
             {activeTab === 'tabla'     && <TablaTab     data={data} teamId={teamId} />}

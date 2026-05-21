@@ -560,6 +560,7 @@ const es = {
     recentForm: 'FORMA RECIENTE',
     groupIn: 'EN EL TORNEO',
     tournamentPosition: 'EN LA TABLA',
+    seeFullTable: 'Ver tabla completa',
     avgAge: 'Edad media',
     playerCount: '{{count}} jugadores',
     coachLabel: 'Entrenador',
@@ -684,6 +685,21 @@ const es = {
     shareTableDesc: 'Genera una imagen de la clasificación y compártela con tus amigos en WhatsApp, Instagram y más.',
     // Group standings (multi-group cups like World Cup / Copa Libertadores)
     groupLabel: 'Grupo',
+    // Calendar tab
+    matchesCount: '{{count}} partidos',
+    stages: {
+      regularSeason: 'Temporada Regular',
+      groupStage: 'Fase de Grupos',
+      playoffs: 'Playoffs',
+      relegation: 'Descenso',
+      championshipRound: 'Liguilla',
+      roundOf32: 'Ronda de 32',
+      roundOf16: 'Octavos de Final',
+      quarterFinals: 'Cuartos de Final',
+      semiFinals: 'Semifinales',
+      final: 'Final',
+      thirdPlace: 'Tercer Lugar',
+    },
     // Zone legends
     zones: {
       champion: 'Campeón',

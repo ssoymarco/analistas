@@ -12,6 +12,7 @@ import {
   Image,
   ActivityIndicator,
   Dimensions,
+  findNodeHandle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -1051,31 +1052,96 @@ function fixtureToMatch(f: LeagueFixture, leagueName: string, leagueLogo: string
 // TAB: Calendario
 // ══════════════════════════════════════════════════════════════════════════════
 
-// ── Stage name → Spanish ──────────────────────────────────────────────────────
-const STAGE_ES: Record<string, string> = {
-  'group stage': 'Fase de Grupos',
-  'round of 32': 'Ronda de 32',
-  'round of 16': 'Octavos de Final',
-  'quarter-finals': 'Cuartos de Final',
-  'quarter finals': 'Cuartos de Final',
-  'semi-finals': 'Semifinales',
-  'semi finals': 'Semifinales',
-  'final': 'Final',
-  '3rd place final': 'Tercer Lugar',
-  'third place': 'Tercer Lugar',
+// ── Stage name → i18n key ─────────────────────────────────────────────────────
+// SportMonks returns stage names in English. We map common ones to translation
+// keys (defined under `league.stages.*` in es.ts / en.ts). Unknown stages fall
+// through unchanged so the user still sees a label, just untranslated.
+const STAGE_KEY: Record<string, string> = {
+  'regular season':   'regularSeason',
+  'group stage':      'groupStage',
+  'play-offs':        'playoffs',
+  'playoffs':         'playoffs',
+  'play offs':        'playoffs',
+  'relegation':       'relegation',
+  'championship round': 'championshipRound',
+  'round of 32':      'roundOf32',
+  'round of 16':      'roundOf16',
+  'quarter-finals':   'quarterFinals',
+  'quarter finals':   'quarterFinals',
+  'semi-finals':      'semiFinals',
+  'semi finals':      'semiFinals',
+  'final':            'final',
+  '3rd place final':  'thirdPlace',
+  'third place':      'thirdPlace',
 };
-function translateStage(name: string): string {
-  return STAGE_ES[name.toLowerCase()] ?? name;
+function useTranslateStage() {
+  const { t } = useTranslation();
+  return (name: string): string => {
+    const key = STAGE_KEY[name.toLowerCase()];
+    return key ? t(`league.stages.${key}`) : name;
+  };
 }
 
-const CalendarioTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
+const CalendarioTab: React.FC<{
+  data: LeagueDetailData;
+  scrollHostRef?: React.RefObject<any>;
+}> = ({ data, scrollHostRef }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
+  const translateStage = useTranslateStage();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const { fixtures, leagueName, leagueLogo } = data;
 
   const handleFixturePress = (fix: LeagueFixture) => {
     navigation.push('MatchDetail', { match: fixtureToMatch(fix, leagueName, leagueLogo) });
+  };
+
+  // ── Auto-scroll to current matchday ─────────────────────────────────────────
+  // Strategy: when the tab mounts (or fixtures change), find the most recent
+  // date that's ≤ today (i.e. last finished or in-progress matchday). If we
+  // haven't started yet (preseason), snap to the first upcoming date instead.
+  // The user can scroll up for past matches, down for future matches.
+  const dateNodeRefs = useRef<Map<string, View | null>>(new Map());
+  const didAutoScrollRef = useRef(false);
+
+  // Identify the target date once per fixtures-change.
+  const targetDateKey = React.useMemo(() => {
+    if (fixtures.length === 0) return null;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const allDates = Array.from(new Set(fixtures.map(f => f.date.slice(0, 10)))).sort();
+    // Largest dateKey ≤ today
+    let target: string | null = null;
+    for (const d of allDates) {
+      if (d <= todayStr) target = d;
+      else break;
+    }
+    // If preseason (nothing past), snap to the first upcoming date
+    return target ?? allDates[0] ?? null;
+  }, [fixtures]);
+
+  // Re-arm when fixtures change (season switch) so we re-scroll once.
+  useEffect(() => { didAutoScrollRef.current = false; }, [fixtures]);
+
+  const tryAutoScroll = () => {
+    if (didAutoScrollRef.current || !targetDateKey || !scrollHostRef?.current) return;
+    const node = dateNodeRefs.current.get(targetDateKey);
+    if (!node) return;
+    const scrollNode = findNodeHandle(scrollHostRef.current);
+    if (!scrollNode) return;
+    didAutoScrollRef.current = true;
+    // Defer slightly so all sibling sections have a chance to lay out.
+    requestAnimationFrame(() => {
+      try {
+        node.measureLayout(
+          scrollNode,
+          (_x, y) => {
+            // Subtract a tiny offset so the date label peeks just under the sticky tab bar.
+            scrollHostRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: false });
+          },
+          () => { /* measureLayout failed silently — best-effort */ },
+        );
+      } catch { /* noop */ }
+    });
   };
 
   if (fixtures.length === 0) {
@@ -1117,7 +1183,9 @@ const CalendarioTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
             <View style={ca.stageHeader}>
               <Text style={[ca.sectionTitle, { color: c.textPrimary }]}>{stageLabel}</Text>
               <View style={[ca.stagePill, { backgroundColor: c.surface }]}>
-                <Text style={[ca.stagePillText, { color: c.textTertiary }]}>{totalInStage} partidos</Text>
+                <Text style={[ca.stagePillText, { color: c.textTertiary }]}>
+                  {t('league.matchesCount', { count: totalInStage })}
+                </Text>
               </View>
             </View>
 
@@ -1127,8 +1195,20 @@ const CalendarioTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
               const [, mm, dd] = dateKey.split('-');
               const months = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
               const dateLabel = `${parseInt(dd, 10)} ${months[parseInt(mm, 10) - 1]}`;
+              const isTarget = dateKey === targetDateKey;
               return (
-                <View key={dateKey}>
+                <View
+                  key={dateKey}
+                  ref={(n) => {
+                    // Track the section we want to scroll to; once it's mounted,
+                    // attempt the auto-scroll (best-effort, runs at most once).
+                    if (isTarget) {
+                      dateNodeRefs.current.set(dateKey, n);
+                      if (n) tryAutoScroll();
+                    }
+                  }}
+                  onLayout={isTarget ? tryAutoScroll : undefined}
+                >
                   {/* Date divider */}
                   <View style={[ca.dateDivider, { borderTopColor: c.border }]}>
                     <Text style={[ca.dateDividerText, { color: c.accent }]}>{dateLabel}</Text>
@@ -1299,6 +1379,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
 
   // ── Scroll animation ──
   const scrollY = useRef(new Animated.Value(0)).current;
+  const scrollHostRef = useRef<any>(null);
   const [showCompact, setShowCompact] = useState(false);
 
   // ── Header theme colors ──
@@ -1408,6 +1489,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
       </View>
 
       <Animated.ScrollView
+        ref={scrollHostRef}
         showsVerticalScrollIndicator={false}
         onScroll={(e: any) => {
           const y = e.nativeEvent.contentOffset.y;
@@ -1547,7 +1629,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
                       </View>
               ) : <ClasificacionTab data={data} />
             ) :
-            activeTab === 'partidos'      ? <CalendarioTab data={data} /> :
+            activeTab === 'partidos'      ? <CalendarioTab data={data} scrollHostRef={scrollHostRef} /> :
             activeTab === 'grupos'        ? <ClasificacionTab data={data} /> :
             activeTab === 'goleadores'    ? <GoleadoresTab data={data} /> :
             activeTab === 'asistencias'   ? <StatListTab data={data} type="assists" /> :
