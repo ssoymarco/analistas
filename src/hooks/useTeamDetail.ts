@@ -144,8 +144,24 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
         // SM returns `activeseasons` (lowercase) — normalize
         const seasons = team.activeSeasons ?? team.activeseasons ?? [];
 
-        // Determine season ID — try multiple fallbacks
+        // Determine season ID — try multiple fallbacks, with one critical
+        // override:  national teams in qualifying competitions usually have
+        // both the qualifier season AND the Mundial 2026 season marked as
+        // `is_current` in SportMonks. The plain `.find(is_current)` would
+        // grab whichever appears first — often the qualifier (e.g. "WC
+        // Qualification Europe", Group I for Norway: NOR / ITA / ISR / EST /
+        // MDA). The user is browsing a national team page during World Cup
+        // season, so they expect the Mundial 2026 group, not the qualifier
+        // group. Prefer Mundial 2026 (league_id 732) whenever it appears.
+        //
+        // If a caller passed `seasonId` explicitly (e.g. from the season
+        // picker), that always wins — no override applies.
+        const PREFERRED_LEAGUE_IDS = [732]; // FIFA World Cup 2026
+        const preferredSeason = seasons.find(
+          s => s.is_current && PREFERRED_LEAGUE_IDS.includes(s.league_id),
+        );
         const sId = seasonId
+          ?? preferredSeason?.id
           ?? seasons.find(s => s.is_current)?.id
           ?? seasons[0]?.id
           ?? null;
