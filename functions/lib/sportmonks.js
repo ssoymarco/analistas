@@ -142,10 +142,10 @@ async function fetchStandings(seasonId) {
  *
  * Includes `participant` so we get the team name/logo alongside the player.
  */
-async function fetchTopScorers(seasonId) {
+async function fetchTopScorers(seasonId, typeId = 208) {
     return fetchAllPages(`/topscorers/seasons/${seasonId}`, {
         include: 'player;participant',
-        filters: 'seasontopscorerTypes:208',
+        filters: `seasontopscorerTypes:${typeId}`,
     });
 }
 /**

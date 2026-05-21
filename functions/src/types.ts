@@ -91,7 +91,13 @@ export interface TopScorerDoc {
 export interface TopScorersDoc {
   seasonId: number;
   leagueId: number;
+  /** Goal scorers (SM type_id 208) — historical primary field. */
   scorers: TopScorerDoc[];
+  /** Top assists (SM type_id 209). Optional — populated by syncTopScorers
+   *  when the season has assists data. */
+  assists?: TopScorerDoc[];
+  /** Top yellow-card receivers (SM type_id 84). Optional. */
+  cards?: TopScorerDoc[];
   updatedAt: Timestamp;
 }
 

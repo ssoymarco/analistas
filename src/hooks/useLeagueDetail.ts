@@ -15,6 +15,123 @@ import {
   type SMScore,
 } from '../services/sportmonks';
 import { getLeagueConfig } from '../config/leagues';
+import {
+  getStandingsFromFirestore,
+  getTopScorersAllCategories,
+  getFixturesBySeasonFromFirestore,
+  type FirestoreTopScorer,
+} from '../services/firestoreApi';
+import type { LeagueStanding, Match } from '../data/types';
+
+// ── Firestore → SM shape shims ──────────────────────────────────────────────
+// Convert data fetched from Firestore back into the SportMonks-shaped objects
+// the existing mapping code (mapStanding, mapTopScorer, etc.) expects. Lets
+// us reuse the proven mappers without a parallel implementation.
+
+function firestoreStandingsToSMGroups(rows: LeagueStanding[]): SMStandingGroup[] {
+  // DETAIL_TYPE constants are defined just below this block — we duplicate
+  // the type_id literals here to avoid a forward-reference issue.
+  const TYPE_ID = { PLAYED: 129, WON: 130, DRAW: 131, LOST: 132, GOALS_FOR: 133, GOALS_AGAINST: 134, GOAL_DIFF: 179 };
+  return rows.map(r => ({
+    id: 0,
+    participant_id: Number(r.team.id),
+    sport_id: 1,
+    league_id: 0,
+    season_id: 0,
+    stage_id: 0,
+    group_id: r.groupId ?? null,
+    round_id: 0,
+    standing_rule_id: 0,
+    position: r.position,
+    result: null,
+    points: r.points,
+    participant: {
+      id: Number(r.team.id),
+      name: r.team.name,
+      short_code: r.team.shortName,
+      image_path: r.team.logo,
+    } as SMParticipant,
+    details: [
+      { id: 0, standing_id: 0, standing_rule_id: 0, type_id: TYPE_ID.PLAYED,        value: r.played },
+      { id: 0, standing_id: 0, standing_rule_id: 0, type_id: TYPE_ID.WON,           value: r.won },
+      { id: 0, standing_id: 0, standing_rule_id: 0, type_id: TYPE_ID.DRAW,          value: r.drawn },
+      { id: 0, standing_id: 0, standing_rule_id: 0, type_id: TYPE_ID.LOST,          value: r.lost },
+      { id: 0, standing_id: 0, standing_rule_id: 0, type_id: TYPE_ID.GOALS_FOR,     value: r.goalsFor },
+      { id: 0, standing_id: 0, standing_rule_id: 0, type_id: TYPE_ID.GOALS_AGAINST, value: r.goalsAgainst },
+      { id: 0, standing_id: 0, standing_rule_id: 0, type_id: TYPE_ID.GOAL_DIFF,     value: r.goalDifference },
+    ],
+  }));
+}
+
+function firestoreTopToSM(rows: FirestoreTopScorer[]): SMTopScorer[] {
+  return rows.map(r => ({
+    id: 0,
+    player_id: Number(r.playerId),
+    type_id: 208,
+    season_id: 0,
+    participant_id: 0,
+    total: r.goals,
+    position: r.position,
+    player: {
+      id: Number(r.playerId),
+      display_name: r.playerName,
+      common_name: r.playerName,
+      image_path: r.playerImage,
+    } as any,
+    participant: {
+      id: 0,
+      name: r.teamName,
+      image_path: r.teamLogo,
+    } as SMParticipant,
+  }) as unknown as SMTopScorer);
+}
+
+function deriveTeamsFromStandings(rows: LeagueStanding[]): SMParticipant[] {
+  return rows.map(r => ({
+    id: Number(r.team.id),
+    name: r.team.name,
+    short_code: r.team.shortName,
+    image_path: r.team.logo,
+  }) as SMParticipant);
+}
+
+function firestoreFixturesToSM(matches: Match[]): SMFixture[] {
+  return matches.map(m => {
+    const homeId = Number(m.homeTeam.id) || 0;
+    const awayId = Number(m.awayTeam.id) || 0;
+    const stateMap: Record<string, number> = {
+      'scheduled': 1, 'live': 22, 'finished': 5,
+    };
+    const stateId = stateMap[m.status] ?? 1;
+    return {
+      id: Number(m.id) || 0,
+      league_id: Number(m.leagueId) || 0,
+      season_id: m.seasonId ?? 0,
+      stage_id: 0,
+      group_id: null,
+      aggregate_id: null,
+      round_id: 0,
+      round_name: '',
+      starting_at: m.startingAtUtc ?? '',
+      starting_at_timestamp: m.startingAtUtc ? Math.floor(new Date(m.startingAtUtc).getTime() / 1000) : 0,
+      result_info: null,
+      leg: null,
+      length: 90,
+      state_id: stateId,
+      participants: [
+        { id: homeId, name: m.homeTeam.name, short_code: m.homeTeam.shortName, image_path: m.homeTeam.logo, meta: { location: 'home' } },
+        { id: awayId, name: m.awayTeam.name, short_code: m.awayTeam.shortName, image_path: m.awayTeam.logo, meta: { location: 'away' } },
+      ] as SMParticipant[],
+      scores: m.status === 'finished' || m.status === 'live' ? [
+        { id: 0, fixture_id: Number(m.id) || 0, type_id: 1525, participant_id: homeId, score: { goals: m.homeScore, participant: 'home' }, description: 'CURRENT' },
+        { id: 0, fixture_id: Number(m.id) || 0, type_id: 1525, participant_id: awayId, score: { goals: m.awayScore, participant: 'away' }, description: 'CURRENT' },
+      ] as SMScore[] : [],
+      league: { id: Number(m.leagueId) || 0, name: m.league, image_path: m.leagueLogo ?? '' } as any,
+      state: { id: stateId, state: m.status, name: m.status } as any,
+      stage: undefined,
+    } as unknown as SMFixture;
+  });
+}
 
 // ── Standing detail type IDs (SportMonks) ──────────────────────────────────
 const DETAIL_TYPE = {
@@ -323,17 +440,50 @@ export function useLeagueDetail(
         // current league fixtures. fetchLeagueFixtures only knows about today
         // ± a few days, so it would return the current jornada regardless of
         // which historical season the user picked.
-        const [standingsRaw, topScorersRaw, topAssistsRaw, topCardsRaw, teamsRaw, fixturesRaw, leagueInfo] = await Promise.all([
-          fetchStandings(resolvedSeasonId).catch(() => [] as SMStandingGroup[]),
-          fetchTopScorers(resolvedSeasonId, 208).catch(() => [] as SMTopScorer[]),
-          fetchTopScorers(resolvedSeasonId, 209).catch(() => [] as SMTopScorer[]),
-          fetchTopScorers(resolvedSeasonId, 84).catch(() => [] as SMTopScorer[]),
-          fetchTeamsBySeasonId(resolvedSeasonId).catch(() => [] as SMParticipant[]),
-          fetchFixturesBySeasonId(resolvedSeasonId).catch(() => [] as SMFixture[]),
-          // Fetch league metadata for the real `image_path` (SportMonks uses
-          // sharded folder paths like /leagues/2/1122.png that we can't construct).
-          fetchSeasonsByLeagueId(leagueId).catch(() => null as null | Record<string, unknown>),
+        // ── Firestore-first: try to satisfy as much as possible from our
+        // own data layer (zero SportMonks calls per user). Fall back to the
+        // proxy only for fields Firestore doesn't have yet.
+        const [fsStandings, fsTopScorers, fsFixturesMatch] = await Promise.all([
+          getStandingsFromFirestore(resolvedSeasonId).catch(() => []),
+          getTopScorersAllCategories(resolvedSeasonId).catch(() => ({ goals: [], assists: [], cards: [] })),
+          getFixturesBySeasonFromFirestore(resolvedSeasonId).catch(() => []),
         ]);
+
+        // If we have a meaningful Firestore hit (standings present and at
+        // least one of goleadores OR fixtures present), serve everything
+        // from cache and ONLY fetch league metadata (1 call vs 7).
+        const hasFirestoreData =
+          fsStandings.length > 0 &&
+          (fsTopScorers.goals.length > 0 || fsFixturesMatch.length > 0);
+
+        const [standingsRaw, topScorersRaw, topAssistsRaw, topCardsRaw, teamsRaw, fixturesRaw, leagueInfo] = hasFirestoreData
+          ? await Promise.all([
+              // Standings: convert Firestore LeagueStanding[] back to SM group shape
+              // (the downstream mapper expects SMStandingGroup[]).
+              Promise.resolve(firestoreStandingsToSMGroups(fsStandings)),
+              // Top scorers: convert FirestoreTopScorer[] back to SM shape so
+              // buildStatRows below can stay unchanged.
+              Promise.resolve(firestoreTopToSM(fsTopScorers.goals)),
+              Promise.resolve(firestoreTopToSM(fsTopScorers.assists)),
+              Promise.resolve(firestoreTopToSM(fsTopScorers.cards)),
+              // Teams: derive from standings when present (covers most leagues).
+              // Cup competitions with no league table still hit the proxy.
+              Promise.resolve(deriveTeamsFromStandings(fsStandings)),
+              // Fixtures: Firestore Match[] → SMFixture[] shim for the mapper.
+              Promise.resolve(firestoreFixturesToSM(fsFixturesMatch)),
+              // League metadata still needs the proxy for the logo URL —
+              // SM uses sharded folder paths we can't construct. Single call.
+              fetchSeasonsByLeagueId(leagueId).catch(() => null as null | Record<string, unknown>),
+            ])
+          : await Promise.all([
+              fetchStandings(resolvedSeasonId).catch(() => [] as SMStandingGroup[]),
+              fetchTopScorers(resolvedSeasonId, 208).catch(() => [] as SMTopScorer[]),
+              fetchTopScorers(resolvedSeasonId, 209).catch(() => [] as SMTopScorer[]),
+              fetchTopScorers(resolvedSeasonId, 84).catch(() => [] as SMTopScorer[]),
+              fetchTeamsBySeasonId(resolvedSeasonId).catch(() => [] as SMParticipant[]),
+              fetchFixturesBySeasonId(resolvedSeasonId).catch(() => [] as SMFixture[]),
+              fetchSeasonsByLeagueId(leagueId).catch(() => null as null | Record<string, unknown>),
+            ]);
 
         const apiLeagueLogo = (leagueInfo?.image_path as string | undefined) ?? '';
 

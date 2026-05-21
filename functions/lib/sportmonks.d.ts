@@ -37,7 +37,7 @@ export declare function fetchStandings(seasonId: number): Promise<SMStandingGrou
  *
  * Includes `participant` so we get the team name/logo alongside the player.
  */
-export declare function fetchTopScorers(seasonId: number): Promise<SMTopScorer[]>;
+export declare function fetchTopScorers(seasonId: number, typeId?: number): Promise<SMTopScorer[]>;
 /**
  * GET /fixtures/{id} with full enrichment includes — fetches everything the
  * MatchDetailScreen needs in a single call. Used by syncMatchEnrichment

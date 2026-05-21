@@ -311,6 +311,52 @@ function topScorerFromDoc(t: TopScorerDoc): FirestoreTopScorer {
   };
 }
 
+// ── League-detail readers (multi-category topscorers, fixtures by season) ───
+
+/**
+ * Fetch ALL three top-scorer categories (goals, assists, cards) for a season
+ * in a single doc read. Each entry shape mirrors FirestoreTopScorer; the
+ * `goals` field reuses the player's count for the respective category
+ * (assists / cards) so existing UI components don't need to change.
+ */
+export async function getTopScorersAllCategories(seasonId: number): Promise<{
+  goals:   FirestoreTopScorer[];
+  assists: FirestoreTopScorer[];
+  cards:   FirestoreTopScorer[];
+}> {
+  const ref = doc(db, 'topscorers', String(seasonId));
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return { goals: [], assists: [], cards: [] };
+  const data = snap.data() as TopScorersDoc & {
+    assists?: TopScorerDoc[];
+    cards?: TopScorerDoc[];
+  };
+  return {
+    goals:   (data.scorers ?? []).map(topScorerFromDoc),
+    assists: (data.assists ?? []).map(topScorerFromDoc),
+    cards:   (data.cards ?? []).map(topScorerFromDoc),
+  };
+}
+
+/**
+ * Fetch all matches for a given seasonId. Used by useLeagueDetail to
+ * populate the Calendario tab without hitting SportMonks.
+ *
+ * Returns matches sorted by kickoff ascending. Requires a Firestore index
+ * (single-field on `seasonId` is auto-created; combined with orderBy on
+ * startingAtUtc requires a composite index — declared in firestore.indexes.json).
+ */
+export async function getFixturesBySeasonFromFirestore(seasonId: number): Promise<Match[]> {
+  const q = query(
+    collection(db, 'matches'),
+    where('seasonId', '==', seasonId),
+    orderBy('startingAtUtc', 'asc'),
+    limit(2000),
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map(d => matchFromDoc(d.data() as MatchDoc));
+}
+
 // ── Coach profile readers (powered by syncCoaches) ──────────────────────────
 
 const SM_COACH_STAT_FS = {

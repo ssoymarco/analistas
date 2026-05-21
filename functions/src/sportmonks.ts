@@ -157,10 +157,13 @@ export async function fetchStandings(seasonId: number): Promise<SMStandingGroup[
  *
  * Includes `participant` so we get the team name/logo alongside the player.
  */
-export async function fetchTopScorers(seasonId: number): Promise<SMTopScorer[]> {
+export async function fetchTopScorers(
+  seasonId: number,
+  typeId = 208, // 208=goals, 209=assists, 84=yellow cards
+): Promise<SMTopScorer[]> {
   return fetchAllPages<SMTopScorer>(`/topscorers/seasons/${seasonId}`, {
     include: 'player;participant',
-    filters: 'seasontopscorerTypes:208',
+    filters: `seasontopscorerTypes:${typeId}`,
   });
 }
 

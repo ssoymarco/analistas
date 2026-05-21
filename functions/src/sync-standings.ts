@@ -56,29 +56,49 @@ export async function syncStandingsHandler(): Promise<void> {
 }
 
 /**
- * Sync top scorers for all configured leagues.
- * Same pattern as standings with rate limit courtesy pauses.
+ * Sync top scorers for all configured leagues. Fetches THREE separate stat
+ * categories per league — goals (208), assists (209), yellow cards (84) —
+ * and writes them all to the same topscorers/{seasonId} document so
+ * useLeagueDetail can render all three tabs from Firestore in one read.
+ *
+ * Cost: 51 leagues × 3 categories = 153 SM calls per run on the
+ * `topscorers` entity. ~3.6k/day at the hourly schedule. ~5% of cap.
  */
 export async function syncTopScorersHandler(): Promise<void> {
   const leagues = getLeaguesWithSeason();
-  logger.info(`🏅 syncTopScorers: processing ${leagues.length} leagues`);
+  logger.info(`🏅 syncTopScorers: processing ${leagues.length} leagues (3 categories each)`);
 
   let successCount = 0;
   let errorCount = 0;
 
   for (let i = 0; i < leagues.length; i++) {
     const league = leagues[i];
+    const seasonId = league.currentSeasonId!;
 
     try {
-      const scorers = await fetchTopScorers(league.currentSeasonId!);
+      const [goals, assists, cards] = await Promise.all([
+        fetchTopScorers(seasonId, 208).catch(() => []),
+        fetchTopScorers(seasonId, 209).catch(() => []),
+        fetchTopScorers(seasonId, 84).catch(() => []),
+      ]);
 
-      if (scorers.length > 0) {
-        const doc = mapTopScorersToDoc(league.currentSeasonId!, league.id, scorers);
-        await db.collection('topscorers').doc(String(league.currentSeasonId)).set(doc);
+      if (goals.length > 0 || assists.length > 0 || cards.length > 0) {
+        const goalsDoc = mapTopScorersToDoc(seasonId, league.id, goals);
+        const assistsList = assists.length > 0
+          ? mapTopScorersToDoc(seasonId, league.id, assists).scorers
+          : [];
+        const cardsList = cards.length > 0
+          ? mapTopScorersToDoc(seasonId, league.id, cards).scorers
+          : [];
+        await db.collection('topscorers').doc(String(seasonId)).set({
+          ...goalsDoc,
+          assists: assistsList,
+          cards: cardsList,
+        });
         successCount++;
       }
     } catch (err) {
-      logger.error(`Failed top scorers for ${league.name} (season ${league.currentSeasonId}):`, err);
+      logger.error(`Failed top scorers for ${league.name} (season ${seasonId}):`, err);
       errorCount++;
     }
 
