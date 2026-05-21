@@ -35,6 +35,7 @@ import { translateNationalTeam } from '../utils/nationalTeams';
 import { CupBracketView } from '../components/CupBracketView';
 import { useCupBracket } from '../hooks/useCupBracket';
 import type { CupTie } from '../services/sportsApi';
+import { getLeagueConfig, type LeagueZone } from '../config/leagues';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'TeamDetail'>;
 type Tab = 'resumen' | 'partidos' | 'plantilla' | 'tabla' | 'bracket';
@@ -129,12 +130,49 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, 
     .sort((a, b) => a.date.localeCompare(b.date));
   const nextUp = upcomingSorted[0] ?? null;
 
-  // Group standing
+  // Standings: decide between group-based view (WC, group-stage cups) and
+  // single-table view (domestic leagues). For group-based competitions we
+  // show the team's group with WC zone semantics. For single-table leagues
+  // we show a 5-row window centered on the team's position and use the
+  // league's own zone config (Champions League / Descenso / Liguilla / etc.)
+  // from src/config/leagues.ts.
   const teamStanding = data.teamStanding;
+  const teamLeagueConfig = getLeagueConfig(data.info.leagueId);
+  const isGroupBased = (teamStanding?.groupId ?? null) !== null;
+  const leagueZones = teamLeagueConfig?.zones;
+
   const groupStandings = useMemo(() => {
-    if (!teamStanding?.groupId) return data.standings.slice(0, 4);
+    if (!teamStanding?.groupId) return [];
     return data.standings.filter(s => s.groupId === teamStanding.groupId);
   }, [data.standings, teamStanding]);
+
+  // Compute a window of standings centered around the team's position for
+  // single-table leagues. Returns 5 entries clamped to the table bounds.
+  const tableWindow = useMemo(() => {
+    if (isGroupBased || data.standings.length === 0) return [];
+    const sorted = [...data.standings].sort((a, b) => a.position - b.position);
+    const teamIdx = sorted.findIndex(s => s.team.id === String(teamId));
+    if (teamIdx < 0) return sorted.slice(0, 5);
+    const start = Math.max(0, Math.min(teamIdx - 2, sorted.length - 5));
+    return sorted.slice(start, start + 5);
+  }, [data.standings, teamId, isGroupBased]);
+
+  // Resolve a zone color for a given position using either WC semantics
+  // (group-based) or the league's configured zones (single-table).
+  const getZoneColorForPosition = (position: number, groupSize: number): string => {
+    if (isGroupBased) {
+      // WC group: 1-2 advance, 3 best 3rd, 4 eliminated
+      if (position <= 2) return c.accent;
+      if (position === 3 && groupSize >= 4) return '#f59e0b';
+      if (position === groupSize) return '#ef4444';
+      return 'transparent';
+    }
+    if (!leagueZones) return 'transparent';
+    for (const z of leagueZones) {
+      if (position >= z.from && position <= z.to) return z.color;
+    }
+    return 'transparent';
+  };
 
   // Coach
   const { coach, coachImage, coachAge } = data.info;
@@ -189,11 +227,11 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, 
           {/* Score or VS */}
           <View style={rs.scoreBlock}>
             {match.isFinished ? (
-              <>
+              <View style={rs.scoreRow}>
                 <Text style={[rs.scoreBig, { color: c.textPrimary }]}>{match.homeScore}</Text>
                 <Text style={[rs.scoreSep, { color: textSec }]}>–</Text>
                 <Text style={[rs.scoreBig, { color: c.textPrimary }]}>{match.awayScore}</Text>
-              </>
+              </View>
             ) : (
               <Text style={[rs.scoreVS, { color: textSec }]}>VS</Text>
             )}
@@ -214,74 +252,136 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, 
     );
   };
 
-  // ── Mini group table ─────────────────────────────────────────────────────
+  // ── Mini standings table ─────────────────────────────────────────────────
+  // Group-based competitions (Mundial, group-stage cups) → shows the team's
+  // group with WC zone semantics (avanza / mejor 3ro / eliminado).
+  // Single-table leagues (Liga MX, Premier League, etc.) → shows a 5-row
+  // window centered on the team's position, with zone colors and a legend
+  // pulled from the league's `zones` config in src/config/leagues.ts.
+  // Falls back to top-5 if the team's position isn't found in standings.
   const MiniGroupTable: React.FC = () => {
-    if (groupStandings.length === 0) return null;
-    // Detect group letter from first standing
-    const firstStanding = groupStandings[0];
-    const groupName = (firstStanding as any).group_name ?? (firstStanding as any).groupName ?? '';
-    const letter = groupName.replace(/[^A-Z]/gi, '').toUpperCase().slice(-1) || '';
+    if (isGroupBased) {
+      // ── WC / group-stage cup branch ──
+      if (groupStandings.length === 0) return null;
+      const firstStanding = groupStandings[0];
+      const groupName = (firstStanding as any).group_name ?? (firstStanding as any).groupName ?? '';
+      const letter = groupName.replace(/[^A-Z]/gi, '').toUpperCase().slice(-1) || '';
+      const rows = groupStandings.slice(0, 4);
+      const groupSize = groupStandings.length;
+      return (
+        <View style={[rs.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>
+          <View style={rs.sectionHeader}>
+            <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>{t('team.groupIn')}</Text>
+            {letter ? <Text style={[rs.sectionBadge, { color: c.accent }]}>GRUPO {letter}</Text> : null}
+          </View>
+          <StandingsHeaderRow />
+          {rows.map(s => (
+            <StandingsRow
+              key={s.team.id}
+              s={s}
+              zoneColor={getZoneColorForPosition(s.position, groupSize)}
+            />
+          ))}
+          {/* WC zone legend */}
+          <View style={[rs.zoneLegend, { borderTopColor: border }]}>
+            <LegendItem color={c.accent}  label={t('team.advanceZone')} />
+            <LegendItem color='#f59e0b'   label={t('team.bestThirdZone')} />
+            <LegendItem color='#ef4444'   label={t('team.eliminatedZone')} />
+          </View>
+        </View>
+      );
+    }
 
+    // ── Single-table league branch ──
+    if (tableWindow.length === 0) return null;
+    const groupSize = data.standings.length; // for relegation detection
+    // Only show the zones that touch the visible window OR are relegation
+    // (relegation is contextually important even if outside the window when
+    // the team is near the bottom). For simplicity show ALL configured zones
+    // — the legend educates the user about the rules of THEIR league.
     return (
       <View style={[rs.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>
         <View style={rs.sectionHeader}>
-          <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>{t('team.groupIn')}</Text>
-          {letter ? <Text style={[rs.sectionBadge, { color: c.accent }]}>GRUPO {letter}</Text> : null}
+          <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>
+            {t('team.tournamentPosition')}
+          </Text>
+          {teamStanding ? (
+            <Text style={[rs.sectionBadge, { color: c.accent }]}>
+              #{teamStanding.position}
+            </Text>
+          ) : null}
         </View>
-        {/* Header row */}
-        <View style={[rs.tableHeaderRow, { borderBottomColor: border }]}>
-          <Text style={[rs.thPos, { color: textSec }]}>#</Text>
-          <Text style={[rs.thTeam, { color: textSec }]}>{t('team.squadTab')}</Text>
-          <Text style={[rs.thStat, { color: textSec }]}>J</Text>
-          <Text style={[rs.thStat, { color: textSec }]}>G</Text>
-          <Text style={[rs.thStat, { color: textSec }]}>E</Text>
-          <Text style={[rs.thStat, { color: textSec }]}>P</Text>
-          <Text style={[rs.thPts, { color: textSec }]}>PTS</Text>
-        </View>
-        {groupStandings.slice(0, 4).map((s, idx) => {
-          const isCurrentTeam = s.team.id === String(teamId);
-          const rowBg = isCurrentTeam ? (c.accent + '18') : 'transparent';
-          // Zone: top 2 advance, 3rd=best 3rd (lighter), 4th=out
-          const zoneColor = idx < 2 ? c.accent : idx === 2 ? '#f59e0b' : '#ef4444';
-          return (
-            <View key={s.team.id} style={[rs.tableRow, { backgroundColor: rowBg, borderTopColor: border }]}>
-              <View style={[rs.zoneBar, { backgroundColor: zoneColor }]} />
-              <Text style={[rs.tdPos, { color: c.textPrimary, fontWeight: isCurrentTeam ? '800' : '500' }]}>{s.position}</Text>
-              <View style={rs.tdTeamCell}>
-                {s.team.logo?.startsWith('http')
-                  ? <Image source={{ uri: s.team.logo }} style={rs.miniLogo} />
-                  : <View style={[rs.miniLogo, { backgroundColor: 'rgba(255,255,255,0.08)' }]} />
-                }
-                <Text style={[rs.tdTeamName, { color: c.textPrimary, fontWeight: isCurrentTeam ? '700' : '400' }]} numberOfLines={1}>
-                  {translateNationalTeam(s.team.name)}
-                </Text>
-              </View>
-              <Text style={[rs.tdStat, { color: textSec }]}>{s.played}</Text>
-              <Text style={[rs.tdStat, { color: textSec }]}>{s.won}</Text>
-              <Text style={[rs.tdStat, { color: textSec }]}>{s.drawn}</Text>
-              <Text style={[rs.tdStat, { color: textSec }]}>{s.lost}</Text>
-              <Text style={[rs.tdPts, { color: c.textPrimary, fontWeight: isCurrentTeam ? '800' : '600' }]}>{s.points}</Text>
-            </View>
-          );
-        })}
-        {/* Zone legend */}
-        <View style={[rs.zoneLegend, { borderTopColor: border }]}>
-          <View style={rs.legendItem}>
-            <View style={[rs.legendDot, { backgroundColor: c.accent }]} />
-            <Text style={[rs.legendText, { color: textSec }]}>{t('team.advanceZone')}</Text>
+        <StandingsHeaderRow />
+        {tableWindow.map(s => (
+          <StandingsRow
+            key={s.team.id}
+            s={s}
+            zoneColor={getZoneColorForPosition(s.position, groupSize)}
+          />
+        ))}
+        {/* League-specific zone legend (if configured) */}
+        {leagueZones && leagueZones.length > 0 && (
+          <View style={[rs.zoneLegend, { borderTopColor: border }]}>
+            {leagueZones.map(z => (
+              <LegendItem key={z.label} color={z.color} label={z.label} />
+            ))}
           </View>
-          <View style={rs.legendItem}>
-            <View style={[rs.legendDot, { backgroundColor: '#f59e0b' }]} />
-            <Text style={[rs.legendText, { color: textSec }]}>{t('team.bestThirdZone')}</Text>
-          </View>
-          <View style={rs.legendItem}>
-            <View style={[rs.legendDot, { backgroundColor: '#ef4444' }]} />
-            <Text style={[rs.legendText, { color: textSec }]}>{t('team.eliminatedZone')}</Text>
-          </View>
-        </View>
+        )}
       </View>
     );
   };
+
+  // ── Standings row helpers (reused by group + single-table branches) ──────
+  const StandingsHeaderRow: React.FC = () => (
+    <View style={[rs.tableHeaderRow, { borderBottomColor: border }]}>
+      <Text style={[rs.thPos, { color: textSec }]}>#</Text>
+      <Text style={[rs.thTeam, { color: textSec }]}>{t('team.squadTab')}</Text>
+      <Text style={[rs.thStat, { color: textSec }]}>J</Text>
+      <Text style={[rs.thStat, { color: textSec }]}>G</Text>
+      <Text style={[rs.thStat, { color: textSec }]}>E</Text>
+      <Text style={[rs.thStat, { color: textSec }]}>P</Text>
+      <Text style={[rs.thPts, { color: textSec }]}>PTS</Text>
+    </View>
+  );
+
+  const StandingsRow: React.FC<{ s: LeagueStanding; zoneColor: string }> = ({ s, zoneColor }) => {
+    const isCurrentTeam = s.team.id === String(teamId);
+    const rowBg = isCurrentTeam ? (c.accent + '18') : 'transparent';
+    return (
+      <View style={[rs.tableRow, { backgroundColor: rowBg, borderTopColor: border }]}>
+        <View style={[rs.zoneBar, { backgroundColor: zoneColor }]} />
+        <Text style={[rs.tdPos, { color: c.textPrimary, fontWeight: isCurrentTeam ? '800' : '500' }]}>
+          {s.position}
+        </Text>
+        <View style={rs.tdTeamCell}>
+          {s.team.logo?.startsWith('http')
+            ? <Image source={{ uri: s.team.logo }} style={rs.miniLogo} />
+            : <View style={[rs.miniLogo, { backgroundColor: 'rgba(255,255,255,0.08)' }]} />
+          }
+          <Text
+            style={[rs.tdTeamName, { color: c.textPrimary, fontWeight: isCurrentTeam ? '700' : '400' }]}
+            numberOfLines={1}
+          >
+            {translateNationalTeam(s.team.name)}
+          </Text>
+        </View>
+        <Text style={[rs.tdStat, { color: textSec }]}>{s.played}</Text>
+        <Text style={[rs.tdStat, { color: textSec }]}>{s.won}</Text>
+        <Text style={[rs.tdStat, { color: textSec }]}>{s.drawn}</Text>
+        <Text style={[rs.tdStat, { color: textSec }]}>{s.lost}</Text>
+        <Text style={[rs.tdPts, { color: c.textPrimary, fontWeight: isCurrentTeam ? '800' : '600' }]}>
+          {s.points}
+        </Text>
+      </View>
+    );
+  };
+
+  const LegendItem: React.FC<{ color: string; label: string }> = ({ color, label }) => (
+    <View style={rs.legendItem}>
+      <View style={[rs.legendDot, { backgroundColor: color }]} />
+      <Text style={[rs.legendText, { color: textSec }]}>{label}</Text>
+    </View>
+  );
 
   // ── Coach card ──────────────────────────────────────────────────────────
   const CoachCard: React.FC = () => {
@@ -430,6 +530,8 @@ const rs = StyleSheet.create({
   scoreBlock: {
     alignItems: 'center', paddingHorizontal: 10, gap: 4, minWidth: 80,
   },
+  // Inline row so "3 — 3" reads left-to-right instead of stacking vertically
+  scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   scoreBig: { fontSize: 28, fontWeight: '800', lineHeight: 32 },
   scoreSep: { fontSize: 22, fontWeight: '300', lineHeight: 32, marginHorizontal: 2 },
   scoreVS: { fontSize: 18, fontWeight: '800' },
@@ -902,14 +1004,34 @@ const pl = StyleSheet.create({
 // TABLA TAB
 // ════════════════════════════════════════════════════════════════════════════
 
-// Zone color helper
-function getZoneColor(idx: number, accentColor: string): string {
-  if (idx < 2) return accentColor;
-  if (idx === 2) return '#f59e0b';
-  return '#ef4444';
+/**
+ * Zone-color resolution. Two flavours:
+ *   • group-based (WC, group-stage cups): top 2 advance, 3rd "mejor 3ro",
+ *     last position eliminated.
+ *   • single-table league: read zones from the league's config in
+ *     src/config/leagues.ts (Champions League / Descenso / Liguilla / etc.).
+ *     Position outside any zone returns 'transparent'.
+ */
+function resolveZoneColor(
+  position: number,
+  groupSize: number,
+  opts: { isGroupBased: boolean; zones?: LeagueZone[]; accentColor: string },
+): string {
+  if (opts.isGroupBased) {
+    if (position <= 2)                      return opts.accentColor;
+    if (position === 3 && groupSize >= 4)   return '#f59e0b';
+    if (position === groupSize)             return '#ef4444';
+    return 'transparent';
+  }
+  if (!opts.zones) return 'transparent';
+  for (const z of opts.zones) {
+    if (position >= z.from && position <= z.to) return z.color;
+  }
+  return 'transparent';
 }
 
-// Single group card — reused for team's group and all others
+// Single standings card — used for both WC groups AND single-table leagues.
+// Behaviour driven by `isGroupBased` + `zones`.
 const GroupCard: React.FC<{
   rows: LeagueStanding[];
   letter: string;
@@ -922,18 +1044,35 @@ const GroupCard: React.FC<{
   textPrimary: string;
   compact?: boolean;
   shareRef?: React.RefObject<any>;
-}> = ({ rows, letter, teamId, isMyGroup, cardBg, border, textSec, accentColor, textPrimary, compact, shareRef }) => {
+  /** True for group-based competitions (WC, group-stage cups). */
+  isGroupBased: boolean;
+  /** League-specific zones from config/leagues.ts. Used only when !isGroupBased. */
+  zones?: LeagueZone[];
+  /** Optional title override — defaults to "GRUPO X" / "Clasificación". */
+  titleOverride?: string;
+}> = ({ rows, letter, teamId, isMyGroup, cardBg, border, textSec, accentColor, textPrimary, compact, shareRef, isGroupBased, zones, titleOverride }) => {
   const { t } = useTranslation();
   const rowH = compact ? 7 : 10;
+  const groupSize = rows.length;
+
+  // Legend items: WC labels for groups, league zones for single-table leagues.
+  const legendItems: Array<{ color: string; label: string }> = isGroupBased
+    ? [
+        { color: accentColor, label: t('team.advanceZone') },
+        { color: '#f59e0b',   label: t('team.bestThirdZone') },
+        { color: '#ef4444',   label: t('team.eliminatedZone') },
+      ]
+    : (zones ?? []).map(z => ({ color: z.color, label: z.label }));
+
   return (
     <ViewShot ref={shareRef} options={{ format: 'png', quality: 0.95 }}>
       <View style={[tl.tableCard, { backgroundColor: cardBg, borderColor: isMyGroup ? accentColor + '60' : border }]}>
-        {/* Header row with group letter + "TU GRUPO" badge */}
+        {/* Header row with group letter + "TU GRUPO" badge (only for group-based) */}
         <View style={[tl.tableCardHeader, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
           <Text style={[tl.tableTitle, { color: textPrimary }]}>
-            {letter ? t('team.groupHeader', { letter }) : t('team.standingsTitle')}
+            {titleOverride ?? (letter ? t('team.groupHeader', { letter }) : t('team.standingsTitle'))}
           </Text>
-          {isMyGroup && (
+          {isMyGroup && isGroupBased && (
             <View style={[tl.myGroupBadge, { backgroundColor: accentColor }]}>
               <Text style={tl.myGroupBadgeText}>TU GRUPO</Text>
             </View>
@@ -952,9 +1091,9 @@ const GroupCard: React.FC<{
           <Text style={[tl.thPts,  { color: textSec }]}>PTS</Text>
         </View>
 
-        {rows.map((s, idx) => {
+        {rows.map(s => {
           const isCurrent = s.team.id === String(teamId);
-          const zoneColor = getZoneColor(idx, accentColor);
+          const zoneColor = resolveZoneColor(s.position, groupSize, { isGroupBased, zones, accentColor });
           const gd = s.goalDifference ?? (s.goalsFor - s.goalsAgainst);
           const gdStr = gd > 0 ? `+${gd}` : String(gd);
           return (
@@ -997,21 +1136,15 @@ const GroupCard: React.FC<{
           );
         })}
 
-        {/* Zone legend — only on the main group card */}
-        {isMyGroup && (
+        {/* Zone legend — only on the main card, only if we have items */}
+        {isMyGroup && legendItems.length > 0 && (
           <View style={[tl.zoneLegend, { borderTopColor: border }]}>
-            <View style={tl.legendItem}>
-              <View style={[tl.legendDot, { backgroundColor: accentColor }]} />
-              <Text style={[tl.legendText, { color: textSec }]}>{t('team.advanceZone')}</Text>
-            </View>
-            <View style={tl.legendItem}>
-              <View style={[tl.legendDot, { backgroundColor: '#f59e0b' }]} />
-              <Text style={[tl.legendText, { color: textSec }]}>{t('team.bestThirdZone')}</Text>
-            </View>
-            <View style={tl.legendItem}>
-              <View style={[tl.legendDot, { backgroundColor: '#ef4444' }]} />
-              <Text style={[tl.legendText, { color: textSec }]}>{t('team.eliminatedZone')}</Text>
-            </View>
+            {legendItems.map(it => (
+              <View key={it.label} style={tl.legendItem}>
+                <View style={[tl.legendDot, { backgroundColor: it.color }]} />
+                <Text style={[tl.legendText, { color: textSec }]}>{it.label}</Text>
+              </View>
+            ))}
           </View>
         )}
       </View>
@@ -1031,6 +1164,13 @@ const TablaTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, te
   const border  = c.border;
 
   const teamStanding = data.teamStanding;
+
+  // Detect competition type and pick up the league's zone config (used by
+  // single-table leagues — Liga MX, Premier League, etc.). For group-based
+  // competitions (WC, group-stage cups) we use the WC zone semantics.
+  const isGroupBased = (teamStanding?.groupId ?? null) !== null;
+  const leagueConfig = getLeagueConfig(data.info.leagueId);
+  const leagueZones  = leagueConfig?.zones;
 
   // Build all distinct groups sorted by groupId (ascending → A, B, C…)
   const allGroups = useMemo(() => {
@@ -1083,9 +1223,52 @@ const TablaTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, te
     );
   }
 
+  // ── Single-table league render (Liga MX, Premier League, etc.) ────────────
+  // No group splitting — show the full table with the team highlighted and
+  // the league's own zone colors / legend.
+  if (!isGroupBased) {
+    return (
+      <View style={tl.container}>
+        <GroupCard
+          rows={myGroup.rows}
+          letter=""
+          teamId={teamId}
+          isMyGroup
+          cardBg={cardBg}
+          border={border}
+          textSec={textSec}
+          accentColor={c.accent}
+          textPrimary={c.textPrimary}
+          shareRef={shareRef}
+          isGroupBased={false}
+          zones={leagueZones}
+          titleOverride={leagueConfig?.name ?? data.info.leagueName}
+        />
+
+        <TouchableOpacity
+          onPress={handleShare}
+          disabled={sharing}
+          activeOpacity={0.7}
+          style={[tl.shareBtn, { backgroundColor: c.accent }]}
+        >
+          {sharing ? (
+            <ActivityIndicator size="small" color="#111" />
+          ) : (
+            <>
+              <ShareIcon color="#111" size={14} />
+              <Text style={tl.shareBtnText}>{t('common.share')}</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        <View style={{ height: 24 }} />
+      </View>
+    );
+  }
+
   return (
     <View style={tl.container}>
-      {/* ── Team's own group (full, highlighted) ── */}
+      {/* ── Team's own group (full, highlighted) — WC / group-stage cups ── */}
       <GroupCard
         rows={myGroup.rows}
         letter={myGroupLetter}
@@ -1097,6 +1280,7 @@ const TablaTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, te
         accentColor={c.accent}
         textPrimary={c.textPrimary}
         shareRef={shareRef}
+        isGroupBased
       />
 
       {/* Share button */}
@@ -1120,7 +1304,7 @@ const TablaTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, te
       {otherGroups.length > 0 && (
         <>
           <Text style={[tl.otherGroupsLabel, { color: textSec }]}>OTROS GRUPOS</Text>
-          {otherGroups.map((g, i) => {
+          {otherGroups.map((g) => {
             // Find real index of this group in allGroups for correct letter
             const realIdx = allGroups.findIndex(ag => ag.key === g.key);
             return (
@@ -1136,6 +1320,7 @@ const TablaTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, te
                 accentColor={c.accent}
                 textPrimary={c.textPrimary}
                 compact
+                isGroupBased
               />
             );
           })}

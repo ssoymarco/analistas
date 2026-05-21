@@ -545,6 +545,7 @@ const en: TranslationKeys = {
     nextMatch: 'NEXT MATCH',
     recentForm: 'RECENT FORM',
     groupIn: 'IN THE TOURNAMENT',
+    tournamentPosition: 'IN THE TABLE',
     avgAge: 'Average age',
     playerCount: '{{count}} players',
     coachLabel: 'Coach',

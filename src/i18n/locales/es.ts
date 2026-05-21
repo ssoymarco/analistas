@@ -559,6 +559,7 @@ const es = {
     nextMatch: 'PRÓXIMO PARTIDO',
     recentForm: 'FORMA RECIENTE',
     groupIn: 'EN EL TORNEO',
+    tournamentPosition: 'EN LA TABLA',
     avgAge: 'Edad media',
     playerCount: '{{count}} jugadores',
     coachLabel: 'Entrenador',
