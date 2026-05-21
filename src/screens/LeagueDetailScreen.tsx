@@ -28,8 +28,11 @@ import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useLeagueDetail } from '../hooks/useLeagueDetail';
 import { useCupBracket } from '../hooks/useCupBracket';
+import { useAvailableSeasons } from '../hooks/useAvailableSeasons';
 import { CupBracketView } from '../components/CupBracketView';
+import { SeasonSelector } from '../components/SeasonSelector';
 import type { CupTie } from '../services/sportsApi';
+import type { AvailableSeason } from '../services/firestoreApi';
 import type {
   LeagueDetailData,
   LeagueStandingRow,
@@ -783,9 +786,19 @@ interface WorldCupHeroProps {
   isFollowing: boolean;
   onToggleFollow: () => void;
   t: (key: string, opts?: any) => string;
+  /** Available WC editions (length > 1 → renders the season pill) */
+  seasons: AvailableSeason[];
+  selectedSeasonId: number | null;
+  onSelectSeason: (seasonId: number) => void;
+  /** Whether the currently selected season is the live 2026 edition.
+   *  Past editions hide the host flags / accent strip / countdown. */
+  isCurrentSeason: boolean;
 }
 
-const WorldCupHeroHeader: React.FC<WorldCupHeroProps> = ({ isFollowing, onToggleFollow, t }) => {
+const WorldCupHeroHeader: React.FC<WorldCupHeroProps> = ({
+  isFollowing, onToggleFollow, t,
+  seasons, selectedSeasonId, onSelectSeason, isCurrentSeason,
+}) => {
   const [wc, setWc] = useState<WCPhase>(() => computeWCPhase());
 
   useEffect(() => {
@@ -793,6 +806,12 @@ const WorldCupHeroHeader: React.FC<WorldCupHeroProps> = ({ isFollowing, onToggle
     const id = setInterval(() => setWc(computeWCPhase()), ms);
     return () => clearInterval(id);
   }, [wc.phase]);
+
+  // Derive the year shown in the pill from the currently selected season
+  const selectedSeason = seasons.find(s => s.id === selectedSeasonId);
+  const yearLabel = selectedSeason
+    ? (selectedSeason.name?.match(/\d{4}/)?.[0] ?? String(selectedSeason.year))
+    : '2026';
 
   return (
     <View>
@@ -802,37 +821,51 @@ const WorldCupHeroHeader: React.FC<WorldCupHeroProps> = ({ isFollowing, onToggle
         end={{ x: 0.7, y: 1 }}
         style={wch.gradient}
       >
-        {/* Host-nation accent strip — top edge */}
-        <View style={wch.accentStrip} pointerEvents="none">
-          {/* MX */}
-          <View style={[wch.accentSeg, { backgroundColor: '#006847' }]} />
-          <View style={[wch.accentSeg, { backgroundColor: '#FFFFFF', opacity: 0.55 }]} />
-          <View style={[wch.accentSeg, { backgroundColor: '#CE1126' }]} />
-          {/* divider */}
-          <View style={[wch.accentSeg, { backgroundColor: 'transparent' }]} />
-          {/* USA */}
-          <View style={[wch.accentSeg, { backgroundColor: '#B22234' }]} />
-          <View style={[wch.accentSeg, { backgroundColor: '#FFFFFF', opacity: 0.55 }]} />
-          <View style={[wch.accentSeg, { backgroundColor: '#3C3B6E' }]} />
-          {/* divider */}
-          <View style={[wch.accentSeg, { backgroundColor: 'transparent' }]} />
-          {/* CAN */}
-          <View style={[wch.accentSeg, { backgroundColor: '#FF0000', opacity: 0.85 }]} />
-          <View style={[wch.accentSeg, { backgroundColor: '#FFFFFF', opacity: 0.55 }]} />
-          <View style={[wch.accentSeg, { backgroundColor: '#FF0000', opacity: 0.85 }]} />
-        </View>
+        {/* Host-nation accent strip — only for the current (2026) edition */}
+        {isCurrentSeason && (
+          <View style={wch.accentStrip} pointerEvents="none">
+            {/* MX */}
+            <View style={[wch.accentSeg, { backgroundColor: '#006847' }]} />
+            <View style={[wch.accentSeg, { backgroundColor: '#FFFFFF', opacity: 0.55 }]} />
+            <View style={[wch.accentSeg, { backgroundColor: '#CE1126' }]} />
+            {/* divider */}
+            <View style={[wch.accentSeg, { backgroundColor: 'transparent' }]} />
+            {/* USA */}
+            <View style={[wch.accentSeg, { backgroundColor: '#B22234' }]} />
+            <View style={[wch.accentSeg, { backgroundColor: '#FFFFFF', opacity: 0.55 }]} />
+            <View style={[wch.accentSeg, { backgroundColor: '#3C3B6E' }]} />
+            {/* divider */}
+            <View style={[wch.accentSeg, { backgroundColor: 'transparent' }]} />
+            {/* CAN */}
+            <View style={[wch.accentSeg, { backgroundColor: '#FF0000', opacity: 0.85 }]} />
+            <View style={[wch.accentSeg, { backgroundColor: '#FFFFFF', opacity: 0.55 }]} />
+            <View style={[wch.accentSeg, { backgroundColor: '#FF0000', opacity: 0.85 }]} />
+          </View>
+        )}
 
         {/* Trophy */}
         <Text style={wch.trophy}>🏆</Text>
 
-        {/* Title */}
+        {/* Title — "MUNDIAL" + year, with year in a tappable pill when
+            multiple editions are available */}
         <Text style={wch.title}>{t('worldcup.heroTitle')}</Text>
+        <View style={{ marginTop: 4 }}>
+          <SeasonSelector
+            seasons={seasons}
+            selectedSeasonId={selectedSeasonId}
+            onSelect={onSelectSeason}
+            pillLabel={yearLabel}
+            mode="dark"
+          />
+        </View>
 
-        {/* Host flags */}
-        <Text style={wch.hosts}>🇲🇽 · 🇺🇸 · 🇨🇦</Text>
+        {/* Host flags — only for current edition (2026 → MX/USA/CAN) */}
+        {isCurrentSeason && (
+          <Text style={wch.hosts}>🇲🇽 · 🇺🇸 · 🇨🇦</Text>
+        )}
 
-        {/* Countdown or live indicator */}
-        {wc.phase === 'pre' && (
+        {/* Countdown — only for the current edition (past WCs already ended) */}
+        {isCurrentSeason && wc.phase === 'pre' && (
           <View style={wch.countdownRow}>
             <WCTimerBlock value={padTwo(wc.days)}    label={t('preview.days').toUpperCase()} />
             <Text style={wch.colon}>:</Text>
@@ -844,7 +877,7 @@ const WorldCupHeroHeader: React.FC<WorldCupHeroProps> = ({ isFollowing, onToggle
           </View>
         )}
 
-        {wc.phase === 'live' && (
+        {isCurrentSeason && wc.phase === 'live' && (
           <View style={wch.liveRow}>
             <View style={wch.liveDot} />
             <Text style={wch.liveText}>
@@ -1213,14 +1246,30 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
   const { isFollowingLeague, toggleFollowLeague } = useFavorites();
 
-  const { data, loading } = useLeagueDetail(leagueId, leagueName, leagueLogo, seasonId);
+  // ── Season picker state ────────────────────────────────────────────────────
+  // Lets the user navigate to past editions of the competition (WC 2014,
+  // Premier League 2019/2020, etc.). Defaults to whatever season was passed
+  // in route.params (the current season for normal navigation).
+  const availableSeasons: AvailableSeason[] = useAvailableSeasons(leagueId);
+  const [selectedSeasonId, setSelectedSeasonId] = useState<number | null>(seasonId ?? null);
+
+  const { data, loading } = useLeagueDetail(leagueId, leagueName, leagueLogo, selectedSeasonId ?? seasonId);
 
   const leagueConfig = getLeagueConfig(leagueId);
   const isCup = leagueConfig?.isCup ?? false;
 
   // Cup bracket — only fetched when the league is a cup competition
-  const cupSeasonId = isCup ? (data?.seasonId ?? leagueConfig?.currentSeasonId ?? null) : null;
+  const cupSeasonId = isCup
+    ? (selectedSeasonId ?? data?.seasonId ?? leagueConfig?.currentSeasonId ?? null)
+    : null;
   const { rounds: cupRoundsAll, loading: bracketLoading } = useCupBracket(cupSeasonId);
+
+  // Is the user currently viewing the live/current season of this competition?
+  const isCurrentSeason = (() => {
+    if (!selectedSeasonId) return true; // default state before user picks
+    const sel = availableSeasons.find(s => s.id === selectedSeasonId);
+    return sel ? sel.current : (selectedSeasonId === leagueConfig?.currentSeasonId);
+  })();
   // Only show knockout rounds in the Bracket tab (Group Stage is in Partidos)
   const cupRounds = cupRoundsAll.filter(r => {
     const n = r.name.toLowerCase();
@@ -1374,6 +1423,10 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
             isFollowing={isFollowing}
             onToggleFollow={() => toggleFollowLeague(String(leagueId))}
             t={t}
+            seasons={availableSeasons}
+            selectedSeasonId={selectedSeasonId ?? seasonId ?? null}
+            onSelectSeason={setSelectedSeasonId}
+            isCurrentSeason={isCurrentSeason}
           />
         ) : (
           <View style={[s.hero, { backgroundColor: headerBg }]}>
@@ -1395,7 +1448,20 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
               {displayCountry ? (
                 <Text style={[s.heroCountry, { color: hTextSoft }]}>{displayCountry}</Text>
               ) : null}
-              {displaySeason ? (
+              {/* When multiple seasons are available, replace the static
+                  season label with a tappable picker. Falls back to the
+                  plain text label for leagues with only one known season. */}
+              {availableSeasons.length > 1 ? (
+                <>
+                  <Text style={[s.heroDot, { color: hTextSoft }]}>·</Text>
+                  <SeasonSelector
+                    seasons={availableSeasons}
+                    selectedSeasonId={selectedSeasonId ?? seasonId ?? null}
+                    onSelect={setSelectedSeasonId}
+                    mode="auto"
+                  />
+                </>
+              ) : displaySeason ? (
                 <>
                   <Text style={[s.heroDot, { color: hTextSoft }]}>·</Text>
                   <Text style={[s.heroSeason, { color: hTextSoft }]}>{displaySeason}</Text>

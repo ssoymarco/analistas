@@ -1048,6 +1048,12 @@ const en: TranslationKeys = {
     noHighlights: 'No key events',
   },
 
+  // ── Season picker ──────────────────────────────────────────────────────────
+  season: {
+    pickerTitle: 'Pick a season',
+    live: 'Live',
+  },
+
   // ── World Cup 2026 hero header ────────────────────────────────────────────
   worldcup: {
     heroTitle: 'WORLD CUP 2026',

@@ -97,6 +97,20 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /// season_index/{leagueId} — list of available seasons per league
+    /// Powers the season picker dropdown in LeagueDetailScreen.
+    match /season_index/{leagueId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    /// cup_brackets/{seasonId} — cached bracket data for past tournaments
+    /// Populated on-demand the first time a user opens a past WC/cup edition.
+    match /cup_brackets/{seasonId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     // ── Deny everything else (including _meta) ────────────────────────────────
     // _meta/livescoresSnapshot is internal diff state for Cloud Functions only —
     // no client should ever need to read it.

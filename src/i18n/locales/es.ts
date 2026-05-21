@@ -1066,6 +1066,12 @@ const es = {
     noHighlights: 'Sin eventos destacados',
   },
 
+  // ── Season picker ──────────────────────────────────────────────────────────
+  season: {
+    pickerTitle: 'Elegir temporada',
+    live: 'En curso',
+  },
+
   // ── Mundial 2026 hero header ──────────────────────────────────────────────
   worldcup: {
     heroTitle: 'MUNDIAL 2026',

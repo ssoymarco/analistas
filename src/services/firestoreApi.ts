@@ -309,6 +309,58 @@ export function subscribeTopScorers(
   );
 }
 
+// ── Season index (powers the season-picker dropdown) ────────────────────────
+
+/** One available season for a league — element of SeasonIndexDoc.seasons */
+export interface AvailableSeason {
+  id:       number;
+  name:     string;     // "2025/2026", "2014", "Apertura 2026" — directly from SportMonks
+  year:     number;     // primary sort key (newest first)
+  current:  boolean;    // true when SportMonks marks the season as is_current
+  finished: boolean;
+  pending:  boolean;
+}
+
+interface SeasonIndexDoc {
+  leagueId:   number;
+  leagueName: string;
+  seasons:    AvailableSeason[];
+  updatedAt:  unknown;
+}
+
+/**
+ * One-shot fetch of the list of seasons available for a league. Returns an
+ * empty array when the league has never been crawled (caller should fall
+ * back to a single-season UI in that case).
+ */
+export async function getAvailableSeasons(leagueId: number): Promise<AvailableSeason[]> {
+  const snap = await getDoc(doc(db, 'season_index', String(leagueId)));
+  if (!snap.exists()) return [];
+  const data = snap.data() as SeasonIndexDoc;
+  return Array.isArray(data.seasons) ? data.seasons : [];
+}
+
+/**
+ * Subscribe to the season list for a league. Fires immediately with the
+ * current list and again whenever the season_index doc is rewritten (e.g.
+ * after a new crawl pass that adds a fresh season).
+ */
+export function subscribeAvailableSeasons(
+  leagueId: number,
+  onChange: (seasons: AvailableSeason[]) => void,
+  onError?: (err: Error) => void,
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, 'season_index', String(leagueId)),
+    snap => {
+      if (!snap.exists()) { onChange([]); return; }
+      const data = snap.data() as SeasonIndexDoc;
+      onChange(Array.isArray(data.seasons) ? data.seasons : []);
+    },
+    err => onError?.(err),
+  );
+}
+
 // ── Internal helpers (exported for tests / advanced use) ─────────────────────
 
 /** Whether a given date is within the Cloud Functions sync window (±1 day). */

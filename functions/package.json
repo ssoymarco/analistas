@@ -11,7 +11,8 @@
     "lint": "eslint src/",
     "clean": "rm -rf lib/",
     "crawl": "npm run build && node lib/scripts/crawl-historical.js",
-    "crawl:reset": "rm -f .crawl-progress.json && echo 'crawl progress reset'"
+    "crawl:reset": "rm -f .crawl-progress.json && echo 'crawl progress reset'",
+    "rebuild:index": "npm run build && node lib/scripts/rebuild-season-index.js"
   },
   "engines": {
     "node": "22"
