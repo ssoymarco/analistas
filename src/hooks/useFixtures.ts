@@ -20,10 +20,7 @@ import {
   groupMatchesByLeague,
   type LeagueWithMatches,
 } from '../services/sportsApi';
-import {
-  subscribeFixturesByDate,
-  isWithinFirestoreSyncWindow,
-} from '../services/firestoreApi';
+import { subscribeFixturesByDate } from '../services/firestoreApi';
 import type { Match } from '../data/types';
 
 interface UseFixturesResult {
@@ -69,8 +66,6 @@ export function useFixtures(date: string): UseFixturesResult {
     return () => { isMounted.current = false; };
   }, []);
 
-  const useFirestore = isWithinFirestoreSyncWindow(date);
-
   // Apply sort + group in a single pass
   const commit = useCallback((raw: Match[]) => {
     const sorted = [...raw].sort(sortForDisplay);
@@ -79,12 +74,14 @@ export function useFixtures(date: string): UseFixturesResult {
     setIsPolling(sorted.some(m => m.status === 'live'));
   }, []);
 
-  // Proxy load — used outside the sync window, on Firestore errors, and on
-  // manual pull-to-refresh (which hits Firestore's cached data + a proxy fresh
-  // fetch in parallel, but we keep it simple and re-fetch from proxy).
-  const loadFromProxy = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+  // Emergency-only proxy load. ALL date queries now read from Firestore (the
+  // 2026-05 historical crawl wrote ~282k fixtures spanning every league SM
+  // covers — there's no "outside the sync window" anymore). This function
+  // is invoked exclusively when Firestore returns an error on the first
+  // subscription emit (network down, permissions, etc.). Any other usage
+  // would re-introduce per-user SportMonks calls and break the "scales to
+  // any user count" property of the architecture.
+  const loadFromProxyOnError = useCallback(async () => {
     setError(null);
     try {
       const data = await getFixturesByDate(date);
@@ -101,40 +98,47 @@ export function useFixtures(date: string): UseFixturesResult {
     }
   }, [date, commit]);
 
-  // Main effect — subscribe to Firestore or fetch from proxy
+  // Main effect — always subscribe to Firestore. onSnapshot pushes server
+  // changes (~100ms latency) so the displayed data is as fresh as anything
+  // the proxy could fetch. Proxy fallback only fires on a hard error.
   useEffect(() => {
-    if (useFirestore) {
-      setLoading(true);
-      setError(null);
-      let receivedFirstSnapshot = false;
+    setLoading(true);
+    setError(null);
+    let receivedFirstSnapshot = false;
 
-      const unsubscribe = subscribeFixturesByDate(
-        date,
-        data => {
-          if (!isMounted.current) return;
-          receivedFirstSnapshot = true;
-          commit(data);
-          setLoading(false);
-        },
-        err => {
-          if (!isMounted.current) return;
-          // If we never got a first snapshot, fall back to the proxy fully.
-          // If we did, keep the displayed data and report the error silently —
-          // the next reconnection will resume the stream.
-          if (!receivedFirstSnapshot) {
-            console.warn('[useFixtures] Firestore unavailable, using proxy:', err.message);
-            loadFromProxy(false);
-          }
-        },
-      );
+    const unsubscribe = subscribeFixturesByDate(
+      date,
+      data => {
+        if (!isMounted.current) return;
+        receivedFirstSnapshot = true;
+        commit(data);
+        setLoading(false);
+      },
+      err => {
+        if (!isMounted.current) return;
+        // If we never got a first snapshot, fall back to the proxy fully.
+        // If we did, keep the displayed data and report the error silently
+        // — the next reconnection will resume the stream.
+        if (!receivedFirstSnapshot) {
+          console.warn('[useFixtures] Firestore unavailable, using proxy:', err.message);
+          loadFromProxyOnError();
+        }
+      },
+    );
 
-      return unsubscribe;
-    }
-    // Outside sync window — proxy only
-    loadFromProxy(false);
-  }, [date, useFirestore, commit, loadFromProxy]);
+    return unsubscribe;
+  }, [date, commit, loadFromProxyOnError]);
 
-  const refresh = useCallback(() => loadFromProxy(true), [loadFromProxy]);
+  // Pull-to-refresh: no-op against the network. Firestore's onSnapshot is
+  // already live — by the time the user releases the pull, the displayed
+  // data is already current. We give a short visual refreshing pulse so the
+  // gesture feels acknowledged.
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => {
+      if (isMounted.current) setRefreshing(false);
+    }, 300);
+  }, []);
 
   return { matches, leagues, loading, refreshing, error, refresh, isPolling };
 }

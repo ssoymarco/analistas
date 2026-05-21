@@ -11,7 +11,6 @@
 
 import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
-import { getLeagueIdChunks } from './config';
 import { fetchFixturesByDate } from './sportmonks';
 import { mapFixtureToMatchDoc } from './mappers';
 import type { MatchDoc } from './types';
@@ -43,29 +42,34 @@ function getTargetDates(): string[] {
 }
 
 /**
- * Main handler: fetch all fixtures for 3 dates across all leagues.
- * Writes/updates every fixture as a matches/{matchId} document.
+ * Main handler: fetch all fixtures for 3 dates across ALL leagues SportMonks
+ * covers (no league filter). Writes/updates every fixture as a
+ * matches/{matchId} document.
+ *
+ * Why no filter: the previous version restricted to the 51 leagues in
+ * config.ts to keep API calls lean, but this caused the Firestore-backed
+ * "Hoy" tab to silently drop ~10-15 matches/day from leagues outside the
+ * config (women's leagues, lower divisions, regional friendlies, etc.).
+ * Pull-to-refresh used the proxy with no filter and showed them, which
+ * looked like a sync bug to users. The proxy and Firestore now have parity.
  */
 export async function syncFixturesHandler(): Promise<void> {
   const dates = getTargetDates();
-  const leagueChunks = getLeagueIdChunks(25);
 
-  logger.info(`📅 syncFixtures: syncing ${dates.length} dates × ${leagueChunks.length} league chunks`);
+  logger.info(`📅 syncFixtures: syncing ${dates.length} dates (all leagues)`);
 
   const allMatchDocs: MatchDoc[] = [];
 
   for (const date of dates) {
-    for (const leagueIds of leagueChunks) {
-      try {
-        const fixtures = await fetchFixturesByDate(date, leagueIds);
+    try {
+      const fixtures = await fetchFixturesByDate(date);
 
-        for (const fixture of fixtures) {
-          const doc = mapFixtureToMatchDoc(fixture);
-          if (doc) allMatchDocs.push(doc);
-        }
-      } catch (err) {
-        logger.error(`Failed to fetch fixtures for ${date} (leagues: ${leagueIds.slice(0, 40)}...):`, err);
+      for (const fixture of fixtures) {
+        const doc = mapFixtureToMatchDoc(fixture);
+        if (doc) allMatchDocs.push(doc);
       }
+    } catch (err) {
+      logger.error(`Failed to fetch fixtures for ${date}:`, err);
     }
   }
 

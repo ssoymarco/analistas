@@ -46,7 +46,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.syncFixturesHandler = syncFixturesHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
-const config_1 = require("./config");
 const sportmonks_1 = require("./sportmonks");
 const mappers_1 = require("./mappers");
 /**
@@ -71,27 +70,32 @@ function getTargetDates() {
     ];
 }
 /**
- * Main handler: fetch all fixtures for 3 dates across all leagues.
- * Writes/updates every fixture as a matches/{matchId} document.
+ * Main handler: fetch all fixtures for 3 dates across ALL leagues SportMonks
+ * covers (no league filter). Writes/updates every fixture as a
+ * matches/{matchId} document.
+ *
+ * Why no filter: the previous version restricted to the 51 leagues in
+ * config.ts to keep API calls lean, but this caused the Firestore-backed
+ * "Hoy" tab to silently drop ~10-15 matches/day from leagues outside the
+ * config (women's leagues, lower divisions, regional friendlies, etc.).
+ * Pull-to-refresh used the proxy with no filter and showed them, which
+ * looked like a sync bug to users. The proxy and Firestore now have parity.
  */
 async function syncFixturesHandler() {
     const dates = getTargetDates();
-    const leagueChunks = (0, config_1.getLeagueIdChunks)(25);
-    logger.info(`📅 syncFixtures: syncing ${dates.length} dates × ${leagueChunks.length} league chunks`);
+    logger.info(`📅 syncFixtures: syncing ${dates.length} dates (all leagues)`);
     const allMatchDocs = [];
     for (const date of dates) {
-        for (const leagueIds of leagueChunks) {
-            try {
-                const fixtures = await (0, sportmonks_1.fetchFixturesByDate)(date, leagueIds);
-                for (const fixture of fixtures) {
-                    const doc = (0, mappers_1.mapFixtureToMatchDoc)(fixture);
-                    if (doc)
-                        allMatchDocs.push(doc);
-                }
+        try {
+            const fixtures = await (0, sportmonks_1.fetchFixturesByDate)(date);
+            for (const fixture of fixtures) {
+                const doc = (0, mappers_1.mapFixtureToMatchDoc)(fixture);
+                if (doc)
+                    allMatchDocs.push(doc);
             }
-            catch (err) {
-                logger.error(`Failed to fetch fixtures for ${date} (leagues: ${leagueIds.slice(0, 40)}...):`, err);
-            }
+        }
+        catch (err) {
+            logger.error(`Failed to fetch fixtures for ${date}:`, err);
         }
     }
     // Batch write all match documents
