@@ -59,10 +59,12 @@ exports.syncFixtures = (0, scheduler_1.onSchedule)({
 });
 /**
  * Sync league standings for all configured leagues.
- * Runs every 6 hours — standings don't change that frequently.
+ * Runs every 1 hour — keeps tables fresh after match days.
+ * Cost: 51 leagues × 24 executions/day = 1,224 calls/day (1.7% of Pro limit).
+ * Future improvement: switch to event-driven sync from pollLivescores matchEnd.
  */
 exports.syncStandings = (0, scheduler_1.onSchedule)({
-    schedule: 'every 6 hours',
+    schedule: 'every 1 hours',
     timeoutSeconds: 540,
     memory: '256MiB',
     region: 'us-central1',
@@ -73,10 +75,13 @@ exports.syncStandings = (0, scheduler_1.onSchedule)({
 });
 /**
  * Sync top scorers for all configured leagues.
- * Runs every 12 hours — scorer rankings update slowly.
+ * Runs every 1 hour — keeps scorer rankings near-real-time so a goal at
+ * 18:42 shows up in the table by 19:00 at the latest.
+ * Cost: 51 leagues × 24 executions/day = 1,224 calls/day (1.7% of Pro limit).
+ * Future improvement: switch to event-driven sync from pollLivescores matchEnd.
  */
 exports.syncTopScorers = (0, scheduler_1.onSchedule)({
-    schedule: 'every 12 hours',
+    schedule: 'every 1 hours',
     timeoutSeconds: 540,
     memory: '256MiB',
     region: 'us-central1',

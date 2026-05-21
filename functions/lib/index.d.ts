@@ -30,11 +30,16 @@ export declare const pollLivescores: import("firebase-functions/v2/scheduler").S
 export declare const syncFixtures: import("firebase-functions/v2/scheduler").ScheduleFunction;
 /**
  * Sync league standings for all configured leagues.
- * Runs every 6 hours — standings don't change that frequently.
+ * Runs every 1 hour — keeps tables fresh after match days.
+ * Cost: 51 leagues × 24 executions/day = 1,224 calls/day (1.7% of Pro limit).
+ * Future improvement: switch to event-driven sync from pollLivescores matchEnd.
  */
 export declare const syncStandings: import("firebase-functions/v2/scheduler").ScheduleFunction;
 /**
  * Sync top scorers for all configured leagues.
- * Runs every 12 hours — scorer rankings update slowly.
+ * Runs every 1 hour — keeps scorer rankings near-real-time so a goal at
+ * 18:42 shows up in the table by 19:00 at the latest.
+ * Cost: 51 leagues × 24 executions/day = 1,224 calls/day (1.7% of Pro limit).
+ * Future improvement: switch to event-driven sync from pollLivescores matchEnd.
  */
 export declare const syncTopScorers: import("firebase-functions/v2/scheduler").ScheduleFunction;
