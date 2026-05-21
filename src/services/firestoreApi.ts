@@ -138,6 +138,44 @@ function teamFromDoc(t: TeamDoc): Team {
 }
 
 function matchFromDoc(d: MatchDoc): Match {
+  // ── Timezone fix ──
+  // The mapper on the Cloud Function stores `time` as the raw UTC HH:MM
+  // because the server doesn't know the user's timezone. For scheduled
+  // matches we recompute the display time from `startingAtUtc` here so the
+  // client renders the kickoff in the device's local time (matches the
+  // proxy-path behaviour, where `getTimeDisplay` does the same conversion).
+  // Live ('45'', 'HT') and finished ('FT') strings are left untouched.
+  let time = d.time;
+  if (d.status === 'scheduled' && d.startingAtUtc) {
+    try {
+      const iso = d.startingAtUtc.replace(' ', 'T').replace(/Z?$/, 'Z');
+      const dt = new Date(iso);
+      if (!isNaN(dt.getTime())) {
+        const hh = dt.getHours().toString().padStart(2, '0');
+        const mm = dt.getMinutes().toString().padStart(2, '0');
+        time = `${hh}:${mm}`;
+      }
+    } catch { /* keep stored value as best-effort fallback */ }
+  }
+
+  // Derive the LOCAL date from the kickoff timestamp. The doc's `d.date` is
+  // the UTC date written by the Cloud Function (used to query Firestore in
+  // bulk), but for client filtering ("does this match belong to local
+  // today?") we need the local-tz date. This keeps Match.date semantically
+  // identical to what the proxy path produces.
+  let date = d.date;
+  if (d.startingAtUtc) {
+    try {
+      const dt = new Date(d.startingAtUtc.replace(' ', 'T').replace(/Z?$/, 'Z'));
+      if (!isNaN(dt.getTime())) {
+        const y  = dt.getFullYear();
+        const mo = (dt.getMonth() + 1).toString().padStart(2, '0');
+        const da = dt.getDate().toString().padStart(2, '0');
+        date = `${y}-${mo}-${da}`;
+      }
+    } catch { /* keep d.date as fallback */ }
+  }
+
   return {
     id:             d.id,
     homeTeam:       teamFromDoc(d.homeTeam),
@@ -145,12 +183,12 @@ function matchFromDoc(d: MatchDoc): Match {
     homeScore:      d.homeScore,
     awayScore:      d.awayScore,
     status:         d.status,
-    time:           d.time,
+    time,
     minute:         d.minute ?? undefined,
     league:         d.league,
     leagueLogo:     d.leagueLogo || undefined,
     leagueId:       d.leagueId,
-    date:           d.date,
+    date,
     startingAtUtc:  d.startingAtUtc || undefined,
     seasonId:       d.seasonId ?? undefined,
     homeScoreHT:    d.homeScoreHT ?? undefined,
@@ -200,14 +238,47 @@ export async function getLivescoresFromFirestore(): Promise<Match[]> {
 }
 
 /**
+ * Compute the UTC dates that overlap with a local-tz calendar day. For users
+ * in west-of-UTC timezones (the Americas) the local day always spans 2 UTC
+ * dates (e.g. local Wed 21 May in Mexico City = UTC 21 May 06:00 → UTC 22 May
+ * 05:59). Mirrors `getUtcDatesForLocalDay` in sportsApi.ts; duplicated here to
+ * keep this module free of circular imports.
+ */
+function getUtcDatesForLocalDay(localDateStr: string): string[] {
+  // Parsing without 'Z' uses the device's local timezone (intentional).
+  const startOfDay = new Date(`${localDateStr}T00:00:00`);
+  const endOfDay   = new Date(`${localDateStr}T23:59:59`);
+  const utcStart = startOfDay.toISOString().slice(0, 10);
+  const utcEnd   = endOfDay.toISOString().slice(0, 10);
+  return utcStart === utcEnd ? [utcStart] : [utcStart, utcEnd];
+}
+
+/**
  * Fetch all matches for a given local date ("YYYY-MM-DD"). The Cloud Functions
  * keep yesterday/today/tomorrow synced — dates outside that window will return
  * an empty array (caller should fall back to the SportMonks proxy).
+ *
+ * Queries every UTC date that overlaps with the local day (1 or 2 depending on
+ * timezone), then filters client-side back to the local date. Without this,
+ * matches whose UTC date differs from the local date (e.g. 8pm CDMX kickoffs,
+ * which are stored as UTC date +1) would be missed.
  */
-export async function getFixturesByDateFromFirestore(date: string): Promise<Match[]> {
-  const q = query(collection(db, 'matches'), where('date', '==', date));
-  const snap = await getDocs(q);
-  return snap.docs.map(d => matchFromDoc(d.data() as MatchDoc));
+export async function getFixturesByDateFromFirestore(localDate: string): Promise<Match[]> {
+  const utcDates = getUtcDatesForLocalDay(localDate);
+  const seen = new Set<string>();
+  const results: Match[] = [];
+  await Promise.all(utcDates.map(async utcDate => {
+    const q = query(collection(db, 'matches'), where('date', '==', utcDate));
+    const snap = await getDocs(q);
+    for (const d of snap.docs) {
+      const m = matchFromDoc(d.data() as MatchDoc);
+      if (m.date !== localDate) continue;       // outside the local day
+      if (seen.has(m.id)) continue;             // dedupe (rare overlap)
+      seen.add(m.id);
+      results.push(m);
+    }
+  }));
+  return results;
 }
 
 /**
@@ -254,19 +325,59 @@ export function subscribeLivescores(
 }
 
 /**
- * Subscribe to all matches for a given local date. Returns unsubscribe.
+ * Subscribe to all matches for a given LOCAL date (device timezone).
+ *
+ * Because the Cloud Function indexes match documents by their UTC date and a
+ * single local day spans up to 2 UTC dates (in any non-UTC zone), this fans
+ * out to one onSnapshot per UTC date that overlaps and merges the results.
+ * The combined set is then filtered client-side to the matches whose KICKOFF
+ * actually falls on the user's local day.
+ *
+ * Returns a single unsubscribe that tears down all underlying listeners.
  */
 export function subscribeFixturesByDate(
-  date: string,
+  localDate: string,
   onChange: (matches: Match[]) => void,
   onError?: (err: Error) => void,
 ): Unsubscribe {
-  const q = query(collection(db, 'matches'), where('date', '==', date));
-  return onSnapshot(
-    q,
-    snap => onChange(snap.docs.map(d => matchFromDoc(d.data() as MatchDoc))),
-    err => onError?.(err),
-  );
+  const utcDates = getUtcDatesForLocalDay(localDate);
+  // Per-UTC-date snapshot cache keyed by docId, so each listener only owns
+  // its own slice of the merged view.
+  const buckets: Record<string, Map<string, Match>> = {};
+  for (const d of utcDates) buckets[d] = new Map();
+
+  const emit = () => {
+    const seen = new Set<string>();
+    const out: Match[] = [];
+    for (const d of utcDates) {
+      for (const m of buckets[d].values()) {
+        if (m.date !== localDate) continue;  // outside the local day
+        if (seen.has(m.id)) continue;        // rare overlap (race conditions)
+        seen.add(m.id);
+        out.push(m);
+      }
+    }
+    onChange(out);
+  };
+
+  const unsubs = utcDates.map(utcDate => {
+    const q = query(collection(db, 'matches'), where('date', '==', utcDate));
+    return onSnapshot(
+      q,
+      snap => {
+        const bucket = buckets[utcDate];
+        bucket.clear();
+        for (const doc of snap.docs) {
+          const m = matchFromDoc(doc.data() as MatchDoc);
+          bucket.set(m.id, m);
+        }
+        emit();
+      },
+      err => onError?.(err),
+    );
+  });
+
+  return () => unsubs.forEach(u => u());
 }
 
 /**
