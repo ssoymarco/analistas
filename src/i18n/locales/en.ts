@@ -688,7 +688,7 @@ const en: TranslationKeys = {
     aiPrediction: 'Analistas AI · expected lineup',
     predictionTitle: 'AI Prediction',
     predictionSubtitle: 'Analistas predictive engine',
-    availableSoon: 'Lineups will be published 1 hour before kick-off',
+    availableSoon: 'Expected lineups appear 1-3 days before kick-off. Confirmed lineups, 1 hour before.',
     shareHint: 'Share the lineup or send it to a friend',
     shareLineupTitle: 'Share the lineup',
     shareLineupDesc: 'Generate an image of the starting eleven and share it with your friends on WhatsApp, Instagram and more.',

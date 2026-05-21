@@ -704,7 +704,7 @@ const es = {
     aiPrediction: 'Analistas IA · formación esperada',
     predictionTitle: 'Predicción IA',
     predictionSubtitle: 'Motor predictivo de Analistas',
-    availableSoon: 'Las alineaciones se publicarán 1 hora antes del partido',
+    availableSoon: 'Las alineaciones probables aparecen 1-3 días antes. Las confirmadas, 1 hora antes del partido.',
     shareHint: 'Comparte la alineación o envíasela a un amigo',
     shareLineupTitle: 'Comparte la alineación',
     shareLineupDesc: 'Genera una imagen del once inicial y compártela con tus amigos en WhatsApp, Instagram y más.',
