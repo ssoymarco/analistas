@@ -361,6 +361,20 @@ export const PerfilScreen: React.FC = () => {
   const [showNameInHeader, setShowNameInHeader] = useState(false);
   const { timeFormat, setTimeFormat } = useTimeFormat();
   const [momiosEnabled, setMomiosEnabled] = useState(true);
+  const [wcBannerEnabled, setWcBannerEnabled] = useState(true);
+
+  // Hydrate the World Cup banner master toggle on mount
+  useEffect(() => {
+    AsyncStorage.getItem('analistas_wc_banner_enabled')
+      .then(v => setWcBannerEnabled(v !== '0'))
+      .catch(() => {});
+  }, []);
+
+  const toggleWcBanner = useCallback(() => {
+    const next = !wcBannerEnabled;
+    setWcBannerEnabled(next);
+    AsyncStorage.setItem('analistas_wc_banner_enabled', next ? '1' : '0').catch(() => {});
+  }, [wcBannerEnabled]);
   const [selectedLang, setSelectedLang] = useState(i18n.language || 'es');
   const [levelSheetVisible, setLevelSheetVisible] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
@@ -847,6 +861,14 @@ export const PerfilScreen: React.FC = () => {
               setMomiosEnabled(true);
             }
           }} activeColor="#10b981" icon={momiosEnabled ? '📊' : '🔒'} />} />
+          <MenuRow
+            c={c}
+            emoji="🌍"
+            label="Banner Mundial 2026"
+            sublabel={wcBannerEnabled ? 'Visible en Partidos' : 'Oculto'}
+            iconBg="rgba(194,24,91,0.15)"
+            rightElement={<CustomToggle value={wcBannerEnabled} onToggle={toggleWcBanner} activeColor="#C2185B" icon="🌍" />}
+          />
           <MenuRow c={c} emoji="🗑️" label={t('profile.clearCache')} sublabel={t('profile.freeSpace')} iconBg="rgba(239,68,68,0.1)" isLast onPress={handleClearCache} />
         </View>
 

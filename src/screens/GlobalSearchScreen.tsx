@@ -263,15 +263,17 @@ export const GlobalSearchScreen: React.FC = () => {
       }
     }
 
-    // Leagues — match name or country (bilingual: Spain ↔ España, Brazil ↔ Brasil, etc.)
+    // Leagues — match name, country (bilingual), OR hidden aliases (e.g. "FIFA",
+    // "world cup" → Mundial 2026 without exposing trademarked terms in the UI).
     for (const l of leagues) {
-      if (normalize(l.name).includes(q) || matchesCountry(l.country, q)) {
+      const aliasHit = l.searchAliases?.some(a => normalize(a).includes(q) || q.includes(normalize(a)));
+      if (normalize(l.name).includes(q) || matchesCountry(l.country, q) || aliasHit) {
         out.push({
           id: `league-${l.id}`,
           type: 'league',
-          name: l.name,
+          name: l.name,        // displayed name is always the safe label
           subtitle: l.country,
-          image: l.image,
+          image: l.suppressLogo ? undefined : l.image,
           data: l,
         });
       }

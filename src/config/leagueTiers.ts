@@ -27,6 +27,7 @@ export const LEAGUE_TIER_1 = new Set<number>([
   944,  // Saudi Pro League
   72,   // Eredivisie (Netherlands)
   1082, // International Friendlies
+  732,  // FIFA World Cup 2026 ⭐
 ]);
 
 // ── Tier 2: Important regional leagues ────────────────────────────────────────

@@ -1,6 +1,7 @@
 // ── Team Detail Screen ────────────────────────────────────────────────────────
-// Full team profile: sticky compact header, 4 tabs (Resumen, Plantilla, Partidos, Tabla).
-// Dark/Light mode responsive. Uses real SportMonks data.
+// Premium national-team page inspired by FotMob + BeSoccer.
+// Tabs: Resumen → Partidos → Plantilla → Tabla
+// Dark/Light mode. All strings via i18n. Real SportMonks data.
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -11,7 +12,6 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
-  Platform,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,555 +28,1186 @@ import { useFavorites } from '../contexts/FavoritesContext';
 import { useTeamDetail } from '../hooks/useTeamDetail';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import type { TeamDetailData, SquadPlayer, RecentMatch, FormEntry } from '../hooks/useTeamDetail';
-import type { LeagueStanding } from '../data/types';
+import type { LeagueStanding, Match } from '../data/types';
 import { SkeletonTeamDetail } from '../components/Skeleton';
 import { BackArrow, ShareIcon } from '../components/NavIcons';
+import { translateNationalTeam } from '../utils/nationalTeams';
+import { CupBracketView } from '../components/CupBracketView';
+import { useCupBracket } from '../hooks/useCupBracket';
+import type { CupTie } from '../services/sportsApi';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'TeamDetail'>;
-type Tab = 'resumen' | 'plantilla' | 'partidos' | 'tabla';
+type Tab = 'resumen' | 'partidos' | 'plantilla' | 'tabla' | 'bracket';
+type MatchFilter = 'all' | 'wc' | 'friendly';
 
+// ── Competition classifier ───────────────────────────────────────────────────
+type CompType = 'wc' | 'friendly' | 'other';
+interface CompInfo { type: CompType; badge: string; color: string; short: string }
 
-// ── Form badges ──────────────────────────────────────────────────────────────
-const FormBadges: React.FC<{ form: FormEntry[] }> = ({ form }) => {
-  const { t } = useTranslation();
+function getCompetitionInfo(leagueName: string): CompInfo {
+  const n = leagueName.toLowerCase();
+  if (n.includes('world cup') || n.includes('copa del mundo') || n.includes('mundial') || n.includes('fifa wc')) {
+    return { type: 'wc', badge: '🏆', color: '#C9A227', short: 'Copa' };
+  }
+  if (n.includes('friendly') || n.includes('amistoso') || n.includes('nations') || n.includes('naciones')) {
+    return { type: 'friendly', badge: '🤝', color: '#8E8E93', short: 'Amistoso' };
+  }
+  return { type: 'other', badge: '🏟️', color: '#60a5fa', short: leagueName.slice(0, 12) };
+}
+
+// ── Date formatter ───────────────────────────────────────────────────────────
+function formatMatchDate(dateStr: string, monthsAbbr: string[]): string {
+  const [, mm, dd] = dateStr.split('-');
+  const month = monthsAbbr[parseInt(mm, 10) - 1] ?? '';
+  return `${parseInt(dd, 10)} ${month.toLowerCase()}`;
+}
+
+// ── Logo component — graceful fallback ───────────────────────────────────────
+const TeamLogo: React.FC<{ uri: string; size: number; radius?: number }> = ({ uri, size, radius }) => {
+  const r = radius ?? size / 2;
+  if (uri?.startsWith('http')) {
+    return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: r }} />;
+  }
+  return (
+    <View style={{ width: size, height: size, borderRadius: r, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ fontSize: size * 0.4 }}>⚽</Text>
+    </View>
+  );
+};
+
+// ── Form badges — score bubbles (new design) ─────────────────────────────────
+const FormBadges: React.FC<{ form: FormEntry[]; recentMatches: RecentMatch[] }> = ({ form, recentMatches }) => {
   const colors = { W: '#10b981', D: '#f59e0b', L: '#ef4444' };
-  const labels: Record<string, string> = {
-    W: t('team.formLabels.W'),
-    D: t('team.formLabels.D'),
-    L: t('team.formLabels.L'),
-  };
+  // Build score label from matching finished matches
+  const finished = recentMatches.filter(m => m.result !== null).slice(0, 5);
   return (
-    <View style={{ flexDirection: 'row', gap: 3 }}>
-      {form.map((f, i) => (
-        <View key={i} style={{
-          width: 22, height: 22, borderRadius: 11,
-          backgroundColor: colors[f.result],
-          alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Text style={{ fontSize: 10, fontWeight: '800', color: '#fff' }}>{labels[f.result]}</Text>
-        </View>
-      ))}
-    </View>
-  );
-};
-
-// ══════════════════════════════════════════════════════════════════════════════
-// TAB: Resumen
-// ══════════════════════════════════════════════════════════════════════════════
-
-const ResumenTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
-  const c = useThemeColors();
-  const { t } = useTranslation();
-  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
-  const { info, recentMatches, squad } = data;
-
-  const topPlayers = squad.filter(p => p.positionId !== 24).slice(0, 5);
-
-  return (
-    <View style={{ paddingHorizontal: 16, gap: 12 }}>
-      {/* Info card */}
-      <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Text style={[s.cardTitle, { color: c.textPrimary }]}>{t('team.info')}</Text>
-        {[
-          { icon: '🏟️', label: t('team.stadium'), value: info.venueName },
-          ...(info.venueCapacity > 0 ? [{ icon: '💺', label: t('team.capacity'), value: info.venueCapacity.toLocaleString() }] : []),
-          ...(info.founded > 0 ? [{ icon: '📅', label: t('team.founded'), value: String(info.founded) }] : []),
-          ...(info.coach ? [{ icon: '👔', label: t('team.coach'), value: info.coach }] : []),
-          ...(info.leagueName ? [{ icon: '🏆', label: t('team.league'), value: info.leagueName }] : []),
-        ].map((row, i) => (
-          <View key={i} style={[s.infoRow, { borderTopColor: c.border }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-              <Text style={{ fontSize: 18 }}>{row.icon}</Text>
-              <Text style={[s.infoLabel, { color: c.textSecondary }]}>{row.label}</Text>
-            </View>
-            <Text style={[s.infoValue, { color: c.textPrimary }]}>{row.value}</Text>
-          </View>
-        ))}
-      </View>
-
-      {/* Recent matches */}
-      {recentMatches.length > 0 && (
-        <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[s.cardTitle, { color: c.textPrimary }]}>{t('matches.recentMatches')}</Text>
-          {recentMatches.filter(m => m.isFinished).slice(0, 3).map((m, i) => (
-            <View key={i} style={[s.matchRow, { borderTopColor: c.border }]}>
-              <View style={s.matchTeam}>
-                {m.homeLogo.startsWith('http') ? (
-                  <Image source={{ uri: m.homeLogo }} style={s.matchLogo} />
-                ) : (
-                  <Text style={{ fontSize: 16 }}>⚽</Text>
-                )}
-                <Text style={[s.matchName, { color: c.textPrimary }]} numberOfLines={1}>{m.homeShort}</Text>
-              </View>
-              <View style={s.matchScore}>
-                <Text style={[s.scoreText, { color: c.textPrimary }]}>{m.homeScore}</Text>
-                <Text style={[s.scoreSep, { color: c.textTertiary }]}>-</Text>
-                <Text style={[s.scoreText, { color: c.textPrimary }]}>{m.awayScore}</Text>
-                {m.result && (
-                  <View style={[s.resultDot, {
-                    backgroundColor: m.result === 'W' ? '#10b981' : m.result === 'L' ? '#ef4444' : '#f59e0b',
-                  }]} />
-                )}
-              </View>
-              <View style={[s.matchTeam, { justifyContent: 'flex-end' }]}>
-                <Text style={[s.matchName, { color: c.textPrimary, textAlign: 'right' }]} numberOfLines={1}>{m.awayShort}</Text>
-                {m.awayLogo.startsWith('http') ? (
-                  <Image source={{ uri: m.awayLogo }} style={s.matchLogo} />
-                ) : (
-                  <Text style={{ fontSize: 16 }}>⚽</Text>
-                )}
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Top players */}
-      {topPlayers.length > 0 && (
-        <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[s.cardTitle, { color: c.textPrimary }]}>{t('team.featuredPlayers')}</Text>
-          {topPlayers.map((p, i) => (
-            <TouchableOpacity
-              key={i}
-              style={[s.playerRow, { borderTopColor: c.border }]}
-              activeOpacity={0.7}
-              onPress={() => navigation.push('PlayerDetail', {
-                playerId: p.playerId,
-                playerName: p.displayName,
-                playerImage: p.image,
-                teamName: info.name,
-                teamLogo: info.logo,
-                jerseyNumber: p.number,
-              })}
-            >
-              {p.image.startsWith('http') ? (
-                <Image source={{ uri: p.image }} style={s.playerImg} />
-              ) : (
-                <View style={[s.playerImg, { backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }]}>
-                  <Text style={{ fontSize: 16 }}>⚽</Text>
-                </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={[s.playerName, { color: c.textPrimary }]}>{p.displayName}</Text>
-                <Text style={[s.playerMeta, { color: c.textTertiary }]}>#{p.number} · {p.position}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      <View style={{ height: 20 }} />
-    </View>
-  );
-};
-
-// ══════════════════════════════════════════════════════════════════════════════
-// TAB: Plantilla
-// ══════════════════════════════════════════════════════════════════════════════
-
-const POSITION_GROUPS: { labelKey: string; posId: number }[] = [
-  { labelKey: 'team.positions.goalkeepers', posId: 24 },
-  { labelKey: 'team.positions.defenders', posId: 25 },
-  { labelKey: 'team.positions.midfielders', posId: 26 },
-  { labelKey: 'team.positions.forwards', posId: 27 },
-];
-
-const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
-  const c = useThemeColors();
-  const { t } = useTranslation();
-  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
-
-  return (
-    <View style={{ paddingHorizontal: 16, gap: 8 }}>
-      {POSITION_GROUPS.map(group => {
-        const players = data.squad.filter(p => p.positionId === group.posId);
-        if (players.length === 0) return null;
-
+    <View style={{ flexDirection: 'row', gap: 4 }}>
+      {form.map((f, i) => {
+        const m = finished[i];
+        const label = m ? `${m.homeScore}-${m.awayScore}` : f.result;
         return (
-          <View key={group.posId}>
-            <Text style={[s.sectionLabel, { color: c.textTertiary }]}>{t(group.labelKey)}</Text>
-            <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
-              {players.map((p, i) => (
-                <TouchableOpacity
-                  key={p.id}
-                  style={[s.squadRow, i > 0 && { borderTopWidth: 1, borderTopColor: c.border }]}
-                  activeOpacity={0.7}
-                  onPress={() => navigation.push('PlayerDetail', {
-                    playerId: p.playerId,
-                    playerName: p.displayName,
-                    playerImage: p.image,
-                    teamName: data.info.name,
-                    teamLogo: data.info.logo,
-                    jerseyNumber: p.number,
-                  })}
-                >
-                  {p.image ? (
-                    <Image source={{ uri: p.image }} style={[s.squadNum, { backgroundColor: c.surface }]} />
-                  ) : (
-                    <View style={[s.squadNum, { backgroundColor: c.surface }]}>
-                      <Text style={[s.squadNumText, { color: c.textPrimary }]}>{p.number}</Text>
-                    </View>
-                  )}
-                  <View style={{ flex: 1, gap: 1 }}>
-                    <Text style={[s.squadName, { color: c.textPrimary }]}>{p.displayName}</Text>
-                    <Text style={[s.squadMeta, { color: c.textTertiary }]}>
-                      {p.age > 0 ? t('team.ageYears', { age: p.age }) : ''}
-                    </Text>
-                  </View>
-                  {p.isCaptain && (
-                    <View style={[s.captainBadge, { backgroundColor: '#fbbf24' }]}>
-                      <Text style={s.captainText}>C</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
+          <View key={i} style={{
+            minWidth: 32, height: 26, borderRadius: 7,
+            backgroundColor: colors[f.result],
+            alignItems: 'center', justifyContent: 'center',
+            paddingHorizontal: 5,
+          }}>
+            <Text style={{ fontSize: 10, fontWeight: '800', color: '#fff' }}>{label}</Text>
           </View>
         );
       })}
-      <View style={{ height: 20 }} />
     </View>
   );
 };
 
-// ══════════════════════════════════════════════════════════════════════════════
-// TAB: Partidos (redesigned — current, previous 3, next 3)
-// ══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// RESUMEN TAB
+// ════════════════════════════════════════════════════════════════════════════
 
-/** Convert RecentMatch to a navigable Match object */
-function recentToMatch(m: RecentMatch): import('../data/types').Match {
-  return {
-    id: String(m.id),
-    homeTeam: { id: '0', name: m.homeName, shortName: m.homeShort, logo: m.homeLogo },
-    awayTeam: { id: '0', name: m.awayName, shortName: m.awayShort, logo: m.awayLogo },
-    homeScore: m.homeScore,
-    awayScore: m.awayScore,
-    status: m.isFinished ? 'finished' : 'scheduled',
-    time: m.isFinished ? 'FT' : 'vs',
-    league: m.league,
-    leagueId: '',
-    date: m.date,
-  };
-}
-
-function MatchFixtureCard({
-  m, highlight, label, c, onPress,
-}: { m: RecentMatch; highlight?: boolean; label?: string; c: any; onPress?: () => void }) {
-  const resultColors: Record<string, string> = { W: '#10b981', D: '#f59e0b', L: '#ef4444' };
-  return (
-    <TouchableOpacity
-      style={[
-        s.fixtureRow,
-        { backgroundColor: c.card, borderColor: highlight ? c.accent : c.border },
-        highlight && { borderWidth: 1.5 },
-      ]}
-      activeOpacity={0.7}
-      onPress={onPress}
-    >
-      {label && (
-        <View style={{
-          position: 'absolute', top: -10, left: 14,
-          backgroundColor: c.accent, borderRadius: 8,
-          paddingHorizontal: 8, paddingVertical: 2,
-        }}>
-          <Text style={{ fontSize: 9, fontWeight: '800', color: '#111', letterSpacing: 0.5 }}>{label}</Text>
-        </View>
-      )}
-      <Text style={[s.fixtureDate, { color: c.textTertiary }]}>{m.date}</Text>
-      <View style={s.fixtureTeams}>
-        <View style={s.fixtureTeam}>
-          {m.homeLogo.startsWith('http') ? (
-            <Image source={{ uri: m.homeLogo }} style={s.fixtureLogo} />
-          ) : <Text style={{ fontSize: 14 }}>⚽</Text>}
-          <Text style={[s.fixtureName, { color: c.textPrimary }]} numberOfLines={1}>{m.homeShort}</Text>
-        </View>
-        <View style={s.fixtureScoreWrap}>
-          {m.isFinished ? (
-            <>
-              <Text style={[s.fixtureScore, { color: c.textPrimary }]}>{m.homeScore}</Text>
-              <Text style={[s.fixtureScoreSep, { color: c.textTertiary }]}> </Text>
-              <Text style={[s.fixtureScore, { color: c.textPrimary }]}>{m.awayScore}</Text>
-              {m.result && (
-                <View style={[s.resultDotSmall, { backgroundColor: resultColors[m.result] }]} />
-              )}
-            </>
-          ) : (
-            <Text style={[s.fixtureScore, { color: c.accent, fontSize: 13 }]}>vs</Text>
-          )}
-        </View>
-        <View style={[s.fixtureTeam, { justifyContent: 'flex-end' }]}>
-          <Text style={[s.fixtureName, { color: c.textPrimary, textAlign: 'right' }]} numberOfLines={1}>{m.awayShort}</Text>
-          {m.awayLogo.startsWith('http') ? (
-            <Image source={{ uri: m.awayLogo }} style={s.fixtureLogo} />
-          ) : <Text style={{ fontSize: 14 }}>⚽</Text>}
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-const PartidosTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
-  const c = useThemeColors();
+const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, teamId }) => {
   const { t } = useTranslation();
-  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
-  const [showAll, setShowAll] = useState(false);
-
-  const goToMatch = useCallback((m: RecentMatch) => {
-    navigation.push('MatchDetail', { match: recentToMatch(m) });
-  }, [navigation]);
-
-  if (data.recentMatches.length === 0) {
-    return (
-      <View style={{ alignItems: 'center', paddingTop: 60 }}>
-        <Text style={{ fontSize: 40, marginBottom: 12 }}>📋</Text>
-        <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>{t('matches.noMatchesAvailable')}</Text>
-      </View>
-    );
-  }
-
-  // Split: finished (newest first) and upcoming (soonest first)
-  const finishedMatches = data.recentMatches.filter(m => m.isFinished);
-  const upcomingMatches = data.recentMatches
-    .filter(m => !m.isFinished)
-    .sort((a, b) => a.date.localeCompare(b.date));
-
-  // Last match = most recent finished
-  const lastMatch = finishedMatches[0] ?? null;
-  // Previous = older finished (chronological: oldest first so they appear top)
-  const previousMatches = finishedMatches.slice(1, 4).reverse();
-  // Next 3 upcoming
-  const nextMatches = upcomingMatches.slice(0, 3);
-
-  // All matches for "Ver todos" — chronological order
-  const allSorted = [...data.recentMatches].sort((a, b) => a.date.localeCompare(b.date));
-
-  if (showAll) {
-    return (
-      <View style={{ paddingHorizontal: 16, gap: 6 }}>
-        <TouchableOpacity
-          onPress={() => setShowAll(false)}
-          style={{
-            flexDirection: 'row', alignItems: 'center', gap: 6,
-            paddingVertical: 8,
-          }}
-          activeOpacity={0.7}
-        >
-          <BackArrow color={c.accent} />
-          <Text style={{ fontSize: 13, fontWeight: '700', color: c.accent }}>{t('team.backToSummary')}</Text>
-        </TouchableOpacity>
-        <Text style={[s.sectionLabel, { color: c.textTertiary }]}>
-          {t('team.allMatches', { count: allSorted.length })}
-        </Text>
-        {allSorted.map(m => (
-          <MatchFixtureCard key={m.id} m={m} c={c} onPress={() => goToMatch(m)} />
-        ))}
-        <View style={{ height: 20 }} />
-      </View>
-    );
-  }
-
-  return (
-    <View style={{ paddingHorizontal: 16, gap: 6 }}>
-      {/* Previous matches (oldest first → top of list) */}
-      {previousMatches.length > 0 && (
-        <>
-          <Text style={[s.sectionLabel, { color: c.textTertiary }]}>{t('team.previous')}</Text>
-          {previousMatches.map(m => (
-            <MatchFixtureCard key={m.id} m={m} c={c} onPress={() => goToMatch(m)} />
-          ))}
-        </>
-      )}
-
-      {/* Last match (highlighted — center) */}
-      {lastMatch && (
-        <>
-          <Text style={[s.sectionLabel, { color: c.textTertiary, marginTop: 8 }]}>{t('team.lastMatch')}</Text>
-          <MatchFixtureCard m={lastMatch} highlight c={c} label={t('team.lastMatchLabel')} onPress={() => goToMatch(lastMatch)} />
-        </>
-      )}
-
-      {/* Upcoming matches (below) */}
-      {nextMatches.length > 0 && (
-        <>
-          <Text style={[s.sectionLabel, { color: c.textTertiary, marginTop: 8 }]}>{t('matches.upcoming')}</Text>
-          {nextMatches.map(m => (
-            <MatchFixtureCard key={m.id} m={m} c={c} onPress={() => goToMatch(m)} />
-          ))}
-        </>
-      )}
-
-      {/* Ver todos button */}
-      {data.recentMatches.length > 7 && (
-        <TouchableOpacity
-          onPress={() => setShowAll(true)}
-          style={[s.verTodosBtn, { borderColor: c.border }]}
-          activeOpacity={0.7}
-        >
-          <Text style={[s.verTodosText, { color: c.accent }]}>
-            {t('team.viewAllMatches', { count: data.recentMatches.length })}
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      <View style={{ height: 20 }} />
-    </View>
-  );
-};
-
-// ══════════════════════════════════════════════════════════════════════════════
-// TAB: Tabla (with tappable teams + share button)
-// ══════════════════════════════════════════════════════════════════════════════
-
-const TablaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
   const c = useThemeColors();
-  const { t } = useTranslation();
   const { isDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
-  const tableRef = useRef<any>(null);
+  const monthsAbbr = t('dates.monthsAbbr', { returnObjects: true }) as string[];
+
+  const textSec = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
+  const cardBg  = c.surface;
+  const border  = c.border;
+
+  // Split matches into past / future
+  const today = new Date().toISOString().split('T')[0];
+  const pastMatches   = data.recentMatches.filter(m => m.isFinished || m.date <= today);
+  const futureMatches = data.recentMatches.filter(m => !m.isFinished && m.date > today);
+  const lastMatch  = pastMatches[0] ?? null;
+  const nextMatch  = futureMatches[futureMatches.length - 1] ?? null; // furthest future is last element after sort
+
+  // Actually futureMatches come from sortedRecent (desc), so the nearest next match is the last one
+  // Let's get the actual nearest upcoming: filter raw recentMatches for upcoming, sort asc
+  const upcomingSorted = data.recentMatches
+    .filter(m => !m.isFinished && m.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const nextUp = upcomingSorted[0] ?? null;
+
+  // Group standing
+  const teamStanding = data.teamStanding;
+  const groupStandings = useMemo(() => {
+    if (!teamStanding?.groupId) return data.standings.slice(0, 4);
+    return data.standings.filter(s => s.groupId === teamStanding.groupId);
+  }, [data.standings, teamStanding]);
+
+  // Coach
+  const { coach, coachImage, coachAge } = data.info;
+
+  // Navigate to match detail
+  const goToMatch = useCallback((m: RecentMatch) => {
+    const match: Match = {
+      id: String(m.id),
+      homeTeam: { id: String(m.homeId), name: m.homeName, shortName: m.homeShort, logo: m.homeLogo },
+      awayTeam: { id: String(m.awayId), name: m.awayName, shortName: m.awayShort, logo: m.awayLogo },
+      homeScore: m.homeScore,
+      awayScore: m.awayScore,
+      status: m.isFinished ? 'finished' : 'scheduled',
+      time: m.isFinished ? 'FT' : '',
+      league: m.league || data.info.leagueName,
+      leagueId: String(data.info.leagueId),
+      date: m.date,
+    };
+    navigation.navigate('MatchDetail', { match });
+  }, [navigation, data.info]);
+
+  // ── Match card (last or next) ────────────────────────────────────────────
+  const MatchCard: React.FC<{ match: RecentMatch; isNext?: boolean }> = ({ match, isNext }) => {
+    const comp = getCompetitionInfo(match.league);
+    const dateStr = formatMatchDate(match.date, monthsAbbr);
+    const isHome = match.isHome;
+    const result = match.result;
+    const resultColor = result === 'W' ? '#10b981' : result === 'L' ? '#ef4444' : '#f59e0b';
+
+    return (
+      <TouchableOpacity
+        onPress={() => goToMatch(match)}
+        activeOpacity={0.75}
+        style={[rs.matchCard, { backgroundColor: cardBg, borderColor: border }]}
+      >
+        {/* Competition badge */}
+        <View style={rs.matchCardTop}>
+          <View style={[rs.compBadge, { backgroundColor: comp.color + '22' }]}>
+            <Text style={[rs.compBadgeText, { color: comp.color }]}>{comp.badge} {comp.short}</Text>
+          </View>
+          <Text style={[rs.matchDateText, { color: textSec }]}>{dateStr}</Text>
+        </View>
+
+        {/* Teams + score */}
+        <View style={rs.matchTeamsRow}>
+          {/* Home */}
+          <View style={[rs.matchTeamBlock, { alignItems: 'flex-end' }]}>
+            <Text style={[rs.matchTeamName, { color: c.textPrimary }]} numberOfLines={1}>{translateNationalTeam(match.homeName)}</Text>
+            <TeamLogo uri={match.homeLogo} size={40} radius={6} />
+          </View>
+
+          {/* Score or VS */}
+          <View style={rs.scoreBlock}>
+            {match.isFinished ? (
+              <>
+                <Text style={[rs.scoreBig, { color: c.textPrimary }]}>{match.homeScore}</Text>
+                <Text style={[rs.scoreSep, { color: textSec }]}>–</Text>
+                <Text style={[rs.scoreBig, { color: c.textPrimary }]}>{match.awayScore}</Text>
+              </>
+            ) : (
+              <Text style={[rs.scoreVS, { color: textSec }]}>VS</Text>
+            )}
+            {result && (
+              <View style={[rs.resultPill, { backgroundColor: resultColor }]}>
+                <Text style={rs.resultPillText}>{t(`team.formLabels.${result}`)}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Away */}
+          <View style={[rs.matchTeamBlock, { alignItems: 'flex-start' }]}>
+            <Text style={[rs.matchTeamName, { color: c.textPrimary }]} numberOfLines={1}>{translateNationalTeam(match.awayName)}</Text>
+            <TeamLogo uri={match.awayLogo} size={40} radius={6} />
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // ── Mini group table ─────────────────────────────────────────────────────
+  const MiniGroupTable: React.FC = () => {
+    if (groupStandings.length === 0) return null;
+    // Detect group letter from first standing
+    const firstStanding = groupStandings[0];
+    const groupName = (firstStanding as any).group_name ?? (firstStanding as any).groupName ?? '';
+    const letter = groupName.replace(/[^A-Z]/gi, '').toUpperCase().slice(-1) || '';
+
+    return (
+      <View style={[rs.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>
+        <View style={rs.sectionHeader}>
+          <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>{t('team.groupIn')}</Text>
+          {letter ? <Text style={[rs.sectionBadge, { color: c.accent }]}>GRUPO {letter}</Text> : null}
+        </View>
+        {/* Header row */}
+        <View style={[rs.tableHeaderRow, { borderBottomColor: border }]}>
+          <Text style={[rs.thPos, { color: textSec }]}>#</Text>
+          <Text style={[rs.thTeam, { color: textSec }]}>{t('team.squadTab')}</Text>
+          <Text style={[rs.thStat, { color: textSec }]}>J</Text>
+          <Text style={[rs.thStat, { color: textSec }]}>G</Text>
+          <Text style={[rs.thStat, { color: textSec }]}>E</Text>
+          <Text style={[rs.thStat, { color: textSec }]}>P</Text>
+          <Text style={[rs.thPts, { color: textSec }]}>PTS</Text>
+        </View>
+        {groupStandings.slice(0, 4).map((s, idx) => {
+          const isCurrentTeam = s.team.id === String(teamId);
+          const rowBg = isCurrentTeam ? (c.accent + '18') : 'transparent';
+          // Zone: top 2 advance, 3rd=best 3rd (lighter), 4th=out
+          const zoneColor = idx < 2 ? c.accent : idx === 2 ? '#f59e0b' : '#ef4444';
+          return (
+            <View key={s.team.id} style={[rs.tableRow, { backgroundColor: rowBg, borderTopColor: border }]}>
+              <View style={[rs.zoneBar, { backgroundColor: zoneColor }]} />
+              <Text style={[rs.tdPos, { color: c.textPrimary, fontWeight: isCurrentTeam ? '800' : '500' }]}>{s.position}</Text>
+              <View style={rs.tdTeamCell}>
+                {s.team.logo?.startsWith('http')
+                  ? <Image source={{ uri: s.team.logo }} style={rs.miniLogo} />
+                  : <View style={[rs.miniLogo, { backgroundColor: 'rgba(255,255,255,0.08)' }]} />
+                }
+                <Text style={[rs.tdTeamName, { color: c.textPrimary, fontWeight: isCurrentTeam ? '700' : '400' }]} numberOfLines={1}>
+                  {translateNationalTeam(s.team.name)}
+                </Text>
+              </View>
+              <Text style={[rs.tdStat, { color: textSec }]}>{s.played}</Text>
+              <Text style={[rs.tdStat, { color: textSec }]}>{s.won}</Text>
+              <Text style={[rs.tdStat, { color: textSec }]}>{s.drawn}</Text>
+              <Text style={[rs.tdStat, { color: textSec }]}>{s.lost}</Text>
+              <Text style={[rs.tdPts, { color: c.textPrimary, fontWeight: isCurrentTeam ? '800' : '600' }]}>{s.points}</Text>
+            </View>
+          );
+        })}
+        {/* Zone legend */}
+        <View style={[rs.zoneLegend, { borderTopColor: border }]}>
+          <View style={rs.legendItem}>
+            <View style={[rs.legendDot, { backgroundColor: c.accent }]} />
+            <Text style={[rs.legendText, { color: textSec }]}>{t('team.advanceZone')}</Text>
+          </View>
+          <View style={rs.legendItem}>
+            <View style={[rs.legendDot, { backgroundColor: '#f59e0b' }]} />
+            <Text style={[rs.legendText, { color: textSec }]}>{t('team.bestThirdZone')}</Text>
+          </View>
+          <View style={rs.legendItem}>
+            <View style={[rs.legendDot, { backgroundColor: '#ef4444' }]} />
+            <Text style={[rs.legendText, { color: textSec }]}>{t('team.eliminatedZone')}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  // ── Coach card ──────────────────────────────────────────────────────────
+  const CoachCard: React.FC = () => {
+    if (!coach) return null;
+    return (
+      <View style={[rs.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>
+        <View style={rs.sectionHeader}>
+          <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>{t('team.coachLabel')}</Text>
+        </View>
+        <View style={rs.coachRow}>
+          {coachImage?.startsWith('http') ? (
+            <Image source={{ uri: coachImage }} style={rs.coachImg} />
+          ) : (
+            <View style={[rs.coachImg, { backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }]}>
+              <Text style={{ fontSize: 22 }}>👨‍💼</Text>
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={[rs.coachName, { color: c.textPrimary }]}>{coach}</Text>
+            {coachAge > 0 && (
+              <Text style={[rs.coachMeta, { color: textSec }]}>{t('team.coachAge', { age: coachAge })}</Text>
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  // ── Info card ───────────────────────────────────────────────────────────
+  const InfoCard: React.FC = () => (
+    <View style={[rs.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>
+      <View style={rs.sectionHeader}>
+        <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>{t('team.info')}</Text>
+      </View>
+      {data.info.founded > 0 && (
+        <View style={[rs.infoRow, { borderTopColor: border }]}>
+          <Text style={[rs.infoLabel, { color: textSec }]}>{t('team.founded')}</Text>
+          <Text style={[rs.infoValue, { color: c.textPrimary }]}>{data.info.founded}</Text>
+        </View>
+      )}
+      {data.info.venueName ? (
+        <View style={[rs.infoRow, { borderTopColor: border }]}>
+          <Text style={[rs.infoLabel, { color: textSec }]}>{t('team.stadium')}</Text>
+          <Text style={[rs.infoValue, { color: c.textPrimary }]}>{data.info.venueName}</Text>
+        </View>
+      ) : null}
+      {data.info.venueCapacity > 0 ? (
+        <View style={[rs.infoRow, { borderTopColor: border }]}>
+          <Text style={[rs.infoLabel, { color: textSec }]}>{t('team.capacity')}</Text>
+          <Text style={[rs.infoValue, { color: c.textPrimary }]}>{data.info.venueCapacity.toLocaleString()}</Text>
+        </View>
+      ) : null}
+      {data.info.leagueName ? (
+        <View style={[rs.infoRow, { borderTopColor: border }]}>
+          <Text style={[rs.infoLabel, { color: textSec }]}>{t('team.league')}</Text>
+          <Text style={[rs.infoValue, { color: c.textPrimary }]}>{data.info.leagueName}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+
+  return (
+    <View style={rs.container}>
+      {/* Last match */}
+      {lastMatch && (
+        <>
+          <Text style={[rs.sectionLabel, { color: textSec }]}>{t('team.lastMatch')}</Text>
+          <MatchCard match={lastMatch} />
+        </>
+      )}
+
+      {/* Next match */}
+      {nextUp && (
+        <>
+          <Text style={[rs.sectionLabel, { color: textSec }]}>{t('team.nextMatch')}</Text>
+          <MatchCard match={nextUp} isNext />
+        </>
+      )}
+
+      {/* Recent form */}
+      {data.form.length > 0 && (
+        <View style={[rs.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>
+          <View style={rs.sectionHeader}>
+            <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>{t('team.recentForm')}</Text>
+            <Text style={[rs.sectionHint, { color: textSec }]}>últimos {data.form.length}</Text>
+          </View>
+          <View style={{ paddingHorizontal: 14, paddingBottom: 14 }}>
+            <FormBadges form={data.form} recentMatches={data.recentMatches} />
+          </View>
+        </View>
+      )}
+
+      {/* Mini group table */}
+      <MiniGroupTable />
+
+      {/* Coach */}
+      <CoachCard />
+
+      {/* Info */}
+      <InfoCard />
+
+      <View style={{ height: 24 }} />
+    </View>
+  );
+};
+
+// Resumen styles
+const rs = StyleSheet.create({
+  container: { paddingHorizontal: 16, paddingTop: 4, gap: 10 },
+  sectionLabel: {
+    fontSize: 11, fontWeight: '700', letterSpacing: 1,
+    textTransform: 'uppercase', marginBottom: -4,
+  },
+  sectionCard: {
+    borderRadius: 14, borderWidth: 1, overflow: 'hidden',
+  },
+  sectionHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  sectionTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3 },
+  sectionBadge: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+  sectionHint: { fontSize: 11 },
+
+  // Match card
+  matchCard: {
+    borderRadius: 14, borderWidth: 1, overflow: 'hidden',
+    paddingHorizontal: 12, paddingVertical: 12,
+  },
+  matchCardTop: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  compBadge: {
+    borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3,
+  },
+  compBadgeText: { fontSize: 10, fontWeight: '700' },
+  matchDateText: { fontSize: 11 },
+  matchTeamsRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  matchTeamBlock: {
+    flex: 1, gap: 6, alignItems: 'center',
+  },
+  matchTeamName: { fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  scoreBlock: {
+    alignItems: 'center', paddingHorizontal: 10, gap: 4, minWidth: 80,
+  },
+  scoreBig: { fontSize: 28, fontWeight: '800', lineHeight: 32 },
+  scoreSep: { fontSize: 22, fontWeight: '300', lineHeight: 32, marginHorizontal: 2 },
+  scoreVS: { fontSize: 18, fontWeight: '800' },
+  resultPill: {
+    paddingHorizontal: 10, paddingVertical: 2, borderRadius: 8, marginTop: 2,
+  },
+  resultPillText: { fontSize: 10, fontWeight: '800', color: '#fff' },
+
+  // Mini group table
+  tableHeaderRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 6,
+    borderBottomWidth: 1,
+  },
+  tableRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 9,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    position: 'relative',
+  },
+  zoneBar: { width: 3, height: 26, borderRadius: 2, marginRight: 8 },
+  thPos:  { width: 20, fontSize: 9, fontWeight: '700', textAlign: 'center' },
+  thTeam: { flex: 1, fontSize: 9, fontWeight: '700', paddingLeft: 8 },
+  thStat: { width: 22, fontSize: 9, fontWeight: '700', textAlign: 'center' },
+  thPts:  { width: 30, fontSize: 9, fontWeight: '700', textAlign: 'center' },
+  tdPos:  { width: 20, fontSize: 12, textAlign: 'center' },
+  tdTeamCell: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  miniLogo: { width: 20, height: 20, borderRadius: 10 },
+  tdTeamName: { fontSize: 12, flex: 1 },
+  tdStat: { width: 22, fontSize: 11, textAlign: 'center' },
+  tdPts:  { width: 30, fontSize: 13, textAlign: 'center' },
+  zoneLegend: {
+    flexDirection: 'row', gap: 14,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  legendDot: { width: 7, height: 7, borderRadius: 4 },
+  legendText: { fontSize: 10 },
+
+  // Coach
+  coachRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 14, paddingBottom: 14,
+  },
+  coachImg: { width: 52, height: 52, borderRadius: 26 },
+  coachName: { fontSize: 15, fontWeight: '700' },
+  coachMeta: { fontSize: 12, marginTop: 2 },
+
+  // Info rows
+  infoRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 14, paddingVertical: 11,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  infoLabel: { fontSize: 13 },
+  infoValue: { fontSize: 13, fontWeight: '600', flex: 1, textAlign: 'right' },
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// PARTIDOS TAB
+// ════════════════════════════════════════════════════════════════════════════
+
+const PartidosTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, teamId }) => {
+  const { t } = useTranslation();
+  const c = useThemeColors();
+  const { isDark } = useDarkMode();
+  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
+  const [filter, setFilter] = useState<MatchFilter>('all');
+  const monthsAbbr = t('dates.monthsAbbr', { returnObjects: true }) as string[];
+
+  const textSec = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
+  const cardBg  = c.surface;
+  const border  = c.border;
+  const today   = new Date().toISOString().split('T')[0];
+
+  const filtered = useMemo(() => {
+    if (filter === 'all') return data.recentMatches;
+    return data.recentMatches.filter(m => {
+      const comp = getCompetitionInfo(m.league);
+      return filter === 'wc' ? comp.type === 'wc' : comp.type === 'friendly';
+    });
+  }, [data.recentMatches, filter]);
+
+  const upcoming = filtered.filter(m => !m.isFinished && m.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const previous = filtered.filter(m => m.isFinished || m.date < today);
+
+  const goToMatch = useCallback((m: RecentMatch) => {
+    const match: Match = {
+      id: String(m.id),
+      homeTeam: { id: String(m.homeId), name: m.homeName, shortName: m.homeShort, logo: m.homeLogo },
+      awayTeam: { id: String(m.awayId), name: m.awayName, shortName: m.awayShort, logo: m.awayLogo },
+      homeScore: m.homeScore,
+      awayScore: m.awayScore,
+      status: m.isFinished ? 'finished' : 'scheduled',
+      time: m.isFinished ? 'FT' : '',
+      league: m.league || data.info.leagueName,
+      leagueId: String(data.info.leagueId),
+      date: m.date,
+    };
+    navigation.navigate('MatchDetail', { match });
+  }, [navigation, data.info]);
+
+  const FILTERS: { key: MatchFilter; label: string }[] = [
+    { key: 'all',      label: t('team.allFilter') },
+    { key: 'wc',       label: t('team.wcFilter') },
+    { key: 'friendly', label: t('team.friendlyFilter') },
+  ];
+
+  // ── Match row ─────────────────────────────────────────────────────────
+  const MatchRow: React.FC<{ m: RecentMatch }> = ({ m }) => {
+    const comp = getCompetitionInfo(m.league);
+    const dateStr = formatMatchDate(m.date, monthsAbbr);
+    const result = m.result;
+    const resultColor = result === 'W' ? '#10b981' : result === 'L' ? '#ef4444' : '#f59e0b';
+    const isCurrentHome = m.homeId === teamId;
+
+    return (
+      <TouchableOpacity
+        onPress={() => goToMatch(m)}
+        activeOpacity={0.7}
+        style={[pt.matchRow, { borderTopColor: border }]}
+      >
+        {/* Date + comp */}
+        <View style={pt.matchDateCol}>
+          <Text style={[pt.matchDate, { color: textSec }]}>{dateStr}</Text>
+          <View style={[pt.compDot, { backgroundColor: comp.color }]} />
+        </View>
+
+        {/* Teams */}
+        <View style={pt.teamsCol}>
+          {/* Home */}
+          <View style={pt.teamLine}>
+            <TeamLogo uri={m.homeLogo} size={20} />
+            <Text
+              style={[pt.teamName, { color: c.textPrimary, fontWeight: isCurrentHome ? '700' : '400' }]}
+              numberOfLines={1}
+            >
+              {translateNationalTeam(m.homeName)}
+            </Text>
+          </View>
+          {/* Away */}
+          <View style={pt.teamLine}>
+            <TeamLogo uri={m.awayLogo} size={20} />
+            <Text
+              style={[pt.teamName, { color: c.textPrimary, fontWeight: !isCurrentHome ? '700' : '400' }]}
+              numberOfLines={1}
+            >
+              {translateNationalTeam(m.awayName)}
+            </Text>
+          </View>
+        </View>
+
+        {/* Score or time */}
+        <View style={pt.scoreCol}>
+          {m.isFinished ? (
+            <>
+              <Text style={[pt.scoreNum, { color: c.textPrimary }]}>{m.homeScore}</Text>
+              <Text style={[pt.scoreNum, { color: c.textPrimary }]}>{m.awayScore}</Text>
+            </>
+          ) : (
+            <>
+              <Text style={[pt.scoreNum, { color: textSec }]}>–</Text>
+              <Text style={[pt.scoreNum, { color: textSec }]}>–</Text>
+            </>
+          )}
+        </View>
+
+        {/* Result badge */}
+        <View style={pt.resultCol}>
+          {result ? (
+            <View style={[pt.resultBadge, { backgroundColor: resultColor }]}>
+              <Text style={pt.resultBadgeText}>{t(`team.formLabels.${result}`)}</Text>
+            </View>
+          ) : (
+            <View style={[pt.resultBadge, { backgroundColor: 'transparent' }]} />
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  return (
+    <View style={pt.container}>
+      {/* Filter pills */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, flexDirection: 'row' }}>
+        {FILTERS.map(f => {
+          const active = filter === f.key;
+          return (
+            <TouchableOpacity
+              key={f.key}
+              onPress={() => setFilter(f.key)}
+              style={[pt.filterPill, { borderColor: active ? c.accent : border, backgroundColor: active ? c.accent + '22' : 'transparent' }]}
+              activeOpacity={0.7}
+            >
+              <Text style={[pt.filterText, { color: active ? c.accent : textSec }]}>{f.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {/* Upcoming */}
+      {upcoming.length > 0 && (
+        <View style={[pt.section, { backgroundColor: cardBg, borderColor: border }]}>
+          <Text style={[pt.sectionLabel, { color: textSec }]}>{t('team.upcomingSection')}</Text>
+          {upcoming.map(m => <MatchRow key={m.id} m={m} />)}
+        </View>
+      )}
+
+      {upcoming.length === 0 && filter === 'all' && (
+        <View style={[pt.emptyBox, { borderColor: border }]}>
+          <Text style={[pt.emptyText, { color: textSec }]}>{t('team.noUpcoming')}</Text>
+        </View>
+      )}
+
+      {/* Previous */}
+      {previous.length > 0 && (
+        <View style={[pt.section, { backgroundColor: cardBg, borderColor: border, marginTop: 10 }]}>
+          <Text style={[pt.sectionLabel, { color: textSec }]}>{t('team.previous')}</Text>
+          {previous.map(m => <MatchRow key={m.id} m={m} />)}
+        </View>
+      )}
+
+      {previous.length === 0 && filter === 'all' && (
+        <View style={[pt.emptyBox, { borderColor: border }]}>
+          <Text style={[pt.emptyText, { color: textSec }]}>{t('team.noRecent')}</Text>
+        </View>
+      )}
+
+      <View style={{ height: 24 }} />
+    </View>
+  );
+};
+
+const pt = StyleSheet.create({
+  container: { paddingTop: 4 },
+  filterPill: {
+    paddingHorizontal: 14, paddingVertical: 6,
+    borderRadius: 20, borderWidth: 1.5,
+  },
+  filterText: { fontSize: 13, fontWeight: '600' },
+  section: {
+    borderRadius: 14, borderWidth: 1, overflow: 'hidden',
+    marginHorizontal: 16,
+  },
+  sectionLabel: {
+    fontSize: 11, fontWeight: '700', letterSpacing: 1,
+    paddingHorizontal: 14, paddingVertical: 10,
+    textTransform: 'uppercase',
+  },
+  emptyBox: {
+    marginHorizontal: 16, borderRadius: 14, borderWidth: 1,
+    paddingVertical: 28, alignItems: 'center',
+  },
+  emptyText: { fontSize: 13 },
+  matchRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+  },
+  matchDateCol: { width: 42, alignItems: 'center', gap: 3 },
+  matchDate: { fontSize: 10, fontWeight: '600', textAlign: 'center' },
+  compDot: { width: 6, height: 6, borderRadius: 3 },
+  teamsCol: { flex: 1, gap: 4 },
+  teamLine: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  teamName: { fontSize: 13, flex: 1 },
+  scoreCol: { width: 24, alignItems: 'center', gap: 3 },
+  scoreNum: { fontSize: 13, fontWeight: '700' },
+  resultCol: { width: 26, alignItems: 'center' },
+  resultBadge: {
+    width: 22, height: 22, borderRadius: 6,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  resultBadgeText: { fontSize: 10, fontWeight: '800', color: '#fff' },
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// PLANTILLA TAB
+// ════════════════════════════════════════════════════════════════════════════
+
+const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
+  const { t } = useTranslation();
+  const c = useThemeColors();
+  const { isDark } = useDarkMode();
+  const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
+
+  const textSec = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
+  const cardBg  = c.surface;
+  const border  = c.border;
+
+  const { squad, info } = data;
+
+  // Average age
+  const avgAge = useMemo(() => {
+    const ages = squad.filter(p => p.age > 0).map(p => p.age);
+    if (ages.length === 0) return 0;
+    return Math.round(ages.reduce((a, b) => a + b, 0) / ages.length * 10) / 10;
+  }, [squad]);
+
+  // Group by position
+  const grouped = useMemo(() => {
+    const groups: Record<string, { posId: number; label: string; players: SquadPlayer[] }> = {
+      POR: { posId: 24, label: t('team.positions.goalkeepers'), players: [] },
+      DEF: { posId: 25, label: t('team.positions.defenders'),   players: [] },
+      MED: { posId: 26, label: t('team.positions.midfielders'), players: [] },
+      DEL: { posId: 27, label: t('team.positions.forwards'),    players: [] },
+      JUG: { posId: 99, label: 'Otros',                          players: [] },
+    };
+    squad.forEach(p => {
+      const key = p.position in groups ? p.position : 'JUG';
+      groups[key].players.push(p);
+    });
+    return Object.entries(groups)
+      .filter(([, v]) => v.players.length > 0)
+      .sort(([, a], [, b]) => a.posId - b.posId);
+  }, [squad, t]);
+
+  const goToPlayer = useCallback((p: SquadPlayer) => {
+    navigation.navigate('PlayerDetail', {
+      playerId: p.playerId,
+      playerName: p.displayName || p.name,
+      playerImage: p.image,
+    });
+  }, [navigation]);
+
+  // ── Player row ──────────────────────────────────────────────────────────
+  const PlayerRow: React.FC<{ player: SquadPlayer; borderTop: boolean }> = ({ player, borderTop }) => (
+    <TouchableOpacity
+      onPress={() => goToPlayer(player)}
+      activeOpacity={0.7}
+      style={[pl.playerRow, borderTop && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: border }]}
+    >
+      {/* Jersey number */}
+      <View style={[pl.jerseyBadge, { backgroundColor: c.accent + '20' }]}>
+        <Text style={[pl.jerseyNum, { color: c.accent }]}>{player.number > 0 ? player.number : '–'}</Text>
+      </View>
+
+      {/* Photo */}
+      {player.image?.startsWith('http') ? (
+        <Image source={{ uri: player.image }} style={pl.playerImg} />
+      ) : (
+        <View style={[pl.playerImg, { backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }]}>
+          <Text style={{ fontSize: 16 }}>👤</Text>
+        </View>
+      )}
+
+      {/* Name + club */}
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={[pl.playerName, { color: c.textPrimary }]} numberOfLines={1}>
+            {player.displayName || player.name}
+          </Text>
+          {player.isCaptain && (
+            <View style={[pl.captainBadge, { backgroundColor: '#C9A227' }]}>
+              <Text style={pl.captainText}>C</Text>
+            </View>
+          )}
+        </View>
+        {player.clubName ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+            {player.clubLogo?.startsWith('http') && (
+              <Image source={{ uri: player.clubLogo }} style={pl.clubLogo} />
+            )}
+            <Text style={[pl.clubName, { color: textSec }]} numberOfLines={1}>{player.clubName}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {/* Age */}
+      {player.age > 0 && (
+        <Text style={[pl.ageText, { color: textSec }]}>{player.age}</Text>
+      )}
+    </TouchableOpacity>
+  );
+
+  return (
+    <View style={pl.container}>
+      {/* Coach card */}
+      {info.coach ? (
+        <View style={[pl.coachCard, { backgroundColor: cardBg, borderColor: border }]}>
+          <View style={pl.coachInner}>
+            {info.coachImage?.startsWith('http') ? (
+              <Image source={{ uri: info.coachImage }} style={pl.coachImg} />
+            ) : (
+              <View style={[pl.coachImg, { backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }]}>
+                <Text style={{ fontSize: 20 }}>👨‍💼</Text>
+              </View>
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={[pl.coachRole, { color: textSec }]}>{t('team.coachLabel').toUpperCase()}</Text>
+              <Text style={[pl.coachName, { color: c.textPrimary }]}>{info.coach}</Text>
+              {info.coachAge > 0 && (
+                <Text style={[pl.coachAge, { color: textSec }]}>{t('team.coachAge', { age: info.coachAge })}</Text>
+              )}
+            </View>
+          </View>
+        </View>
+      ) : null}
+
+      {/* Squad summary */}
+      <Text style={[pl.squadSummary, { color: textSec }]}>
+        {t('team.playerCount', { count: squad.length })}
+        {avgAge > 0 ? `  ·  ${t('team.avgAge')}: ${avgAge}` : ''}
+      </Text>
+
+      {/* Groups */}
+      {grouped.map(([key, group]) => (
+        <View key={key} style={[pl.positionGroup, { backgroundColor: cardBg, borderColor: border }]}>
+          <View style={pl.posHeaderRow}>
+            <View style={[pl.posAccent, { backgroundColor: c.accent }]} />
+            <Text style={[pl.posHeader, { color: c.textPrimary }]}>{group.label}</Text>
+            <Text style={[pl.posCount, { color: textSec }]}>{group.players.length}</Text>
+          </View>
+          {group.players.map((p, idx) => (
+            <PlayerRow key={p.id} player={p} borderTop={idx > 0} />
+          ))}
+        </View>
+      ))}
+
+      <View style={{ height: 24 }} />
+    </View>
+  );
+};
+
+const pl = StyleSheet.create({
+  container: { paddingHorizontal: 16, paddingTop: 4, gap: 10 },
+  coachCard: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+  coachInner: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    padding: 14,
+  },
+  coachImg: { width: 52, height: 52, borderRadius: 26 },
+  coachRole: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  coachName: { fontSize: 16, fontWeight: '700', marginTop: 1 },
+  coachAge: { fontSize: 12, marginTop: 2 },
+  squadSummary: { fontSize: 12, paddingHorizontal: 2 },
+  positionGroup: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+  posHeaderRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 14, paddingVertical: 10,
+  },
+  posAccent: { width: 3, height: 16, borderRadius: 2 },
+  posHeader: { flex: 1, fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
+  posCount: { fontSize: 12 },
+  playerRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 9,
+    gap: 10,
+  },
+  jerseyBadge: {
+    width: 32, height: 32, borderRadius: 8,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  jerseyNum: { fontSize: 12, fontWeight: '800' },
+  playerImg: { width: 38, height: 38, borderRadius: 19 },
+  playerName: { fontSize: 14, fontWeight: '600' },
+  captainBadge: {
+    width: 18, height: 18, borderRadius: 9,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  captainText: { fontSize: 9, fontWeight: '900', color: '#111' },
+  clubLogo: { width: 14, height: 14, borderRadius: 7 },
+  clubName: { fontSize: 11 },
+  ageText: { fontSize: 13, width: 26, textAlign: 'center' },
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// TABLA TAB
+// ════════════════════════════════════════════════════════════════════════════
+
+// Zone color helper
+function getZoneColor(idx: number, accentColor: string): string {
+  if (idx < 2) return accentColor;
+  if (idx === 2) return '#f59e0b';
+  return '#ef4444';
+}
+
+// Single group card — reused for team's group and all others
+const GroupCard: React.FC<{
+  rows: LeagueStanding[];
+  letter: string;
+  teamId: number;
+  isMyGroup: boolean;
+  cardBg: string;
+  border: string;
+  textSec: string;
+  accentColor: string;
+  textPrimary: string;
+  compact?: boolean;
+  shareRef?: React.RefObject<any>;
+}> = ({ rows, letter, teamId, isMyGroup, cardBg, border, textSec, accentColor, textPrimary, compact, shareRef }) => {
+  const { t } = useTranslation();
+  const rowH = compact ? 7 : 10;
+  return (
+    <ViewShot ref={shareRef} options={{ format: 'png', quality: 0.95 }}>
+      <View style={[tl.tableCard, { backgroundColor: cardBg, borderColor: isMyGroup ? accentColor + '60' : border }]}>
+        {/* Header row with group letter + "TU GRUPO" badge */}
+        <View style={[tl.tableCardHeader, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+          <Text style={[tl.tableTitle, { color: textPrimary }]}>
+            {letter ? t('team.groupHeader', { letter }) : t('team.standingsTitle')}
+          </Text>
+          {isMyGroup && (
+            <View style={[tl.myGroupBadge, { backgroundColor: accentColor }]}>
+              <Text style={tl.myGroupBadgeText}>TU GRUPO</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Column headers */}
+        <View style={[tl.headerRow, { borderBottomColor: border }]}>
+          <Text style={[tl.thPos,  { color: textSec }]}>#</Text>
+          <Text style={[tl.thTeam, { color: textSec }]}> </Text>
+          <Text style={[tl.thStat, { color: textSec }]}>J</Text>
+          <Text style={[tl.thStat, { color: textSec }]}>G</Text>
+          <Text style={[tl.thStat, { color: textSec }]}>E</Text>
+          <Text style={[tl.thStat, { color: textSec }]}>P</Text>
+          <Text style={[tl.thStat, { color: textSec }]}>DIF</Text>
+          <Text style={[tl.thPts,  { color: textSec }]}>PTS</Text>
+        </View>
+
+        {rows.map((s, idx) => {
+          const isCurrent = s.team.id === String(teamId);
+          const zoneColor = getZoneColor(idx, accentColor);
+          const gd = s.goalDifference ?? (s.goalsFor - s.goalsAgainst);
+          const gdStr = gd > 0 ? `+${gd}` : String(gd);
+          return (
+            <View
+              key={s.team.id}
+              style={[
+                tl.row,
+                { paddingVertical: rowH, borderTopColor: border },
+                isCurrent && { backgroundColor: accentColor + '18' },
+              ]}
+            >
+              <View style={[tl.zoneBar, { backgroundColor: zoneColor }]} />
+              <Text style={[tl.tdPos, { color: textPrimary, fontWeight: isCurrent ? '800' : '500' }]}>
+                {s.position}
+              </Text>
+              <View style={tl.tdTeamCell}>
+                {s.team.logo?.startsWith('http')
+                  ? <Image source={{ uri: s.team.logo }} style={compact ? tl.logoSm : tl.logo} />
+                  : <View style={[compact ? tl.logoSm : tl.logo, { backgroundColor: 'rgba(255,255,255,0.08)' }]} />
+                }
+                <Text
+                  style={[
+                    compact ? tl.tdTeamNameSm : tl.tdTeamName,
+                    { color: textPrimary, fontWeight: isCurrent ? '700' : '400' },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {translateNationalTeam(s.team.name)}
+                </Text>
+              </View>
+              <Text style={[tl.tdStat, { color: textSec, fontSize: compact ? 10 : 11 }]}>{s.played}</Text>
+              <Text style={[tl.tdStat, { color: textSec, fontSize: compact ? 10 : 11 }]}>{s.won}</Text>
+              <Text style={[tl.tdStat, { color: textSec, fontSize: compact ? 10 : 11 }]}>{s.drawn}</Text>
+              <Text style={[tl.tdStat, { color: textSec, fontSize: compact ? 10 : 11 }]}>{s.lost}</Text>
+              <Text style={[tl.tdStat, { color: textSec, fontSize: compact ? 10 : 11 }]}>{gdStr}</Text>
+              <Text style={[tl.tdPts,  { color: textPrimary, fontWeight: isCurrent ? '800' : '600', fontSize: compact ? 11 : 13 }]}>
+                {s.points}
+              </Text>
+            </View>
+          );
+        })}
+
+        {/* Zone legend — only on the main group card */}
+        {isMyGroup && (
+          <View style={[tl.zoneLegend, { borderTopColor: border }]}>
+            <View style={tl.legendItem}>
+              <View style={[tl.legendDot, { backgroundColor: accentColor }]} />
+              <Text style={[tl.legendText, { color: textSec }]}>{t('team.advanceZone')}</Text>
+            </View>
+            <View style={tl.legendItem}>
+              <View style={[tl.legendDot, { backgroundColor: '#f59e0b' }]} />
+              <Text style={[tl.legendText, { color: textSec }]}>{t('team.bestThirdZone')}</Text>
+            </View>
+            <View style={tl.legendItem}>
+              <View style={[tl.legendDot, { backgroundColor: '#ef4444' }]} />
+              <Text style={[tl.legendText, { color: textSec }]}>{t('team.eliminatedZone')}</Text>
+            </View>
+          </View>
+        )}
+      </View>
+    </ViewShot>
+  );
+};
+
+const TablaTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, teamId }) => {
+  const { t } = useTranslation();
+  const c = useThemeColors();
+  const { isDark } = useDarkMode();
   const [sharing, setSharing] = useState(false);
+  const shareRef = useRef<any>(null);
+
+  const textSec = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
+  const cardBg  = c.surface;
+  const border  = c.border;
+
+  const teamStanding = data.teamStanding;
+
+  // Build all distinct groups sorted by groupId (ascending → A, B, C…)
+  const allGroups = useMemo(() => {
+    if (data.standings.length === 0) return [];
+    const map = new Map<string, LeagueStanding[]>();
+    for (const s of data.standings) {
+      const key = String(s.groupId ?? 'none');
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(s);
+    }
+    return Array.from(map.entries())
+      .map(([key, rows]) => ({
+        key,
+        groupId: rows[0].groupId ?? null,
+        rows: rows.sort((a, b) => a.position - b.position),
+      }))
+      .sort((a, b) => (a.groupId ?? 0) - (b.groupId ?? 0));
+  }, [data.standings]);
+
+  // Assign letters (A, B, C…) by sort order
+  const getGroupLetter = (idx: number) => String.fromCharCode(65 + idx);
+
+  const myGroupId = teamStanding?.groupId ?? null;
+  const myGroupIdx = allGroups.findIndex(g => g.groupId === myGroupId);
+  const myGroup = myGroupIdx >= 0 ? allGroups[myGroupIdx] : (allGroups[0] ?? null);
+  const myGroupLetter = myGroup ? getGroupLetter(myGroupIdx >= 0 ? myGroupIdx : 0) : '';
+  const otherGroups = allGroups.filter((_, i) => i !== (myGroupIdx >= 0 ? myGroupIdx : 0));
 
   const handleShare = useCallback(async () => {
-    if (!tableRef.current) return;
-    setSharing(true);
+    if (!shareRef.current) return;
     try {
-      const uri = await captureRef(tableRef, {
-        format: 'png',
-        quality: 1,
-        result: 'tmpfile',
-      });
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'image/png',
-          dialogTitle: t('team.shareStandings'),
-        });
-      } else {
-        Alert.alert(t('common.share'), t('team.shareUnavailable'));
-      }
-    } catch (err) {
-      console.warn('[TablaTab] share failed:', err);
+      setSharing(true);
+      const uri = await captureRef(shareRef, { format: 'png', quality: 0.95 });
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) { Alert.alert(t('team.shareUnavailable')); return; }
+      await Sharing.shareAsync(uri, { mimeType: 'image/png', UTI: 'public.png', dialogTitle: t('team.shareTablePrompt') });
+    } catch (_) {
+      // Ignore
     } finally {
       setSharing(false);
     }
-  }, []);
+  }, [t]);
 
-  if (data.standings.length === 0) {
+  if (!myGroup) {
     return (
       <View style={{ alignItems: 'center', paddingTop: 60 }}>
-        <Text style={{ fontSize: 40, marginBottom: 12 }}>🏆</Text>
-        <Text style={{ fontSize: 15, fontWeight: '600', color: c.textSecondary }}>{t('team.noStandings')}</Text>
+        <Text style={{ fontSize: 36 }}>📊</Text>
+        <Text style={{ fontSize: 14, color: textSec, marginTop: 10 }}>{t('team.noStandings')}</Text>
       </View>
     );
   }
 
   return (
-    <View style={{ paddingHorizontal: 16 }}>
-      {/* Capturable table area */}
-      <ViewShot ref={tableRef} options={{ format: 'png', quality: 1 }}
-        style={{ backgroundColor: isDark ? '#0D0D0D' : '#fff', borderRadius: 14, overflow: 'hidden' }}
-      >
-        {/* Branding header for shared image */}
-        <View style={{
-          paddingHorizontal: 14, paddingTop: 14, paddingBottom: 8,
-          flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {data.info.logo?.startsWith('http') && (
-              <Image source={{ uri: data.info.logo }} style={{ width: 20, height: 20, borderRadius: 10 }} />
-            )}
-            <Text style={{ fontSize: 14, fontWeight: '700', color: c.textPrimary }}>
-              {data.info.leagueName || t('team.standingsTitle')}
-            </Text>
-          </View>
-          <Text style={{ fontSize: 10, fontWeight: '600', color: c.textTertiary }}>Analistas App</Text>
-        </View>
+    <View style={tl.container}>
+      {/* ── Team's own group (full, highlighted) ── */}
+      <GroupCard
+        rows={myGroup.rows}
+        letter={myGroupLetter}
+        teamId={teamId}
+        isMyGroup
+        cardBg={cardBg}
+        border={border}
+        textSec={textSec}
+        accentColor={c.accent}
+        textPrimary={c.textPrimary}
+        shareRef={shareRef}
+      />
 
-        <View style={[s.tableCard, { backgroundColor: c.card, borderColor: c.border }]}>
-          {/* Header */}
-          <View style={[s.tableHeader, { backgroundColor: c.surface }]}>
-            <Text style={[s.thPos, { color: c.textTertiary }]}></Text>
-            <Text style={[s.thTeam, { color: c.textTertiary }]}>{t('league.teamHeader')}</Text>
-            <Text style={[s.thStat, { color: c.textTertiary }]}>J</Text>
-            <Text style={[s.thStat, { color: c.textTertiary }]}>G</Text>
-            <Text style={[s.thStat, { color: c.textTertiary }]}>E</Text>
-            <Text style={[s.thStat, { color: c.textTertiary }]}>P</Text>
-            <Text style={[s.thPts, { color: c.textTertiary }]}>PTS</Text>
-          </View>
-          {data.standings.map((st) => {
-            const isHighlighted = st.team.id === String(data.info.id);
-            const teamIdNum = Number(st.team.id);
+      {/* Share button */}
+      <TouchableOpacity
+        onPress={handleShare}
+        disabled={sharing}
+        activeOpacity={0.7}
+        style={[tl.shareBtn, { backgroundColor: c.accent }]}
+      >
+        {sharing ? (
+          <ActivityIndicator size="small" color="#111" />
+        ) : (
+          <>
+            <ShareIcon color="#111" size={14} />
+            <Text style={tl.shareBtnText}>{t('common.share')}</Text>
+          </>
+        )}
+      </TouchableOpacity>
+
+      {/* ── Other groups (compact) ── */}
+      {otherGroups.length > 0 && (
+        <>
+          <Text style={[tl.otherGroupsLabel, { color: textSec }]}>OTROS GRUPOS</Text>
+          {otherGroups.map((g, i) => {
+            // Find real index of this group in allGroups for correct letter
+            const realIdx = allGroups.findIndex(ag => ag.key === g.key);
             return (
-              <TouchableOpacity
-                key={`${st.position}-${st.team.id}`}
-                activeOpacity={0.6}
-                onPress={() => {
-                  if (!isNaN(teamIdNum) && teamIdNum > 0 && teamIdNum !== data.info.id) {
-                    navigation.push('TeamDetail', {
-                      teamId: teamIdNum,
-                      teamName: st.team.name,
-                      teamLogo: st.team.logo,
-                      seasonId: data.info.currentSeasonId ?? undefined,
-                    });
-                  }
-                }}
-                style={[
-                  s.tableRow,
-                  { borderTopColor: c.border },
-                  isHighlighted && { backgroundColor: 'rgba(59,130,246,0.12)' },
-                ]}
-              >
-                <Text style={[s.tdPos, { color: isHighlighted ? '#3b82f6' : c.textTertiary }]}>{st.position}</Text>
-                <View style={s.tdTeam}>
-                  {st.team.logo.startsWith('http') ? (
-                    <Image source={{ uri: st.team.logo }} style={s.tableLogo} />
-                  ) : <Text style={{ fontSize: 12 }}>⚽</Text>}
-                  <Text style={[
-                    s.tdTeamName,
-                    { color: c.textPrimary },
-                    isHighlighted && { fontWeight: '700', color: '#3b82f6' },
-                  ]} numberOfLines={1}>{st.team.name}</Text>
-                </View>
-                <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.played}</Text>
-                <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.won}</Text>
-                <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.drawn}</Text>
-                <Text style={[s.tdStat, { color: c.textSecondary }]}>{st.lost}</Text>
-                <Text style={[s.tdPts, { color: isHighlighted ? '#3b82f6' : c.textPrimary }]}>{st.points}</Text>
-              </TouchableOpacity>
+              <GroupCard
+                key={g.key}
+                rows={g.rows}
+                letter={getGroupLetter(realIdx)}
+                teamId={teamId}
+                isMyGroup={false}
+                cardBg={cardBg}
+                border={border}
+                textSec={textSec}
+                accentColor={c.accent}
+                textPrimary={c.textPrimary}
+                compact
+              />
             );
           })}
-        </View>
-      </ViewShot>
+        </>
+      )}
 
-      {/* Share section */}
-      <View style={{ alignItems: 'center', marginTop: 20, gap: 8 }}>
-        <Text style={{ fontSize: 13, color: c.textTertiary, textAlign: 'center' }}>
-          {t('team.shareTablePrompt')}
-        </Text>
-        <TouchableOpacity
-          onPress={handleShare}
-          disabled={sharing}
-          activeOpacity={0.7}
-          style={[s.shareButton, { backgroundColor: c.accent }]}
-        >
-          {sharing ? (
-            <ActivityIndicator size="small" color="#111" />
-          ) : (
-            <>
-              <ShareIcon color="#111" size={14} />
-              <Text style={s.shareButtonText}>{t('common.share')}</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      <View style={{ height: 20 }} />
+      <View style={{ height: 24 }} />
     </View>
   );
 };
 
-// ══════════════════════════════════════════════════════════════════════════════
+const tl = StyleSheet.create({
+  container: { paddingHorizontal: 16, paddingTop: 4, gap: 14 },
+  tableCard: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+  tableCardHeader: {
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  tableTitle: { fontSize: 14, fontWeight: '700', letterSpacing: 0.3 },
+  headerRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 6,
+    borderBottomWidth: 1,
+  },
+  row: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    position: 'relative',
+  },
+  zoneBar: { width: 3, height: 26, borderRadius: 2, marginRight: 6 },
+  thPos:  { width: 20, fontSize: 9, fontWeight: '700', textAlign: 'center' },
+  thTeam: { flex: 1, fontSize: 9, fontWeight: '700', paddingLeft: 6 },
+  thStat: { width: 24, fontSize: 9, fontWeight: '700', textAlign: 'center' },
+  thPts:  { width: 30, fontSize: 9, fontWeight: '700', textAlign: 'center' },
+  tdPos:  { width: 20, fontSize: 12, textAlign: 'center' },
+  tdTeamCell: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  logo: { width: 22, height: 22, borderRadius: 11 },
+  logoSm: { width: 18, height: 18, borderRadius: 9 },
+  tdTeamName: { fontSize: 12, flex: 1 },
+  tdTeamNameSm: { fontSize: 11, flex: 1 },
+  tdStat: { width: 24, fontSize: 11, textAlign: 'center' },
+  tdPts:  { width: 30, fontSize: 13, textAlign: 'center' },
+  myGroupBadge: {
+    paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6,
+  },
+  myGroupBadgeText: {
+    fontSize: 9, fontWeight: '900', color: '#111', letterSpacing: 0.5,
+  },
+  otherGroupsLabel: {
+    fontSize: 11, fontWeight: '700', letterSpacing: 1,
+    textTransform: 'uppercase', paddingHorizontal: 2, marginTop: 4,
+  },
+  zoneLegend: {
+    flexDirection: 'row', gap: 14,
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexWrap: 'wrap',
+  },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  legendText: { fontSize: 11 },
+  shareBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, paddingVertical: 13, paddingHorizontal: 28,
+    borderRadius: 24, alignSelf: 'center', minWidth: 160,
+  },
+  shareBtnText: { fontSize: 14, fontWeight: '700', color: '#111' },
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // MAIN SCREEN
-// ══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 
 export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
   const { teamId, teamName, teamLogo, seasonId } = route.params;
@@ -593,7 +1224,46 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
   const { data, loading, error } = useTeamDetail(teamId, seasonId);
   const isFollowing = isFollowingTeam(String(teamId));
 
-  // Fade in compact header content when hero scrolls out (~120px)
+  // WC bracket — only fetch for WC teams (leagueId 732)
+  const isWCTeam = data?.info.leagueId === 732;
+  const wcSeasonId = isWCTeam ? (data?.info.currentSeasonId ?? null) : null;
+  const { rounds: bracketRoundsAll, loading: bracketLoading } = useCupBracket(wcSeasonId);
+  // Filter out Group Stage — already shown in Partidos tab; only knockout in Bracket
+  const bracketRounds = bracketRoundsAll.filter(r => {
+    const n = r.name.toLowerCase();
+    return !n.includes('group') && !n.includes('grupo') && !n.includes('fase de grupos');
+  });
+
+  // Navigate to MatchDetail when a bracket tie is tapped
+  const handlePressTie = (tie: CupTie) => {
+    const leg = tie.legs[0];
+    if (!leg) return;
+    const match: Match = {
+      id: leg.fixtureId,
+      homeTeam: {
+        id: tie.homeTeam.id,
+        name: tie.homeTeam.name,
+        shortName: tie.homeTeam.name.slice(0, 3).toUpperCase(),
+        logo: tie.homeTeam.logo,
+      },
+      awayTeam: {
+        id: tie.awayTeam.id,
+        name: tie.awayTeam.name,
+        shortName: tie.awayTeam.name.slice(0, 3).toUpperCase(),
+        logo: tie.awayTeam.logo,
+      },
+      homeScore: leg.homeScore ?? 0,
+      awayScore: leg.awayScore ?? 0,
+      status: tie.isFinished ? 'finished' : 'scheduled',
+      time: tie.isFinished ? 'FT' : '',
+      league: data?.info.leagueName ?? '',
+      leagueId: String(data?.info.leagueId ?? ''),
+      date: leg.date,
+    };
+    (navigation as any).navigate('MatchDetail', { match });
+  };
+
+  // Compact header fades in when hero scrolls past
   const compactOpacity = scrollY.interpolate({
     inputRange: [80, 140],
     outputRange: [0, 1],
@@ -607,82 +1277,84 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
   const hBorderCol = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.2)';
   const hLogoBg    = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)';
 
+  // Tab order: Resumen → Partidos → Plantilla → Tabla [→ Bracket for WC teams]
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'resumen', label: t('team.summaryTab') },
+    { key: 'resumen',   label: t('team.summaryTab') },
+    { key: 'partidos',  label: t('team.matchesTab') },
     { key: 'plantilla', label: t('team.squadTab') },
-    { key: 'partidos', label: t('team.matchesTab') },
-    { key: 'tabla', label: t('team.standingsTab') },
+    { key: 'tabla',     label: t('team.standingsTab') },
+    ...(isWCTeam ? [{ key: 'bracket' as Tab, label: 'Bracket' }] : []),
   ];
+
+  const TabBar: React.FC<{ style?: any }> = ({ style }) => (
+    <View style={[hs.tabBar, { backgroundColor: c.bg, borderBottomColor: c.border }, style]}>
+      {TABS.map(tab => {
+        const active = activeTab === tab.key;
+        return (
+          <TouchableOpacity
+            key={tab.key}
+            onPress={() => setActiveTab(tab.key)}
+            style={[hs.tab, active && { borderBottomColor: c.accent }]}
+            activeOpacity={0.7}
+          >
+            <Text style={[hs.tabText, { color: active ? c.textPrimary : c.textTertiary }, active && { fontWeight: '700' }]}>
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
-      {/* ── Sticky compact header (always visible) + fixed tab bar ── */}
+      {/* ── Sticky compact header ── */}
       <View style={[hs.stickyHeader, { backgroundColor: headerBg }]}>
         <View style={hs.topBar}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={[hs.backBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={[hs.iconBtn, { backgroundColor: hBtnBg }]}
+            activeOpacity={0.7}
+          >
             <BackArrow color={hText} />
           </TouchableOpacity>
+
           <Animated.View style={[hs.compactCenter, { opacity: compactOpacity }]}>
             {teamLogo?.startsWith('http') ? (
               <Image source={{ uri: teamLogo }} style={hs.compactLogo} />
             ) : null}
             <Text style={[hs.compactName, { color: hText }]} numberOfLines={1}>
-              {data?.info.name ?? teamName}
+              {translateNationalTeam(data?.info.name ?? teamName)}
             </Text>
           </Animated.View>
-          <TouchableOpacity style={[hs.shareBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7}>
-            <ShareIcon color={hText} />
-          </TouchableOpacity>
+
+          <View style={[hs.iconBtn, { backgroundColor: 'transparent' }]} />
         </View>
-        {/* Fixed tab bar — inside stickyHeader so it renders above ScrollView on Android */}
-        {showFixedTabs && (
-          <View style={[hs.fixedTabBar, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
-            {TABS.map(tab => {
-              const active = activeTab === tab.key;
-              return (
-                <TouchableOpacity
-                  key={tab.key}
-                  onPress={() => setActiveTab(tab.key)}
-                  style={[hs.tab, active && { borderBottomColor: c.accent }]}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    hs.tabText,
-                    { color: active ? c.textPrimary : c.textTertiary },
-                    active && { fontWeight: '700' },
-                  ]}>{tab.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
+
+        {/* Fixed tab bar — appears once hero scrolls away */}
+        {showFixedTabs && <TabBar />}
       </View>
 
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
-        /* stickyHeaderIndices removed — Android wraps sticky headers in a native
-           container that breaks flexDirection:'row'. Tabs scroll with content for now. */
         onScroll={(e: any) => {
           const y = e.nativeEvent.contentOffset.y;
-          // Drive compact header animation
           scrollY.setValue(y);
-          // Toggle fixed tab bar visibility
           const threshold = heroHeight.current > 0 ? heroHeight.current - 48 : 200;
           if (y >= threshold && !showFixedTabs) setShowFixedTabs(true);
           else if (y < threshold && showFixedTabs) setShowFixedTabs(false);
         }}
         scrollEventThrottle={16}
       >
-        {/* ── Hero Header (scrolls with content) ── */}
+        {/* ── Hero (scrolls with content) ── */}
         <View
           style={[hs.hero, { backgroundColor: headerBg }]}
-          onLayout={(e) => { heroHeight.current = e.nativeEvent.layout.height; }}
+          onLayout={e => { heroHeight.current = e.nativeEvent.layout.height; }}
         >
-
           <View style={hs.expanded}>
             {/* League label */}
             <Text style={[hs.leagueLabel, { color: hTextSoft }]}>{data?.info.leagueName ?? ''}</Text>
@@ -699,9 +1371,11 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
             </View>
 
             {/* Team name */}
-            <Text style={[hs.teamName, { color: hText }]}>{data?.info.name ?? teamName}</Text>
+            <Text style={[hs.teamName, { color: hText }]}>
+              {translateNationalTeam(data?.info.name ?? teamName)}
+            </Text>
 
-            {/* City */}
+            {/* City / country */}
             {data?.info.city ? (
               <Text style={[hs.cityText, { color: hTextSoft }]}>{data.info.city}</Text>
             ) : null}
@@ -717,7 +1391,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
               </Text>
             </TouchableOpacity>
 
-            {/* Stats strip: Position, Points, Form */}
+            {/* Stats strip: pos, pts, form */}
             {data?.teamStanding && (
               <View style={hs.statsStrip}>
                 <View style={hs.statItem}>
@@ -730,7 +1404,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
                 </View>
                 {data.form.length > 0 && (
                   <View style={hs.statItem}>
-                    <FormBadges form={data.form} />
+                    <FormBadges form={data.form} recentMatches={data.recentMatches} />
                     <Text style={[hs.statLabel, { color: hTextSoft }]}>{t('team.formLabel')}</Text>
                   </View>
                 )}
@@ -739,26 +1413,8 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
           </View>
         </View>
 
-        {/* ── Tab bar (scrolls with content) ── */}
-        <View style={[hs.tabBar, { backgroundColor: c.bg, borderBottomColor: c.border }]}>
-          {TABS.map(tab => {
-            const active = activeTab === tab.key;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                onPress={() => setActiveTab(tab.key)}
-                style={[hs.tab, active && { borderBottomColor: c.accent }]}
-                activeOpacity={0.7}
-              >
-                <Text style={[
-                  hs.tabText,
-                  { color: active ? c.textPrimary : c.textTertiary },
-                  active && { fontWeight: '700' },
-                ]}>{tab.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        {/* ── In-flow tab bar (scrolls with content, hidden once fixed bar shows) ── */}
+        {!showFixedTabs && <TabBar />}
 
         {/* ── Tab content ── */}
         {loading ? (
@@ -771,268 +1427,85 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
           </View>
         ) : data ? (
           <View style={{ paddingTop: 12 }}>
-            {activeTab === 'resumen' && <ResumenTab data={data} />}
+            {activeTab === 'resumen'   && <ResumenTab   data={data} teamId={teamId} />}
+            {activeTab === 'partidos'  && <PartidosTab  data={data} teamId={teamId} />}
             {activeTab === 'plantilla' && <PlantillaTab data={data} />}
-            {activeTab === 'partidos' && <PartidosTab data={data} />}
-            {activeTab === 'tabla' && <TablaTab data={data} />}
+            {activeTab === 'tabla'     && <TablaTab     data={data} teamId={teamId} />}
+            {activeTab === 'bracket'   && (
+              bracketLoading ? (
+                <View style={{ alignItems: 'center', paddingTop: 60 }}>
+                  <ActivityIndicator size="large" color={c.accent} />
+                </View>
+              ) : bracketRounds.length > 0 ? (
+                <CupBracketView
+                  rounds={bracketRounds}
+                  leagueName={data.info.leagueName}
+                  seasonStr="2026"
+                  onPressTie={handlePressTie}
+                />
+              ) : (
+                <View style={{ alignItems: 'center', paddingTop: 60, paddingHorizontal: 32 }}>
+                  <Text style={{ fontSize: 36 }}>🏆</Text>
+                  <Text style={{ fontSize: 14, color: c.textTertiary, marginTop: 12, textAlign: 'center' }}>
+                    El bracket estará disponible cuando comience la fase eliminatoria
+                  </Text>
+                </View>
+              )
+            )}
           </View>
         ) : null}
       </ScrollView>
-
     </SafeAreaView>
   );
 };
 
-// ══════════════════════════════════════════════════════════════════════════════
-// STYLES
-// ══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// HEADER + TAB STYLES
+// ════════════════════════════════════════════════════════════════════════════
 
 const hs = StyleSheet.create({
-  // Sticky compact header
-  stickyHeader: {
-    position: 'relative',
-    zIndex: 20,
-  },
-  hero: {
-    position: 'relative',
-  },
-  gradient: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  stickyHeader: { position: 'relative', zIndex: 20 },
+  hero: { position: 'relative' },
   topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    height: 48,
-    zIndex: 2,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 8, height: 48, zIndex: 2,
   },
-  backBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  shareBtn: {
+  iconBtn: {
     width: 36, height: 36, borderRadius: 18,
     alignItems: 'center', justifyContent: 'center',
   },
   compactCenter: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingHorizontal: 10,
+    flex: 1, flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'center', gap: 8, paddingHorizontal: 10,
   },
-  compactLogo: {
-    width: 24, height: 24, borderRadius: 12,
-  },
-  compactName: {
-    fontSize: 15, fontWeight: '700',
-    flexShrink: 1,
-  },
+  compactLogo: { width: 24, height: 24, borderRadius: 12 },
+  compactName: { fontSize: 15, fontWeight: '700', flexShrink: 1 },
   expanded: {
     alignItems: 'center',
-    paddingTop: 4,
-    paddingBottom: 16,
-    gap: 6,
+    paddingTop: 4, paddingBottom: 16, gap: 6,
   },
-  leagueLabel: {
-    fontSize: 11, fontWeight: '600',
-    letterSpacing: 0.3,
-  },
+  leagueLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.3 },
   logoWrap: {
-    width: 72, height: 72,
-    borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 2,
+    width: 72, height: 72, borderRadius: 10,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 2,
   },
   logo: { width: 56, height: 56, borderRadius: 6 },
-  teamName: {
-    fontSize: 20, fontWeight: '800',
-    letterSpacing: -0.3,
-  },
-  cityText: {
-    fontSize: 12,
-    marginTop: -2,
-  },
+  teamName: { fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+  cityText: { fontSize: 12, marginTop: -2 },
   followBtn: {
-    paddingHorizontal: 20, paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    backgroundColor: 'transparent',
-    marginTop: 2,
+    paddingHorizontal: 20, paddingVertical: 7, borderRadius: 20,
+    borderWidth: 1.5, backgroundColor: 'transparent', marginTop: 2,
   },
-  followBtnActive: {},
-  followText: {
-    fontSize: 12, fontWeight: '700',
-  },
-  followTextActive: {},
-  statsStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 20,
-    marginTop: 4,
-  },
+  followText: { fontSize: 12, fontWeight: '700' },
+  statsStrip: { flexDirection: 'row', alignItems: 'center', gap: 20, marginTop: 4 },
   statItem: { alignItems: 'center', gap: 2 },
   statValue: { fontSize: 18, fontWeight: '800' },
   statLabel: { fontSize: 9, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase' },
-
-  // Tab bar (in-flow, scrolls with content)
-  tabBar: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-  },
-  // Fixed tab bar — rendered inside stickyHeader, below topBar, when scrolled past hero
-  fixedTabBar: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-  },
+  tabBar: { flexDirection: 'row', borderBottomWidth: 1 },
   tab: {
-    flex: 1,
-    alignItems: 'center',
+    flex: 1, alignItems: 'center',
     paddingVertical: 12,
-    borderBottomWidth: 2.5,
-    borderBottomColor: 'transparent',
+    borderBottomWidth: 2.5, borderBottomColor: 'transparent',
   },
-  tabText: {
-    fontSize: 13,
-    fontWeight: '500',
-    letterSpacing: 0.1,
-  },
-});
-
-const s = StyleSheet.create({
-  // Cards
-  card: {
-    borderRadius: 14, borderWidth: 1, overflow: 'hidden',
-    paddingTop: 0,
-  },
-  cardTitle: {
-    fontSize: 16, fontWeight: '700',
-    paddingHorizontal: 14, paddingVertical: 14,
-  },
-  sectionLabel: {
-    fontSize: 11, fontWeight: '700', letterSpacing: 1,
-    paddingHorizontal: 4, paddingTop: 12, paddingBottom: 6,
-    textTransform: 'uppercase',
-  },
-
-  // Info rows
-  infoRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 14,
-    borderTopWidth: 1,
-  },
-  infoLabel: { fontSize: 14 },
-  infoValue: { fontSize: 14, fontWeight: '600', textAlign: 'right' },
-
-  // Match rows
-  matchRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 12,
-    borderTopWidth: 1,
-  },
-  matchTeam: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
-  },
-  matchLogo: { width: 24, height: 24, borderRadius: 12 },
-  matchName: { fontSize: 13, fontWeight: '600', flex: 1 },
-  matchScore: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 8,
-  },
-  scoreText: { fontSize: 16, fontWeight: '800' },
-  scoreSep: { fontSize: 14 },
-  resultDot: { width: 8, height: 8, borderRadius: 4, marginLeft: 4 },
-
-  // Player rows
-  playerRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderTopWidth: 1, gap: 12,
-  },
-  playerImg: { width: 40, height: 40, borderRadius: 20 },
-  playerName: { fontSize: 14, fontWeight: '600' },
-  playerMeta: { fontSize: 11 },
-
-  // Squad rows
-  squadRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 10, gap: 12,
-  },
-  squadNum: {
-    width: 36, height: 36, borderRadius: 12,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  squadNumText: { fontSize: 14, fontWeight: '800' },
-  squadName: { fontSize: 14, fontWeight: '600' },
-  squadMeta: { fontSize: 11 },
-  captainBadge: {
-    width: 20, height: 20, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  captainText: { fontSize: 10, fontWeight: '800', color: '#111' },
-
-  // Fixture rows (Partidos tab)
-  fixtureRow: {
-    borderRadius: 12, borderWidth: 1, padding: 12,
-    marginBottom: 6, position: 'relative',
-  },
-  fixtureDate: { fontSize: 10, fontWeight: '600', marginBottom: 8, textAlign: 'center' },
-  fixtureTeams: { flexDirection: 'row', alignItems: 'center' },
-  fixtureTeam: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  fixtureLogo: { width: 22, height: 22, borderRadius: 11 },
-  fixtureName: { fontSize: 13, fontWeight: '600', flex: 1 },
-  fixtureScoreWrap: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10 },
-  fixtureScore: { fontSize: 16, fontWeight: '800' },
-  fixtureScoreSep: { fontSize: 12 },
-  resultDotSmall: { width: 7, height: 7, borderRadius: 4 },
-
-  // Ver todos
-  verTodosBtn: {
-    borderRadius: 12, borderWidth: 1,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  verTodosText: {
-    fontSize: 14, fontWeight: '700',
-  },
-
-  // Table
-  tableCard: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
-  tableHeader: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 12, paddingVertical: 10,
-  },
-  tableRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 12, paddingVertical: 10,
-    borderTopWidth: 1,
-  },
-  thPos:  { width: 24, fontSize: 9, fontWeight: '700', textAlign: 'center' },
-  thTeam: { flex: 1, fontSize: 9, fontWeight: '700' },
-  thStat: { width: 26, fontSize: 9, fontWeight: '700', textAlign: 'center' },
-  thPts:  { width: 32, fontSize: 9, fontWeight: '700', textAlign: 'center' },
-  tdPos:  { width: 24, fontSize: 12, fontWeight: '600', textAlign: 'center' },
-  tdTeam: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  tableLogo: { width: 20, height: 20, borderRadius: 10 },
-  tdTeamName: { fontSize: 12, fontWeight: '500', flex: 1 },
-  tdStat: { width: 26, fontSize: 12, textAlign: 'center' },
-  tdPts:  { width: 32, fontSize: 14, fontWeight: '800', textAlign: 'center' },
-
-  // Share button
-  shareButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 28,
-    borderRadius: 24,
-    minWidth: 160,
-  },
-  shareButtonText: {
-    fontSize: 14, fontWeight: '700', color: '#111',
-  },
+  tabText: { fontSize: 13, fontWeight: '500', letterSpacing: 0.1 },
 });

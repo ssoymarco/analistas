@@ -40,6 +40,13 @@ export interface LeagueConfig {
    * If omitted, a generic European fallback is used (Champion / CL / EL / Descenso).
    */
   zones?: LeagueZone[];
+  /**
+   * Hidden search aliases — match user queries to this league without
+   * displaying these terms anywhere. Use to handle copyrighted names we
+   * cannot display (e.g. FIFA World Cup) while still making the league
+   * discoverable.
+   */
+  searchAliases?: string[];
 }
 
 // ── Shared zone palettes ──────────────────────────────────────────────────────
@@ -333,6 +340,15 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
   { id: 1108, name: 'CAF Confederation Cup', country: 'Africa',      flag: '🏆', currentSeasonId: 26264, isCup: true },
 
   // ── Otros ─────────────────────────────────────────────────────────────────
+  { id: 732,  name: 'Mundial 2026',              country: 'World',    flag: '🌍', currentSeasonId: 26618, isCup: true, hasPlayoffs: true, playoffsLabel: 'Eliminatoria',
+    // Hidden search aliases — let users find the tournament with common
+    // queries without displaying any FIFA-trademarked term in the UI.
+    searchAliases: [
+      'copa del mundo', 'copa mundial', 'mundial de futbol', 'mundial de fútbol',
+      'world cup', 'wc 2026', 'wc26', 'wc2026', 'fifa', 'usa canada mexico',
+      'usa canadá méxico', 'norteamerica 2026', 'norteamérica 2026',
+    ],
+  },
   { id: 1082, name: 'Amistosos Internacionales', country: 'World',    flag: '🌍', currentSeasonId: 26758 },
 
   // ── Femenil ───────────────────────────────────────────────────────────────

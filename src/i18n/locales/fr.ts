@@ -835,6 +835,8 @@ const fr: TranslationKeys = {
     preparingLeagues: 'Préparation de tes ligues...',
     readyMessage: 'Ton expérience est prête !',
     welcomeFinalTitle: 'bienvenue dans le HUB du football.',
+    welcomeFinalLine1: 'bienvenue dans',
+    welcomeFinalLine2: 'le HUB du football.',
     welcomeFinalSub: 'Ton expérience sur Analistas APP commence maintenant.',
     firstMatch: 'Premier match dans ton fil',
     start_btn: 'Commencer',

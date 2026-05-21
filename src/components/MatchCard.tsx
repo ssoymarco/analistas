@@ -13,6 +13,8 @@ import { useLiveTick, computeLiveMinuteSeconds, formatLiveMinute } from '../hook
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatMatchTime } from '../utils/formatMatchTime';
 import type { Match } from '../data/types';
+import { getLeagueConfig } from '../config/leagues';
+import { getDisplayVenueName, getDisplayVenueCity } from '../config/worldCupVenues';
 
 /** Renders a team logo — Image if URL, Text if emoji/short string */
 const TeamLogo = ({ logo, size = 24 }: { logo: string; size?: number }) => {
@@ -42,6 +44,23 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
   const isLive      = match.status === 'live';
   const isFinished  = match.status === 'finished';
   const isScheduled = match.status === 'scheduled';
+
+  // Venue label — only shown for cup competitions where stadiums vary
+  // (World Cup, Copa Libertadores, FA Cup, etc.). For regular leagues the
+  // home team's stadium is implicit, so we omit it to keep the card compact.
+  const leagueIdNum = Number(match.leagueId) || 0;
+  const isCup = getLeagueConfig(leagueIdNum)?.isCup === true;
+  const venueName = isCup
+    ? getDisplayVenueName(match.venueId, leagueIdNum, match.venueName)
+    : null;
+  const venueCity = isCup
+    ? getDisplayVenueCity(match.venueId, leagueIdNum, match.venueCity)
+    : null;
+  // For WC matches, the FIFA name already encodes the city ("Estadio Boston"),
+  // so showing the city again would be redundant. Hide city when the name and
+  // city share the same word.
+  const showCity = !!venueCity && !!venueName
+    && !venueName.toLowerCase().includes(venueCity.toLowerCase());
 
   const homeWon = isFinished && match.homeScore > match.awayScore;
   const awayWon = isFinished && match.awayScore > match.homeScore;
@@ -115,6 +134,16 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
         {/* Per-match notification toggle — only renders for followed matches */}
         <MatchBell match={match} />
       </View>
+
+      {/* Venue line — appears for cup competitions only */}
+      {venueName ? (
+        <View style={s.venueRow}>
+          <Text style={s.venueIcon}>🏟️</Text>
+          <Text style={[s.venueText, { color: c.textTertiary }]} numberOfLines={1}>
+            {venueName}{showCity ? ` · ${venueCity}` : ''}
+          </Text>
+        </View>
+      ) : null}
     </AnimatedPressable>
   );
 };
@@ -138,6 +167,22 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     gap: 6,
+  },
+  // Venue (stadium) sub-label — shown for cup competitions only
+  venueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    marginTop: -6, // tighten against the main row above
+  },
+  venueIcon: { fontSize: 11 },
+  venueText: {
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.15,
+    flex: 1,
   },
 
   // Teams

@@ -26,6 +26,7 @@ import type {
   TeamFormEntry,
   MissingPlayer,
   MatchPrediction,
+  MatchFact,
   RefereeStats,
 } from '../data/types';
 
@@ -72,9 +73,13 @@ import {
   fetchGroupsBySeason,
   fetchAggregateById,
   fetchFixturesByStage,
+  fetchCoachProfile,
+  fetchMatchFacts,
+  type SMMatchFact,
   type SMGroup,
   type SMAggregate,
   type SMPlayer,
+  type SMCoachProfile,
 } from './sportmonks';
 
 import type { NewsArticle, CupGroup, CupGroupsResult } from '../data/types';
@@ -383,6 +388,9 @@ function mapFixtureToMatch(fixture: SMFixture): Match {
     isFavorite: false,
     startingAtUtc: fixture.starting_at,
     seasonId: rawSeasonId > 0 ? rawSeasonId : undefined,
+    venueId: fixture.venue_id || fixture.venue?.id || undefined,
+    venueName: fixture.venue?.name || undefined,
+    venueCity: fixture.venue?.city_name || undefined,
   };
 }
 
@@ -841,7 +849,7 @@ async function fetchFixturesWithLiveState(localDate: string): Promise<SMFixture[
  * correct day regardless of the user's timezone.
  */
 export async function getFixturesByDate(localDate: string): Promise<Match[]> {
-  const cacheKey = `fixtures_${localDate}`;
+  const cacheKey = `fixtures_v2_${localDate}`;
   const today = new Date().toISOString().slice(0, 10);
   const ttl = localDate === today ? CacheTTL.fixturesLive : CacheTTL.fixturesStatic;
 
@@ -1451,6 +1459,40 @@ function computeAggregateScore(fixture: SMFixture): { home: number; away: number
 }
 
 /**
+ * Pick the best display name for a coach.
+ * SportMonks `display_name` is usually correct (e.g. "Pep Guardiola") but
+ * has occasional bad data (e.g. "Andrei" for André Soares Jardine). To
+ * detect those: if display_name doesn't share any token with the real
+ * lastname, fall back to firstname + last surname (e.g. "André Jardine").
+ */
+function pickCoachName(coach: { name?: string; firstname?: string; lastname?: string; common_name?: string; display_name?: string } | undefined): string {
+  if (!coach) return '';
+  const display = coach.display_name?.trim() || '';
+  const first   = coach.firstname?.trim() || '';
+  const last    = coach.lastname?.trim() || '';
+  const fullName = coach.name?.trim() || '';
+
+  // No display_name → fall back through the chain
+  if (!display) return coach.common_name || fullName || `${first} ${last}`.trim();
+
+  // Validate display_name against lastname. If display_name has no token in
+  // common with lastname, the SportMonks data is suspect → build a clean
+  // "firstname + final surname" instead (avoids the verbose middle names).
+  if (last) {
+    const displayTokens = display.toLowerCase().split(/\s+/);
+    const lastTokens    = last.toLowerCase().split(/\s+/);
+    const sharesToken = lastTokens.some(lt => displayTokens.some(dt => dt === lt));
+    if (!sharesToken && first) {
+      const finalSurname = lastTokens[lastTokens.length - 1];
+      // Capitalize the surname
+      const surnameCap = finalSurname.charAt(0).toUpperCase() + finalSurname.slice(1);
+      return `${first} ${surnameCap}`.trim();
+    }
+  }
+  return display;
+}
+
+/**
  * Fetch full fixture detail with all available SM data:
  * events, stats, lineups, venue, referee, weather, TV, H2H, pressure,
  * injuries, form, predictions, referee stats.
@@ -1472,7 +1514,7 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
     const isCupLeague = getLeagueConfig(fixture.league_id)?.isCup === true;
 
     // Fire ALL secondary requests in parallel
-    const [h2hResults, homeSidelined, awaySidelined, homeFixtures, awayFixtures, refStats, predictions, aggregateData, stageFixtures] = await Promise.all([
+    const [h2hResults, homeSidelined, awaySidelined, homeFixtures, awayFixtures, refStats, predictions, aggregateData, stageFixtures, matchFacts] = await Promise.all([
       // H2H
       (homeTeam && awayTeam)
         ? fetchH2H(homeTeam.id, awayTeam.id).catch(() => [] as SMFixture[])
@@ -1509,6 +1551,10 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
       (isCupLeague && !fixture.aggregate_id && fixture.stage_id)
         ? fetchFixturesByStage(fixture.stage_id).catch(() => [] as SMFixture[])
         : Promise.resolve([] as SMFixture[]),
+      // Match Facts — Spanish-translated pre-match insights. Cached 1h internally.
+      (homeTeam && awayTeam)
+        ? getMatchFacts(id, homeTeam.name, awayTeam.name).catch(() => [] as MatchFact[])
+        : Promise.resolve([] as MatchFact[]),
     ]);
 
     // Filter sidelined to players who were unavailable at match time.
@@ -1553,9 +1599,15 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
         // Find coach via fixture.coaches (meta.participant_id links to team)
         const homeCoach = fixture.coaches?.find(c => c.meta?.participant_id === homeTeam?.id);
         const homeCoachImg = homeCoach?.image_path?.includes('placeholder') ? undefined : homeCoach?.image_path;
+        const homeCoachName = pickCoachName(homeCoach);
         return {
           ...mapLineup(entries, homeTeam?.id ?? 0, fixture.events),
           isExpected: useExpected,
+          coach: homeCoachName,
+          coachNationality: homeCoach?.nationality?.name ?? '',
+          coachNationalityCode: homeCoach?.nationality?.iso2,
+          coachNationalityFlag: homeCoach?.nationality?.image_path,
+          coachDateOfBirth: homeCoach?.date_of_birth,
           coachImageUrl: homeCoachImg,
           coachId: homeCoach?.meta?.coach_id ?? homeCoach?.id,
         };
@@ -1572,9 +1624,15 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
         // Find coach via fixture.coaches (meta.participant_id links to team)
         const awayCoach = fixture.coaches?.find(c => c.meta?.participant_id === awayTeam?.id);
         const awayCoachImg = awayCoach?.image_path?.includes('placeholder') ? undefined : awayCoach?.image_path;
+        const awayCoachName = pickCoachName(awayCoach);
         return {
           ...mapLineup(entries, awayTeam?.id ?? 0, fixture.events),
           isExpected: useExpected,
+          coach: awayCoachName,
+          coachNationality: awayCoach?.nationality?.name ?? '',
+          coachNationalityCode: awayCoach?.nationality?.iso2,
+          coachNationalityFlag: awayCoach?.nationality?.image_path,
+          coachDateOfBirth: awayCoach?.date_of_birth,
           coachImageUrl: awayCoachImg,
           coachId: awayCoach?.meta?.coach_id ?? awayCoach?.id,
         };
@@ -1588,6 +1646,7 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
         away: mapSidelined(activeAwaySidelined),
       },
       predictions: predictions.length > 0 ? mapPredictions(predictions) : undefined,
+      matchFacts: matchFacts.length > 0 ? matchFacts : undefined,
       homeForm: homeTeam ? mapTeamForm(homeFixtures, homeTeam.id) : undefined,
       awayForm: awayTeam ? mapTeamForm(awayFixtures, awayTeam.id) : undefined,
       h2h: {
@@ -1641,14 +1700,14 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
       match.status === 'finished' ? CacheTTL.detailFinished :
       match.status === 'live'     ? CacheTTL.detailLive :
                                     CacheTTL.detailScheduled;
-    AppCache.set(`fixture_detail_${id}`, { match, detail }, detailTtl);
+    AppCache.set(`fixture_detail_v2_${id}`, { match, detail }, detailTtl);
 
     console.log('[sportsApi] getFixtureDetail OK for', id);
     return { match, detail };
   } catch (err) {
     console.warn('[sportsApi] getFixtureDetail FAILED for id=' + id + ':', err instanceof Error ? err.message : err);
     captureError(err, { fn: 'getFixtureDetail', fixtureId: id });
-    const cached = await AppCache.get<{ match: Match; detail: Partial<MatchDetail> }>(`fixture_detail_${id}`);
+    const cached = await AppCache.get<{ match: Match; detail: Partial<MatchDetail> }>(`fixture_detail_v2_${id}`);
     return cached ?? null;
   }
 }
@@ -1875,6 +1934,14 @@ const ROUND_TRANSLATIONS: Record<string, string> = {
   'round 2': 'Segunda Ronda',
   'round 3': 'Tercera Ronda',
   'round 4': 'Cuarta Ronda',
+  // 3rd place / consolation finals
+  '3rd place final': 'Tercer Lugar',
+  '3rd place': 'Tercer Lugar',
+  'third place final': 'Tercer Lugar',
+  'third-place final': 'Tercer Lugar',
+  'third place': 'Tercer Lugar',
+  'third-place': 'Tercer Lugar',
+  'consolation final': 'Final de Consolación',
   // Group stage (hybrids)
   'group stage': 'Fase de Grupos',
   'group phase': 'Fase de Grupos',
@@ -1911,6 +1978,21 @@ function translatePlaceholderName(name: string): string {
     const key = RANKED_KEYS[n];
     if (key) return i18n.t(key as any);
   }
+  // "Winner Match 91" / "Winner of Match 91" → i18n
+  const winnerMatchM = lower.match(/^winner\s+(?:of\s+)?match\s+(\d+)$/);
+  if (winnerMatchM) return i18n.t('cup.winnerMatch', { n: winnerMatchM[1] });
+  // "Winner Semi-final 1" / "Winner Semi-final" → i18n
+  const winnerSemiM = lower.match(/^winner\s+semi-?finals?\s*(\d*)$/);
+  if (winnerSemiM) return i18n.t('cup.winnerSemifinal', { n: winnerSemiM[1] || '' }).trimEnd();
+  // "Winner Quarter-final X" / "Winner Quarterfinal X" → i18n
+  const winnerQFM = lower.match(/^winner\s+quarter-?finals?\s*(\d*)$/);
+  if (winnerQFM) return i18n.t('cup.winnerQuarterfinal', { n: winnerQFM[1] || '' }).trimEnd();
+  // "Winner Round of 16 X" → i18n
+  const winnerR16M = lower.match(/^winner\s+(?:of\s+)?round\s+of\s+16\s*(\d*)$/);
+  if (winnerR16M) return i18n.t('cup.winnerRoundOf16', { n: winnerR16M[1] }).trim();
+  // Generic "Winner X" / "Winner of X" fallback
+  const winnerGenM = lower.match(/^winner\s+(?:of\s+)?(.+)$/);
+  if (winnerGenM) return i18n.t('cup.winnerOf', { name: winnerGenM[1] });
   return name;
 }
 
@@ -2114,9 +2196,13 @@ export async function getCupBracket(
           }
         }
 
-        // Step 4 — filter by prefix (if found) to keep one tournament only
+        // Step 4 — filter by prefix to keep one tournament only.
+        // CRITICAL: filter from `playoffSized` (NOT `notFinished`) so we keep
+        // ALL stages of the active tournament — including finished earlier
+        // rounds like Cuartos and Semifinal. We only want to drop OTHER
+        // tournaments (e.g. Apertura), not finished stages of the active one.
         const filtered = tournamentPrefix
-          ? notFinished.filter(([, s]) => {
+          ? playoffSized.filter(([, s]) => {
               const nl = s.name.toLowerCase();
               return nl.startsWith(tournamentPrefix!) || !nl.includes(' - ');
             })
@@ -2396,9 +2482,19 @@ export interface SearchableLeague {
   name: string;
   country: string;
   flag: string;
-  image: string;       // SportMonks CDN logo URL
+  image: string;            // SportMonks CDN logo URL (NOT shown for copyright-sensitive leagues)
   seasonId?: number;
+  /** Hidden search keywords — never displayed, only used to match queries */
+  searchAliases?: string[];
+  /** When true, the UI should suppress the remote logo (use flag emoji instead) */
+  suppressLogo?: boolean;
 }
+
+// League IDs whose SportMonks logo we MUST NOT display due to third-party
+// trademark concerns (e.g. FIFA marks). The flag emoji is used instead.
+const COPYRIGHT_SENSITIVE_LEAGUE_IDS = new Set<number>([
+  732, // FIFA World Cup
+]);
 
 /** Returns all leagues from config as searchable items */
 export function getSearchableLeagues(): SearchableLeague[] {
@@ -2407,8 +2503,12 @@ export function getSearchableLeagues(): SearchableLeague[] {
     name: l.name,
     country: l.country,
     flag: l.flag,
-    image: `https://cdn.sportmonks.com/images/soccer/leagues/${l.id}.png`,
+    image: COPYRIGHT_SENSITIVE_LEAGUE_IDS.has(l.id)
+      ? ''
+      : `https://cdn.sportmonks.com/images/soccer/leagues/${l.id}.png`,
     seasonId: l.currentSeasonId ?? undefined,
+    searchAliases: l.searchAliases,
+    suppressLogo: COPYRIGHT_SENSITIVE_LEAGUE_IDS.has(l.id),
   }));
 }
 
@@ -3149,4 +3249,276 @@ export async function getSearchableNationalTeams(): Promise<SearchableTeam[]> {
 
   _nationalTeamsCache = teams;
   return teams;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COACH PROFILES — career teams + aggregated career statistics
+// Used by the CoachDetailModal on the lineup screen.
+// SportMonks stat type_ids (verified against multiple coach responses):
+//   188 = Matches Played
+//   214 = Wins
+//   215 = Draws
+//   216 = Losses
+//   59  = Goals scored
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CoachCareerTeam {
+  id: number;
+  name: string;
+  logo: string;
+}
+
+export interface CoachCareerStats {
+  matchesPlayed: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsScored: number;
+  /** Percentage (0–100), rounded to integer */
+  winRate: number;
+}
+
+export interface CoachProfile {
+  id: number;
+  name: string;
+  teams: CoachCareerTeam[];      // distinct teams from coach's career
+  stats: CoachCareerStats;       // aggregated across all seasons
+}
+
+const SM_COACH_STAT = {
+  MATCHES: 188,
+  WINS:    214,
+  DRAWS:   215,
+  LOSSES:  216,
+  GOALS:   59,
+} as const;
+
+export async function getCoachProfile(coachId: number): Promise<CoachProfile | null> {
+  // v3: switched career source to statistics[].team + improved name
+  // resolution via pickCoachName (handles "Andrei" → "André Jardine").
+  const cacheKey = `coach_profile_v3_${coachId}`;
+  const cached = await AppCache.get<CoachProfile>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const raw: SMCoachProfile = await fetchCoachProfile(coachId);
+    if (!raw) return null;
+
+    // ── Career teams (distinct) ─────────────────────────────────────────────
+    // SportMonks `teams[]` only contains the CURRENT team for most coaches.
+    // True career history lives in `statistics[].team` (one entry per
+    // coach-team-season tuple). We aggregate the distinct teams there.
+    const teamMap = new Map<number, CoachCareerTeam>();
+
+    // Pass 1: include current team(s) from teams[] (may be empty)
+    for (const entry of raw.teams ?? []) {
+      const t = entry.team;
+      if (!t || teamMap.has(t.id)) continue;
+      teamMap.set(t.id, { id: t.id, name: t.name, logo: t.image_path ?? '' });
+    }
+
+    // Pass 2: derive career teams from statistics (handles Bayern, Barça, etc.)
+    for (const stat of raw.statistics ?? []) {
+      const t = stat.team;
+      if (!t || teamMap.has(t.id)) continue;
+      teamMap.set(t.id, { id: t.id, name: t.name, logo: t.image_path ?? '' });
+    }
+
+    // ── Aggregated stats across all seasons ────────────────────────────────
+    let matchesPlayed = 0, wins = 0, draws = 0, losses = 0, goalsScored = 0;
+    for (const stat of raw.statistics ?? []) {
+      for (const d of stat.details ?? []) {
+        const count = d.value?.count ?? 0;
+        switch (d.type_id) {
+          case SM_COACH_STAT.MATCHES: matchesPlayed += count; break;
+          case SM_COACH_STAT.WINS:    wins += count; break;
+          case SM_COACH_STAT.DRAWS:   draws += count; break;
+          case SM_COACH_STAT.LOSSES:  losses += count; break;
+          case SM_COACH_STAT.GOALS:   goalsScored += count; break;
+        }
+      }
+    }
+    const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
+
+    const profile: CoachProfile = {
+      id: raw.id,
+      name: pickCoachName(raw),
+      teams: Array.from(teamMap.values()),
+      stats: { matchesPlayed, wins, draws, losses, goalsScored, winRate },
+    };
+
+    // Cache 7 days — coach career stats change slowly
+    AppCache.set(cacheKey, profile, 7 * 24 * 60 * 60_000);
+    return profile;
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MATCH FACTS — Spanish translation + filter of SportMonks "Match Facts" data.
+// Used in PreviewTab to show insights like form streaks, H2H stats, etc.
+// SportMonks returns ~25 facts per fixture in English; we translate and keep
+// the most impactful ones using a regex-based pattern matcher against the
+// structured `data` field.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Translate a SportMonks fact's natural_language English string into Spanish
+ * by matching common patterns against the team names of this fixture.
+ *
+ * Approach: SportMonks sentences are formulaic. We parse the team name and
+ * the numbers (% / counts) out of the English, then rebuild the sentence
+ * in Spanish. Falls back to the original English string if no pattern matches.
+ */
+function translateFactToSpanish(
+  en: string,
+  homeName: string,
+  awayName: string,
+): string {
+  // Strip parenthetical home/away breakdowns ("(home only: ...)" / "(away only: ...)")
+  // — they add nuance but make sentences too long for the UI.
+  let s = en.replace(/\s*\([^)]*only:[^)]*\)/gi, '').trim();
+  // Strip "in their Premier League matches" / "in their La Liga matches" etc.
+  // Keep "against X" but drop the league name to keep things short.
+  s = s.replace(/\s+in their [A-Z][^()]*matches\b/gi, '');
+
+  // Escape team names for regex
+  const esc = (n: string) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const home = esc(homeName);
+  const away = esc(awayName);
+  const team = `(${home}|${away})`;
+
+  // Helper: localize team name (no-op for now — SM returns the names we already use)
+  const tr = (name: string) => name;
+
+  // ── H2H: "X have/has N wins (P%) against Y" ─────────────────────────────
+  let m;
+  m = s.match(new RegExp(`^${team}\\s+(?:have|has)\\s+(\\d+)\\s+wins?(?:\\s+\\(([\\d.]+%?)\\))?\\s+against\\s+(${home}|${away})`, 'i'));
+  if (m) return `${tr(m[1])} tiene ${m[2]} victorias${m[3] ? ` (${m[3]})` : ''} ante ${tr(m[4])}`;
+
+  m = s.match(new RegExp(`^${team}\\s+(?:have|has)\\s+(\\d+)\\s+losses?(?:\\s+\\(([\\d.]+%?)\\))?\\s+against\\s+(${home}|${away})`, 'i'));
+  if (m) return `${tr(m[1])} tiene ${m[2]} derrotas${m[3] ? ` (${m[3]})` : ''} ante ${tr(m[4])}`;
+
+  m = s.match(new RegExp(`^${team}\\s+(?:have|has)\\s+(\\d+)\\s+draws?(?:\\s+\\(([\\d.]+%?)\\))?\\s+against\\s+(${home}|${away})`, 'i'));
+  if (m) return `${tr(m[1])} tiene ${m[2]} empates${m[3] ? ` (${m[3]})` : ''} ante ${tr(m[4])}`;
+
+  m = s.match(new RegExp(`^${team}\\s+(?:have|has)\\s+(\\d+)\\s+clean sheets?(?:\\s+\\(([\\d.]+%?)\\))?\\s+against\\s+(${home}|${away})`, 'i'));
+  if (m) return `${tr(m[1])} ha dejado ${m[2]} porterías a cero${m[3] ? ` (${m[3]})` : ''} ante ${tr(m[4])}`;
+
+  m = s.match(new RegExp(`^${team}\\s+conceded\\s+([\\d.]+)\\s+goals per match\\s+against\\s+(${home}|${away})`, 'i'));
+  if (m) return `${tr(m[1])} recibe ${m[2]} goles por partido ante ${tr(m[3])}`;
+
+  m = s.match(new RegExp(`^${team}\\s+scored\\s+([\\d.]+)\\s+goals per match\\s+against\\s+(${home}|${away})`, 'i'));
+  if (m) return `${tr(m[1])} anota ${m[2]} goles por partido ante ${tr(m[3])}`;
+
+  m = s.match(new RegExp(`^${team}\\s+(?:have|has)\\s+conceded\\s+(\\d+)\\s+goals?\\s+against\\s+(${home}|${away})`, 'i'));
+  if (m) return `${tr(m[1])} ha recibido ${m[2]} goles ante ${tr(m[3])}`;
+
+  m = s.match(new RegExp(`^${team}\\s+(?:were|was)\\s+first to score\\s+(\\d+)\\s+times?(?:\\s+\\(([\\d.]+%?)\\))?\\s+against\\s+(${home}|${away})`, 'i'));
+  if (m) return `${tr(m[1])} anotó primero ${m[2]} veces${m[3] ? ` (${m[3]})` : ''} ante ${tr(m[4])}`;
+
+  // ── Overall recent form ─────────────────────────────────────────────────
+  m = s.match(new RegExp(`^${team}\\s+has\\s+(\\d+)\\s+wins?\\s+in their (\\d+) most recent matches`, 'i'));
+  if (m) return `${tr(m[1])} ganó ${m[2]} de sus últimos ${m[3]} partidos`;
+
+  m = s.match(new RegExp(`^${team}\\s+has\\s+(\\d+)\\s+losses?\\s+in their (\\d+) most recent matches`, 'i'));
+  if (m) return `${tr(m[1])} perdió ${m[2]} de sus últimos ${m[3]} partidos`;
+
+  m = s.match(new RegExp(`^${team}\\s+has\\s+(\\d+)\\s+draws?\\s+in their (\\d+) most recent matches`, 'i'));
+  if (m) return `${tr(m[1])} empató ${m[2]} de sus últimos ${m[3]} partidos`;
+
+  m = s.match(new RegExp(`^${team}\\s+has\\s+conceded\\s+(\\d+)\\s+goals?\\s+in their (\\d+) most recent matches`, 'i'));
+  if (m) return `${tr(m[1])} ha recibido ${m[2]} goles en sus últimos ${m[3]} partidos`;
+
+  m = s.match(new RegExp(`^${team}\\s+has\\s+scored\\s+(\\d+)\\s+goals?\\s+in their (\\d+) most recent matches`, 'i'));
+  if (m) return `${tr(m[1])} ha anotado ${m[2]} goles en sus últimos ${m[3]} partidos`;
+
+  // ── Streaks ─────────────────────────────────────────────────────────────
+  m = s.match(new RegExp(`^${team}\\s+has\\s+won\\s+(\\d+)\\s+of their last\\s+(\\d+) matches`, 'i'));
+  if (m) return `${tr(m[1])} ganó ${m[2]} de sus últimos ${m[3]} partidos`;
+
+  m = s.match(new RegExp(`^${team}\\s+has\\s+lost\\s+(\\d+)\\s+of their last\\s+(\\d+) matches`, 'i'));
+  if (m) return `${tr(m[1])} perdió ${m[2]} de sus últimos ${m[3]} partidos`;
+
+  m = s.match(new RegExp(`^${team}\\s+is\\s+unbeaten\\s+in\\s+(\\d+)\\s+of their last\\s+(\\d+) matches`, 'i'));
+  if (m) return `${tr(m[1])} está invicto en ${m[2]} de sus últimos ${m[3]} partidos`;
+
+  m = s.match(new RegExp(`^${team}\\s+is\\s+winless\\s+in\\s+(\\d+)\\s+of their last\\s+(\\d+) matches`, 'i'));
+  if (m) return `${tr(m[1])} no gana en ${m[2]} de sus últimos ${m[3]} partidos`;
+
+  // No pattern matched — return original English (we will still display it
+  // but it stands out as "untranslated" content for future improvement).
+  return s;
+}
+
+/**
+ * Compute an importance score 0-100 for ranking facts.
+ * Higher = more interesting/extreme stat.
+ */
+function rankFact(f: SMMatchFact): number {
+  let score = 0;
+  // Streaks are usually more striking than raw stats
+  if (f.category === 'streaks') score += 30;
+  // H2H is more contextual than generic recent form
+  if (f.basis === 'h2h') score += 10;
+  // Extreme percentages are more interesting (very high or very low)
+  const pct = f.data?.all?.percentage ?? null;
+  if (pct != null) {
+    score += Math.abs(pct - 50); // distance from 50% = how lopsided
+  }
+  // Long streaks = more interesting
+  const streak = f.data?.all?.streak ?? null;
+  if (streak != null && streak >= 5) score += streak * 2;
+  // High counts also interesting
+  const count = f.data?.all?.count ?? null;
+  if (count != null && count >= 10) score += 5;
+  return Math.min(100, score);
+}
+
+/**
+ * Fetch + translate + rank match facts for a fixture.
+ * Returns the top 6 most interesting facts in Spanish.
+ */
+export async function getMatchFacts(
+  fixtureId: number,
+  homeTeamName: string,
+  awayTeamName: string,
+): Promise<MatchFact[]> {
+  const cacheKey = `match_facts_v1_${fixtureId}`;
+  const cached = await AppCache.get<MatchFact[]>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const raw = await fetchMatchFacts(fixtureId);
+    if (!Array.isArray(raw) || raw.length === 0) return [];
+
+    const ranked = raw
+      .filter(f => f.natural_language && f.natural_language.trim().length > 0)
+      .map(f => ({
+        raw: f,
+        importance: rankFact(f),
+        text: translateFactToSpanish(f.natural_language!, homeTeamName, awayTeamName),
+      }))
+      // Drop duplicates — SM sometimes returns symmetric stats for both sides
+      // ("X has 9 wins against Y" AND "Y has 9 losses against X"). Keep one.
+      .filter((item, idx, arr) =>
+        arr.findIndex(x => x.text === item.text) === idx,
+      )
+      .sort((a, b) => b.importance - a.importance)
+      .slice(0, 6)
+      .map<MatchFact>(({ raw, text, importance }) => ({
+        id: raw.id,
+        text,
+        participant: raw.participant,
+        basis: raw.basis,
+        category: raw.category,
+        importance,
+      }));
+
+    AppCache.set(cacheKey, ranked, CacheTTL.h2h); // 1h cache — facts are stable
+    return ranked;
+  } catch {
+    return [];
+  }
 }

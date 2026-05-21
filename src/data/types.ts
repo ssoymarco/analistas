@@ -42,6 +42,12 @@ export interface Match {
     /** Minute offset at period start (0 for 1H, 45 for 2H, 90 for ET1, etc.). */
     periodMinuteOffset: number;
   };
+  /** Stadium info — used for the venue label on match cards.
+   *  For World Cup 2026 fixtures, the FIFA-clean override is applied at render
+   *  time (see config/worldCupVenues.ts). */
+  venueId?: number;
+  venueName?: string;
+  venueCity?: string;
 }
 
 export interface LeagueStanding {
@@ -284,10 +290,13 @@ export interface MatchLineup {
   starters: LineupPlayer[];
   bench: LineupPlayer[];
   coach: string;
-  coachNationality: string;
-  coachImageUrl?: string;  // photo from participants.coach include
-  coachId?: number;        // SM coach id — used to fetch extended coach profile
-  isExpected?: boolean;    // true when sourced from expectedlineups add-on (AI prediction)
+  coachNationality: string;       // SportMonks gives English name — use coachNationalityCode for localization
+  coachNationalityCode?: string;  // ISO2 country code (e.g. "ES", "GB") — feeds the i18n country lookup
+  coachNationalityFlag?: string;  // URL to country flag (from coaches.nationality include)
+  coachDateOfBirth?: string;      // ISO date "1973-08-29" — used to compute age
+  coachImageUrl?: string;         // photo from coaches include
+  coachId?: number;               // SM coach id — used to fetch extended coach profile
+  isExpected?: boolean;           // true when sourced from expectedlineups add-on (AI prediction)
 }
 
 export interface TVStation {
@@ -301,6 +310,24 @@ export interface MatchCommentary {
   extraMinute: number | null;
   comment: string;
   important: boolean;
+}
+
+/**
+ * A localized, ready-to-display intelligence fact about the match
+ * (form streak, H2H stat, scoring trend, etc.).
+ */
+export interface MatchFact {
+  id: number;
+  /** Already translated to Spanish — render as-is */
+  text: string;
+  /** "home" | "away" | "both" — which team the fact is about */
+  participant: 'home' | 'away' | 'both';
+  /** "h2h" = head-to-head; "overall" = recent form */
+  basis: 'h2h' | 'overall';
+  /** "statistics" or "streaks" — used for icon selection */
+  category: 'statistics' | 'streaks';
+  /** Importance score 0-100 — higher = more prominent (used for sorting) */
+  importance: number;
 }
 
 export interface MatchPrediction {
@@ -369,6 +396,7 @@ export interface MatchDetail {
   commentaries?: MatchCommentary[];
   resultInfo?: string;
   predictions?: MatchPrediction[];
+  matchFacts?: MatchFact[];
   homeForm?: TeamFormEntry[];
   awayForm?: TeamFormEntry[];
   pressureIndex?: PressureIndex;

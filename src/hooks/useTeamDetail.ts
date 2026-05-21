@@ -9,6 +9,7 @@ import {
   type SMFixture,
 } from '../services/sportmonks';
 import { getStandings } from '../services/sportsApi';
+import { getLeagueConfig } from '../config/leagues';
 import type { LeagueStanding } from '../data/types';
 
 // ── Public types ────────────────────────────────────────────────────────────
@@ -23,6 +24,7 @@ export interface TeamInfo {
   founded: number;
   coach: string;
   coachImage: string;
+  coachAge: number;
   venueName: string;
   venueCapacity: number;
   venueImage?: string;
@@ -43,6 +45,8 @@ export interface SquadPlayer {
   age: number;
   image: string;
   isCaptain: boolean;
+  clubName: string;
+  clubLogo: string;
 }
 
 export interface RecentMatch {
@@ -51,9 +55,11 @@ export interface RecentMatch {
   homeName: string;
   homeShort: string;
   homeLogo: string;
+  homeId: number;
   awayName: string;
   awayShort: string;
   awayLogo: string;
+  awayId: number;
   homeScore: number;
   awayScore: number;
   isHome: boolean;
@@ -144,18 +150,16 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
           ?? seasons[0]?.id
           ?? null;
         // If still null, try matching league config
-        const leagueCfg = sId ? null : (() => {
-          const leagueIdFromSeasons = seasons[0]?.league_id;
-          if (leagueIdFromSeasons) {
-            const { getLeagueConfig: getLc } = require('../config/leagues');
-            return getLc(leagueIdFromSeasons);
-          }
-          return null;
-        })();
-        const effectiveSeasonId = sId ?? leagueCfg?.currentSeasonId ?? null;
+        const fallbackLeagueId = seasons[0]?.league_id;
+        const fallbackCfg = (!sId && fallbackLeagueId) ? getLeagueConfig(fallbackLeagueId) : null;
+        const effectiveSeasonId = sId ?? fallbackCfg?.currentSeasonId ?? null;
 
-        const leagueName = seasons.find(s => s.id === effectiveSeasonId)?.name ?? '';
+        const seasonName = seasons.find(s => s.id === effectiveSeasonId)?.name ?? '';
         const leagueId = seasons.find(s => s.id === effectiveSeasonId)?.league_id ?? 0;
+        // Prefer the league display name from our config (e.g. "Mundial 2026") over the
+        // raw season name from SportMonks (e.g. "2026" or "2025/26").
+        const leagueCfgForName = getLeagueConfig(leagueId);
+        const leagueName = leagueCfgForName?.name ?? seasonName;
 
         // Fetch all data in parallel
         const [squadData, recentData, standings] = await Promise.all([
@@ -166,6 +170,21 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
 
         if (!mounted.current) return;
 
+        // For World Cup national teams, SportMonks often returns incorrect venue data
+        // (e.g. Mexico → Soldier Field, Chicago). Suppress the venue for these teams.
+        const isWCNationalTeam = leagueId === 732;
+
+        // Extract active coach from coaches array
+        const coaches: any[] = (team as any).coaches ?? [];
+        const activeCoach = coaches.find((c: any) => c.active !== false) ?? coaches[0] ?? null;
+        const coachName = activeCoach
+          ? (activeCoach.display_name || activeCoach.common_name || activeCoach.name || '')
+          : (team.coach ? (team.coach.display_name || team.coach.common_name || team.coach.name || '') : '');
+        const coachImg = activeCoach?.image_path ?? team.coach?.image_path ?? '';
+        const coachAge = activeCoach?.date_of_birth
+          ? calculateAge(activeCoach.date_of_birth)
+          : (team.coach?.date_of_birth ? calculateAge(team.coach.date_of_birth) : 0);
+
         // Map team info
         const info: TeamInfo = {
           id: team.id,
@@ -173,47 +192,71 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
           shortCode: team.short_code || team.name.slice(0, 3).toUpperCase(),
           logo: team.image_path,
           country: '',
-          city: team.venue?.city_name ?? '',
+          city: isWCNationalTeam ? '' : (team.venue?.city_name ?? ''),
           founded: team.founded,
-          coach: '',
-          coachImage: '',
-          venueName: team.venue?.name ?? '',
-          venueCapacity: team.venue?.capacity ?? 0,
-          venueImage: team.venue?.image_path ?? undefined,
+          coach: coachName,
+          coachImage: coachImg,
+          coachAge,
+          venueName: isWCNationalTeam ? '' : (team.venue?.name ?? ''),
+          venueCapacity: isWCNationalTeam ? 0 : (team.venue?.capacity ?? 0),
+          venueImage: isWCNationalTeam ? undefined : (team.venue?.image_path ?? undefined),
           leagueId,
           leagueName,
           currentSeasonId: sId,
         };
 
+        // Today's date string for active membership check
+        const todayStr = new Date().toISOString().split('T')[0];
+
         // Map squad
         const squad: SquadPlayer[] = squadData
           .filter(sp => sp.player)
-          .map(sp => ({
-            id: sp.id,
-            playerId: sp.player_id,
-            name: sp.player!.name,
-            displayName: sp.player!.display_name || sp.player!.common_name,
-            number: sp.jersey_number,
-            position: positionLabel(sp.position_id),
-            positionId: sp.position_id,
-            nationality: '',
-            age: sp.player!.date_of_birth ? calculateAge(sp.player!.date_of_birth) : 0,
-            image: sp.player!.image_path,
-            isCaptain: sp.captain,
-          }))
+          .map(sp => {
+            // Find current club (non-national, active membership)
+            const clubMembership = sp.player?.teams?.find(mt =>
+              (!mt.end || mt.end > todayStr) &&
+              mt.team &&
+              mt.team.type !== 'national'
+            );
+            return {
+              id: sp.id,
+              playerId: sp.player_id,
+              name: sp.player!.name,
+              displayName: sp.player!.display_name || sp.player!.common_name,
+              number: sp.jersey_number,
+              position: positionLabel(sp.position_id),
+              positionId: sp.position_id,
+              nationality: '',
+              age: sp.player!.date_of_birth ? calculateAge(sp.player!.date_of_birth) : 0,
+              image: sp.player!.image_path,
+              isCaptain: sp.captain,
+              clubName: clubMembership?.team?.name ?? '',
+              clubLogo: clubMembership?.team?.image_path ?? '',
+            };
+          })
           .sort((a, b) => a.positionId - b.positionId || a.number - b.number);
 
-        // Sort by date descending (most recent first) then take 10
+        // Sort by date descending (most recent first) then take up to 25
+        // (covers full tournament windows: WC group + KO + friendlies, etc.)
         const sortedRecent = [...recentData].sort((a, b) => b.starting_at_timestamp - a.starting_at_timestamp);
 
+        // State IDs that definitively mean the match ended
+        const FINISHED_STATES = new Set([5, 9, 10, 11, 17]);
+
         // Map recent matches
-        const recentMatches: RecentMatch[] = sortedRecent.slice(0, 10).map(f => {
+        const recentMatches: RecentMatch[] = sortedRecent.slice(0, 25).map(f => {
           const home = f.participants?.find(p => p.meta?.location === 'home');
           const away = f.participants?.find(p => p.meta?.location === 'away');
           const homeScore = getGoals(f.scores, 'home');
           const awayScore = getGoals(f.scores, 'away');
           const isHome = home?.id === teamId;
-          const isFinished = [5, 9, 10].includes(f.state_id);
+          // A match is finished if: known finished state, OR the kickoff was >4h ago
+          // and the state is not scheduled (1), not live (13/14)
+          const isDateWayPast = new Date(f.starting_at).getTime() < Date.now() - 4 * 3_600_000;
+          const isFinished =
+            FINISHED_STATES.has(f.state_id) ||
+            (isDateWayPast && f.state_id !== 1 && f.state_id !== 13 && f.state_id !== 14);
+
           let result: 'W' | 'D' | 'L' | null = null;
           if (isFinished) {
             const gf = isHome ? homeScore : awayScore;
@@ -227,9 +270,11 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
             homeName: home?.name ?? '',
             homeShort: home?.short_code ?? '',
             homeLogo: home?.image_path ?? '',
+            homeId: home?.id ?? 0,
             awayName: away?.name ?? '',
             awayShort: away?.short_code ?? '',
             awayLogo: away?.image_path ?? '',
+            awayId: away?.id ?? 0,
             homeScore,
             awayScore,
             isHome,

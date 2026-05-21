@@ -22,7 +22,13 @@
       ],
       "expo-web-browser",
       "expo-localization",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      [
+        "expo-tracking-transparency",
+        {
+          "userTrackingPermission": "Los anuncios nos permiten mantener Analistas gratis. Tu información nunca se vende a terceros."
+        }
+      ]
     ],
     "ios": {
       "bundleIdentifier": "app.analistas",

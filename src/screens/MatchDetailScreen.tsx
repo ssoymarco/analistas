@@ -516,7 +516,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
 
               {/* ── Home follow button ── */}
               {(() => {
-                const following = isFollowingTeam(match.homeTeam.id);
+                const following = isFollowingTeam(displayMatch.homeTeam.id);
                 return (
                   <TouchableOpacity
                     style={[scr.followBtn, {
@@ -529,9 +529,9 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                     }]}
                     onPress={() => {
                       haptics.selection();
-                      const nowFollowing = !isFollowingTeam(match.homeTeam.id);
-                      toggleFollowTeam(match.homeTeam.id);
-                      showFollowToast(match.homeTeam.name, nowFollowing);
+                      const nowFollowing = !isFollowingTeam(displayMatch.homeTeam.id);
+                      toggleFollowTeam(displayMatch.homeTeam.id);
+                      showFollowToast(displayMatch.homeTeam.name, nowFollowing);
                     }}
                     activeOpacity={0.75}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -548,19 +548,19 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 style={scr.teamCol}
                 activeOpacity={0.6}
                 onPress={() => {
-                  const n = Number(match.homeTeam.id);
+                  const n = Number(displayMatch.homeTeam.id);
                   if (!isNaN(n) && n > 0) {
                     navigation.push('TeamDetail', {
                       teamId: n,
-                      teamName: match.homeTeam.name,
-                      teamLogo: match.homeTeam.logo,
-                      seasonId: match.seasonId,
+                      teamName: displayMatch.homeTeam.name,
+                      teamLogo: displayMatch.homeTeam.logo,
+                      seasonId: displayMatch.seasonId,
                     });
                   }
                 }}
               >
-                <TeamBadge name={match.homeTeam.name} logo={match.homeTeam.logo} size={80} />
-                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{match.homeTeam.name}</Text>
+                <TeamBadge name={displayMatch.homeTeam.name} logo={displayMatch.homeTeam.logo} size={80} />
+                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{displayMatch.homeTeam.name}</Text>
               </TouchableOpacity>
 
               {/* Center */}
@@ -608,24 +608,24 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 style={scr.teamCol}
                 activeOpacity={0.6}
                 onPress={() => {
-                  const n = Number(match.awayTeam.id);
+                  const n = Number(displayMatch.awayTeam.id);
                   if (!isNaN(n) && n > 0) {
                     navigation.push('TeamDetail', {
                       teamId: n,
-                      teamName: match.awayTeam.name,
-                      teamLogo: match.awayTeam.logo,
-                      seasonId: match.seasonId,
+                      teamName: displayMatch.awayTeam.name,
+                      teamLogo: displayMatch.awayTeam.logo,
+                      seasonId: displayMatch.seasonId,
                     });
                   }
                 }}
               >
-                <TeamBadge name={match.awayTeam.name} logo={match.awayTeam.logo} size={80} />
-                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{match.awayTeam.name}</Text>
+                <TeamBadge name={displayMatch.awayTeam.name} logo={displayMatch.awayTeam.logo} size={80} />
+                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{displayMatch.awayTeam.name}</Text>
               </TouchableOpacity>
 
               {/* ── Away follow button ── */}
               {(() => {
-                const following = isFollowingTeam(match.awayTeam.id);
+                const following = isFollowingTeam(displayMatch.awayTeam.id);
                 return (
                   <TouchableOpacity
                     style={[scr.followBtn, {
@@ -638,9 +638,9 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                     }]}
                     onPress={() => {
                       haptics.selection();
-                      const nowFollowing = !isFollowingTeam(match.awayTeam.id);
-                      toggleFollowTeam(match.awayTeam.id);
-                      showFollowToast(match.awayTeam.name, nowFollowing);
+                      const nowFollowing = !isFollowingTeam(displayMatch.awayTeam.id);
+                      toggleFollowTeam(displayMatch.awayTeam.id);
+                      showFollowToast(displayMatch.awayTeam.name, nowFollowing);
                     }}
                     activeOpacity={0.75}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -672,14 +672,49 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           </Animated.View>
 
           {/* ── COMPACT view ── */}
-          <Animated.View style={[scr.heroCompact, { opacity: compactOpacity }]} pointerEvents="none">
+          {/* pointerEvents="box-none" lets touches pass through the wrapper
+              to the expanded view below when scrolled to top, while still
+              allowing the small badges to receive their own taps. */}
+          <Animated.View style={[scr.heroCompact, { opacity: compactOpacity }]} pointerEvents="box-none">
             <View style={scr.compactInner}>
-              <TeamBadgeSmall name={match.homeTeam.name} logo={match.homeTeam.logo} size={32} />
-              <View style={scr.compactCenter}>
+              <TouchableOpacity
+                onPress={() => {
+                  const n = Number(displayMatch.homeTeam.id);
+                  if (!isNaN(n) && n > 0) {
+                    navigation.push('TeamDetail', {
+                      teamId: n,
+                      teamName: displayMatch.homeTeam.name,
+                      teamLogo: displayMatch.homeTeam.logo,
+                      seasonId: displayMatch.seasonId,
+                    });
+                  }
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.6}
+              >
+                <TeamBadgeSmall name={displayMatch.homeTeam.name} logo={displayMatch.homeTeam.logo} size={32} />
+              </TouchableOpacity>
+              <View style={scr.compactCenter} pointerEvents="none">
                 {isLive && <View style={scr.compactLiveDot} />}
                 <Text style={[scr.compactScore, { color: hText }]}>{compactScoreText}</Text>
               </View>
-              <TeamBadgeSmall name={match.awayTeam.name} logo={match.awayTeam.logo} size={32} />
+              <TouchableOpacity
+                onPress={() => {
+                  const n = Number(displayMatch.awayTeam.id);
+                  if (!isNaN(n) && n > 0) {
+                    navigation.push('TeamDetail', {
+                      teamId: n,
+                      teamName: displayMatch.awayTeam.name,
+                      teamLogo: displayMatch.awayTeam.logo,
+                      seasonId: displayMatch.seasonId,
+                    });
+                  }
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.6}
+              >
+                <TeamBadgeSmall name={displayMatch.awayTeam.name} logo={displayMatch.awayTeam.logo} size={32} />
+              </TouchableOpacity>
             </View>
             <Text style={[scr.compactDate, { color: hTextSoft }]}>
               {isLive
@@ -765,12 +800,12 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           )
         ) : (
           <>
-            {activeTab === 'previa' && isScheduled && <PreviewTab    match={match} detail={detail} />}
-            {activeTab === 'previa' && !isScheduled && <EnVivoTab     match={match} detail={detail} />}
-            {activeTab === 'alineacion'   && <AlineacionTab    match={match} detail={detail} />}
-            {activeTab === 'estadisticas' && <EstadisticasTab  match={match} detail={detail} />}
+            {activeTab === 'previa' && isScheduled && <PreviewTab    match={displayMatch} detail={detail} />}
+            {activeTab === 'previa' && !isScheduled && <EnVivoTab     match={displayMatch} detail={detail} />}
+            {activeTab === 'alineacion'   && <AlineacionTab    match={displayMatch} detail={detail} />}
+            {activeTab === 'estadisticas' && <EstadisticasTab  match={displayMatch} detail={detail} />}
             {activeTab === 'tabla'        && <TablaTab         match={displayMatch} detail={detail} onCupDetected={handleCupDetected} />}
-            {activeTab === 'noticias'     && <NoticiasTab      match={match} detail={detail} />}
+            {activeTab === 'noticias'     && <NoticiasTab      match={displayMatch} detail={detail} />}
           </>
         )}
       </Animated.ScrollView>
