@@ -11,8 +11,13 @@
  */
 export declare const SPORTMONKS_TOKEN: import("firebase-functions/lib/params/types").SecretParam;
 /**
- * Resolve the token at runtime, inside a function execution.
- * Throws if the function did not bind SPORTMONKS_TOKEN in its `secrets` option.
+ * Resolve the SportMonks token at runtime. Two sources, in order:
+ *   1. Firebase Secret (when running inside a Cloud Function that binds
+ *      SPORTMONKS_TOKEN in its `secrets: []` option).
+ *   2. `process.env.SPORTMONKS_TOKEN` (for local scripts / CI / one-off
+ *      crawls that don't run inside a Firebase function).
+ *
+ * Throws if neither source has a value.
  */
 export declare function getSportmonksToken(): string;
 export declare const SM_BASE_URL = "https://api.sportmonks.com/v3/football";

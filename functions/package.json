@@ -9,7 +9,9 @@
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
     "lint": "eslint src/",
-    "clean": "rm -rf lib/"
+    "clean": "rm -rf lib/",
+    "crawl": "npm run build && node lib/scripts/crawl-historical.js",
+    "crawl:reset": "rm -f .crawl-progress.json && echo 'crawl progress reset'"
   },
   "engines": {
     "node": "22"

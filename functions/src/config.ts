@@ -17,17 +17,29 @@ import { defineSecret } from 'firebase-functions/params';
 export const SPORTMONKS_TOKEN = defineSecret('SPORTMONKS_TOKEN');
 
 /**
- * Resolve the token at runtime, inside a function execution.
- * Throws if the function did not bind SPORTMONKS_TOKEN in its `secrets` option.
+ * Resolve the SportMonks token at runtime. Two sources, in order:
+ *   1. Firebase Secret (when running inside a Cloud Function that binds
+ *      SPORTMONKS_TOKEN in its `secrets: []` option).
+ *   2. `process.env.SPORTMONKS_TOKEN` (for local scripts / CI / one-off
+ *      crawls that don't run inside a Firebase function).
+ *
+ * Throws if neither source has a value.
  */
 export function getSportmonksToken(): string {
-  const token = SPORTMONKS_TOKEN.value();
-  if (!token) {
-    throw new Error(
-      'SPORTMONKS_TOKEN is empty. Run: firebase functions:secrets:set SPORTMONKS_TOKEN',
-    );
+  // 1. Cloud Function runtime
+  try {
+    const fromSecret = SPORTMONKS_TOKEN.value();
+    if (fromSecret) return fromSecret;
+  } catch {
+    // Reading defineSecret outside a function context can throw — fall through.
   }
-  return token;
+  // 2. Local script / CI environment
+  const fromEnv = process.env.SPORTMONKS_TOKEN;
+  if (fromEnv) return fromEnv;
+  throw new Error(
+    'SPORTMONKS_TOKEN is not set. Either bind the Firebase secret in `secrets: [SPORTMONKS_TOKEN]` ' +
+    'or export SPORTMONKS_TOKEN in your local environment before running the script.',
+  );
 }
 
 export const SM_BASE_URL  = 'https://api.sportmonks.com/v3/football';
