@@ -1875,6 +1875,32 @@ export async function getCupGroupStandings(seasonId: number): Promise<CupGroupsR
   const cached = await AppCache.get<CupGroupsResult>(cacheKey);
   if (cached) return cached;
 
+  // ── Firestore-first ──
+  // Both inputs (standings + groups) live in our `standings/{seasonId}` doc
+  // — group names are auto-generated from group_ids ("Grupo A", "Grupo B"…)
+  // when SportMonks omits them. Avoids two per-user SM calls.
+  try {
+    const { getStandingsFromFirestore } = await import('./firestoreApi');
+    const fsRows = await getStandingsFromFirestore(seasonId);
+    const groupRows = fsRows.filter(r => r.groupId != null);
+    if (groupRows.length > 0) {
+      const sortedGroupIds = Array.from(new Set(groupRows.map(r => r.groupId!))).sort((a, b) => a - b);
+      const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const groups: CupGroup[] = sortedGroupIds.map((gid, i) => {
+        const standings = groupRows
+          .filter(r => r.groupId === gid)
+          .sort((a, b) => a.position - b.position)
+          .map((r, j) => ({ ...r, position: j + 1 }));
+        return { id: gid, name: `Grupo ${LETTERS[i]}`, standings };
+      });
+      const out: CupGroupsResult = { hasGroups: true, groups };
+      AppCache.set(cacheKey, out, CacheTTL.standings);
+      return out;
+    }
+  } catch {
+    // Firestore unavailable — fall through to proxy
+  }
+
   try {
     const [rawData, smGroups] = await Promise.all([
       fetchStandings(seasonId),
@@ -2187,7 +2213,52 @@ export async function getCupBracket(
   isPlayoffsOnly?: boolean,
 ): Promise<CupRound[]> {
   try {
-    const fixtures = await fetchFixturesBySeasonId(seasonId);
+    // Firestore-first: matches/ has every fixture from the crawl + the
+    // ongoing syncFixtures. Read from there to avoid a per-user proxy hit.
+    let fixtures: SMFixture[] = [];
+    try {
+      const { getFixturesBySeasonFromFirestore } = await import('./firestoreApi');
+      const fsMatches = await getFixturesBySeasonFromFirestore(seasonId);
+      if (fsMatches.length > 0) {
+        // Re-use the shim used by useLeagueDetail to map Match[] → SMFixture[].
+        // Defined inline here because sportsApi can't import from a hook.
+        fixtures = fsMatches.map(m => {
+          const homeId = Number(m.homeTeam.id) || 0;
+          const awayId = Number(m.awayTeam.id) || 0;
+          const stateId = m.status === 'finished' ? 5 : m.status === 'live' ? 22 : 1;
+          return {
+            id: Number(m.id) || 0,
+            league_id: Number(m.leagueId) || 0,
+            season_id: m.seasonId ?? 0,
+            stage_id: 0,
+            group_id: null,
+            aggregate_id: null,
+            round_id: 0,
+            starting_at: m.startingAtUtc ?? '',
+            starting_at_timestamp: m.startingAtUtc ? Math.floor(new Date(m.startingAtUtc).getTime() / 1000) : 0,
+            length: 90,
+            state_id: stateId,
+            participants: [
+              { id: homeId, name: m.homeTeam.name, short_code: m.homeTeam.shortName, image_path: m.homeTeam.logo, meta: { location: 'home' } },
+              { id: awayId, name: m.awayTeam.name, short_code: m.awayTeam.shortName, image_path: m.awayTeam.logo, meta: { location: 'away' } },
+            ],
+            scores: m.status !== 'scheduled' ? [
+              { type_id: 1525, participant_id: homeId, score: { goals: m.homeScore, participant: 'home' }, description: 'CURRENT' },
+              { type_id: 1525, participant_id: awayId, score: { goals: m.awayScore, participant: 'away' }, description: 'CURRENT' },
+            ] : [],
+            league: { id: Number(m.leagueId) || 0, name: m.league, image_path: m.leagueLogo ?? '' },
+            state: { id: stateId, state: m.status, name: m.status },
+          } as unknown as SMFixture;
+        });
+      }
+    } catch {
+      // Firestore unavailable — proxy fallback below
+    }
+
+    if (fixtures.length === 0) {
+      // Firestore had nothing — fall back to proxy
+      fixtures = await fetchFixturesBySeasonId(seasonId);
+    }
     if (fixtures.length === 0) return [];
 
     // ── Group by STAGE (not round) ────────────────────────────────────────────
