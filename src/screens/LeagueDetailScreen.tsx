@@ -846,9 +846,9 @@ const WorldCupHeroHeader: React.FC<WorldCupHeroProps> = ({
         {/* Trophy */}
         <Text style={wch.trophy}>🏆</Text>
 
-        {/* Title — "MUNDIAL" + year, with year in a tappable pill when
-            multiple editions are available */}
-        <Text style={wch.title}>{t('worldcup.heroTitle')}</Text>
+        {/* Title — year comes from the selected season, so picking a past
+            edition switches the entire branding to that year. */}
+        <Text style={wch.title}>{t('worldcup.heroTitle', { year: yearLabel })}</Text>
         <View style={{ marginTop: 4 }}>
           <SeasonSelector
             seasons={seasons}

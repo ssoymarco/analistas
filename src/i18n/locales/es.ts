@@ -1074,7 +1074,7 @@ const es = {
 
   // ── Mundial 2026 hero header ──────────────────────────────────────────────
   worldcup: {
-    heroTitle: 'MUNDIAL 2026',
+    heroTitle: 'MUNDIAL {{year}}',
     teams: 'SELECCIONES',
     groups: 'GRUPOS',
     matches: 'PARTIDOS',
