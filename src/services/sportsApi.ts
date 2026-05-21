@@ -86,6 +86,7 @@ import type { NewsArticle, CupGroup, CupGroupsResult } from '../data/types';
 import { AVAILABLE_LEAGUES, getLeagueConfig, LEAGUE_IDS } from '../config/leagues';
 import i18n from '../i18n';
 import { normalize } from '../utils/normalize';
+import { resolveTeamLogo } from '../utils/teamLogoOverrides';
 
 // ── State Mapping ───────────────────────────────────────────────────────────
 
@@ -332,7 +333,7 @@ function mapParticipantToTeam(p: SMParticipant | undefined): Team {
     id: String(p.id),
     name,
     shortName: p.short_code || name.slice(0, 3).toUpperCase(),
-    logo: p.image_path || '⚽',
+    logo: resolveTeamLogo(p.id, p.image_path) || '⚽',
   };
 }
 

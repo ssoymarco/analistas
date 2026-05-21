@@ -37,6 +37,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { resolveTeamLogo } from '../utils/teamLogoOverrides';
 import type {
   Match,
   MatchStatus,
@@ -133,7 +134,7 @@ function teamFromDoc(t: TeamDoc): Team {
     id:        t.id,
     name:      t.name,
     shortName: t.shortName,
-    logo:      t.logo,
+    logo:      resolveTeamLogo(t.id, t.logo),
   };
 }
 

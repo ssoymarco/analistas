@@ -10,6 +10,7 @@ import {
 } from '../services/sportmonks';
 import { getStandings } from '../services/sportsApi';
 import { getLeagueConfig } from '../config/leagues';
+import { resolveTeamLogo } from '../utils/teamLogoOverrides';
 import type { LeagueStanding } from '../data/types';
 
 // ── Public types ────────────────────────────────────────────────────────────
@@ -206,7 +207,7 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
           id: team.id,
           name: team.name,
           shortCode: team.short_code || team.name.slice(0, 3).toUpperCase(),
-          logo: team.image_path,
+          logo: resolveTeamLogo(team.id, team.image_path),
           country: '',
           city: isWCNationalTeam ? '' : (team.venue?.city_name ?? ''),
           founded: team.founded,
@@ -285,11 +286,11 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
             date: f.starting_at.split(' ')[0],
             homeName: home?.name ?? '',
             homeShort: home?.short_code ?? '',
-            homeLogo: home?.image_path ?? '',
+            homeLogo: resolveTeamLogo(home?.id, home?.image_path ?? ''),
             homeId: home?.id ?? 0,
             awayName: away?.name ?? '',
             awayShort: away?.short_code ?? '',
-            awayLogo: away?.image_path ?? '',
+            awayLogo: resolveTeamLogo(away?.id, away?.image_path ?? ''),
             awayId: away?.id ?? 0,
             homeScore,
             awayScore,
