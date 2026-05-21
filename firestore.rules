@@ -75,7 +75,31 @@ service cloud.firestore {
       allow update: if false; // always delete + create for username swap
     }
 
-    // ── Deny everything else ───────────────────────────────────────────────────
+    // ── Sports data — populated by Cloud Functions (Admin SDK bypasses rules) ──
+    // Clients (mobile app, web) read-only; writes denied at the rule level so
+    // only the Cloud Functions service account (via Admin SDK) can populate it.
+
+    /// matches/{matchId} — live + scheduled + finished fixtures
+    match /matches/{matchId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    /// standings/{seasonId} — league tables
+    match /standings/{seasonId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    /// topscorers/{seasonId} — top scorers per league
+    match /topscorers/{seasonId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // ── Deny everything else (including _meta) ────────────────────────────────
+    // _meta/livescoresSnapshot is internal diff state for Cloud Functions only —
+    // no client should ever need to read it.
     match /{document=**} {
       allow read, write: if false;
     }
