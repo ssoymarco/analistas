@@ -15,6 +15,7 @@ import { formatMatchTime } from '../utils/formatMatchTime';
 import type { Match } from '../data/types';
 import { getLeagueConfig } from '../config/leagues';
 import { getDisplayVenueName, getDisplayVenueCity } from '../config/worldCupVenues';
+import { translateNationalTeam } from '../utils/nationalTeams';
 
 /** Renders a team logo — Image if URL, Text if emoji/short string */
 const TeamLogo = ({ logo, size = 24 }: { logo: string; size?: number }) => {
@@ -87,7 +88,7 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
             style={[s.teamName, { color: c.textPrimary }, homeWon && s.teamNameBold]}
             numberOfLines={1}
           >
-            {match.homeTeam.name}
+            {translateNationalTeam(match.homeTeam.name)}
           </Text>
           {!!match.homeRedCards && <RedCards count={match.homeRedCards} />}
         </View>
@@ -126,7 +127,7 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
             style={[s.teamName, s.teamNameRight, { color: c.textPrimary }, awayWon && s.teamNameBold]}
             numberOfLines={1}
           >
-            {match.awayTeam.name}
+            {translateNationalTeam(match.awayTeam.name)}
           </Text>
           <TeamLogo logo={match.awayTeam.logo} />
         </View>
