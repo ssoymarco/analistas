@@ -776,10 +776,19 @@ function computeWCPhase(now = Date.now()): WCPhase {
 
 const padTwo = (n: number) => n.toString().padStart(2, '0');
 
-const WCTimerBlock: React.FC<{ value: string; label: string }> = ({ value, label }) => (
-  <View style={wch.timerBlock}>
-    <Text style={wch.timerValue}>{value}</Text>
-    <Text style={wch.timerLabel}>{label}</Text>
+const WCTimerBlock: React.FC<{
+  value: string; label: string;
+  isDark: boolean;
+}> = ({ value, label, isDark }) => (
+  <View style={[
+    wch.timerBlock,
+    !isDark && {
+      backgroundColor: 'rgba(13,31,56,0.06)',
+      borderColor: 'rgba(13,31,56,0.08)',
+    },
+  ]}>
+    <Text style={[wch.timerValue, !isDark && { color: '#0D1F38' }]}>{value}</Text>
+    <Text style={[wch.timerLabel, !isDark && { color: 'rgba(13,31,56,0.55)' }]}>{label}</Text>
   </View>
 );
 
@@ -800,6 +809,7 @@ const WorldCupHeroHeader: React.FC<WorldCupHeroProps> = ({
   isFollowing, onToggleFollow, t,
   seasons, selectedSeasonId, onSelectSeason, isCurrentSeason,
 }) => {
+  const { isDark } = useDarkMode();
   const [wc, setWc] = useState<WCPhase>(() => computeWCPhase());
 
   useEffect(() => {
@@ -814,10 +824,25 @@ const WorldCupHeroHeader: React.FC<WorldCupHeroProps> = ({
     ? (selectedSeason.name?.match(/\d{4}/)?.[0] ?? String(selectedSeason.year))
     : '2026';
 
+  // Theme-aware palette. Dark mode keeps the original FIFA navy + gold look.
+  // Light mode switches to a warm cream gradient with navy text so the hero
+  // blends into the white app surface instead of looking like a floating
+  // dark island, while still keeping the brand cues (gold trophy, gold
+  // separator, host accent strip).
+  const gradientColors = isDark
+    ? (['#05101E', '#0D1F38', '#152C4E'] as const)
+    : (['#FFFFFF', '#FAF5E8', '#F0E6CC'] as const);
+  const titleColor       = isDark ? '#FFFFFF' : '#0D1F38';
+  const titleShadowColor = isDark ? 'rgba(0,0,0,0.4)' : 'rgba(13,31,56,0.12)';
+  const hostsColor       = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(13,31,56,0.55)';
+  const followBorderCol  = isDark ? 'rgba(255,255,255,0.28)' : 'rgba(13,31,56,0.25)';
+  const followBgIdle     = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(13,31,56,0.04)';
+  const followTextIdle   = isDark ? '#FFFFFF' : '#0D1F38';
+
   return (
     <View>
       <LinearGradient
-        colors={['#05101E', '#0D1F38', '#152C4E']}
+        colors={gradientColors}
         start={{ x: 0, y: 0 }}
         end={{ x: 0.7, y: 1 }}
         style={wch.gradient}
@@ -849,39 +874,41 @@ const WorldCupHeroHeader: React.FC<WorldCupHeroProps> = ({
 
         {/* Title — year comes from the selected season, so picking a past
             edition switches the entire branding to that year. */}
-        <Text style={wch.title}>{t('worldcup.heroTitle', { year: yearLabel })}</Text>
+        <Text style={[wch.title, { color: titleColor, textShadowColor: titleShadowColor }]}>
+          {t('worldcup.heroTitle', { year: yearLabel })}
+        </Text>
         <View style={{ marginTop: 4 }}>
           <SeasonSelector
             seasons={seasons}
             selectedSeasonId={selectedSeasonId}
             onSelect={onSelectSeason}
             pillLabel={yearLabel}
-            mode="dark"
+            mode={isDark ? 'dark' : 'auto'}
           />
         </View>
 
         {/* Host flags — only for current edition (2026 → MX/USA/CAN) */}
         {isCurrentSeason && (
-          <Text style={wch.hosts}>🇲🇽 · 🇺🇸 · 🇨🇦</Text>
+          <Text style={[wch.hosts, { color: hostsColor }]}>🇲🇽 · 🇺🇸 · 🇨🇦</Text>
         )}
 
         {/* Countdown — only for the current edition (past WCs already ended) */}
         {isCurrentSeason && wc.phase === 'pre' && (
           <View style={wch.countdownRow}>
-            <WCTimerBlock value={padTwo(wc.days)}    label={t('preview.days').toUpperCase()} />
-            <Text style={wch.colon}>:</Text>
-            <WCTimerBlock value={padTwo(wc.hours)}   label={t('preview.hours').toUpperCase()} />
-            <Text style={wch.colon}>:</Text>
-            <WCTimerBlock value={padTwo(wc.minutes)} label={t('preview.minutes').toUpperCase()} />
-            <Text style={wch.colon}>:</Text>
-            <WCTimerBlock value={padTwo(wc.seconds)} label={t('preview.seconds').toUpperCase()} />
+            <WCTimerBlock isDark={isDark} value={padTwo(wc.days)}    label={t('preview.days').toUpperCase()} />
+            <Text style={[wch.colon, !isDark && { color: 'rgba(13,31,56,0.25)' }]}>:</Text>
+            <WCTimerBlock isDark={isDark} value={padTwo(wc.hours)}   label={t('preview.hours').toUpperCase()} />
+            <Text style={[wch.colon, !isDark && { color: 'rgba(13,31,56,0.25)' }]}>:</Text>
+            <WCTimerBlock isDark={isDark} value={padTwo(wc.minutes)} label={t('preview.minutes').toUpperCase()} />
+            <Text style={[wch.colon, !isDark && { color: 'rgba(13,31,56,0.25)' }]}>:</Text>
+            <WCTimerBlock isDark={isDark} value={padTwo(wc.seconds)} label={t('preview.seconds').toUpperCase()} />
           </View>
         )}
 
         {isCurrentSeason && wc.phase === 'live' && (
           <View style={wch.liveRow}>
             <View style={wch.liveDot} />
-            <Text style={wch.liveText}>
+            <Text style={[wch.liveText, !isDark && { color: '#0D1F38' }]}>
               {t('worldcup.liveLabel')} · {t('worldcup.dayLabel', { n: wc.daysElapsed + 1 })}
             </Text>
           </View>
@@ -893,12 +920,12 @@ const WorldCupHeroHeader: React.FC<WorldCupHeroProps> = ({
             wch.followBtn,
             isFollowing
               ? { backgroundColor: '#00E096' }
-              : { backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.28)' },
+              : { backgroundColor: followBgIdle, borderWidth: 1.5, borderColor: followBorderCol },
           ]}
           onPress={onToggleFollow}
           activeOpacity={0.8}
         >
-          <Text style={[wch.followText, { color: isFollowing ? '#001A0D' : '#FFFFFF' }]}>
+          <Text style={[wch.followText, { color: isFollowing ? '#001A0D' : followTextIdle }]}>
             {isFollowing ? t('league.followingLeague') : t('league.followLeague')}
           </Text>
         </TouchableOpacity>
@@ -1383,17 +1410,11 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   const [showCompact, setShowCompact] = useState(false);
 
   // ── Header theme colors ──
-  // The World Cup hero uses a fixed dark-navy gradient (FIFA brand identity).
-  // In light mode the topBar/status-bar area used to be white, which made the
-  // navy hero look like a floating block. For WC we force the top region to
-  // dark-on-dark in both themes so the whole header reads as one panel.
-  const isWC = leagueId === 732;
-  const WC_NAVY = '#05101E';
-  const headerBg   = isWC ? WC_NAVY : c.bg;
-  const hText      = isWC ? '#fff'  : (isDark ? '#fff' : '#111827');
-  const hTextSoft  = isWC ? 'rgba(255,255,255,0.6)' : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(17,24,39,0.5)');
-  const hBtnBg     = isWC ? 'rgba(255,255,255,0.12)' : (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)');
-  const hBorderCol = isWC ? 'rgba(255,255,255,0.4)'  : (isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.2)');
+  const headerBg   = c.bg;
+  const hText      = isDark ? '#fff' : '#111827';
+  const hTextSoft  = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(17,24,39,0.5)';
+  const hBtnBg     = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)';
+  const hBorderCol = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.2)';
 
   // ── Display values ──
   // Trademark-sensitive overrides (e.g. FIFA World Cup) come from the shared
@@ -1471,25 +1492,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
 
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: c.bg }]} edges={['top']}>
-      <StatusBar style={isWC || isDark ? 'light' : 'dark'} />
-
-      {/* WC: paint a navy backdrop behind the status bar + topBar so the
-          FIFA-brand dark hero feels like one continuous panel from the very
-          top of the screen down to the gold separator. Without this the
-          navy gradient looks like a floating block on a white app in light
-          mode. The backdrop sits behind topBar (rendered first in JSX) and
-          stops where the WC gradient takes over inside the ScrollView. */}
-      {isWC && (
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            top: 0, left: 0, right: 0,
-            height: 200, // generous: covers any status-bar inset + topBar
-            backgroundColor: WC_NAVY,
-          }}
-        />
-      )}
+      <StatusBar style={isDark ? 'light' : 'dark'} />
 
       {/* ── Back + Actions bar (with compact league name on scroll) ── */}
       <View style={[s.topBar, { backgroundColor: headerBg }]}>
