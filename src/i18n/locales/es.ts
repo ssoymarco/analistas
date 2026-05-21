@@ -199,6 +199,14 @@ const es = {
     ranked8: 'Octavo lugar',
     ranked9: 'Noveno lugar',
     ranked10: 'Décimo lugar',
+    // "Winner X" placeholder team names
+    winnerMatch: 'Ganador Partido {{n}}',
+    winnerSemifinal: 'Ganador Semifinal {{n}}',
+    winnerQuarterfinal: 'Ganador Cuartos {{n}}',
+    winnerRoundOf16: 'Ganador Octavos {{n}}',
+    winnerOf: 'Ganador de {{name}}',
+    // Tab label
+    groupsTab: 'Grupos',
   },
 
   // ── Favorites ──────────────────────────────────────────────────────────────
@@ -547,6 +555,27 @@ const es = {
     // Form result labels (W/D/L → G/E/P)
     formLabels: { W: 'G', D: 'E', L: 'P' },
     ageYears: '{{age}} años',
+    // National team redesign
+    nextMatch: 'PRÓXIMO PARTIDO',
+    recentForm: 'FORMA RECIENTE',
+    groupIn: 'EN EL TORNEO',
+    avgAge: 'Edad media',
+    playerCount: '{{count}} jugadores',
+    coachLabel: 'Entrenador',
+    advanceZone: 'Avanza',
+    bestThirdZone: 'Mejor 3ro',
+    eliminatedZone: 'Eliminado',
+    upcomingSection: 'PRÓXIMOS',
+    noUpcoming: 'Sin partidos próximos',
+    noRecent: 'Sin partidos anteriores',
+    allFilter: 'Todos',
+    wcFilter: 'Copa',
+    friendlyFilter: 'Amistosos',
+    groupHeader: 'GRUPO {{letter}}',
+    friendly: 'Amistoso',
+    worldCupLabel: 'Copa del Mundo',
+    age: 'Años',
+    coachAge: 'Edad: {{age}} años',
   },
 
   // ── Player detail ──────────────────────────────────────────────────────────
@@ -643,6 +672,8 @@ const es = {
     cardsTab: 'Tarjetas',
     teamsTab: 'Equipos',
     calendarTab: 'Calendario',
+    matchesTab: 'Partidos',
+    preSeasonEmpty: 'Los datos se actualizarán cuando comience el torneo',
     teamsLabel: 'Equipos',
     matchdaysLabel: 'Jornadas',
     followingLeague: '✓ Siguiendo',
@@ -650,12 +681,17 @@ const es = {
     noData: 'Sin datos disponibles',
     shareTableTitle: 'Comparte la tabla',
     shareTableDesc: 'Genera una imagen de la clasificación y compártela con tus amigos en WhatsApp, Instagram y más.',
+    // Group standings (multi-group cups like World Cup / Copa Libertadores)
+    groupLabel: 'Grupo',
     // Zone legends
     zones: {
       champion: 'Campeón',
       championsLeague: 'Champions League',
       europaLeague: 'Europa League',
       relegation: 'Descenso',
+      qualifyDirect: 'Clasifica',
+      thirdPlace: 'Mejor 3er lugar',
+      eliminated: 'Eliminado',
     },
   },
 
@@ -854,11 +890,17 @@ const es = {
     preparingLeagues: 'Preparando tus ligas...',
     readyMessage: '¡Tu experiencia está lista!',
     welcomeFinalTitle: 'te damos la bienvenida al HUB del fútbol.',
-    welcomeFinalSub: 'Tu experiencia en Analistas APP comienza ahora.',
+    welcomeFinalLine1: 'te damos la bienvenida',
+    welcomeFinalLine2: 'al HUB del fútbol.',
+    welcomeFinalSub: 'Tu experiencia en Analistas APP\ncomienza ahora.',
     firstMatch: 'Primer partido en tu feed',
     start_btn: 'Empezar',
     skip: 'Omitir',
     continue: 'Continuar',
+    attTitle: 'Analistas es gratis para ti',
+    attBody: 'Los anuncios nos permiten mantener la app sin costo. Si nos das permiso, verás anuncios relacionados con lo que te interesa en lugar de anuncios al azar.\n\nTu información nunca se vende a terceros.',
+    attContinue: 'Continuar',
+    attSkip: 'Omitir por ahora',
     nextMatchLabel: 'Próximo partido',
     newsLabel: 'Noticia',
     tableLabel: 'Tabla',
@@ -1022,6 +1064,16 @@ const es = {
     firstHalf: '1er Tiempo',
     secondHalf: '2do Tiempo',
     noHighlights: 'Sin eventos destacados',
+  },
+
+  // ── Mundial 2026 hero header ──────────────────────────────────────────────
+  worldcup: {
+    heroTitle: 'MUNDIAL 2026',
+    teams: 'SELECCIONES',
+    groups: 'GRUPOS',
+    matches: 'PARTIDOS',
+    liveLabel: 'EN CURSO',
+    dayLabel: 'Día {{n}}',
   },
 };
 

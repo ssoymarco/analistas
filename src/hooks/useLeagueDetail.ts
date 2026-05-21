@@ -86,6 +86,9 @@ export interface LeagueFixture {
   stateShort: string; // NS, FT, 1H, HT, 2H, etc.
   seasonId: number;
   leagueId: number;
+  stageName: string;  // e.g. "Group Stage", "Round of 16", "Quarter-finals"
+  roundName: string;  // e.g. "Matchday 1", "Round of 32"
+  stageSortOrder: number; // for ordering stages
 }
 
 export interface LeagueDetailData {
@@ -171,10 +174,14 @@ function deduplicateStandings(rawData: SMStandingGroup[]): LeagueStandingRow[] {
     return a.position - b.position;
   });
 
-  // Step 4: Map with global positions
-  return deduplicated.map((sg, idx) => ({
+  // Step 4: Map with positions
+  // For multi-group competitions (e.g. World Cup, Copa Libertadores group
+  // stage) we KEEP the original SportMonks position (1-4 within each group)
+  // so the UI can show "Grupo A: 1. México 2. Sudáfrica…" naturally.
+  // For single-table leagues, the API position is already 1..N globally.
+  return deduplicated.map(sg => ({
     ...mapStanding(sg),
-    position: isMultiGroup ? idx + 1 : sg.position,
+    position: sg.position, // 1-4 within group OR 1..N globally
     groupId: isMultiGroup ? (sg.group_id ?? null) : null,
   }));
 }
@@ -225,6 +232,9 @@ function mapFixture(f: SMFixture): LeagueFixture {
     stateShort: f.state?.short_name ?? 'NS',
     seasonId: f.season_id,
     leagueId: f.league_id,
+    stageName: f.stage?.name ?? '',
+    roundName: f.round?.name ?? '',
+    stageSortOrder: f.stage?.sort_order ?? 0,
   };
 }
 
@@ -311,7 +321,7 @@ export function useLeagueDetail(
         // For cup competitions: use season-level fixture fetch (all rounds, no ±7d window).
         // For regular leagues: use day-by-day around today (fast, covers only current jornada).
         const isCupLeague = config?.isCup ?? false;
-        const [standingsRaw, topScorersRaw, topAssistsRaw, topCardsRaw, teamsRaw, fixturesRaw] = await Promise.all([
+        const [standingsRaw, topScorersRaw, topAssistsRaw, topCardsRaw, teamsRaw, fixturesRaw, leagueInfo] = await Promise.all([
           fetchStandings(resolvedSeasonId).catch(() => [] as SMStandingGroup[]),
           fetchTopScorers(resolvedSeasonId, 208).catch(() => [] as SMTopScorer[]),
           fetchTopScorers(resolvedSeasonId, 209).catch(() => [] as SMTopScorer[]),
@@ -320,7 +330,12 @@ export function useLeagueDetail(
           isCupLeague
             ? fetchFixturesBySeasonId(resolvedSeasonId).catch(() => [] as SMFixture[])
             : fetchLeagueFixtures(leagueId).catch(() => [] as SMFixture[]),
+          // Fetch league metadata for the real `image_path` (SportMonks uses
+          // sharded folder paths like /leagues/2/1122.png that we can't construct).
+          fetchSeasonsByLeagueId(leagueId).catch(() => null as null | Record<string, unknown>),
         ]);
+
+        const apiLeagueLogo = (leagueInfo?.image_path as string | undefined) ?? '';
 
         if (!mounted.current) return;
 
@@ -376,7 +391,9 @@ export function useLeagueDetail(
         setData({
           leagueId,
           leagueName: config?.name || leagueName,
-          leagueLogo: leagueLogo || '',
+          // Prefer the API's real image_path over the constructed URL
+          // (SportMonks uses sharded folder paths like /leagues/2/1122.png).
+          leagueLogo: apiLeagueLogo || leagueLogo || '',
           country: config?.country || '',
           countryFlag: config?.flag || '',
           seasonId: resolvedSeasonId,
@@ -390,8 +407,29 @@ export function useLeagueDetail(
         });
       } catch (err: any) {
         if (!mounted.current) return;
-        console.warn('useLeagueDetail error:', err?.message);
+        // Surface full error info to help debug
+        // eslint-disable-next-line no-console
+        console.warn('useLeagueDetail error for league', leagueId, 'season', seasonId, ':', err?.message, err?.stack?.slice(0, 200));
         setError(err?.message ?? 'Error loading league');
+        // Even on partial failure, expose a minimal valid data object so the
+        // screen at least renders the league name + a "no data" placeholder
+        // instead of an empty wireframe.
+        const config = getLeagueConfig(leagueId);
+        setData({
+          leagueId,
+          leagueName: config?.name || leagueName,
+          leagueLogo: leagueLogo || '',
+          country: config?.country || '',
+          countryFlag: config?.flag || '',
+          seasonId: seasonId ?? config?.currentSeasonId ?? 0,
+          seasonName: '',
+          standings: [],
+          topScorers: [],
+          topAssists: [],
+          topCards: [],
+          teams: [],
+          fixtures: [],
+        });
       } finally {
         if (mounted.current) setLoading(false);
       }

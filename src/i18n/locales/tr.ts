@@ -832,6 +832,8 @@ const tr: TranslationKeys = {
     preparingLeagues: 'Liglerin hazırlanıyor...',
     readyMessage: 'Deneyimin hazır!',
     welcomeFinalTitle: 'futbol merkezine hoş geldin.',
+    welcomeFinalLine1: 'futbol merkezine',
+    welcomeFinalLine2: 'hoş geldin.',
     welcomeFinalSub: 'Analistas APP\'teki deneyimin şimdi başlıyor.',
     firstMatch: 'Akışındaki ilk maç',
     start_btn: 'Başla',

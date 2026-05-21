@@ -12,6 +12,7 @@ import { useThemeColors } from '../../theme/useTheme';
 import type { Match, MatchDetail, TeamFormEntry, MissingPlayer } from '../../data/types';
 import { PredictionsCarousel, AIPredictionsSection } from './EnVivoTab';
 import { PlaceholderBannerAd } from '../../components/PlaceholderBannerAd';
+import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupVenues';
 
 // ── Traduce condiciones meteorológicas de la API (siempre en inglés) ──────────
 function translateWeatherDesc(desc: string, t: (key: string) => string): string {
@@ -78,20 +79,36 @@ function MatchInfoCard({ match, detail }: { match: Match; detail: MatchDetail })
   const rows: React.ReactNode[] = [];
 
   if (hasVenue) {
-    const { name, city, surface, capacity } = detail.venue!;
+    const { id: venueId, name, city, surface, capacity } = detail.venue!;
+    // Apply FIFA "clean venue" override during World Cup 2026
+    // (e.g. "Estadio Banorte" → "Estadio Ciudad de México")
+    const leagueIdNum = Number(match.leagueId) || 0;
+    // Debug: always log venue data so we can verify IDs during development
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log('[VENUE DEBUG] match.leagueId=', match.leagueId, 'leagueIdNum=', leagueIdNum, 'venueId=', venueId, 'name=', name, 'city=', city);
+    }
+    const displayName = getDisplayVenueName(venueId, leagueIdNum, name) ?? name;
+    const displayCity = getDisplayVenueCity(venueId, leagueIdNum, city) ?? city;
     const surfaceStr = !surface ? '' :
       surface.toLowerCase().includes('artif') ? t('matchInfo.surfaceArtificial') :
       surface.toLowerCase().includes('hybrid') ? t('matchInfo.surfaceHybrid') :
       t('matchInfo.surfaceGrass');
-    const meta = [city, surfaceStr, capacity > 0 ? t('preview.capacity', { count: capacity.toLocaleString() }) : '']
-      .filter(Boolean)
-      .join(' · ');
+    // Avoid showing the city twice when the FIFA name already includes it
+    // (e.g. "Estadio Ciudad de México" + "Ciudad de México" would be redundant)
+    const showCity = !!displayCity
+      && !displayName.toLowerCase().includes(displayCity.toLowerCase());
+    const meta = [
+      showCity ? displayCity : '',
+      surfaceStr,
+      capacity > 0 ? t('preview.capacity', { count: capacity.toLocaleString() }) : '',
+    ].filter(Boolean).join(' · ');
     rows.push(
       <View key="venue" style={styles.infoRow}>
         <Text style={styles.infoRowIcon}>🏟️</Text>
         <View style={styles.infoRowBody}>
           <Text style={[styles.infoRowLabel, { color: c.textTertiary }]}>{t('preview.stadium').toUpperCase()}</Text>
-          <Text style={[styles.infoRowMain, { color: c.textPrimary }]}>{name}</Text>
+          <Text style={[styles.infoRowMain, { color: c.textPrimary }]}>{displayName}</Text>
           {!!meta && <Text style={[styles.infoRowSub, { color: c.textSecondary }]}>{meta}</Text>}
         </View>
       </View>
@@ -352,6 +369,72 @@ function FormCard({
   );
 }
 
+/** 7b. MatchFactsCard — SportMonks pre-match insights (translated to Spanish) */
+function MatchFactsCard({ match, detail }: { match: Match; detail: MatchDetail }) {
+  const c = useThemeColors();
+  const facts = detail.matchFacts ?? [];
+  if (facts.length === 0) return null;
+
+  const HOME_COLOR = '#3b82f6';
+  const AWAY_COLOR = '#f97316';
+
+  // Pick an emoji + accent color per fact
+  const iconFor = (f: typeof facts[number]) => {
+    if (f.category === 'streaks') return f.basis === 'h2h' ? '🔥' : '⚡';
+    return f.basis === 'h2h' ? '🆚' : '📊';
+  };
+  const colorFor = (f: typeof facts[number]) => {
+    if (f.participant === 'home') return HOME_COLOR;
+    if (f.participant === 'away') return AWAY_COLOR;
+    return c.textSecondary;
+  };
+
+  return (
+    <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
+      <View style={styles.h2hHeader}>
+        <Text style={styles.h2hHeaderIcon}>💡</Text>
+        <Text style={[styles.h2hHeaderTitle, { color: c.textPrimary }]}>
+          DATOS DEL PARTIDO
+        </Text>
+      </View>
+      <Text style={[styles.h2hSubtitle, { color: c.textSecondary, marginBottom: 8 }]}>
+        Inteligencia previa basada en historial y forma reciente
+      </Text>
+
+      <View style={{ gap: 10 }}>
+        {facts.map(f => (
+          <View
+            key={f.id}
+            style={[
+              factStyles.row,
+              {
+                backgroundColor: c.surface,
+                borderLeftColor: colorFor(f),
+              },
+            ]}
+          >
+            <Text style={factStyles.icon}>{iconFor(f)}</Text>
+            <Text style={[factStyles.text, { color: c.textPrimary }]} numberOfLines={3}>
+              {f.text}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const factStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+    paddingVertical: 10, paddingHorizontal: 12,
+    borderRadius: 10,
+    borderLeftWidth: 3,
+  },
+  icon: { fontSize: 18, lineHeight: 22 },
+  text: { fontSize: 13, lineHeight: 19, fontWeight: '500', flex: 1 },
+});
+
 /** 8. MissingPlayersCard */
 function MissingPlayersCard({
   match,
@@ -433,6 +516,8 @@ export const PreviewTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
       <PredictionsCarousel match={match} />
       {/* AI predictions — rich multi-type card */}
       <AIPredictionsSection predictions={detail.predictions ?? []} match={match} />
+      {/* SportMonks-powered pre-match insights (Spanish-translated) */}
+      <MatchFactsCard     match={match} detail={detail} />
       {/* Strategic Caliente ad — right below predictions (highest-value placement) */}
       <PlaceholderBannerAd variant="caliente-mrec" />
       <H2HCard            match={match} detail={detail} />
