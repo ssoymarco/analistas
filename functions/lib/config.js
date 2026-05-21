@@ -113,12 +113,19 @@ exports.LEAGUES = [
     { id: 968, name: 'J1 League', country: 'Japan', flag: '🇯🇵', currentSeasonId: 26810 },
     { id: 1034, name: 'K League 1', country: 'South Korea', flag: '🇰🇷', currentSeasonId: 26894 },
     { id: 902, name: 'Persian Gulf Pro League', country: 'Iran', flag: '🇮🇷', currentSeasonId: 26175 },
+    // ── Europa — Copas continentales (UEFA) ───────────────────────────────────
+    { id: 2, name: 'Champions League', country: 'Europe', flag: '⭐', currentSeasonId: 25580 },
+    { id: 5, name: 'Europa League', country: 'Europe', flag: '🟠', currentSeasonId: 25582 },
+    { id: 2286, name: 'Europa Conference League', country: 'Europe', flag: '🟢', currentSeasonId: 25581 },
     // ── Competiciones internacionales ─────────────────────────────────────────
     { id: 1122, name: 'Copa Libertadores', country: 'South America', flag: '🏆', currentSeasonId: 26784 },
     { id: 1116, name: 'Copa Sudamericana', country: 'South America', flag: '🏆', currentSeasonId: 26783 },
     { id: 1111, name: 'CONCACAF Champions Cup', country: 'North America', flag: '🏆', currentSeasonId: 26750 },
     { id: 1741, name: 'CONCACAF Nations League', country: 'North America', flag: '🏆', currentSeasonId: 27491 },
     { id: 1107, name: 'CAF Champions League', country: 'Africa', flag: '🏆', currentSeasonId: 26228 },
+    { id: 1108, name: 'CAF Confederation Cup', country: 'Africa', flag: '🏆', currentSeasonId: 26264 },
+    // ── Selecciones / mundialista ─────────────────────────────────────────────
+    { id: 732, name: 'Mundial 2026', country: 'World', flag: '🌍', currentSeasonId: 26618 },
     // ── Otros + Femenil ───────────────────────────────────────────────────────
     { id: 1082, name: 'Amistosos Internacionales', country: 'World', flag: '🌍', currentSeasonId: 26758 },
     { id: 1579, name: 'Liga MX Femenil', country: 'Mexico', flag: '🇲🇽', currentSeasonId: 25595 },
