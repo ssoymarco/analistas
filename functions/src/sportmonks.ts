@@ -144,11 +144,19 @@ export async function fetchStandings(seasonId: number): Promise<SMStandingGroup[
 }
 
 /**
- * GET /topscorers/seasons/{seasonId} — full top scorers list, all pages.
- * SM returns one row per stat type per player; many leagues exceed 50 rows.
+ * GET /topscorers/seasons/{seasonId} — Goal Topscorer ranking, all pages.
+ *
+ * SportMonks returns rankings across MULTIPLE types per season (goals, assists,
+ * cards, etc.). We filter to type_id 208 (Goal Topscorer) at the API level
+ * with the `seasontopscorerTypes` filter — NOT `topScorerTypes` (camelCase),
+ * which SportMonks silently ignores and falls back to whatever default ranking
+ * it has on hand (usually cards). See sibling note in src/services/sportmonks.ts.
+ *
+ * Includes `participant` so we get the team name/logo alongside the player.
  */
 export async function fetchTopScorers(seasonId: number): Promise<SMTopScorer[]> {
   return fetchAllPages<SMTopScorer>(`/topscorers/seasons/${seasonId}`, {
-    include: 'player',
+    include: 'player;participant',
+    filters: 'seasontopscorerTypes:208',
   });
 }

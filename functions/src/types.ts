@@ -242,6 +242,13 @@ export interface SMTopScorer {
     display_name: string;
     image_path: string;
   };
+  /** Team the scorer plays for — included via `participant` query param */
+  participant?: {
+    id: number;
+    name: string;
+    short_code?: string;
+    image_path?: string;
+  };
 }
 
 // ── SM State & Event Constants ──────────────────────────────────────────────

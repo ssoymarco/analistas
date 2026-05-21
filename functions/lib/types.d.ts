@@ -217,6 +217,13 @@ export interface SMTopScorer {
         display_name: string;
         image_path: string;
     };
+    /** Team the scorer plays for — included via `participant` query param */
+    participant?: {
+        id: number;
+        name: string;
+        short_code?: string;
+        image_path?: string;
+    };
 }
 export declare const SM_STATE_IDS: {
     readonly NOT_STARTED: 1;

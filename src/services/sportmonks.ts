@@ -749,12 +749,21 @@ export async function fetchFixturesByStage(stageId: number): Promise<SMFixture[]
 
 /**
  * GET /topscorers/seasons/{seasonId}?include=player
- * @param typeId  SM type_id filter: 208=goals, 209=assists, 84=yellow cards.
- *                Omit to return all types (caller must filter by type_id).
+ * @param typeId  SM type_id filter:
+ *                  208 = Goal Topscorer
+ *                  209 = Assist Topscorer
+ *                  210 = Card Topscorer
+ *                Omit to return all available types in the season.
+ *
+ * The filter is `seasontopscorerTypes:{id}` — NOT `topScorerTypes` (camelCase),
+ * which SportMonks silently ignores. With the wrong filter name the endpoint
+ * falls back to whatever default ranking it has on hand (typically cards),
+ * so you get cards back even when you asked for goals. Took an afternoon
+ * to figure that out — leaving this note so we don't relearn it.
  */
 export async function fetchTopScorers(seasonId: number, typeId?: number): Promise<SMTopScorer[]> {
-  const params: Record<string, string> = { include: 'player' };
-  if (typeId !== undefined) params.filters = `topScorerTypes:${typeId}`;
+  const params: Record<string, string> = { include: 'player;participant' };
+  if (typeId !== undefined) params.filters = `seasontopscorerTypes:${typeId}`;
   return fetchApi<SMTopScorer[]>(`topscorers/seasons/${seasonId}`, params);
 }
 

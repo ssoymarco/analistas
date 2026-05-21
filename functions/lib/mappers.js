@@ -186,8 +186,10 @@ function mapTopScorersToDoc(seasonId, leagueId, scorers) {
                 playerId: String(pid),
                 playerName: s.player?.display_name ?? s.player?.common_name ?? `Player ${pid}`,
                 playerImage: s.player?.image_path ?? '',
-                teamName: '', // SM top scorers don't always include team info
-                teamLogo: '',
+                // Team info now arrives via the `participant` include on the topscorers
+                // query — see fetchTopScorers in sportmonks.ts.
+                teamName: s.participant?.name ?? '',
+                teamLogo: s.participant?.image_path ?? '',
                 goals: s.total,
                 assists: 0,
                 position: s.position,
