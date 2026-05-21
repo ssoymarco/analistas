@@ -318,18 +318,18 @@ export function useLeagueDetail(
 
         // 2. Fetch all data in parallel
         // type_ids: 208=goals, 209=assists, 84=yellow cards
-        // For cup competitions: use season-level fixture fetch (all rounds, no ±7d window).
-        // For regular leagues: use day-by-day around today (fast, covers only current jornada).
-        const isCupLeague = config?.isCup ?? false;
+        // ALWAYS fetch fixtures by seasonId — when the user switches to a past
+        // season via the picker we must show that season's matches, not the
+        // current league fixtures. fetchLeagueFixtures only knows about today
+        // ± a few days, so it would return the current jornada regardless of
+        // which historical season the user picked.
         const [standingsRaw, topScorersRaw, topAssistsRaw, topCardsRaw, teamsRaw, fixturesRaw, leagueInfo] = await Promise.all([
           fetchStandings(resolvedSeasonId).catch(() => [] as SMStandingGroup[]),
           fetchTopScorers(resolvedSeasonId, 208).catch(() => [] as SMTopScorer[]),
           fetchTopScorers(resolvedSeasonId, 209).catch(() => [] as SMTopScorer[]),
           fetchTopScorers(resolvedSeasonId, 84).catch(() => [] as SMTopScorer[]),
           fetchTeamsBySeasonId(resolvedSeasonId).catch(() => [] as SMParticipant[]),
-          isCupLeague
-            ? fetchFixturesBySeasonId(resolvedSeasonId).catch(() => [] as SMFixture[])
-            : fetchLeagueFixtures(leagueId).catch(() => [] as SMFixture[]),
+          fetchFixturesBySeasonId(resolvedSeasonId).catch(() => [] as SMFixture[]),
           // Fetch league metadata for the real `image_path` (SportMonks uses
           // sharded folder paths like /leagues/2/1122.png that we can't construct).
           fetchSeasonsByLeagueId(leagueId).catch(() => null as null | Record<string, unknown>),

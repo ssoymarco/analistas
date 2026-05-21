@@ -74,7 +74,9 @@ export const SeasonSelector: React.FC<SeasonSelectorProps> = ({
         <Text style={[s.pillLabel, { color: pillText }]} numberOfLines={1}>
           {label}
         </Text>
-        <Chevron color={chevronCol} />
+        {/* Unicode "▾" — small down-pointing triangle. Clean, single glyph,
+            no rotation math, scales with the font. */}
+        <Text style={[s.chevronChar, { color: chevronCol }]}>▾</Text>
       </TouchableOpacity>
 
       {/* Bottom-sheet modal */}
@@ -157,29 +159,14 @@ export const SeasonSelector: React.FC<SeasonSelectorProps> = ({
   );
 };
 
-// ── Chevron down (drawn with two thin lines to avoid an icon dep) ───────────
-const Chevron: React.FC<{ color: string; size?: number }> = ({ color, size = 10 }) => (
-  <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-    <View style={{
-      position: 'absolute', top: 1, left: 1,
-      width: size - 2, height: 1.5, borderRadius: 1,
-      backgroundColor: color, transform: [{ rotate: '45deg' }],
-    }} />
-    <View style={{
-      position: 'absolute', top: 1, right: 1,
-      width: size - 2, height: 1.5, borderRadius: 1,
-      backgroundColor: color, transform: [{ rotate: '-45deg' }],
-    }} />
-  </View>
-);
-
 const s = StyleSheet.create({
   pill: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 12, paddingVertical: 6,
     borderRadius: 18, borderWidth: 1, alignSelf: 'center',
   },
-  pillLabel: { fontSize: 13, fontWeight: '700', letterSpacing: 0.2 },
+  pillLabel:   { fontSize: 13, fontWeight: '700', letterSpacing: 0.2 },
+  chevronChar: { fontSize: 11, fontWeight: '700', marginTop: 1 },
 
   backdrop: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.55)',

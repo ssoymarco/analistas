@@ -11,6 +11,7 @@ export function useAvailableSeasons(leagueId: number | null): AvailableSeason[] 
   useEffect(() => {
     if (!leagueId) { setSeasons([]); return; }
     const unsub = subscribeAvailableSeasons(leagueId, setSeasons, err => {
+      // eslint-disable-next-line no-console
       console.warn('[useAvailableSeasons] subscribe error:', err.message);
     });
     return unsub;
