@@ -215,6 +215,21 @@ export async function fetchH2H(teamId1: number, teamId2: number): Promise<SMFixt
 }
 
 /**
+ * GET /players/{id} — full player profile with season-by-season stats and
+ * team history. Used by syncPlayers to populate players/{id} docs.
+ */
+export async function fetchPlayerFullProfile(playerId: number): Promise<unknown | null> {
+  try {
+    const res = await fetchApi<unknown>(`/players/${playerId}`, {
+      include: 'statistics.details;statistics.season;statistics.team;nationality;teams.team',
+    });
+    return res.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * GET /coaches/{id} — full coach profile with career history.
  * Used by syncCoaches to populate coaches/{id} docs.
  */

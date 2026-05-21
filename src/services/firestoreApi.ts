@@ -357,6 +357,24 @@ export async function getFixturesBySeasonFromFirestore(seasonId: number): Promis
   return snap.docs.map(d => matchFromDoc(d.data() as MatchDoc));
 }
 
+// ── Player profile reader (powered by syncPlayers) ──────────────────────────
+
+/**
+ * Read a player's raw profile (statistics, teams, nationality) from
+ * Firestore. Returns the raw SM-shaped payload so the existing
+ * usePlayerDetail mapper can consume it unchanged.
+ *
+ * Returns null when no doc exists yet — caller should fall back to the
+ * proxy for that first request.
+ */
+export async function getPlayerRawFromFirestore(playerId: number): Promise<unknown | null> {
+  const ref = doc(db, 'players', String(playerId));
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  const data = snap.data() as any;
+  return data?.raw ?? null;
+}
+
 // ── Coach profile readers (powered by syncCoaches) ──────────────────────────
 
 const SM_COACH_STAT_FS = {

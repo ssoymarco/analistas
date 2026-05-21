@@ -93,3 +93,12 @@ export declare const syncMatchEnrichment: import("firebase-functions/v2/schedule
  * 72k/day per-entity cap.
  */
 export declare const syncCoaches: import("firebase-functions/v2/scheduler").ScheduleFunction;
+/**
+ * Sync full player profiles for every player we know about (discovered via
+ * squads + topscorers). Replaces the per-user usePlayerDetail proxy call.
+ *
+ * Schedule: every 24h.
+ *
+ * Cost: ~3-5k SM calls/day on the `players` entity. ~5-7% of the 72k/day cap.
+ */
+export declare const syncPlayers: import("firebase-functions/v2/scheduler").ScheduleFunction;

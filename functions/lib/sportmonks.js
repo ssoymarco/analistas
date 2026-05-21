@@ -13,6 +13,7 @@ exports.fetchStandings = fetchStandings;
 exports.fetchTopScorers = fetchTopScorers;
 exports.fetchFixtureFullDetail = fetchFixtureFullDetail;
 exports.fetchH2H = fetchH2H;
+exports.fetchPlayerFullProfile = fetchPlayerFullProfile;
 exports.fetchCoachFullProfile = fetchCoachFullProfile;
 exports.fetchSidelined = fetchSidelined;
 exports.fetchTeamsForSeason = fetchTeamsForSeason;
@@ -190,6 +191,21 @@ async function fetchFixtureFullDetail(id) {
  */
 async function fetchH2H(teamId1, teamId2) {
     return fetchAllPages(`/fixtures/head-to-head/${teamId1}/${teamId2}`, { include: 'participants;scores' });
+}
+/**
+ * GET /players/{id} — full player profile with season-by-season stats and
+ * team history. Used by syncPlayers to populate players/{id} docs.
+ */
+async function fetchPlayerFullProfile(playerId) {
+    try {
+        const res = await fetchApi(`/players/${playerId}`, {
+            include: 'statistics.details;statistics.season;statistics.team;nationality;teams.team',
+        });
+        return res.data ?? null;
+    }
+    catch {
+        return null;
+    }
 }
 /**
  * GET /coaches/{id} — full coach profile with career history.

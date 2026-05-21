@@ -12,7 +12,7 @@
  * - syncTopScorers:   Every 12 hours → top scorers for all configured leagues
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.syncFixtures = exports.pollLivescores = void 0;
+exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.syncFixtures = exports.pollLivescores = void 0;
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
 // before any other module touches admin.firestore().
 require("./admin-init");
@@ -25,6 +25,7 @@ const sync_teams_1 = require("./sync-teams");
 const sync_squads_1 = require("./sync-squads");
 const sync_match_enrichment_1 = require("./sync-match-enrichment");
 const sync_coaches_1 = require("./sync-coaches");
+const sync_players_1 = require("./sync-players");
 // ── Scheduled Functions ─────────────────────────────────────────────────────
 /**
  * Poll livescores every 1 minute.
@@ -179,5 +180,23 @@ exports.syncCoaches = (0, scheduler_1.onSchedule)({
     secrets: [config_1.SPORTMONKS_TOKEN],
 }, async () => {
     await (0, sync_coaches_1.syncCoachesHandler)();
+});
+/**
+ * Sync full player profiles for every player we know about (discovered via
+ * squads + topscorers). Replaces the per-user usePlayerDetail proxy call.
+ *
+ * Schedule: every 24h.
+ *
+ * Cost: ~3-5k SM calls/day on the `players` entity. ~5-7% of the 72k/day cap.
+ */
+exports.syncPlayers = (0, scheduler_1.onSchedule)({
+    schedule: 'every 24 hours',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    retryCount: 1,
+    secrets: [config_1.SPORTMONKS_TOKEN],
+}, async () => {
+    await (0, sync_players_1.syncPlayersHandler)();
 });
 //# sourceMappingURL=index.js.map

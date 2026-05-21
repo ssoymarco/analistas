@@ -263,6 +263,19 @@ export interface PlayerDetailData {
 // ── Fetch enhanced player data ──────────────────────────────────────────────
 
 async function fetchPlayerEnhanced(playerId: number): Promise<SMPlayer & { statistics?: SMSeasonStatistic[] }> {
+  // Firestore-first: syncPlayers writes players/{id} daily with the same
+  // shape and includes. Avoids a per-user SM call (the only proxy hit
+  // remaining for the player detail page).
+  try {
+    const { getPlayerRawFromFirestore } = await import('../services/firestoreApi');
+    const raw = await getPlayerRawFromFirestore(playerId);
+    if (raw) {
+      return raw as SMPlayer & { statistics?: SMSeasonStatistic[] };
+    }
+  } catch {
+    // Firestore unavailable — fall through to proxy
+  }
+
   return fetchApi<SMPlayer & { statistics?: SMSeasonStatistic[] }>(
     `players/${playerId}`,
     {

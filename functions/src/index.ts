@@ -24,6 +24,7 @@ import { syncTeamsHandler } from './sync-teams';
 import { syncSquadsHandler } from './sync-squads';
 import { syncMatchEnrichmentHandler } from './sync-match-enrichment';
 import { syncCoachesHandler } from './sync-coaches';
+import { syncPlayersHandler } from './sync-players';
 
 // ── Scheduled Functions ─────────────────────────────────────────────────────
 
@@ -210,5 +211,27 @@ export const syncCoaches = onSchedule(
   },
   async () => {
     await syncCoachesHandler();
+  },
+);
+
+/**
+ * Sync full player profiles for every player we know about (discovered via
+ * squads + topscorers). Replaces the per-user usePlayerDetail proxy call.
+ *
+ * Schedule: every 24h.
+ *
+ * Cost: ~3-5k SM calls/day on the `players` entity. ~5-7% of the 72k/day cap.
+ */
+export const syncPlayers = onSchedule(
+  {
+    schedule: 'every 24 hours',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    retryCount: 1,
+    secrets: [SPORTMONKS_TOKEN],
+  },
+  async () => {
+    await syncPlayersHandler();
   },
 );
