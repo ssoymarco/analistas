@@ -6,13 +6,31 @@
  * When expanding to 120 leagues, add entries to LEAGUES array.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LEAGUES = exports.MAX_ENRICHMENTS_PER_RUN = exports.POLLS_PER_INVOCATION = exports.LIVESCORE_POLL_INTERVAL_SEC = exports.SM_TIMEOUT = exports.SM_BASE_URL = exports.SM_API_TOKEN = void 0;
+exports.LEAGUES = exports.MAX_ENRICHMENTS_PER_RUN = exports.POLLS_PER_INVOCATION = exports.LIVESCORE_POLL_INTERVAL_SEC = exports.SM_TIMEOUT = exports.SM_BASE_URL = exports.SPORTMONKS_TOKEN = void 0;
+exports.getSportmonksToken = getSportmonksToken;
 exports.getLeagueIdsCsv = getLeagueIdsCsv;
 exports.getLeagueIdChunks = getLeagueIdChunks;
 exports.getLeagueConfig = getLeagueConfig;
 exports.getLeaguesWithSeason = getLeaguesWithSeason;
 // ── SportMonks API ──────────────────────────────────────────────────────────
-exports.SM_API_TOKEN = 'fJSTWbE3MXoQFM8cOTbZcoEomEMx9xJEh9F77IGS7RKjs2wGHd0vQDNanYIN';
+const params_1 = require("firebase-functions/params");
+/**
+ * SportMonks API token — stored as a Firebase Secret (not in code).
+ * Set it once with:  firebase functions:secrets:set SPORTMONKS_TOKEN
+ * Every function that calls SportMonks must declare it in its `secrets: [...]` option.
+ */
+exports.SPORTMONKS_TOKEN = (0, params_1.defineSecret)('SPORTMONKS_TOKEN');
+/**
+ * Resolve the token at runtime, inside a function execution.
+ * Throws if the function did not bind SPORTMONKS_TOKEN in its `secrets` option.
+ */
+function getSportmonksToken() {
+    const token = exports.SPORTMONKS_TOKEN.value();
+    if (!token) {
+        throw new Error('SPORTMONKS_TOKEN is empty. Run: firebase functions:secrets:set SPORTMONKS_TOKEN');
+    }
+    return token;
+}
 exports.SM_BASE_URL = 'https://api.sportmonks.com/v3/football';
 /** Timeout for each SportMonks API request (ms) */
 exports.SM_TIMEOUT = 15_000;

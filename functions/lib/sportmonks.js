@@ -24,9 +24,11 @@ function buildQueryString(params) {
 }
 /**
  * Single authenticated API request with timeout.
+ * Token is read at runtime from the SPORTMONKS_TOKEN secret — every function
+ * that calls this must declare the secret in its `secrets: [SPORTMONKS_TOKEN]` option.
  */
 async function fetchApi(endpoint, params = {}) {
-    const qs = buildQueryString({ api_token: config_1.SM_API_TOKEN, ...params });
+    const qs = buildQueryString({ api_token: (0, config_1.getSportmonksToken)(), ...params });
     const url = `${config_1.SM_BASE_URL}${endpoint}?${qs}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), config_1.SM_TIMEOUT);
@@ -43,19 +45,31 @@ async function fetchApi(endpoint, params = {}) {
     }
 }
 /**
- * Fetch all pages of a paginated SM endpoint. Safety cap at 10 pages.
+ * Fetch ALL pages of a paginated SM endpoint, following `pagination.has_more`.
+ * Uses `per_page=50` (SM max) to minimise request count.
+ *
+ * @param maxPages  Generous safety cap (default 200 = 10,000 records). Hitting
+ *                  it logs a warning so we notice if a real dataset is bigger.
  */
-async function fetchAllPages(endpoint, params = {}) {
+async function fetchAllPages(endpoint, params = {}, maxPages = 200) {
     const allData = [];
     let page = 1;
-    while (page <= 10) {
-        const res = await fetchApi(endpoint, { ...params, page: String(page) });
+    while (page <= maxPages) {
+        const res = await fetchApi(endpoint, {
+            per_page: '50',
+            ...params,
+            page: String(page),
+        });
         if (Array.isArray(res.data)) {
             allData.push(...res.data);
         }
         if (!res.pagination?.has_more)
             break;
         page++;
+    }
+    if (page > maxPages) {
+        // eslint-disable-next-line no-console
+        console.warn(`fetchAllPages: hit maxPages=${maxPages} on ${endpoint} — data may be truncated`);
     }
     return allData;
 }
@@ -100,21 +114,21 @@ async function fetchFixtureById(id) {
     }
 }
 /**
- * GET /standings/seasons/{seasonId} — league standings.
+ * GET /standings/seasons/{seasonId} — full league standings, all pages.
+ * Group-stage cups (WC, UCL) can have many entries — pagination is required.
  */
 async function fetchStandings(seasonId) {
-    const res = await fetchApi(`/standings/seasons/${seasonId}`, {
+    return fetchAllPages(`/standings/seasons/${seasonId}`, {
         include: 'participant;details',
     });
-    return Array.isArray(res.data) ? res.data : [];
 }
 /**
- * GET /topscorers/seasons/{seasonId} — top goal scorers.
+ * GET /topscorers/seasons/{seasonId} — full top scorers list, all pages.
+ * SM returns one row per stat type per player; many leagues exceed 50 rows.
  */
 async function fetchTopScorers(seasonId) {
-    const res = await fetchApi(`/topscorers/seasons/${seasonId}`, {
+    return fetchAllPages(`/topscorers/seasons/${seasonId}`, {
         include: 'player',
     });
-    return Array.isArray(res.data) ? res.data : [];
 }
 //# sourceMappingURL=sportmonks.js.map

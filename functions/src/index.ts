@@ -13,6 +13,7 @@
 
 import * as admin from 'firebase-admin';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { SPORTMONKS_TOKEN } from './config';
 import { pollLivescoresHandler } from './poll-livescores';
 import { syncFixturesHandler } from './sync-fixtures';
 import { syncStandingsHandler, syncTopScorersHandler } from './sync-standings';
@@ -38,6 +39,7 @@ export const pollLivescores = onSchedule(
     memory: '256MiB',
     region: 'us-central1',
     retryCount: 0,  // Don't retry — next invocation will run in 1 min anyway
+    secrets: [SPORTMONKS_TOKEN],
   },
   async () => {
     await pollLivescoresHandler();
@@ -57,6 +59,7 @@ export const syncFixtures = onSchedule(
     memory: '512MiB',
     region: 'us-central1',
     retryCount: 1,
+    secrets: [SPORTMONKS_TOKEN],
   },
   async () => {
     await syncFixturesHandler();
@@ -74,6 +77,7 @@ export const syncStandings = onSchedule(
     memory: '256MiB',
     region: 'us-central1',
     retryCount: 1,
+    secrets: [SPORTMONKS_TOKEN],
   },
   async () => {
     await syncStandingsHandler();
@@ -91,6 +95,7 @@ export const syncTopScorers = onSchedule(
     memory: '256MiB',
     region: 'us-central1',
     retryCount: 1,
+    secrets: [SPORTMONKS_TOKEN],
   },
   async () => {
     await syncTopScorersHandler();

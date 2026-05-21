@@ -4,7 +4,17 @@
  * SportMonks API configuration + league registry for Cloud Functions.
  * When expanding to 120 leagues, add entries to LEAGUES array.
  */
-export declare const SM_API_TOKEN = "fJSTWbE3MXoQFM8cOTbZcoEomEMx9xJEh9F77IGS7RKjs2wGHd0vQDNanYIN";
+/**
+ * SportMonks API token — stored as a Firebase Secret (not in code).
+ * Set it once with:  firebase functions:secrets:set SPORTMONKS_TOKEN
+ * Every function that calls SportMonks must declare it in its `secrets: [...]` option.
+ */
+export declare const SPORTMONKS_TOKEN: import("firebase-functions/lib/params/types").SecretParam;
+/**
+ * Resolve the token at runtime, inside a function execution.
+ * Throws if the function did not bind SPORTMONKS_TOKEN in its `secrets` option.
+ */
+export declare function getSportmonksToken(): string;
 export declare const SM_BASE_URL = "https://api.sportmonks.com/v3/football";
 /** Timeout for each SportMonks API request (ms) */
 export declare const SM_TIMEOUT = 15000;

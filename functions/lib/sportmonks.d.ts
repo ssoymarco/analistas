@@ -22,10 +22,12 @@ export declare function fetchFixturesByDate(date: string, leagueIds?: string): P
  */
 export declare function fetchFixtureById(id: number): Promise<SMFixture | null>;
 /**
- * GET /standings/seasons/{seasonId} — league standings.
+ * GET /standings/seasons/{seasonId} — full league standings, all pages.
+ * Group-stage cups (WC, UCL) can have many entries — pagination is required.
  */
 export declare function fetchStandings(seasonId: number): Promise<SMStandingGroup[]>;
 /**
- * GET /topscorers/seasons/{seasonId} — top goal scorers.
+ * GET /topscorers/seasons/{seasonId} — full top scorers list, all pages.
+ * SM returns one row per stat type per player; many leagues exceed 50 rows.
  */
 export declare function fetchTopScorers(seasonId: number): Promise<SMTopScorer[]>;

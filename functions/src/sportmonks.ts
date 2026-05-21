@@ -5,9 +5,9 @@
  * No CORS proxy needed — server-to-server direct calls.
  */
 
-import { SM_API_TOKEN, SM_BASE_URL, SM_TIMEOUT } from './config';
+import { getSportmonksToken, SM_BASE_URL, SM_TIMEOUT } from './config';
 import type {
-  SMResponse, SMFixture, SMStandingGroup, SMTopScorer, SMPagination,
+  SMResponse, SMFixture, SMStandingGroup, SMTopScorer,
 } from './types';
 
 // ── Internal Helpers ────────────────────────────────────────────────────────
@@ -24,12 +24,14 @@ function buildQueryString(params: Record<string, string>): string {
 
 /**
  * Single authenticated API request with timeout.
+ * Token is read at runtime from the SPORTMONKS_TOKEN secret — every function
+ * that calls this must declare the secret in its `secrets: [SPORTMONKS_TOKEN]` option.
  */
 async function fetchApi<T>(
   endpoint: string,
   params: Record<string, string> = {},
 ): Promise<SMResponse<T>> {
-  const qs = buildQueryString({ api_token: SM_API_TOKEN, ...params });
+  const qs = buildQueryString({ api_token: getSportmonksToken(), ...params });
   const url = `${SM_BASE_URL}${endpoint}?${qs}`;
 
   const controller = new AbortController();
@@ -50,22 +52,36 @@ async function fetchApi<T>(
 }
 
 /**
- * Fetch all pages of a paginated SM endpoint. Safety cap at 10 pages.
+ * Fetch ALL pages of a paginated SM endpoint, following `pagination.has_more`.
+ * Uses `per_page=50` (SM max) to minimise request count.
+ *
+ * @param maxPages  Generous safety cap (default 200 = 10,000 records). Hitting
+ *                  it logs a warning so we notice if a real dataset is bigger.
  */
 async function fetchAllPages<T>(
   endpoint: string,
   params: Record<string, string> = {},
+  maxPages = 200,
 ): Promise<T[]> {
   const allData: T[] = [];
   let page = 1;
 
-  while (page <= 10) {
-    const res = await fetchApi<T[]>(endpoint, { ...params, page: String(page) });
+  while (page <= maxPages) {
+    const res = await fetchApi<T[]>(endpoint, {
+      per_page: '50',
+      ...params,
+      page: String(page),
+    });
     if (Array.isArray(res.data)) {
       allData.push(...res.data);
     }
     if (!res.pagination?.has_more) break;
     page++;
+  }
+
+  if (page > maxPages) {
+    // eslint-disable-next-line no-console
+    console.warn(`fetchAllPages: hit maxPages=${maxPages} on ${endpoint} — data may be truncated`);
   }
 
   return allData;
@@ -118,21 +134,21 @@ export async function fetchFixtureById(id: number): Promise<SMFixture | null> {
 }
 
 /**
- * GET /standings/seasons/{seasonId} — league standings.
+ * GET /standings/seasons/{seasonId} — full league standings, all pages.
+ * Group-stage cups (WC, UCL) can have many entries — pagination is required.
  */
 export async function fetchStandings(seasonId: number): Promise<SMStandingGroup[]> {
-  const res = await fetchApi<SMStandingGroup[]>(`/standings/seasons/${seasonId}`, {
+  return fetchAllPages<SMStandingGroup>(`/standings/seasons/${seasonId}`, {
     include: 'participant;details',
   });
-  return Array.isArray(res.data) ? res.data : [];
 }
 
 /**
- * GET /topscorers/seasons/{seasonId} — top goal scorers.
+ * GET /topscorers/seasons/{seasonId} — full top scorers list, all pages.
+ * SM returns one row per stat type per player; many leagues exceed 50 rows.
  */
 export async function fetchTopScorers(seasonId: number): Promise<SMTopScorer[]> {
-  const res = await fetchApi<SMTopScorer[]>(`/topscorers/seasons/${seasonId}`, {
+  return fetchAllPages<SMTopScorer>(`/topscorers/seasons/${seasonId}`, {
     include: 'player',
   });
-  return Array.isArray(res.data) ? res.data : [];
 }

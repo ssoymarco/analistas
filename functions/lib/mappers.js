@@ -57,14 +57,11 @@ function formatTimeDisplay(fixture, status, minute) {
         return 'HT';
     if (status === 'live' && minute)
         return `${minute}'`;
-    // Scheduled: show local time
-    try {
-        const dt = new Date(fixture.starting_at);
-        return dt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-    }
-    catch {
-        return fixture.starting_at?.slice(11, 16) ?? '--:--';
-    }
+    // Scheduled: store the raw UTC HH:MM. We can't compute the user's local time
+    // server-side (GCP runs in UTC, the client knows its own timezone). The app
+    // uses `startingAtUtc` to render the final local time per-user; this `time`
+    // string is a UTC fallback for any read path that doesn't do that conversion.
+    return fixture.starting_at?.slice(11, 16) ?? '--:--';
 }
 // ── Score Extraction ────────────────────────────────────────────────────────
 function extractScores(fixture) {

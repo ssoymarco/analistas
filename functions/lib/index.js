@@ -48,6 +48,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.syncTopScorers = exports.syncStandings = exports.syncFixtures = exports.pollLivescores = void 0;
 const admin = __importStar(require("firebase-admin"));
 const scheduler_1 = require("firebase-functions/v2/scheduler");
+const config_1 = require("./config");
 const poll_livescores_1 = require("./poll-livescores");
 const sync_fixtures_1 = require("./sync-fixtures");
 const sync_standings_1 = require("./sync-standings");
@@ -69,6 +70,7 @@ exports.pollLivescores = (0, scheduler_1.onSchedule)({
     memory: '256MiB',
     region: 'us-central1',
     retryCount: 0, // Don't retry — next invocation will run in 1 min anyway
+    secrets: [config_1.SPORTMONKS_TOKEN],
 }, async () => {
     await (0, poll_livescores_1.pollLivescoresHandler)();
 });
@@ -84,6 +86,7 @@ exports.syncFixtures = (0, scheduler_1.onSchedule)({
     memory: '512MiB',
     region: 'us-central1',
     retryCount: 1,
+    secrets: [config_1.SPORTMONKS_TOKEN],
 }, async () => {
     await (0, sync_fixtures_1.syncFixturesHandler)();
 });
@@ -97,6 +100,7 @@ exports.syncStandings = (0, scheduler_1.onSchedule)({
     memory: '256MiB',
     region: 'us-central1',
     retryCount: 1,
+    secrets: [config_1.SPORTMONKS_TOKEN],
 }, async () => {
     await (0, sync_standings_1.syncStandingsHandler)();
 });
@@ -110,6 +114,7 @@ exports.syncTopScorers = (0, scheduler_1.onSchedule)({
     memory: '256MiB',
     region: 'us-central1',
     retryCount: 1,
+    secrets: [config_1.SPORTMONKS_TOKEN],
 }, async () => {
     await (0, sync_standings_1.syncTopScorersHandler)();
 });

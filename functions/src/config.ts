@@ -7,7 +7,29 @@
 
 // ── SportMonks API ──────────────────────────────────────────────────────────
 
-export const SM_API_TOKEN = 'fJSTWbE3MXoQFM8cOTbZcoEomEMx9xJEh9F77IGS7RKjs2wGHd0vQDNanYIN';
+import { defineSecret } from 'firebase-functions/params';
+
+/**
+ * SportMonks API token — stored as a Firebase Secret (not in code).
+ * Set it once with:  firebase functions:secrets:set SPORTMONKS_TOKEN
+ * Every function that calls SportMonks must declare it in its `secrets: [...]` option.
+ */
+export const SPORTMONKS_TOKEN = defineSecret('SPORTMONKS_TOKEN');
+
+/**
+ * Resolve the token at runtime, inside a function execution.
+ * Throws if the function did not bind SPORTMONKS_TOKEN in its `secrets` option.
+ */
+export function getSportmonksToken(): string {
+  const token = SPORTMONKS_TOKEN.value();
+  if (!token) {
+    throw new Error(
+      'SPORTMONKS_TOKEN is empty. Run: firebase functions:secrets:set SPORTMONKS_TOKEN',
+    );
+  }
+  return token;
+}
+
 export const SM_BASE_URL  = 'https://api.sportmonks.com/v3/football';
 
 /** Timeout for each SportMonks API request (ms) */
