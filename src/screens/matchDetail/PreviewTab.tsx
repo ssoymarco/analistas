@@ -83,11 +83,6 @@ function MatchInfoCard({ match, detail }: { match: Match; detail: MatchDetail })
     // Apply FIFA "clean venue" override during World Cup 2026
     // (e.g. "Estadio Banorte" → "Estadio Ciudad de México")
     const leagueIdNum = Number(match.leagueId) || 0;
-    // Debug: always log venue data so we can verify IDs during development
-    if (__DEV__) {
-      // eslint-disable-next-line no-console
-      console.log('[VENUE DEBUG] match.leagueId=', match.leagueId, 'leagueIdNum=', leagueIdNum, 'venueId=', venueId, 'name=', name, 'city=', city);
-    }
     const displayName = getDisplayVenueName(venueId, leagueIdNum, name) ?? name;
     const displayCity = getDisplayVenueCity(venueId, leagueIdNum, city) ?? city;
     const surfaceStr = !surface ? '' :

@@ -1681,15 +1681,16 @@ export async function getFixtureDetail(id: number): Promise<{ match: Match; deta
           }
         }
 
-        if (__DEV__ && (fixture.aggregate_id || match.status === 'finished')) {
+        // Only log when an aggregate WAS expected but couldn't be computed —
+        // that's the diagnostic case worth surfacing during development. Skip
+        // the noise for every finished single-leg league fixture.
+        if (__DEV__ && fixture.aggregate_id && !agg) {
           console.warn(
-            `[aggregate] fixture=${fixture.id} league=${fixture.league_id} stage=${fixture.stage_id} agg_id=${fixture.aggregate_id}`,
-            `\n  scores:`, fixture.scores?.map(s => `${s.description}:${s.score.participant}=${s.score.goals}`),
+            `[aggregate] couldn't compute for fixture=${fixture.id} league=${fixture.league_id} stage=${fixture.stage_id} agg_id=${fixture.aggregate_id}`,
             `\n  nested fixtures:`, fixture.aggregate?.fixtures?.length ?? 'none',
             `\n  separate agg fetched:`, aggregateData ? `yes (${aggregateData.fixtures?.length ?? 0} legs)` : 'no',
             `\n  h2h candidates:`, h2hResults.length,
             `\n  stage fixtures:`, stageFixtures.length,
-            `\n  computed:`, agg,
           );
         }
         return agg;
