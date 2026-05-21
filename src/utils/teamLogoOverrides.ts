@@ -25,11 +25,11 @@ import { Image } from 'react-native';
 // string). Values come from `require(...)` for bundled assets, or can be
 // plain URL strings for remote-hosted overrides if that's ever preferred.
 //
-// To add Cruz Azul (id 2626): drop the file at assets/team-logos/2626.png
-// then uncomment the line below. (Left commented so the bundle doesn't fail
-// before the file is present.)
 const OVERRIDE_ASSETS: Record<string, number | string> = {
-  // '2626': require('../../assets/team-logos/2626.png'), // Cruz Azul — new crest 2024
+  // Cruz Azul rebranded to "Club de Futbol Cruz Azul" with a new crest in
+  // 2024. SportMonks still serves the classic "DEPORTIVO CRUZ AZUL MEXICO"
+  // badge from their CDN — keep this override until they update.
+  '2626': require('../../assets/team-logos/2626.png'),
 };
 
 // ── Resolved URI cache ──────────────────────────────────────────────────────
