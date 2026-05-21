@@ -11,15 +11,15 @@
  * - syncTopScorers:   Every 12 hours → top scorers for all configured leagues
  */
 
-import * as admin from 'firebase-admin';
+// IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
+// before any other module touches admin.firestore().
+import './admin-init';
+
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { SPORTMONKS_TOKEN } from './config';
 import { pollLivescoresHandler } from './poll-livescores';
 import { syncFixturesHandler } from './sync-fixtures';
 import { syncStandingsHandler, syncTopScorersHandler } from './sync-standings';
-
-// ── Initialize Firebase Admin ───────────────────────────────────────────────
-admin.initializeApp();
 
 // ── Scheduled Functions ─────────────────────────────────────────────────────
 

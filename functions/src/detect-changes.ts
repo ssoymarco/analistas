@@ -6,11 +6,9 @@
  * Queues FCM notifications for each detected change.
  */
 
-import * as admin from 'firebase-admin';
+import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import type { MatchDoc, LivescoresSnapshot, DetectedChange } from './types';
-
-const db = admin.firestore();
 
 /**
  * Load the previous livescores snapshot from _meta/livescoresSnapshot.

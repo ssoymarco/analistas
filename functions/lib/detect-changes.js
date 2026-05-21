@@ -44,15 +44,14 @@ exports.loadSnapshot = loadSnapshot;
 exports.saveSnapshot = saveSnapshot;
 exports.detectChanges = detectChanges;
 exports.dispatchNotifications = dispatchNotifications;
-const admin = __importStar(require("firebase-admin"));
+const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
-const db = admin.firestore();
 /**
  * Load the previous livescores snapshot from _meta/livescoresSnapshot.
  * Returns an empty snapshot if none exists yet.
  */
 async function loadSnapshot() {
-    const snap = await db.doc('_meta/livescoresSnapshot').get();
+    const snap = await admin_init_1.db.doc('_meta/livescoresSnapshot').get();
     if (!snap.exists)
         return {};
     return snap.data()?.matches ?? {};
@@ -70,9 +69,9 @@ async function saveSnapshot(matches) {
             stateId: m.stateId,
         };
     }
-    await db.doc('_meta/livescoresSnapshot').set({
+    await admin_init_1.db.doc('_meta/livescoresSnapshot').set({
         matches: snapshot,
-        updatedAt: admin.firestore.Timestamp.now(),
+        updatedAt: admin_init_1.admin.firestore.Timestamp.now(),
     });
 }
 /**

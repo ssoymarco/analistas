@@ -13,15 +13,13 @@
  * 6. Dispatch notifications for detected changes
  */
 
-import * as admin from 'firebase-admin';
+import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { LIVESCORE_POLL_INTERVAL_SEC, POLLS_PER_INVOCATION } from './config';
 import { fetchLivescores } from './sportmonks';
 import { mapFixtureToMatchDoc } from './mappers';
 import { loadSnapshot, saveSnapshot, detectChanges, dispatchNotifications } from './detect-changes';
 import type { MatchDoc } from './types';
-
-const db = admin.firestore();
 
 /** Utility: sleep for N milliseconds */
 function sleep(ms: number): Promise<void> {

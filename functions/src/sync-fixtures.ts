@@ -9,14 +9,12 @@
  * hasn't picked up a match yet (e.g., a match that just got scheduled).
  */
 
-import * as admin from 'firebase-admin';
+import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { getLeagueIdChunks } from './config';
 import { fetchFixturesByDate } from './sportmonks';
 import { mapFixtureToMatchDoc } from './mappers';
 import type { MatchDoc } from './types';
-
-const db = admin.firestore();
 
 /**
  * Format a Date as 'YYYY-MM-DD' in UTC.

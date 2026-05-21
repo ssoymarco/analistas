@@ -44,12 +44,11 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.syncStandingsHandler = syncStandingsHandler;
 exports.syncTopScorersHandler = syncTopScorersHandler;
-const admin = __importStar(require("firebase-admin"));
+const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
 const config_1 = require("./config");
 const sportmonks_1 = require("./sportmonks");
 const mappers_1 = require("./mappers");
-const db = admin.firestore();
 /** Utility: sleep for N milliseconds (rate limit courtesy) */
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -69,7 +68,7 @@ async function syncStandingsHandler() {
             const groups = await (0, sportmonks_1.fetchStandings)(league.currentSeasonId);
             if (groups.length > 0) {
                 const doc = (0, mappers_1.mapStandingsToDoc)(league.currentSeasonId, league.id, groups);
-                await db.collection('standings').doc(String(league.currentSeasonId)).set(doc);
+                await admin_init_1.db.collection('standings').doc(String(league.currentSeasonId)).set(doc);
                 successCount++;
             }
         }
@@ -99,7 +98,7 @@ async function syncTopScorersHandler() {
             const scorers = await (0, sportmonks_1.fetchTopScorers)(league.currentSeasonId);
             if (scorers.length > 0) {
                 const doc = (0, mappers_1.mapTopScorersToDoc)(league.currentSeasonId, league.id, scorers);
-                await db.collection('topscorers').doc(String(league.currentSeasonId)).set(doc);
+                await admin_init_1.db.collection('topscorers').doc(String(league.currentSeasonId)).set(doc);
                 successCount++;
             }
         }

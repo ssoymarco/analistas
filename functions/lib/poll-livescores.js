@@ -48,13 +48,12 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.pollLivescoresHandler = pollLivescoresHandler;
-const admin = __importStar(require("firebase-admin"));
+const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
 const config_1 = require("./config");
 const sportmonks_1 = require("./sportmonks");
 const mappers_1 = require("./mappers");
 const detect_changes_1 = require("./detect-changes");
-const db = admin.firestore();
 /** Utility: sleep for N milliseconds */
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -83,15 +82,15 @@ async function executeSinglePoll(pollIndex) {
     const changes = (0, detect_changes_1.detectChanges)(matchDocs, prevSnapshot);
     // 4. Batch write to Firestore (max 500 per batch)
     const batches = [];
-    let currentBatch = db.batch();
+    let currentBatch = admin_init_1.db.batch();
     let opCount = 0;
     for (const matchDoc of matchDocs) {
-        const ref = db.collection('matches').doc(matchDoc.id);
+        const ref = admin_init_1.db.collection('matches').doc(matchDoc.id);
         currentBatch.set(ref, matchDoc, { merge: true });
         opCount++;
         if (opCount >= 499) {
             batches.push(currentBatch);
-            currentBatch = db.batch();
+            currentBatch = admin_init_1.db.batch();
             opCount = 0;
         }
     }

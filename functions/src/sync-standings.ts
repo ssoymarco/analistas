@@ -8,13 +8,11 @@
  * fetches standings/scorers from SportMonks, and writes to Firestore.
  */
 
-import * as admin from 'firebase-admin';
+import { db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { getLeaguesWithSeason } from './config';
 import { fetchStandings, fetchTopScorers } from './sportmonks';
 import { mapStandingsToDoc, mapTopScorersToDoc } from './mappers';
-
-const db = admin.firestore();
 
 /** Utility: sleep for N milliseconds (rate limit courtesy) */
 function sleep(ms: number): Promise<void> {
