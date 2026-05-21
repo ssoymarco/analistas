@@ -13,6 +13,7 @@ exports.fetchStandings = fetchStandings;
 exports.fetchTopScorers = fetchTopScorers;
 exports.fetchFixtureFullDetail = fetchFixtureFullDetail;
 exports.fetchH2H = fetchH2H;
+exports.fetchCoachFullProfile = fetchCoachFullProfile;
 exports.fetchSidelined = fetchSidelined;
 exports.fetchTeamsForSeason = fetchTeamsForSeason;
 exports.fetchSquadForSeasonAndTeam = fetchSquadForSeasonAndTeam;
@@ -189,6 +190,21 @@ async function fetchFixtureFullDetail(id) {
  */
 async function fetchH2H(teamId1, teamId2) {
     return fetchAllPages(`/fixtures/head-to-head/${teamId1}/${teamId2}`, { include: 'participants;scores' });
+}
+/**
+ * GET /coaches/{id} — full coach profile with career history.
+ * Used by syncCoaches to populate coaches/{id} docs.
+ */
+async function fetchCoachFullProfile(coachId) {
+    try {
+        const res = await fetchApi(`/coaches/${coachId}`, {
+            include: 'teams.team;statistics.team;statistics.details;nationality',
+        });
+        return res.data ?? null;
+    }
+    catch {
+        return null;
+    }
 }
 /**
  * GET /sidelined/seasons/{seasonId}/teams/{teamId} — injuries / suspensions

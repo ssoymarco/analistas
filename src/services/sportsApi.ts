@@ -3366,6 +3366,21 @@ export async function getCoachProfile(coachId: number): Promise<CoachProfile | n
   const cached = await AppCache.get<CoachProfile>(cacheKey);
   if (cached) return cached;
 
+  // ── Firestore-first ──────────────────────────────────────────────────────
+  // syncCoaches writes coaches/{id} daily. Use that to avoid a per-user SM
+  // call. If the doc is missing (rare — coach is new, or first request before
+  // the next sync runs), we fall through to the proxy below.
+  try {
+    const { getCoachProfileFromFirestore } = await import('./firestoreApi');
+    const fsProfile = await getCoachProfileFromFirestore(coachId);
+    if (fsProfile) {
+      AppCache.set(cacheKey, fsProfile, 7 * 24 * 60 * 60_000);
+      return fsProfile;
+    }
+  } catch {
+    // Firestore unavailable — continue to proxy path
+  }
+
   try {
     const raw: SMCoachProfile = await fetchCoachProfile(coachId);
     if (!raw) return null;

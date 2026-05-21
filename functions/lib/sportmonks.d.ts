@@ -53,6 +53,11 @@ export declare function fetchFixtureFullDetail(id: number): Promise<SMFixture | 
  */
 export declare function fetchH2H(teamId1: number, teamId2: number): Promise<SMFixture[]>;
 /**
+ * GET /coaches/{id} — full coach profile with career history.
+ * Used by syncCoaches to populate coaches/{id} docs.
+ */
+export declare function fetchCoachFullProfile(coachId: number): Promise<unknown | null>;
+/**
  * GET /sidelined/seasons/{seasonId}/teams/{teamId} — injuries / suspensions
  * for a team in a given season. Used by syncMatchEnrichment.
  */

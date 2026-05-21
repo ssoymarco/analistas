@@ -311,6 +311,82 @@ function topScorerFromDoc(t: TopScorerDoc): FirestoreTopScorer {
   };
 }
 
+// ── Coach profile readers (powered by syncCoaches) ──────────────────────────
+
+const SM_COACH_STAT_FS = {
+  MATCHES: 188,
+  WINS:    214,
+  DRAWS:   215,
+  LOSSES:  216,
+  GOALS:   59,
+} as const;
+
+function pickCoachNameFromRaw(raw: any): string {
+  return raw?.display_name || raw?.common_name || raw?.name ||
+         [raw?.firstname, raw?.lastname].filter(Boolean).join(' ').trim() || '';
+}
+
+/**
+ * Read a full coach profile from Firestore — written by the syncCoaches
+ * Cloud Function. Returns the same CoachProfile shape that
+ * sportsApi.getCoachProfile produces, so consumers don't need to know which
+ * source it came from.
+ */
+export async function getCoachProfileFromFirestore(
+  coachId: number,
+): Promise<{
+  id: number;
+  name: string;
+  teams: { id: number; name: string; logo: string }[];
+  stats: {
+    matchesPlayed: number; wins: number; draws: number; losses: number;
+    goalsScored: number; winRate: number;
+  };
+} | null> {
+  const ref = doc(db, 'coaches', String(coachId));
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  const data = snap.data();
+  const raw = (data as any)?.raw;
+  if (!raw) return null;
+
+  // Distinct career teams (current + history)
+  const teamMap = new Map<number, { id: number; name: string; logo: string }>();
+  for (const entry of raw.teams ?? []) {
+    const t = entry?.team;
+    if (!t || teamMap.has(t.id)) continue;
+    teamMap.set(t.id, { id: t.id, name: t.name, logo: t.image_path ?? '' });
+  }
+  for (const stat of raw.statistics ?? []) {
+    const t = stat?.team;
+    if (!t || teamMap.has(t.id)) continue;
+    teamMap.set(t.id, { id: t.id, name: t.name, logo: t.image_path ?? '' });
+  }
+
+  // Aggregate stats across all seasons
+  let matchesPlayed = 0, wins = 0, draws = 0, losses = 0, goalsScored = 0;
+  for (const stat of raw.statistics ?? []) {
+    for (const d of stat.details ?? []) {
+      const count = d?.value?.count ?? 0;
+      switch (d?.type_id) {
+        case SM_COACH_STAT_FS.MATCHES: matchesPlayed += count; break;
+        case SM_COACH_STAT_FS.WINS:    wins += count; break;
+        case SM_COACH_STAT_FS.DRAWS:   draws += count; break;
+        case SM_COACH_STAT_FS.LOSSES:  losses += count; break;
+        case SM_COACH_STAT_FS.GOALS:   goalsScored += count; break;
+      }
+    }
+  }
+  const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
+
+  return {
+    id: coachId,
+    name: pickCoachNameFromRaw(raw),
+    teams: Array.from(teamMap.values()),
+    stats: { matchesPlayed, wins, draws, losses, goalsScored, winRate },
+  };
+}
+
 // ── Team-detail readers (powered by syncTeams + syncSquads) ─────────────────
 
 function calculateAgeFromDob(dob: string): number {

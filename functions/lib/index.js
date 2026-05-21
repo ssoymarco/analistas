@@ -12,7 +12,7 @@
  * - syncTopScorers:   Every 12 hours → top scorers for all configured leagues
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.syncFixtures = exports.pollLivescores = void 0;
+exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.syncFixtures = exports.pollLivescores = void 0;
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
 // before any other module touches admin.firestore().
 require("./admin-init");
@@ -24,6 +24,7 @@ const sync_standings_1 = require("./sync-standings");
 const sync_teams_1 = require("./sync-teams");
 const sync_squads_1 = require("./sync-squads");
 const sync_match_enrichment_1 = require("./sync-match-enrichment");
+const sync_coaches_1 = require("./sync-coaches");
 // ── Scheduled Functions ─────────────────────────────────────────────────────
 /**
  * Poll livescores every 1 minute.
@@ -158,5 +159,25 @@ exports.syncMatchEnrichment = (0, scheduler_1.onSchedule)({
     secrets: [config_1.SPORTMONKS_TOKEN],
 }, async () => {
     await (0, sync_match_enrichment_1.syncMatchEnrichmentHandler)();
+});
+/**
+ * Sync full coach profiles (career stats + teams managed) for every active
+ * coach we know about (discovered via enriched matches). Replaces the
+ * per-user getCoachProfile proxy call in AlineacionTab.
+ *
+ * Schedule: every 24h.
+ *
+ * Cost: ~1,000-1,500 SM calls/day on the `coaches` entity. ~6% of the
+ * 72k/day per-entity cap.
+ */
+exports.syncCoaches = (0, scheduler_1.onSchedule)({
+    schedule: 'every 24 hours',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    retryCount: 1,
+    secrets: [config_1.SPORTMONKS_TOKEN],
+}, async () => {
+    await (0, sync_coaches_1.syncCoachesHandler)();
 });
 //# sourceMappingURL=index.js.map

@@ -23,6 +23,7 @@ import { syncStandingsHandler, syncTopScorersHandler } from './sync-standings';
 import { syncTeamsHandler } from './sync-teams';
 import { syncSquadsHandler } from './sync-squads';
 import { syncMatchEnrichmentHandler } from './sync-match-enrichment';
+import { syncCoachesHandler } from './sync-coaches';
 
 // ── Scheduled Functions ─────────────────────────────────────────────────────
 
@@ -185,5 +186,29 @@ export const syncMatchEnrichment = onSchedule(
   },
   async () => {
     await syncMatchEnrichmentHandler();
+  },
+);
+
+/**
+ * Sync full coach profiles (career stats + teams managed) for every active
+ * coach we know about (discovered via enriched matches). Replaces the
+ * per-user getCoachProfile proxy call in AlineacionTab.
+ *
+ * Schedule: every 24h.
+ *
+ * Cost: ~1,000-1,500 SM calls/day on the `coaches` entity. ~6% of the
+ * 72k/day per-entity cap.
+ */
+export const syncCoaches = onSchedule(
+  {
+    schedule: 'every 24 hours',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    retryCount: 1,
+    secrets: [SPORTMONKS_TOKEN],
+  },
+  async () => {
+    await syncCoachesHandler();
   },
 );

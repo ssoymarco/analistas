@@ -82,3 +82,14 @@ export declare const syncSquads: import("firebase-functions/v2/scheduler").Sched
  * `fixtures` entity. Well below the 3,000/hour cap.
  */
 export declare const syncMatchEnrichment: import("firebase-functions/v2/scheduler").ScheduleFunction;
+/**
+ * Sync full coach profiles (career stats + teams managed) for every active
+ * coach we know about (discovered via enriched matches). Replaces the
+ * per-user getCoachProfile proxy call in AlineacionTab.
+ *
+ * Schedule: every 24h.
+ *
+ * Cost: ~1,000-1,500 SM calls/day on the `coaches` entity. ~6% of the
+ * 72k/day per-entity cap.
+ */
+export declare const syncCoaches: import("firebase-functions/v2/scheduler").ScheduleFunction;

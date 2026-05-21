@@ -212,6 +212,21 @@ export async function fetchH2H(teamId1: number, teamId2: number): Promise<SMFixt
 }
 
 /**
+ * GET /coaches/{id} — full coach profile with career history.
+ * Used by syncCoaches to populate coaches/{id} docs.
+ */
+export async function fetchCoachFullProfile(coachId: number): Promise<unknown | null> {
+  try {
+    const res = await fetchApi<unknown>(`/coaches/${coachId}`, {
+      include: 'teams.team;statistics.team;statistics.details;nationality',
+    });
+    return res.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * GET /sidelined/seasons/{seasonId}/teams/{teamId} — injuries / suspensions
  * for a team in a given season. Used by syncMatchEnrichment.
  */
