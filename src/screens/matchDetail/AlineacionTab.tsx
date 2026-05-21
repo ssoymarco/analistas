@@ -14,6 +14,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  Animated,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
@@ -228,6 +229,106 @@ const MatchBanner: React.FC = () => (
     </View>
   </View>
 );
+
+// ── Lineup Skeleton (pre-match empty state) ──────────────────────────────────
+//
+// Renders a full pitch with 11 ghost players per side in a 4-3-3 formation so
+// the user sees what's coming instead of a barren empty state. Pulses softly
+// to signal "loading / arriving". Used when neither real nor expected lineups
+// have been published yet by SportMonks (typically >72h before kick-off).
+
+/** A single placeholder player dot — circle + thin name bar underneath. */
+const GhostPlayerDot: React.FC<{ theme: PitchTheme; pulse: Animated.Value }> = ({ theme, pulse }) => {
+  const isDarkTheme = theme.grassA.startsWith('#1') || theme.grassA.startsWith('#2d');
+  // Soft, mostly-transparent fill that reads on both grass palettes
+  const fill   = isDarkTheme ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.35)';
+  const ring   = isDarkTheme ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.25)';
+  const barBg  = isDarkTheme ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.28)';
+  return (
+    <Animated.View style={{ alignItems: 'center', gap: 6, opacity: pulse }}>
+      <View style={{
+        width: DOT_SIZE, height: DOT_SIZE, borderRadius: DOT_SIZE / 2,
+        backgroundColor: fill, borderWidth: 2, borderColor: ring,
+      }} />
+      <View style={{ width: DOT_SIZE * 1.4, height: 6, borderRadius: 3, backgroundColor: barBg }} />
+    </Animated.View>
+  );
+};
+
+/** Empty-state skeleton — pitch + 4-3-3 ghosts per side + notice banner. */
+const LineupSkeleton: React.FC<{ theme: PitchTheme }> = ({ theme }) => {
+  const c = useThemeColors();
+  const { t } = useTranslation();
+  const pulse = useRef(new Animated.Value(0.6)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1100, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.55, duration: 1100, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  // 4-3-3 — visible row order from each goal line forward.
+  // Home: GK is closest to top edge; Away: GK is closest to bottom edge.
+  const HOME_ROWS = [1, 4, 3, 3];
+  const AWAY_ROWS = [3, 3, 4, 1];
+
+  return (
+    <View>
+      {/* Notice banner — sets expectations about when lineups arrive */}
+      <View style={[lsk.notice, { backgroundColor: c.accent + '14', borderColor: c.accent + '30' }]}>
+        <Text style={lsk.noticeIcon}>🏟️</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[lsk.noticeTitle, { color: c.textPrimary }]}>{t('lineup.noLineup')}</Text>
+          <Text style={[lsk.noticeBody, { color: c.textSecondary }]}>{t('lineup.availableSoon')}</Text>
+        </View>
+      </View>
+
+      {/* Pitch — same visual treatment as the real one */}
+      <View style={[ms.pitchContainer, { backgroundColor: theme.grassA, borderRadius: 0 }]}>
+        <View style={[ms.pitchShadow, { borderColor: theme.shadow }]} />
+        <View style={ms.pitch}>
+          <GrassStripes theme={theme} />
+          <PitchMarkings theme={theme} />
+          <View style={ms.topHalf}>
+            {HOME_ROWS.map((count, ri) => (
+              <View key={`h-${ri}`} style={ms.playerRow}>
+                {Array.from({ length: count }).map((_, i) => (
+                  <GhostPlayerDot key={i} theme={theme} pulse={pulse} />
+                ))}
+              </View>
+            ))}
+          </View>
+          <View style={ms.bottomHalf}>
+            {AWAY_ROWS.map((count, ri) => (
+              <View key={`a-${ri}`} style={ms.playerRow}>
+                {Array.from({ length: count }).map((_, i) => (
+                  <GhostPlayerDot key={i} theme={theme} pulse={pulse} />
+                ))}
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const lsk = StyleSheet.create({
+  notice: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: 16, marginTop: 16, marginBottom: 14,
+    borderRadius: 12, borderWidth: 1,
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  noticeIcon:  { fontSize: 22 },
+  noticeTitle: { fontSize: 14, fontWeight: '700', marginBottom: 2 },
+  noticeBody:  { fontSize: 12, lineHeight: 17 },
+});
 
 // ── Coach helpers ─────────────────────────────────────────────────────────────
 const coachInitials = (name: string): string => {
@@ -701,15 +802,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   };
 
   if (!hasLineups) {
-    return (
-      <View style={ms.empty}>
-        <Text style={{ fontSize: 40, marginBottom: 12 }}>🏟️</Text>
-        <Text style={[ms.emptyText, { color: c.textSecondary }]}>{t('lineup.noLineup')}</Text>
-        <Text style={[ms.emptySubText, { color: c.textTertiary }]}>
-          {t('lineup.availableSoon')}
-        </Text>
-      </View>
-    );
+    return <LineupSkeleton theme={theme} />;
   }
 
   // ── Pitch block ──────────────────────────────────────────────────────────
