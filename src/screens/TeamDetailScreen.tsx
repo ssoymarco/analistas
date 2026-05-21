@@ -141,9 +141,16 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
   const isGroupBased = (teamStanding?.groupId ?? null) !== null;
   const leagueZones = teamLeagueConfig?.zones;
 
+  // Group filter + position renumber (1..N within the group). SportMonks
+  // returns global standings positions (e.g. Colombia at #44 across all 48
+  // WC teams) — useless inside a 4-team group. Sort by the global position
+  // (which already encodes pts → GD → GF tie-breakers) then renumber.
   const groupStandings = useMemo(() => {
     if (!teamStanding?.groupId) return [];
-    return data.standings.filter(s => s.groupId === teamStanding.groupId);
+    return data.standings
+      .filter(s => s.groupId === teamStanding.groupId)
+      .sort((a, b) => a.position - b.position)
+      .map((s, i) => ({ ...s, position: i + 1 }));
   }, [data.standings, teamStanding]);
 
   // Compute a window of standings centered around the team's position for
@@ -582,7 +589,12 @@ const rs = StyleSheet.create({
   thPts:  { width: 30, fontSize: 9, fontWeight: '700', textAlign: 'center' },
   tdPos:  { width: 20, fontSize: 12, textAlign: 'center' },
   tdTeamCell: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7 },
-  miniLogo: { width: 20, height: 20, borderRadius: 10 },
+  // Square-with-soft-corners frame. Previously borderRadius:10 → perfect
+  // circle, which made some sources (e.g. flag PNGs with full-bleed colour)
+  // look like rectangles while others (e.g. round federation crests) looked
+  // distinctly circular. A small radius gives every team — flag or crest —
+  // the same visual shape: a small rounded square.
+  miniLogo: { width: 20, height: 20, borderRadius: 3 },
   tdTeamName: { fontSize: 12, flex: 1 },
   tdStat: { width: 22, fontSize: 11, textAlign: 'center' },
   tdPts:  { width: 30, fontSize: 13, textAlign: 'center' },
@@ -1201,7 +1213,9 @@ const TablaTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, te
   const leagueConfig = getLeagueConfig(data.info.leagueId);
   const leagueZones  = leagueConfig?.zones;
 
-  // Build all distinct groups sorted by groupId (ascending → A, B, C…)
+  // Build all distinct groups sorted by groupId (ascending → A, B, C…).
+  // Renumber each group's positions to 1..N — SportMonks returns global
+  // positions which are meaningless inside a single group view.
   const allGroups = useMemo(() => {
     if (data.standings.length === 0) return [];
     const map = new Map<string, LeagueStanding[]>();
@@ -1214,7 +1228,11 @@ const TablaTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, te
       .map(([key, rows]) => ({
         key,
         groupId: rows[0].groupId ?? null,
-        rows: rows.sort((a, b) => a.position - b.position),
+        rows: rows
+          .sort((a, b) => a.position - b.position)
+          // Only renumber when this is a real group split (groupId set).
+          // For single-table leagues, preserve the global position.
+          .map((s, i) => (s.groupId != null ? { ...s, position: i + 1 } : s)),
       }))
       .sort((a, b) => (a.groupId ?? 0) - (b.groupId ?? 0));
   }, [data.standings]);
@@ -1386,8 +1404,10 @@ const tl = StyleSheet.create({
   thPts:  { width: 30, fontSize: 9, fontWeight: '700', textAlign: 'center' },
   tdPos:  { width: 20, fontSize: 12, textAlign: 'center' },
   tdTeamCell: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7 },
-  logo: { width: 22, height: 22, borderRadius: 11 },
-  logoSm: { width: 18, height: 18, borderRadius: 9 },
+  // Soft-square frame (see comment on rs.miniLogo above) so flags and crests
+  // share a consistent rectangular silhouette across the standings table.
+  logo:   { width: 22, height: 22, borderRadius: 3 },
+  logoSm: { width: 18, height: 18, borderRadius: 3 },
   tdTeamName: { fontSize: 12, flex: 1 },
   tdTeamNameSm: { fontSize: 11, flex: 1 },
   tdStat: { width: 24, fontSize: 11, textAlign: 'center' },
@@ -1606,10 +1626,24 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
             </TouchableOpacity>
 
             {/* Stats strip: pos, pts, form */}
-            {data?.teamStanding && (
+            {data?.teamStanding && (() => {
+              // For group-based competitions (WC, group-stage cups) show the
+              // team's rank within its group (1..N), not the global SportMonks
+              // position which is meaningless to the user (e.g. Colombia "#44"
+              // out of 48 WC teams really means 4th in Group K).
+              const ts = data.teamStanding;
+              let displayPos = ts.position;
+              if (ts.groupId != null) {
+                const groupRows = data.standings
+                  .filter(s => s.groupId === ts.groupId)
+                  .sort((a, b) => a.position - b.position);
+                const idx = groupRows.findIndex(s => s.team.id === ts.team.id);
+                if (idx >= 0) displayPos = idx + 1;
+              }
+              return (
               <View style={hs.statsStrip}>
                 <View style={hs.statItem}>
-                  <Text style={[hs.statValue, { color: hText }]}>#{data.teamStanding.position}</Text>
+                  <Text style={[hs.statValue, { color: hText }]}>#{displayPos}</Text>
                   <Text style={[hs.statLabel, { color: hTextSoft }]}>{t('team.positionLabel')}</Text>
                 </View>
                 <View style={hs.statItem}>
@@ -1623,7 +1657,8 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
                   </View>
                 )}
               </View>
-            )}
+              );
+            })()}
           </View>
         </View>
 
