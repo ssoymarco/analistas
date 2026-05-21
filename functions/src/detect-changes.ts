@@ -8,6 +8,7 @@
 
 import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
+import { triggerLeagueSyncForChanges } from './sync-league-data';
 import type { MatchDoc, LivescoresSnapshot, DetectedChange } from './types';
 
 /**
@@ -198,5 +199,14 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
       starts: changes.filter(c => c.type === 'matchStart').length,
       ends: changes.filter(c => c.type === 'matchEnd').length,
     });
+
+    // Event-driven sync: refresh standings/topscorers for affected leagues
+    // immediately, so Messi-vs-Ronaldo races and league-position swaps
+    // surface in the app within seconds instead of waiting for the cron.
+    // Runs in parallel via Promise.allSettled inside the helper; one
+    // league's failure can't block another. We await so the sync finishes
+    // before the next poll cycle starts (still well under the 120s
+    // function timeout — single-league syncs take ~600ms).
+    await triggerLeagueSyncForChanges(changes);
   }
 }
