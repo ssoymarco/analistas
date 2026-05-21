@@ -120,6 +120,20 @@ const en: TranslationKeys = {
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',
     footnote: 'Any match in your followed list respects these settings. You can silence individual matches with the bell button on each card.',
+    matchSheet: {
+      title: 'Notifications for this match',
+      subtitle: "Customize which events you want for this match only. Changes won't affect your global settings.",
+      muteTitle: 'Mute this match',
+      muteDescription: "You won't receive any notifications for this fixture.",
+      eventsTitle: 'Events',
+      eventsHint: 'Each event uses your global setting unless you change it here.',
+      usingGlobal: 'Global',
+      customized: 'Custom',
+      resetButton: 'Reset to global settings',
+      muteHint: 'When muted, individual events are ignored.',
+      done: 'Done',
+      reminderHint: '{{minutes}} min before kickoff',
+    },
   },
 
   // ── PartidosScreen ─────────────────────────────────────────────────────────

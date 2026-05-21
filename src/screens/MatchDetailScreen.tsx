@@ -38,6 +38,7 @@ import { TablaTab }         from './matchDetail/TablaTab';
 import { NoticiasTab }      from './matchDetail/NoticiasTab';
 import { EstadisticasTab }  from './matchDetail/EstadisticasTab';
 import { BackArrow, ShareIcon } from '../components/NavIcons';
+import { MatchNotificationsSheet } from '../components/MatchNotificationsSheet';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatMatchTime } from '../utils/formatMatchTime';
 
@@ -52,14 +53,22 @@ const SCROLL_TOP_THRESHOLD = 400;
 
 
 // ── Icon: Bell ───────────────────────────────────────────────────────────────
-function BellIcon({ size = 18 }: { size?: number }) {
+// `state` drives the visual:
+//   - 'default'   : green bell (notifications follow global prefs)
+//   - 'custom'    : green bell with a small dot (per-match overrides set)
+//   - 'muted'     : gray bell with a diagonal slash overlay (match silenced)
+function BellIcon({ size = 18, state = 'default' }: {
+  size?: number;
+  state?: 'default' | 'custom' | 'muted';
+}) {
   const s = size;
+  const fill = state === 'muted' ? '#6b7280' : '#10b981';
   return (
     <View style={{ width: s, height: s, alignItems: 'center', justifyContent: 'center' }}>
       {/* Bell body */}
       <View style={{
         width: s * 0.65, height: s * 0.55,
-        backgroundColor: '#10b981',
+        backgroundColor: fill,
         borderTopLeftRadius: s * 0.32,
         borderTopRightRadius: s * 0.32,
         borderBottomLeftRadius: 2,
@@ -69,7 +78,7 @@ function BellIcon({ size = 18 }: { size?: number }) {
       {/* Bell brim */}
       <View style={{
         width: s * 0.8, height: s * 0.12,
-        backgroundColor: '#10b981',
+        backgroundColor: fill,
         borderRadius: s * 0.06,
         position: 'absolute', bottom: s * 0.18,
       }} />
@@ -78,22 +87,39 @@ function BellIcon({ size = 18 }: { size?: number }) {
         width: s * 0.18, height: s * 0.18,
         borderRadius: s * 0.09,
         borderWidth: 1.5,
-        borderColor: '#10b981',
+        borderColor: fill,
         position: 'absolute', top: 0,
       }} />
       {/* Clapper */}
       <View style={{
         width: s * 0.14, height: s * 0.14,
         borderRadius: s * 0.07,
-        backgroundColor: '#10b981',
+        backgroundColor: fill,
         position: 'absolute', bottom: s * 0.06,
       }} />
-      {/* Notification dot */}
-      <View style={{
-        width: 6, height: 6, borderRadius: 3,
-        backgroundColor: '#ef4444',
-        position: 'absolute', top: 0, right: 0,
-      }} />
+      {/* Custom-override dot (shown only when overrides exist but not muted) */}
+      {state === 'custom' && (
+        <View style={{
+          width: 6, height: 6, borderRadius: 3,
+          backgroundColor: '#00E096',
+          borderWidth: 1, borderColor: '#0d1f38',
+          position: 'absolute', top: -1, right: -1,
+        }} />
+      )}
+      {/* Diagonal slash for muted state */}
+      {state === 'muted' && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            width: s * 1.05, height: 2,
+            backgroundColor: '#ef4444',
+            top: s / 2 - 1, left: -s * 0.025,
+            transform: [{ rotate: '45deg' }],
+            borderRadius: 1,
+          }}
+        />
+      )}
     </View>
   );
 }
@@ -206,7 +232,15 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const {
     prefs,
     toggleMatchEstadio, isMatchEstadio,
+    isMatchMuted, hasMatchCustomization,
   } = useNotificationPrefs();
+  // Per-match notifications bottom sheet (opened from the bell in the header).
+  const [notifSheetVisible, setNotifSheetVisible] = useState(false);
+  const matchMuted = isMatchMuted(match.id);
+  // 'muted' wins; if not muted but the user has any override → 'custom';
+  // otherwise plain default.
+  const bellState: 'default' | 'custom' | 'muted' =
+    matchMuted ? 'muted' : (hasMatchCustomization(match.id) ? 'custom' : 'default');
   // When global is ON: being in the set means "excluded for this match" (off)
   // When global is OFF: being in the set means "enabled for this match" (on)
   const matchEstadioActive = prefs.estadioMode
@@ -455,8 +489,12 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[scr.navBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7}>
-            <BellIcon size={18} />
+          <TouchableOpacity
+            style={[scr.navBtn, { backgroundColor: hBtnBg }]}
+            activeOpacity={0.7}
+            onPress={() => { haptics.light(); setNotifSheetVisible(true); }}
+          >
+            <BellIcon size={18} state={bellState} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -866,6 +904,14 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           <Text style={scr.scrollTopText}>{t('matches.scrollToTop')}</Text>
         </TouchableOpacity>
       )}
+
+      {/* ── Per-match notifications bottom sheet ── */}
+      <MatchNotificationsSheet
+        visible={notifSheetVisible}
+        onClose={() => setNotifSheetVisible(false)}
+        matchId={match.id}
+        matchLabel={`${translateNationalTeam(match.homeTeam.name)} · ${translateNationalTeam(match.awayTeam.name)}`}
+      />
     </SafeAreaView>
   );
 };

@@ -128,6 +128,21 @@ const es = {
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',
     footnote: 'Cualquier partido en tu lista de seguidos respeta esta configuración. Puedes silenciar partidos individuales con el botón de campana en cada tarjeta.',
+    // Per-match notifications sheet (opened from the bell in MatchDetailScreen)
+    matchSheet: {
+      title: 'Notificaciones de este partido',
+      subtitle: 'Personaliza qué eventos quieres recibir solo para este encuentro. Los cambios no afectan tu configuración global.',
+      muteTitle: 'Silenciar este partido',
+      muteDescription: 'No recibirás ninguna notificación de este encuentro.',
+      eventsTitle: 'Eventos',
+      eventsHint: 'Cada evento toma el valor de tu configuración global a menos que lo cambies aquí.',
+      usingGlobal: 'Usando global',
+      customized: 'Personalizado',
+      resetButton: 'Restaurar valores globales',
+      muteHint: 'Cuando está silenciado, los eventos individuales se ignoran.',
+      done: 'Listo',
+      reminderHint: '{{minutes}} min antes del kickoff',
+    },
   },
 
   // ── PartidosScreen ─────────────────────────────────────────────────────────
