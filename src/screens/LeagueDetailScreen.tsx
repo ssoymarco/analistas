@@ -38,7 +38,7 @@ import type {
   LeagueFixture,
 } from '../hooks/useLeagueDetail';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
-import { getLeagueConfig } from '../config/leagues';
+import { getLeagueConfig, getLeagueDisplayName, isCopyrightSensitiveLeague } from '../config/leagues';
 import type { LeagueZone } from '../config/leagues';
 import type { Match, MatchStatus } from '../data/types';
 import { BackArrow, ShareIcon } from '../components/NavIcons';
@@ -1260,14 +1260,14 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   const hBorderCol = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.2)';
 
   // ── Display values ──
-  // Some leagues (e.g. FIFA World Cup, id 732) must NOT display their
-  // SportMonks/FIFA-branded logo due to trademark concerns. We detect those
-  // by checking the league config — if it carries a flag emoji and is in
-  // the suppress-list, we render the emoji instead of any remote logo.
-  const COPYRIGHT_SENSITIVE_LEAGUE_IDS = new Set<number>([732]);
+  // Trademark-sensitive overrides (e.g. FIFA World Cup) come from the shared
+  // helpers in src/config/leagues.ts — see COPYRIGHT_SENSITIVE_LEAGUE_IDS.
+  // For these leagues we replace the SportMonks-supplied name and remote
+  // logo with curated values from our own config.
   const leagueCfg = leagueId ? getLeagueConfig(leagueId) : undefined;
-  const suppressRemoteLogo = leagueId ? COPYRIGHT_SENSITIVE_LEAGUE_IDS.has(leagueId) : false;
-  const displayName = data?.leagueName || leagueName;
+  const suppressRemoteLogo = leagueId ? isCopyrightSensitiveLeague(leagueId) : false;
+  const apiOrParamName = data?.leagueName || leagueName;
+  const displayName = leagueId ? getLeagueDisplayName(leagueId, apiOrParamName) : apiOrParamName;
   // Use ONLY the real image_path from API or nav params — never construct
   // URLs because SportMonks uses sharded folder paths (e.g. /leagues/2/1122.png)
   // that we cannot predict from the league id alone.

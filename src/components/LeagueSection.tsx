@@ -4,15 +4,7 @@ import { useThemeColors } from '../theme/useTheme';
 import type { Match } from '../data/types';
 import type { LeagueWithMatches } from '../services/sportsApi';
 import { MatchCard } from './MatchCard';
-import { getLeagueConfig } from '../config/leagues';
-
-/**
- * Leagues whose remote logo we must NOT display due to trademark / brand
- * concerns (e.g. the official FIFA World Cup mark). For these we fall back
- * to the flag emoji defined in `src/config/leagues.ts` and use the config
- * name instead of whatever string SportMonks sends ("World Cup" → "Mundial 2026").
- */
-const COPYRIGHT_SENSITIVE_LEAGUE_IDS = new Set<string>(['732']);
+import { getLeagueDisplayName, getLeagueDisplayFlag, isCopyrightSensitiveLeague } from '../config/leagues';
 
 /** Renders a league flag — Image if URL, Text if emoji */
 const LeagueFlag = ({ logo, size = 18 }: { logo: string; size?: number }) => {
@@ -52,18 +44,12 @@ export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPre
   const c = useThemeColors();
   const hasLive = league.matches.some(m => m.status === 'live');
 
-  // Resolve display name + flag with trademark-sensitive override.
-  // For leagues in COPYRIGHT_SENSITIVE_LEAGUE_IDS (e.g. WC 2026), prefer
-  // the curated config (name "Mundial 2026", flag "🌍") over whatever
-  // SportMonks supplies ("World Cup", FIFA logo URL).
-  const numericId = Number(league.id);
-  const cfg = Number.isFinite(numericId) ? getLeagueConfig(numericId) : undefined;
-  const isCopyrightSensitive = COPYRIGHT_SENSITIVE_LEAGUE_IDS.has(String(league.id));
-
-  const displayName = (isCopyrightSensitive && cfg?.name) ? cfg.name : league.name;
-  const flag = isCopyrightSensitive
-    ? (cfg?.flag || '🌍')
-    : (league.logo || LEAGUE_FLAGS[league.id] || cfg?.flag || '🏆');
+  // Resolve display name + flag using the centralised helpers. For
+  // trademark-sensitive leagues (e.g. WC 2026) these return the curated
+  // config values; for everything else they pass through SportMonks' data.
+  const displayName = getLeagueDisplayName(league.id, league.name);
+  const fallbackLogo = league.logo || LEAGUE_FLAGS[league.id] || '🏆';
+  const flag = getLeagueDisplayFlag(league.id, fallbackLogo);
 
   // ── Staggered entry animation ──────────────────────────────────────────────
   const entryAnim = useRef(new Animated.Value(0)).current;

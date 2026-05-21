@@ -29,7 +29,8 @@ import { useLiveTick, computeLiveMinuteSeconds, formatLiveClock } from '../hooks
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
-import { getLeagueConfig }  from '../config/leagues';
+import { getLeagueConfig, getLeagueDisplayName }  from '../config/leagues';
+import { translateNationalTeam } from '../utils/nationalTeams';
 import { EnVivoTab }        from './matchDetail/EnVivoTab';
 import { PreviewTab }      from './matchDetail/PreviewTab';
 import { AlineacionTab }    from './matchDetail/AlineacionTab';
@@ -448,7 +449,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
             })}
           >
             <Text style={[scr.navLeague, { color: hText }]} numberOfLines={1}>
-              <Text style={[scr.navLeagueBold, { color: hText }]}>{match.league}</Text>
+              <Text style={[scr.navLeagueBold, { color: hText }]}>{getLeagueDisplayName(match.leagueId, match.league)}</Text>
               {'  '}
               <Text style={[scr.navRound, { color: hTextSoft }]}>·  {t('matches.matchday')}</Text>
             </Text>
@@ -560,7 +561,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 }}
               >
                 <TeamBadge name={displayMatch.homeTeam.name} logo={displayMatch.homeTeam.logo} size={80} />
-                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{displayMatch.homeTeam.name}</Text>
+                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{translateNationalTeam(displayMatch.homeTeam.name)}</Text>
               </TouchableOpacity>
 
               {/* Center */}
@@ -620,7 +621,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 }}
               >
                 <TeamBadge name={displayMatch.awayTeam.name} logo={displayMatch.awayTeam.logo} size={80} />
-                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{displayMatch.awayTeam.name}</Text>
+                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{translateNationalTeam(displayMatch.awayTeam.name)}</Text>
               </TouchableOpacity>
 
               {/* ── Away follow button ── */}

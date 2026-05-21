@@ -21,6 +21,7 @@ import { useDarkMode } from '../../contexts/DarkModeContext';
 import type { Match, MatchDetail, LineupPlayer, MatchLineup, MissingPlayer } from '../../data/types';
 import { getCoachProfile, type CoachProfile } from '../../services/sportsApi';
 import { translateCountry } from '../../i18n/countries';
+import { translateNationalTeam } from '../../utils/nationalTeams';
 
 // ── Optional packages (graceful degradation if missing) ──────────────────────
 let ViewShot: any = null;
@@ -907,7 +908,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
               <Text style={ms.coachBadgeText}>Local</Text>
             </View>
           </View>
-          <Text style={[ms.coachTeam, { color: c.textTertiary }]}>{match.homeTeam.name}</Text>
+          <Text style={[ms.coachTeam, { color: c.textTertiary }]}>{translateNationalTeam(match.homeTeam.name)}</Text>
         </TouchableOpacity>
 
         {/* Away coach */}
@@ -943,7 +944,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
               <Text style={ms.coachBadgeText}>Visitante</Text>
             </View>
           </View>
-          <Text style={[ms.coachTeam, { color: c.textTertiary }]}>{match.awayTeam.name}</Text>
+          <Text style={[ms.coachTeam, { color: c.textTertiary }]}>{translateNationalTeam(match.awayTeam.name)}</Text>
         </TouchableOpacity>
       </View>
 

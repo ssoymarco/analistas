@@ -380,6 +380,47 @@ export function getLeagueConfigByName(name: string): LeagueConfig | undefined {
   return AVAILABLE_LEAGUES.find((l) => l.name.toLowerCase() === lower);
 }
 
+// ── Trademark-sensitive overrides ────────────────────────────────────────────
+//
+// Some competitions own brand assets we must NOT display: official logo and,
+// in some markets, even the official name. The FIFA World Cup is the canonical
+// example — we render "Mundial 2026" + a 🌍 emoji instead of "World Cup" +
+// the FIFA mark. Add a leagueId here when we acquire (or lose) a sub-license
+// for that brand.
+export const COPYRIGHT_SENSITIVE_LEAGUE_IDS = new Set<number>([732]); // FIFA World Cup 2026
+
+/** True when the given league should NOT show its remote logo / English name. */
+export function isCopyrightSensitiveLeague(id: number | string): boolean {
+  const numId = typeof id === 'string' ? Number(id) : id;
+  return Number.isFinite(numId) && COPYRIGHT_SENSITIVE_LEAGUE_IDS.has(numId);
+}
+
+/**
+ * Display name for a league, using our curated `config.name` for
+ * trademark-sensitive leagues (and falling back to whatever string the API
+ * already produced for everything else). Pass the SportMonks-supplied
+ * `fallback` so non-sensitive leagues render exactly as before.
+ */
+export function getLeagueDisplayName(id: number | string, fallback: string): string {
+  if (!isCopyrightSensitiveLeague(id)) return fallback;
+  const numId = typeof id === 'string' ? Number(id) : id;
+  return getLeagueConfig(numId)?.name ?? fallback;
+}
+
+/**
+ * Display flag/emoji for a league. For trademark-sensitive leagues, returns
+ * the curated emoji from config (e.g. 🌍 for the World Cup). For everything
+ * else, returns the SportMonks logo URL (or null when not available — caller
+ * can fall back to its own emoji).
+ */
+export function getLeagueDisplayFlag(id: number | string, fallbackLogo: string): string {
+  if (isCopyrightSensitiveLeague(id)) {
+    const numId = typeof id === 'string' ? Number(id) : id;
+    return getLeagueConfig(numId)?.flag || '🌍';
+  }
+  return fallbackLogo;
+}
+
 // ── "Sugerida" league logic (onboarding) ─────────────────────────────────────
 //
 // A league is marked as "Sugerida" in the onboarding flow only when one of:

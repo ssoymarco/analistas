@@ -15,6 +15,7 @@ import { haptics } from '../../utils/haptics';
 import { AnimatedPressable } from '../../components/AnimatedPressable';
 import { GoalPicker, GOAL_OPTIONS } from '../../components/GoalPicker';
 import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupVenues';
+import { getLeagueDisplayName } from '../../config/leagues';
 import type {
   Match, MatchDetail, MatchEvent, H2HResult, TeamFormEntry,
   OddsMarket, MatchPrediction, MissingPlayer, PressureIndex,
@@ -456,7 +457,7 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
       <View style={pc.headerRow}>
         <View style={[pc.headerBar, { backgroundColor: c.accent }]} />
         <Text style={[pc.headerTitle, { color: c.textPrimary }]}>{t('predictions.title')}</Text>
-        <Text style={[pc.headerLeague, { color: c.textTertiary }]}>  · {match.league}</Text>
+        <Text style={[pc.headerLeague, { color: c.textTertiary }]}>  · {getLeagueDisplayName(match.leagueId, match.league)}</Text>
         <View style={{ flex: 1 }} />
         <View style={pc.dots}>
           {cards.map((_, i) => (

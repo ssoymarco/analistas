@@ -17,7 +17,7 @@ import type { Match, MatchDetail, LeagueStanding, CupGroup } from '../../data/ty
 import type { CupRound, CupTie } from '../../services/sportsApi';
 import { SkeletonLeagueDetail } from '../../components/Skeleton';
 import type { PartidosStackParamList } from '../../navigation/AppNavigator';
-import { getLeagueConfig, getLeagueConfigByName, type LeagueZone } from '../../config/leagues';
+import { getLeagueConfig, getLeagueConfigByName, getLeagueDisplayName, type LeagueZone } from '../../config/leagues';
 
 // ── Dynamic imports ──────────────────────────────────────────────────────────
 let ViewShot: any = null;
@@ -621,7 +621,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
         {cupPhase === 'bracket' && (
           <CupBracketView
             rounds={rounds}
-            leagueName={match.league}
+            leagueName={getLeagueDisplayName(match.leagueId, match.league)}
             seasonStr={seasonStr}
           />
         )}
@@ -630,7 +630,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
         {!showToggle && cupPhase !== 'bracket' && (
           <CupBracketView
             rounds={rounds}
-            leagueName={match.league}
+            leagueName={getLeagueDisplayName(match.leagueId, match.league)}
             seasonStr={seasonStr}
           />
         )}
@@ -696,14 +696,14 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
         {isProjected && (
           <View style={[ph.projectedBanner, { backgroundColor: 'rgba(139,92,246,0.10)', borderColor: 'rgba(139,92,246,0.25)' }]}>
             <Text style={[ph.projectedTitle, { color: '#a78bfa' }]}>
-              🔮 {t('cup.projectedBracket')} · {match.league}
+              🔮 {t('cup.projectedBracket')} · {getLeagueDisplayName(match.leagueId, match.league)}
             </Text>
             <Text style={[ph.projectedSub, { color: '#7c6fad' }]}>
               {t('cup.basedOnTable')}
             </Text>
           </View>
         )}
-        <CupBracketView rounds={displayRounds} leagueName={match.league} seasonStr={seasonStr} />
+        <CupBracketView rounds={displayRounds} leagueName={getLeagueDisplayName(match.leagueId, match.league)} seasonStr={seasonStr} />
       </View>
     );
 
@@ -772,7 +772,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
       >
         <Text style={{ fontSize: 28 }}>🏆</Text>
         <View style={{ flex: 1 }}>
-          <Text style={[tb.leagueName, { color: c.textPrimary }]}>{match.league}</Text>
+          <Text style={[tb.leagueName, { color: c.textPrimary }]}>{getLeagueDisplayName(match.leagueId, match.league)}</Text>
           <Text style={[tb.leagueSeason, { color: c.textTertiary }]}>{seasonStr} · Jornada</Text>
         </View>
       </TouchableOpacity>
