@@ -40,6 +40,13 @@ export interface LeagueConfig {
    * If omitted, a generic European fallback is used (Champion / CL / EL / Descenso).
    */
   zones?: LeagueZone[];
+  /**
+   * Hidden search aliases — match user queries to this league without
+   * displaying these terms anywhere. Use to handle copyrighted names we
+   * cannot display (e.g. FIFA World Cup) while still making the league
+   * discoverable.
+   */
+  searchAliases?: string[];
 }
 
 // ── Shared zone palettes ──────────────────────────────────────────────────────
@@ -333,6 +340,15 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
   { id: 1108, name: 'CAF Confederation Cup', country: 'Africa',      flag: '🏆', currentSeasonId: 26264, isCup: true },
 
   // ── Otros ─────────────────────────────────────────────────────────────────
+  { id: 732,  name: 'Mundial 2026',              country: 'World',    flag: '🌍', currentSeasonId: 26618, isCup: true, hasPlayoffs: true, playoffsLabel: 'Eliminatoria',
+    // Hidden search aliases — let users find the tournament with common
+    // queries without displaying any FIFA-trademarked term in the UI.
+    searchAliases: [
+      'copa del mundo', 'copa mundial', 'mundial de futbol', 'mundial de fútbol',
+      'world cup', 'wc 2026', 'wc26', 'wc2026', 'fifa', 'usa canada mexico',
+      'usa canadá méxico', 'norteamerica 2026', 'norteamérica 2026',
+    ],
+  },
   { id: 1082, name: 'Amistosos Internacionales', country: 'World',    flag: '🌍', currentSeasonId: 26758 },
 
   // ── Femenil ───────────────────────────────────────────────────────────────
@@ -362,6 +378,47 @@ export function getLeagueConfig(id: number): LeagueConfig | undefined {
 export function getLeagueConfigByName(name: string): LeagueConfig | undefined {
   const lower = name.toLowerCase();
   return AVAILABLE_LEAGUES.find((l) => l.name.toLowerCase() === lower);
+}
+
+// ── Trademark-sensitive overrides ────────────────────────────────────────────
+//
+// Some competitions own brand assets we must NOT display: official logo and,
+// in some markets, even the official name. The FIFA World Cup is the canonical
+// example — we render "Mundial 2026" + a 🌍 emoji instead of "World Cup" +
+// the FIFA mark. Add a leagueId here when we acquire (or lose) a sub-license
+// for that brand.
+export const COPYRIGHT_SENSITIVE_LEAGUE_IDS = new Set<number>([732]); // FIFA World Cup 2026
+
+/** True when the given league should NOT show its remote logo / English name. */
+export function isCopyrightSensitiveLeague(id: number | string): boolean {
+  const numId = typeof id === 'string' ? Number(id) : id;
+  return Number.isFinite(numId) && COPYRIGHT_SENSITIVE_LEAGUE_IDS.has(numId);
+}
+
+/**
+ * Display name for a league, using our curated `config.name` for
+ * trademark-sensitive leagues (and falling back to whatever string the API
+ * already produced for everything else). Pass the SportMonks-supplied
+ * `fallback` so non-sensitive leagues render exactly as before.
+ */
+export function getLeagueDisplayName(id: number | string, fallback: string): string {
+  if (!isCopyrightSensitiveLeague(id)) return fallback;
+  const numId = typeof id === 'string' ? Number(id) : id;
+  return getLeagueConfig(numId)?.name ?? fallback;
+}
+
+/**
+ * Display flag/emoji for a league. For trademark-sensitive leagues, returns
+ * the curated emoji from config (e.g. 🌍 for the World Cup). For everything
+ * else, returns the SportMonks logo URL (or null when not available — caller
+ * can fall back to its own emoji).
+ */
+export function getLeagueDisplayFlag(id: number | string, fallbackLogo: string): string {
+  if (isCopyrightSensitiveLeague(id)) {
+    const numId = typeof id === 'string' ? Number(id) : id;
+    return getLeagueConfig(numId)?.flag || '🌍';
+  }
+  return fallbackLogo;
 }
 
 // ── "Sugerida" league logic (onboarding) ─────────────────────────────────────

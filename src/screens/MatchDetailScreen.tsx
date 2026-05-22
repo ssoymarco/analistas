@@ -29,7 +29,8 @@ import { useLiveTick, computeLiveMinuteSeconds, formatLiveClock } from '../hooks
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
-import { getLeagueConfig }  from '../config/leagues';
+import { getLeagueConfig, getLeagueDisplayName }  from '../config/leagues';
+import { translateNationalTeam } from '../utils/nationalTeams';
 import { EnVivoTab }        from './matchDetail/EnVivoTab';
 import { PreviewTab }      from './matchDetail/PreviewTab';
 import { AlineacionTab }    from './matchDetail/AlineacionTab';
@@ -37,6 +38,7 @@ import { TablaTab }         from './matchDetail/TablaTab';
 import { NoticiasTab }      from './matchDetail/NoticiasTab';
 import { EstadisticasTab }  from './matchDetail/EstadisticasTab';
 import { BackArrow, ShareIcon } from '../components/NavIcons';
+import { MatchNotificationsSheet } from '../components/MatchNotificationsSheet';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatMatchTime } from '../utils/formatMatchTime';
 
@@ -51,14 +53,22 @@ const SCROLL_TOP_THRESHOLD = 400;
 
 
 // ── Icon: Bell ───────────────────────────────────────────────────────────────
-function BellIcon({ size = 18 }: { size?: number }) {
+// `state` drives the visual:
+//   - 'default'   : green bell (notifications follow global prefs)
+//   - 'custom'    : green bell with a small dot (per-match overrides set)
+//   - 'muted'     : gray bell with a diagonal slash overlay (match silenced)
+function BellIcon({ size = 18, state = 'default' }: {
+  size?: number;
+  state?: 'default' | 'custom' | 'muted';
+}) {
   const s = size;
+  const fill = state === 'muted' ? '#6b7280' : '#10b981';
   return (
     <View style={{ width: s, height: s, alignItems: 'center', justifyContent: 'center' }}>
       {/* Bell body */}
       <View style={{
         width: s * 0.65, height: s * 0.55,
-        backgroundColor: '#10b981',
+        backgroundColor: fill,
         borderTopLeftRadius: s * 0.32,
         borderTopRightRadius: s * 0.32,
         borderBottomLeftRadius: 2,
@@ -68,7 +78,7 @@ function BellIcon({ size = 18 }: { size?: number }) {
       {/* Bell brim */}
       <View style={{
         width: s * 0.8, height: s * 0.12,
-        backgroundColor: '#10b981',
+        backgroundColor: fill,
         borderRadius: s * 0.06,
         position: 'absolute', bottom: s * 0.18,
       }} />
@@ -77,22 +87,39 @@ function BellIcon({ size = 18 }: { size?: number }) {
         width: s * 0.18, height: s * 0.18,
         borderRadius: s * 0.09,
         borderWidth: 1.5,
-        borderColor: '#10b981',
+        borderColor: fill,
         position: 'absolute', top: 0,
       }} />
       {/* Clapper */}
       <View style={{
         width: s * 0.14, height: s * 0.14,
         borderRadius: s * 0.07,
-        backgroundColor: '#10b981',
+        backgroundColor: fill,
         position: 'absolute', bottom: s * 0.06,
       }} />
-      {/* Notification dot */}
-      <View style={{
-        width: 6, height: 6, borderRadius: 3,
-        backgroundColor: '#ef4444',
-        position: 'absolute', top: 0, right: 0,
-      }} />
+      {/* Custom-override dot (shown only when overrides exist but not muted) */}
+      {state === 'custom' && (
+        <View style={{
+          width: 6, height: 6, borderRadius: 3,
+          backgroundColor: '#00E096',
+          borderWidth: 1, borderColor: '#0d1f38',
+          position: 'absolute', top: -1, right: -1,
+        }} />
+      )}
+      {/* Diagonal slash for muted state */}
+      {state === 'muted' && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            width: s * 1.05, height: 2,
+            backgroundColor: '#ef4444',
+            top: s / 2 - 1, left: -s * 0.025,
+            transform: [{ rotate: '45deg' }],
+            borderRadius: 1,
+          }}
+        />
+      )}
     </View>
   );
 }
@@ -205,7 +232,15 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const {
     prefs,
     toggleMatchEstadio, isMatchEstadio,
+    isMatchMuted, hasMatchCustomization,
   } = useNotificationPrefs();
+  // Per-match notifications bottom sheet (opened from the bell in the header).
+  const [notifSheetVisible, setNotifSheetVisible] = useState(false);
+  const matchMuted = isMatchMuted(match.id);
+  // 'muted' wins; if not muted but the user has any override → 'custom';
+  // otherwise plain default.
+  const bellState: 'default' | 'custom' | 'muted' =
+    matchMuted ? 'muted' : (hasMatchCustomization(match.id) ? 'custom' : 'default');
   // When global is ON: being in the set means "excluded for this match" (off)
   // When global is OFF: being in the set means "enabled for this match" (on)
   const matchEstadioActive = prefs.estadioMode
@@ -448,14 +483,18 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
             })}
           >
             <Text style={[scr.navLeague, { color: hText }]} numberOfLines={1}>
-              <Text style={[scr.navLeagueBold, { color: hText }]}>{match.league}</Text>
+              <Text style={[scr.navLeagueBold, { color: hText }]}>{getLeagueDisplayName(match.leagueId, match.league)}</Text>
               {'  '}
               <Text style={[scr.navRound, { color: hTextSoft }]}>·  {t('matches.matchday')}</Text>
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[scr.navBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7}>
-            <BellIcon size={18} />
+          <TouchableOpacity
+            style={[scr.navBtn, { backgroundColor: hBtnBg }]}
+            activeOpacity={0.7}
+            onPress={() => { haptics.light(); setNotifSheetVisible(true); }}
+          >
+            <BellIcon size={18} state={bellState} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -516,7 +555,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
 
               {/* ── Home follow button ── */}
               {(() => {
-                const following = isFollowingTeam(match.homeTeam.id);
+                const following = isFollowingTeam(displayMatch.homeTeam.id);
                 return (
                   <TouchableOpacity
                     style={[scr.followBtn, {
@@ -529,9 +568,9 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                     }]}
                     onPress={() => {
                       haptics.selection();
-                      const nowFollowing = !isFollowingTeam(match.homeTeam.id);
-                      toggleFollowTeam(match.homeTeam.id);
-                      showFollowToast(match.homeTeam.name, nowFollowing);
+                      const nowFollowing = !isFollowingTeam(displayMatch.homeTeam.id);
+                      toggleFollowTeam(displayMatch.homeTeam.id);
+                      showFollowToast(displayMatch.homeTeam.name, nowFollowing);
                     }}
                     activeOpacity={0.75}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -548,19 +587,19 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 style={scr.teamCol}
                 activeOpacity={0.6}
                 onPress={() => {
-                  const n = Number(match.homeTeam.id);
+                  const n = Number(displayMatch.homeTeam.id);
                   if (!isNaN(n) && n > 0) {
                     navigation.push('TeamDetail', {
                       teamId: n,
-                      teamName: match.homeTeam.name,
-                      teamLogo: match.homeTeam.logo,
-                      seasonId: match.seasonId,
+                      teamName: displayMatch.homeTeam.name,
+                      teamLogo: displayMatch.homeTeam.logo,
+                      seasonId: displayMatch.seasonId,
                     });
                   }
                 }}
               >
-                <TeamBadge name={match.homeTeam.name} logo={match.homeTeam.logo} size={80} />
-                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{match.homeTeam.name}</Text>
+                <TeamBadge name={displayMatch.homeTeam.name} logo={displayMatch.homeTeam.logo} size={80} />
+                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{translateNationalTeam(displayMatch.homeTeam.name)}</Text>
               </TouchableOpacity>
 
               {/* Center */}
@@ -608,24 +647,24 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 style={scr.teamCol}
                 activeOpacity={0.6}
                 onPress={() => {
-                  const n = Number(match.awayTeam.id);
+                  const n = Number(displayMatch.awayTeam.id);
                   if (!isNaN(n) && n > 0) {
                     navigation.push('TeamDetail', {
                       teamId: n,
-                      teamName: match.awayTeam.name,
-                      teamLogo: match.awayTeam.logo,
-                      seasonId: match.seasonId,
+                      teamName: displayMatch.awayTeam.name,
+                      teamLogo: displayMatch.awayTeam.logo,
+                      seasonId: displayMatch.seasonId,
                     });
                   }
                 }}
               >
-                <TeamBadge name={match.awayTeam.name} logo={match.awayTeam.logo} size={80} />
-                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{match.awayTeam.name}</Text>
+                <TeamBadge name={displayMatch.awayTeam.name} logo={displayMatch.awayTeam.logo} size={80} />
+                <Text style={[scr.teamName, { color: hText }]} numberOfLines={2}>{translateNationalTeam(displayMatch.awayTeam.name)}</Text>
               </TouchableOpacity>
 
               {/* ── Away follow button ── */}
               {(() => {
-                const following = isFollowingTeam(match.awayTeam.id);
+                const following = isFollowingTeam(displayMatch.awayTeam.id);
                 return (
                   <TouchableOpacity
                     style={[scr.followBtn, {
@@ -638,9 +677,9 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                     }]}
                     onPress={() => {
                       haptics.selection();
-                      const nowFollowing = !isFollowingTeam(match.awayTeam.id);
-                      toggleFollowTeam(match.awayTeam.id);
-                      showFollowToast(match.awayTeam.name, nowFollowing);
+                      const nowFollowing = !isFollowingTeam(displayMatch.awayTeam.id);
+                      toggleFollowTeam(displayMatch.awayTeam.id);
+                      showFollowToast(displayMatch.awayTeam.name, nowFollowing);
                     }}
                     activeOpacity={0.75}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -672,14 +711,49 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           </Animated.View>
 
           {/* ── COMPACT view ── */}
-          <Animated.View style={[scr.heroCompact, { opacity: compactOpacity }]} pointerEvents="none">
+          {/* pointerEvents="box-none" lets touches pass through the wrapper
+              to the expanded view below when scrolled to top, while still
+              allowing the small badges to receive their own taps. */}
+          <Animated.View style={[scr.heroCompact, { opacity: compactOpacity }]} pointerEvents="box-none">
             <View style={scr.compactInner}>
-              <TeamBadgeSmall name={match.homeTeam.name} logo={match.homeTeam.logo} size={32} />
-              <View style={scr.compactCenter}>
+              <TouchableOpacity
+                onPress={() => {
+                  const n = Number(displayMatch.homeTeam.id);
+                  if (!isNaN(n) && n > 0) {
+                    navigation.push('TeamDetail', {
+                      teamId: n,
+                      teamName: displayMatch.homeTeam.name,
+                      teamLogo: displayMatch.homeTeam.logo,
+                      seasonId: displayMatch.seasonId,
+                    });
+                  }
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.6}
+              >
+                <TeamBadgeSmall name={displayMatch.homeTeam.name} logo={displayMatch.homeTeam.logo} size={32} />
+              </TouchableOpacity>
+              <View style={scr.compactCenter} pointerEvents="none">
                 {isLive && <View style={scr.compactLiveDot} />}
                 <Text style={[scr.compactScore, { color: hText }]}>{compactScoreText}</Text>
               </View>
-              <TeamBadgeSmall name={match.awayTeam.name} logo={match.awayTeam.logo} size={32} />
+              <TouchableOpacity
+                onPress={() => {
+                  const n = Number(displayMatch.awayTeam.id);
+                  if (!isNaN(n) && n > 0) {
+                    navigation.push('TeamDetail', {
+                      teamId: n,
+                      teamName: displayMatch.awayTeam.name,
+                      teamLogo: displayMatch.awayTeam.logo,
+                      seasonId: displayMatch.seasonId,
+                    });
+                  }
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.6}
+              >
+                <TeamBadgeSmall name={displayMatch.awayTeam.name} logo={displayMatch.awayTeam.logo} size={32} />
+              </TouchableOpacity>
             </View>
             <Text style={[scr.compactDate, { color: hTextSoft }]}>
               {isLive
@@ -765,12 +839,12 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           )
         ) : (
           <>
-            {activeTab === 'previa' && isScheduled && <PreviewTab    match={match} detail={detail} />}
-            {activeTab === 'previa' && !isScheduled && <EnVivoTab     match={match} detail={detail} />}
-            {activeTab === 'alineacion'   && <AlineacionTab    match={match} detail={detail} />}
-            {activeTab === 'estadisticas' && <EstadisticasTab  match={match} detail={detail} />}
+            {activeTab === 'previa' && isScheduled && <PreviewTab    match={displayMatch} detail={detail} />}
+            {activeTab === 'previa' && !isScheduled && <EnVivoTab     match={displayMatch} detail={detail} />}
+            {activeTab === 'alineacion'   && <AlineacionTab    match={displayMatch} detail={detail} />}
+            {activeTab === 'estadisticas' && <EstadisticasTab  match={displayMatch} detail={detail} />}
             {activeTab === 'tabla'        && <TablaTab         match={displayMatch} detail={detail} onCupDetected={handleCupDetected} />}
-            {activeTab === 'noticias'     && <NoticiasTab      match={match} detail={detail} />}
+            {activeTab === 'noticias'     && <NoticiasTab      match={displayMatch} detail={detail} />}
           </>
         )}
       </Animated.ScrollView>
@@ -830,6 +904,14 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           <Text style={scr.scrollTopText}>{t('matches.scrollToTop')}</Text>
         </TouchableOpacity>
       )}
+
+      {/* ── Per-match notifications bottom sheet ── */}
+      <MatchNotificationsSheet
+        visible={notifSheetVisible}
+        onClose={() => setNotifSheetVisible(false)}
+        matchId={match.id}
+        matchLabel={`${translateNationalTeam(match.homeTeam.name)} · ${translateNationalTeam(match.awayTeam.name)}`}
+      />
     </SafeAreaView>
   );
 };

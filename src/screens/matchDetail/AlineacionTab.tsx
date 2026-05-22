@@ -3,7 +3,7 @@
 // goal frame markings, and polished player dots.
 // NEW: confirmation banner, coaches cards, bench with segmented toggle.
 // PITCH IS UNCHANGED — kept exactly as before.
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,11 +14,15 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  Animated,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
 import { useDarkMode } from '../../contexts/DarkModeContext';
 import type { Match, MatchDetail, LineupPlayer, MatchLineup, MissingPlayer } from '../../data/types';
+import { getCoachProfile, type CoachProfile } from '../../services/sportsApi';
+import { translateCountry } from '../../i18n/countries';
+import { translateNationalTeam } from '../../utils/nationalTeams';
 
 // ── Optional packages (graceful degradation if missing) ──────────────────────
 let ViewShot: any = null;
@@ -226,6 +230,147 @@ const MatchBanner: React.FC = () => (
   </View>
 );
 
+// ── Lineup Skeleton (pre-match empty state) ──────────────────────────────────
+//
+// Renders a full pitch with 11 ghost players per side in a 4-3-3 formation so
+// the user sees what's coming instead of a barren empty state. Pulses softly
+// to signal "loading / arriving". Used when neither real nor expected lineups
+// have been published yet by SportMonks (typically >72h before kick-off).
+
+/** A single placeholder player dot — circle + thin name bar underneath. */
+const GhostPlayerDot: React.FC<{ theme: PitchTheme; pulse: Animated.Value }> = ({ theme, pulse }) => {
+  const isDarkTheme = theme.grassA.startsWith('#1') || theme.grassA.startsWith('#2d');
+  // Soft, mostly-transparent fill that reads on both grass palettes
+  const fill   = isDarkTheme ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.35)';
+  const ring   = isDarkTheme ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.25)';
+  const barBg  = isDarkTheme ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.28)';
+  return (
+    <Animated.View style={{ alignItems: 'center', gap: 6, opacity: pulse }}>
+      <View style={{
+        width: DOT_SIZE, height: DOT_SIZE, borderRadius: DOT_SIZE / 2,
+        backgroundColor: fill, borderWidth: 2, borderColor: ring,
+      }} />
+      <View style={{ width: DOT_SIZE * 1.4, height: 6, borderRadius: 3, backgroundColor: barBg }} />
+    </Animated.View>
+  );
+};
+
+/** Empty-state skeleton — pitch + 4-3-3 ghosts per side + notice banner. */
+const LineupSkeleton: React.FC<{ theme: PitchTheme }> = ({ theme }) => {
+  const c = useThemeColors();
+  const { t } = useTranslation();
+  const pulse = useRef(new Animated.Value(0.6)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1100, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.55, duration: 1100, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  // 4-3-3 — visible row order from each goal line forward.
+  // Home: GK is closest to top edge; Away: GK is closest to bottom edge.
+  const HOME_ROWS = [1, 4, 3, 3];
+  const AWAY_ROWS = [3, 3, 4, 1];
+
+  return (
+    <View>
+      {/* Notice banner — sets expectations about when lineups arrive */}
+      <View style={[lsk.notice, { backgroundColor: c.accent + '14', borderColor: c.accent + '30' }]}>
+        <Text style={lsk.noticeIcon}>🏟️</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[lsk.noticeTitle, { color: c.textPrimary }]}>{t('lineup.noLineup')}</Text>
+          <Text style={[lsk.noticeBody, { color: c.textSecondary }]}>{t('lineup.availableSoon')}</Text>
+        </View>
+      </View>
+
+      {/* Pitch — same visual treatment as the real one */}
+      <View style={[ms.pitchContainer, { backgroundColor: theme.grassA, borderRadius: 0 }]}>
+        <View style={[ms.pitchShadow, { borderColor: theme.shadow }]} />
+        <View style={ms.pitch}>
+          <GrassStripes theme={theme} />
+          <PitchMarkings theme={theme} />
+          <View style={ms.topHalf}>
+            {HOME_ROWS.map((count, ri) => (
+              <View key={`h-${ri}`} style={ms.playerRow}>
+                {Array.from({ length: count }).map((_, i) => (
+                  <GhostPlayerDot key={i} theme={theme} pulse={pulse} />
+                ))}
+              </View>
+            ))}
+          </View>
+          <View style={ms.bottomHalf}>
+            {AWAY_ROWS.map((count, ri) => (
+              <View key={`a-${ri}`} style={ms.playerRow}>
+                {Array.from({ length: count }).map((_, i) => (
+                  <GhostPlayerDot key={i} theme={theme} pulse={pulse} />
+                ))}
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const lsk = StyleSheet.create({
+  notice: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: 16, marginTop: 16, marginBottom: 14,
+    borderRadius: 12, borderWidth: 1,
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  noticeIcon:  { fontSize: 22 },
+  noticeTitle: { fontSize: 14, fontWeight: '700', marginBottom: 2 },
+  noticeBody:  { fontSize: 12, lineHeight: 17 },
+});
+
+// ── Coach helpers ─────────────────────────────────────────────────────────────
+const coachInitials = (name: string): string => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'DT';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
+const computeAge = (dob?: string): number | null => {
+  if (!dob) return null;
+  const birth = new Date(dob);
+  if (isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+};
+
+// CoachAvatar — photo if available, otherwise colored initials
+const CoachAvatar: React.FC<{
+  name: string;
+  imageUrl?: string;
+  size: number;
+  color: string;
+}> = ({ name, imageUrl, size, color }) => {
+  if (imageUrl) {
+    return <Image source={{ uri: imageUrl }} style={{ width: size, height: size, borderRadius: size / 2 }} resizeMode="cover" />;
+  }
+  return (
+    <View style={{
+      width: size, height: size, borderRadius: size / 2,
+      backgroundColor: color, alignItems: 'center', justifyContent: 'center',
+    }}>
+      <Text style={{ fontSize: size * 0.36, fontWeight: '900', color: '#FFFFFF', letterSpacing: 0.5 }}>
+        {coachInitials(name)}
+      </Text>
+    </View>
+  );
+};
+
 // ── Coach Detail Modal ────────────────────────────────────────────────────────
 interface CoachModalData {
   lineup: MatchLineup;
@@ -242,6 +387,23 @@ const CoachDetailModal: React.FC<{
   const c   = useThemeColors();
   const { t } = useTranslation();
   const { isDark } = useDarkMode();
+  const [profile, setProfile] = useState<CoachProfile | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState(false);
+
+  // Fetch career profile when modal opens
+  useEffect(() => {
+    if (!visible || !data?.lineup.coachId) {
+      setProfile(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingProfile(true);
+    getCoachProfile(data.lineup.coachId)
+      .then(p => { if (!cancelled) setProfile(p); })
+      .finally(() => { if (!cancelled) setLoadingProfile(false); });
+    return () => { cancelled = true; };
+  }, [visible, data?.lineup.coachId]);
+
   if (!data) return null;
   const { lineup, teamName, teamLogo, teamColor } = data;
   const overlayBg = isDark ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.55)';
@@ -249,27 +411,32 @@ const CoachDetailModal: React.FC<{
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={[cdm.overlay, { backgroundColor: overlayBg }]} onPress={onClose} />
-      <View style={[cdm.sheet, { backgroundColor: sheetBg }]}>
+      <ScrollView
+        style={[cdm.sheet, { backgroundColor: sheetBg }]}
+        contentContainerStyle={cdm.sheetContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Handle */}
         <View style={[cdm.handle, { backgroundColor: c.border }]} />
 
         {/* Coach photo + name */}
         <View style={cdm.heroRow}>
           <View style={[cdm.photoWrap, { borderColor: teamColor + '60', backgroundColor: c.surface }]}>
-            {lineup.coachImageUrl ? (
-              <Image source={{ uri: lineup.coachImageUrl }} style={cdm.photo} resizeMode="cover" />
-            ) : (
-              <Text style={{ fontSize: 48 }}>👨‍💼</Text>
-            )}
+            <CoachAvatar name={lineup.coach} imageUrl={lineup.coachImageUrl} size={86} color={teamColor} />
           </View>
           <View style={cdm.heroInfo}>
             <Text style={[cdm.coachName, { color: c.textPrimary }]} numberOfLines={2}>
               {lineup.coach || 'DT'}
             </Text>
             {lineup.coachNationality ? (
-              <Text style={[cdm.coachNat, { color: c.textSecondary }]}>
-                {lineup.coachNationality}
-              </Text>
+              <View style={cdm.flagRow}>
+                {lineup.coachNationalityFlag ? (
+                  <Image source={{ uri: lineup.coachNationalityFlag }} style={cdm.flagImg} resizeMode="cover" />
+                ) : null}
+                <Text style={[cdm.coachNat, { color: c.textSecondary }]}>
+                  {translateCountry(lineup.coachNationalityCode, lineup.coachNationality)}
+                </Text>
+              </View>
             ) : null}
             {/* Team badge */}
             <View style={cdm.teamRow}>
@@ -295,10 +462,25 @@ const CoachDetailModal: React.FC<{
         <View style={[cdm.infoCard, { backgroundColor: c.card, borderColor: c.border }]}>
           <View style={cdm.infoRow}>
             <Text style={[cdm.infoLabel, { color: c.textTertiary }]}>{t('matchInfo.nationality')}</Text>
-            <Text style={[cdm.infoValue, { color: c.textPrimary }]}>
-              {lineup.coachNationality || '—'}
-            </Text>
+            <View style={cdm.infoValueRow}>
+              {lineup.coachNationalityFlag ? (
+                <Image source={{ uri: lineup.coachNationalityFlag }} style={cdm.flagImgSmall} resizeMode="cover" />
+              ) : null}
+              <Text style={[cdm.infoValue, { color: c.textPrimary }]}>
+                {lineup.coachNationality
+                  ? translateCountry(lineup.coachNationalityCode, lineup.coachNationality)
+                  : '—'}
+              </Text>
+            </View>
           </View>
+          {computeAge(lineup.coachDateOfBirth) !== null ? (
+            <View style={[cdm.infoRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
+              <Text style={[cdm.infoLabel, { color: c.textTertiary }]}>Edad</Text>
+              <Text style={[cdm.infoValue, { color: c.textPrimary }]}>
+                {computeAge(lineup.coachDateOfBirth)} años
+              </Text>
+            </View>
+          ) : null}
           <View style={[cdm.infoRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
             <Text style={[cdm.infoLabel, { color: c.textTertiary }]}>Equipo</Text>
             <Text style={[cdm.infoValue, { color: c.textPrimary }]}>{teamName}</Text>
@@ -309,6 +491,74 @@ const CoachDetailModal: React.FC<{
           </View>
         </View>
 
+        {/* ── Career stats card (from /coaches/{id}) ─────────────────────── */}
+        {profile && profile.stats.matchesPlayed > 0 ? (
+          <>
+            <Text style={[cdm.sectionTitle, { color: c.textTertiary }]}>
+              ESTADÍSTICAS DE CARRERA
+            </Text>
+            <View style={[cdm.statsCard, { backgroundColor: c.card, borderColor: c.border }]}>
+              {/* Win rate big circle */}
+              <View style={cdm.winRateRow}>
+                <View style={[cdm.winRateCircle, { borderColor: teamColor }]}>
+                  <Text style={[cdm.winRateNum, { color: teamColor }]}>{profile.stats.winRate}</Text>
+                  <Text style={[cdm.winRatePct, { color: teamColor }]}>%</Text>
+                </View>
+                <View style={cdm.winRateMeta}>
+                  <Text style={[cdm.winRateLabel, { color: c.textSecondary }]}>Tasa de victoria</Text>
+                  <Text style={[cdm.winRateSub, { color: c.textTertiary }]}>
+                    {profile.stats.wins} V · {profile.stats.draws} E · {profile.stats.losses} D
+                  </Text>
+                </View>
+              </View>
+              {/* Stat boxes */}
+              <View style={cdm.statBoxRow}>
+                <View style={[cdm.statBox, { backgroundColor: c.surface }]}>
+                  <Text style={[cdm.statBoxNum, { color: c.textPrimary }]}>{profile.stats.matchesPlayed}</Text>
+                  <Text style={[cdm.statBoxLabel, { color: c.textTertiary }]}>Partidos</Text>
+                </View>
+                <View style={[cdm.statBox, { backgroundColor: c.surface }]}>
+                  <Text style={[cdm.statBoxNum, { color: c.textPrimary }]}>{profile.stats.goalsScored}</Text>
+                  <Text style={[cdm.statBoxLabel, { color: c.textTertiary }]}>Goles</Text>
+                </View>
+                <View style={[cdm.statBox, { backgroundColor: c.surface }]}>
+                  <Text style={[cdm.statBoxNum, { color: c.textPrimary }]}>{profile.teams.length}</Text>
+                  <Text style={[cdm.statBoxLabel, { color: c.textTertiary }]}>Equipos</Text>
+                </View>
+              </View>
+            </View>
+          </>
+        ) : null}
+
+        {/* ── Career teams chips ──────────────────────────────────────────── */}
+        {profile && profile.teams.length > 0 ? (
+          <>
+            <Text style={[cdm.sectionTitle, { color: c.textTertiary }]}>
+              EQUIPOS DIRIGIDOS
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={cdm.teamsScroll}
+            >
+              {profile.teams.map(team => (
+                <View key={team.id} style={[cdm.teamChip, { backgroundColor: c.card, borderColor: c.border }]}>
+                  {team.logo ? (
+                    <Image source={{ uri: team.logo }} style={cdm.teamChipLogo} resizeMode="contain" />
+                  ) : (
+                    <Text style={{ fontSize: 16 }}>⚽</Text>
+                  )}
+                  <Text style={[cdm.teamChipName, { color: c.textPrimary }]} numberOfLines={1}>
+                    {team.name}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+          </>
+        ) : loadingProfile ? (
+          <Text style={[cdm.loadingText, { color: c.textTertiary }]}>Cargando carrera…</Text>
+        ) : null}
+
         {/* Close button */}
         <TouchableOpacity
           style={[cdm.closeBtn, { backgroundColor: c.surface, borderColor: c.border }]}
@@ -317,7 +567,7 @@ const CoachDetailModal: React.FC<{
         >
           <Text style={[cdm.closeBtnText, { color: c.textPrimary }]}>{t('common.close')}</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </Modal>
   );
 };
@@ -326,9 +576,10 @@ const cdm = StyleSheet.create({
   overlay: { ...StyleSheet.absoluteFillObject },
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
+    maxHeight: '85%',
     borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingHorizontal: 20, paddingBottom: 36, paddingTop: 12,
   },
+  sheetContent: { paddingHorizontal: 20, paddingBottom: 36, paddingTop: 12 },
   handle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
   heroRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
   photoWrap: {
@@ -340,6 +591,10 @@ const cdm = StyleSheet.create({
   heroInfo: { flex: 1, gap: 4 },
   coachName: { fontSize: 22, fontWeight: '800', lineHeight: 26 },
   coachNat: { fontSize: 14, fontWeight: '500' },
+  flagRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  flagImg: { width: 18, height: 14, borderRadius: 2 },
+  flagImgSmall: { width: 16, height: 12, borderRadius: 2 },
+  infoValueRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'flex-end', marginLeft: 16 },
   teamRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
   teamLogo: { width: 20, height: 20 },
   teamName: { fontSize: 13, fontWeight: '500' },
@@ -351,6 +606,34 @@ const cdm = StyleSheet.create({
   infoValue: { fontSize: 14, fontWeight: '700', textAlign: 'right', flex: 1, marginLeft: 16 },
   closeBtn: { borderRadius: 14, borderWidth: 1, paddingVertical: 14, alignItems: 'center' },
   closeBtnText: { fontSize: 15, fontWeight: '700' },
+  // Career stats card
+  statsCard: { borderRadius: 14, borderWidth: 1, marginBottom: 20, padding: 16, gap: 14 },
+  winRateRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  winRateCircle: {
+    width: 76, height: 76, borderRadius: 38,
+    borderWidth: 3, alignItems: 'center', justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  winRateNum: { fontSize: 28, fontWeight: '900' },
+  winRatePct: { fontSize: 16, fontWeight: '700', marginTop: 2 },
+  winRateMeta: { flex: 1, gap: 2 },
+  winRateLabel: { fontSize: 15, fontWeight: '700' },
+  winRateSub: { fontSize: 13, fontWeight: '500' },
+  statBoxRow: { flexDirection: 'row', gap: 8 },
+  statBox: { flex: 1, borderRadius: 10, paddingVertical: 12, alignItems: 'center', gap: 2 },
+  statBoxNum: { fontSize: 18, fontWeight: '900' },
+  statBoxLabel: { fontSize: 11, fontWeight: '500', letterSpacing: 0.3 },
+  // Teams chips
+  teamsScroll: { gap: 8, paddingBottom: 6, paddingRight: 8 },
+  teamChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 12, paddingVertical: 10,
+    borderRadius: 12, borderWidth: 1,
+    maxWidth: 200,
+  },
+  teamChipLogo: { width: 22, height: 22 },
+  teamChipName: { fontSize: 13, fontWeight: '600' },
+  loadingText: { fontSize: 13, textAlign: 'center', paddingVertical: 16, fontStyle: 'italic' },
 });
 
 // ── Bajas / Sidelined section ─────────────────────────────────────────────────
@@ -477,6 +760,29 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   const [coachModalVisible, setCoachModalVisible] = useState(false);
   const [coachModalData, setCoachModalData] = useState<CoachModalData | null>(null);
 
+  // Career profiles for the comparative banner (both coaches side-by-side)
+  const [homeProfile, setHomeProfile] = useState<CoachProfile | null>(null);
+  const [awayProfile, setAwayProfile] = useState<CoachProfile | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const homeId = detail.homeLineup.coachId;
+    const awayId = detail.awayLineup.coachId;
+    if (homeId) {
+      getCoachProfile(homeId).then(p => { if (!cancelled) setHomeProfile(p); });
+    }
+    if (awayId) {
+      getCoachProfile(awayId).then(p => { if (!cancelled) setAwayProfile(p); });
+    }
+    return () => { cancelled = true; };
+  }, [detail.homeLineup.coachId, detail.awayLineup.coachId]);
+
+  const showComparison = !!(
+    homeProfile && awayProfile &&
+    homeProfile.stats.matchesPlayed > 0 &&
+    awayProfile.stats.matchesPlayed > 0
+  );
+
   // Lineup state — three buckets:
   // • AI predicted (SportMonks expectedlineups add-on) → "🤖 Predicción IA"
   // • live/finished with real lineup data                → "✅ Confirmada"
@@ -496,15 +802,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   };
 
   if (!hasLineups) {
-    return (
-      <View style={ms.empty}>
-        <Text style={{ fontSize: 40, marginBottom: 12 }}>🏟️</Text>
-        <Text style={[ms.emptyText, { color: c.textSecondary }]}>{t('lineup.noLineup')}</Text>
-        <Text style={[ms.emptySubText, { color: c.textTertiary }]}>
-          {t('lineup.availableSoon')}
-        </Text>
-      </View>
-    );
+    return <LineupSkeleton theme={theme} />;
   }
 
   // ── Pitch block ──────────────────────────────────────────────────────────
@@ -630,6 +928,43 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
         </View>
       )}
 
+      {/* ── Comparative banner (both coaches career win rate) ── */}
+      {showComparison ? (
+        <View style={[ms.compareBanner, { backgroundColor: c.card, borderColor: c.border }]}>
+          <Text style={[ms.compareTitle, { color: c.textTertiary }]}>COMPARATIVA EN CARRERA</Text>
+          <View style={ms.compareRow}>
+            {/* Home coach */}
+            <View style={ms.compareSide}>
+              <Text style={[ms.compareName, { color: c.textPrimary }]} numberOfLines={1}>
+                {homeProfile!.name}
+              </Text>
+              <Text style={[ms.compareWinRate, { color: HOME_COLOR }]}>
+                {homeProfile!.stats.winRate}%
+              </Text>
+              <Text style={[ms.compareMeta, { color: c.textTertiary }]}>
+                {homeProfile!.stats.matchesPlayed} PJ · {homeProfile!.stats.wins} V
+              </Text>
+            </View>
+            {/* VS divider */}
+            <View style={[ms.compareVs, { backgroundColor: c.surface }]}>
+              <Text style={[ms.compareVsText, { color: c.textSecondary }]}>VS</Text>
+            </View>
+            {/* Away coach */}
+            <View style={ms.compareSide}>
+              <Text style={[ms.compareName, { color: c.textPrimary }]} numberOfLines={1}>
+                {awayProfile!.name}
+              </Text>
+              <Text style={[ms.compareWinRate, { color: AWAY_COLOR }]}>
+                {awayProfile!.stats.winRate}%
+              </Text>
+              <Text style={[ms.compareMeta, { color: c.textTertiary }]}>
+                {awayProfile!.stats.matchesPlayed} PJ · {awayProfile!.stats.wins} V
+              </Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
       {/* ── Coaches section ── */}
       <Text style={[ms.sectionTitle, { color: c.textTertiary }]}>ENTRENADORES</Text>
       <View style={ms.coachesRow}>
@@ -648,28 +983,25 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
           activeOpacity={0.7}
         >
           <View style={[ms.coachAvatarWrap, { borderColor: HOME_COLOR + '60' }]}>
-            {detail.homeLineup.coachImageUrl ? (
-              <Image source={{ uri: detail.homeLineup.coachImageUrl }} style={ms.coachPhoto} />
-            ) : (
-              <Text style={{ fontSize: 28 }}>👨‍💼</Text>
-            )}
+            <CoachAvatar
+              name={detail.homeLineup.coach}
+              imageUrl={detail.homeLineup.coachImageUrl}
+              size={64}
+              color={HOME_COLOR}
+            />
           </View>
           <Text style={[ms.coachName, { color: c.textPrimary }]} numberOfLines={1}>
             {detail.homeLineup.coach || 'DT'}
           </Text>
-          {detail.homeLineup.coachNationality ? (
-            <View style={ms.coachMeta}>
-              <Text style={{ fontSize: 12 }}>🏳️</Text>
-              <View style={[ms.coachBadge, { backgroundColor: HOME_COLOR }]}>
-                <Text style={ms.coachBadgeText}>Local</Text>
-              </View>
-            </View>
-          ) : (
+          <View style={ms.coachMeta}>
+            {detail.homeLineup.coachNationalityFlag ? (
+              <Image source={{ uri: detail.homeLineup.coachNationalityFlag }} style={ms.coachFlagImg} resizeMode="cover" />
+            ) : null}
             <View style={[ms.coachBadge, { backgroundColor: HOME_COLOR }]}>
               <Text style={ms.coachBadgeText}>Local</Text>
             </View>
-          )}
-          <Text style={[ms.coachTeam, { color: c.textTertiary }]}>{match.homeTeam.name}</Text>
+          </View>
+          <Text style={[ms.coachTeam, { color: c.textTertiary }]}>{translateNationalTeam(match.homeTeam.name)}</Text>
         </TouchableOpacity>
 
         {/* Away coach */}
@@ -687,28 +1019,25 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
           activeOpacity={0.7}
         >
           <View style={[ms.coachAvatarWrap, { borderColor: AWAY_COLOR + '60' }]}>
-            {detail.awayLineup.coachImageUrl ? (
-              <Image source={{ uri: detail.awayLineup.coachImageUrl }} style={ms.coachPhoto} />
-            ) : (
-              <Text style={{ fontSize: 28 }}>👨‍💼</Text>
-            )}
+            <CoachAvatar
+              name={detail.awayLineup.coach}
+              imageUrl={detail.awayLineup.coachImageUrl}
+              size={64}
+              color={AWAY_COLOR}
+            />
           </View>
           <Text style={[ms.coachName, { color: c.textPrimary }]} numberOfLines={1}>
             {detail.awayLineup.coach || 'DT'}
           </Text>
-          {detail.awayLineup.coachNationality ? (
-            <View style={ms.coachMeta}>
-              <Text style={{ fontSize: 12 }}>🏳️</Text>
-              <View style={[ms.coachBadge, { backgroundColor: AWAY_COLOR }]}>
-                <Text style={ms.coachBadgeText}>Visitante</Text>
-              </View>
-            </View>
-          ) : (
+          <View style={ms.coachMeta}>
+            {detail.awayLineup.coachNationalityFlag ? (
+              <Image source={{ uri: detail.awayLineup.coachNationalityFlag }} style={ms.coachFlagImg} resizeMode="cover" />
+            ) : null}
             <View style={[ms.coachBadge, { backgroundColor: AWAY_COLOR }]}>
               <Text style={ms.coachBadgeText}>Visitante</Text>
             </View>
-          )}
-          <Text style={[ms.coachTeam, { color: c.textTertiary }]}>{match.awayTeam.name}</Text>
+          </View>
+          <Text style={[ms.coachTeam, { color: c.textTertiary }]}>{translateNationalTeam(match.awayTeam.name)}</Text>
         </TouchableOpacity>
       </View>
 
@@ -886,6 +1215,24 @@ const ms = StyleSheet.create({
     marginTop: 20, marginBottom: 10,
   },
 
+  // Comparative banner (home vs away coach career)
+  compareBanner: {
+    borderRadius: 14, borderWidth: 1,
+    padding: 16, gap: 12,
+    marginTop: 20,
+  },
+  compareTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 1, textAlign: 'center' },
+  compareRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  compareSide: { flex: 1, alignItems: 'center', gap: 2 },
+  compareName: { fontSize: 13, fontWeight: '700', textAlign: 'center' },
+  compareWinRate: { fontSize: 28, fontWeight: '900', letterSpacing: -0.5, marginVertical: 2 },
+  compareMeta: { fontSize: 11, fontWeight: '500' },
+  compareVs: {
+    width: 32, height: 32, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  compareVsText: { fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+
   // Coaches
   coachesRow: { flexDirection: 'row', gap: 10 },
   coachCard: {
@@ -899,6 +1246,7 @@ const ms = StyleSheet.create({
   },
   coachName: { fontSize: 15, fontWeight: '800', textAlign: 'center' },
   coachMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  coachFlagImg: { width: 18, height: 13, borderRadius: 2 },
   coachBadge: {
     paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
   },

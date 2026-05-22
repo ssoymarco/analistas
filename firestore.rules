@@ -75,7 +75,51 @@ service cloud.firestore {
       allow update: if false; // always delete + create for username swap
     }
 
-    // ── Deny everything else ───────────────────────────────────────────────────
+    // ── Sports data — public reads, server-only writes ─────────────────────────
+    //
+    // These collections hold public sports data (scores, standings, top
+    // scorers, season indexes, bracket caches). Match results aren't private
+    // — every sports site shows them — so we allow unauthenticated reads
+    // here, which removes a hard dependency on Firebase Auth being
+    // available before the first paint. Writes are blocked at the rule
+    // level; only the Cloud Functions service account (via Admin SDK,
+    // which bypasses these rules) can populate them.
+
+    /// matches/{matchId} — live + scheduled + finished fixtures
+    match /matches/{matchId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// standings/{seasonId} — league tables
+    match /standings/{seasonId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// topscorers/{seasonId} — top scorers per league
+    match /topscorers/{seasonId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// season_index/{leagueId} — list of available seasons per league
+    /// Powers the season picker dropdown in LeagueDetailScreen.
+    match /season_index/{leagueId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// cup_brackets/{seasonId} — cached bracket data for past tournaments
+    /// Populated on-demand the first time a user opens a past WC/cup edition.
+    match /cup_brackets/{seasonId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ── Deny everything else (including _meta) ────────────────────────────────
+    // _meta/livescoresSnapshot is internal diff state for Cloud Functions only —
+    // no client should ever need to read it.
     match /{document=**} {
       allow read, write: if false;
     }

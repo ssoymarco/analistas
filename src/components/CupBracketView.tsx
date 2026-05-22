@@ -15,6 +15,13 @@ import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import type { CupRound, CupTie, CupLeg } from '../services/sportsApi';
 
+// ── Date helper: "2026-05-22" → "22/05" (DD/MM, Spanish format) ──────────────
+const formatLegDate = (iso: string): string => {
+  const parts = iso.split('-'); // ["2026", "05", "22"]
+  if (parts.length < 3) return iso;
+  return `${parts[2]}/${parts[1]}`;
+};
+
 // ── Team Logo ─────────────────────────────────────────────────────────────────
 const Logo: React.FC<{ uri: string; size?: number }> = ({ uri, size = 22 }) => {
   if (uri?.startsWith('http')) {
@@ -63,13 +70,13 @@ const LegDetail: React.FC<{ leg: CupLeg; canonicalHomeId: string }> = ({ leg, ca
     <View style={s.legRow}>
       <View style={[s.legBullet, { backgroundColor: played ? '#00E096' : c.textTertiary }]} />
       <Text style={[s.legLabel, { color: c.textTertiary }]}>
-        {leg.legLabel || leg.date.slice(5).replace('-', '/')}
+        {leg.legLabel || formatLegDate(leg.date)}
       </Text>
       {played ? (
         <Text style={[s.legScore, { color: c.textSecondary }]}>{h}–{a}</Text>
       ) : (
         <Text style={[s.legScore, { color: c.textTertiary }]}>
-          {leg.date.slice(5).replace('-', '/')}
+          {formatLegDate(leg.date)}
         </Text>
       )}
     </View>
@@ -77,7 +84,7 @@ const LegDetail: React.FC<{ leg: CupLeg; canonicalHomeId: string }> = ({ leg, ca
 };
 
 // ── Tie Card (full-width) ─────────────────────────────────────────────────────
-const TieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
+const TieCard: React.FC<{ tie: CupTie; onPress?: (tie: CupTie) => void }> = ({ tie, onPress }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(tie.isCurrentMatch);
@@ -109,8 +116,11 @@ const TieCard: React.FC<{ tie: CupTie }> = ({ tie }) => {
   return (
     <TouchableOpacity
       style={[s.tieCard, { backgroundColor: cardBg, borderLeftColor: borderColor }]}
-      activeOpacity={isTwoLeg ? 0.7 : 1}
-      onPress={() => isTwoLeg && setExpanded(e => !e)}
+      activeOpacity={isTwoLeg || !!onPress ? 0.7 : 1}
+      onPress={() => {
+        if (isTwoLeg) setExpanded(e => !e);
+        else onPress?.(tie);
+      }}
     >
       {/* Inferred label */}
       {isInferred && (
@@ -241,12 +251,14 @@ interface CupBracketViewProps {
   rounds: CupRound[];
   leagueName: string;
   seasonStr: string;
+  onPressTie?: (tie: CupTie) => void;
 }
 
 export const CupBracketView: React.FC<CupBracketViewProps> = ({
   rounds,
   leagueName,
   seasonStr,
+  onPressTie,
 }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
@@ -315,7 +327,7 @@ export const CupBracketView: React.FC<CupBracketViewProps> = ({
 
       {/* Ties list */}
       {selectedRound?.ties.map((tie) => (
-        <TieCard key={tie.id} tie={tie} />
+        <TieCard key={tie.id} tie={tie} onPress={onPressTie} />
       ))}
 
       {/* Navigation arrows */}

@@ -27,6 +27,21 @@ export interface NotificationPrefs {
   estadioDelay: number;
 }
 
+/** Subset of NotificationPrefs that the user can override on a per-match
+ *  basis from the bell in MatchDetailScreen. Excludes things that don't
+ *  make sense per-match (notificationsEnabled is global, estadioMode has
+ *  its own per-match API, reminder/estadio delays are minute values). */
+export type MatchEventPrefKey =
+  | 'matchReminder' | 'goals' | 'matchStart' | 'halftime' | 'matchEnd'
+  | 'lineups' | 'yellowCards' | 'redCards' | 'substitutions' | 'var';
+
+export const MATCH_EVENT_KEYS: MatchEventPrefKey[] = [
+  'matchReminder', 'goals', 'matchStart', 'halftime', 'matchEnd',
+  'lineups', 'redCards', 'yellowCards', 'substitutions', 'var',
+];
+
+export type MatchEventOverrides = Record<string /* matchId */, Partial<Record<MatchEventPrefKey, boolean>>>;
+
 // Defaults reflect the polite happy-path:
 //   - Master switch ON (the user opened settings because they want alerts)
 //   - Match reminder ON at 15 min (the universal sweet spot in competitor apps)
@@ -61,6 +76,18 @@ interface NotificationPrefsContextType {
   estadioMatchDelays: Record<string, number>;
   setMatchEstadioDelay: (matchId: string, minutes: number) => void;
   getMatchEstadioDelay: (matchId: string) => number;
+  /** Per-match event overrides — let the user customize a single match
+   *  without affecting their global preferences. Missing keys fall back to
+   *  the global pref. */
+  matchEventOverrides: MatchEventOverrides;
+  setMatchEventOverride: (matchId: string, key: MatchEventPrefKey, value: boolean) => void;
+  clearMatchEventOverride: (matchId: string, key: MatchEventPrefKey) => void;
+  clearAllMatchEventOverrides: (matchId: string) => void;
+  /** Returns the effective bool for an event on a given match — override if
+   *  set, otherwise the global pref. */
+  getEffectiveMatchEventPref: (matchId: string, key: MatchEventPrefKey) => boolean;
+  /** Whether the user has set any per-event override OR muted this match. */
+  hasMatchCustomization: (matchId: string) => boolean;
   /** Expo Push Token — null until permissions are granted */
   pushToken: string | null;
   setPushToken: (token: string | null) => void;
@@ -83,6 +110,12 @@ const NotificationPrefsContext = createContext<NotificationPrefsContextType>({
   estadioMatchDelays: {},
   setMatchEstadioDelay: () => {},
   getMatchEstadioDelay: () => 2,
+  matchEventOverrides: {},
+  setMatchEventOverride: () => {},
+  clearMatchEventOverride: () => {},
+  clearAllMatchEventOverrides: () => {},
+  getEffectiveMatchEventPref: () => true,
+  hasMatchCustomization: () => false,
   pushToken: null,
   setPushToken: () => {},
   permissionStatus: 'undetermined',
@@ -93,6 +126,7 @@ const PREFS_KEY          = 'analistas_notif_prefs';
 const MUTED_KEY          = 'analistas_muted_matches';
 const ESTADIO_KEY        = 'analistas_estadio_matches';
 const ESTADIO_DELAYS_KEY = 'analistas_estadio_delays';
+const OVERRIDES_KEY      = 'analistas_match_event_overrides';
 const PERM_KEY           = 'analistas_notif_permission';
 
 export function NotificationPrefsProvider({ children }: { children: ReactNode }) {
@@ -100,12 +134,13 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   const [mutedMatchIds, setMutedMatchIds] = useState<Set<string>>(new Set());
   const [estadioMatchIds, setEstadioMatchIds] = useState<Set<string>>(new Set());
   const [estadioMatchDelays, setEstadioMatchDelays] = useState<Record<string, number>>({});
+  const [matchEventOverrides, setMatchEventOverrides] = useState<MatchEventOverrides>({});
   const [pushToken, setPushTokenState] = useState<string | null>(null);
   const [permissionStatus, setPermissionStatusState] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
 
   useEffect(() => {
-    AsyncStorage.multiGet([PREFS_KEY, MUTED_KEY, ESTADIO_KEY, ESTADIO_DELAYS_KEY, PUSH_TOKEN_KEY, PERM_KEY]).then(
-      ([[, rawPrefs], [, rawMuted], [, rawEstadio], [, rawDelays], [, savedToken], [, savedPerm]]) => {
+    AsyncStorage.multiGet([PREFS_KEY, MUTED_KEY, ESTADIO_KEY, ESTADIO_DELAYS_KEY, OVERRIDES_KEY, PUSH_TOKEN_KEY, PERM_KEY]).then(
+      ([[, rawPrefs], [, rawMuted], [, rawEstadio], [, rawDelays], [, rawOverrides], [, savedToken], [, savedPerm]]) => {
         if (rawPrefs) {
           try { setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(rawPrefs) }); } catch {}
         }
@@ -117,6 +152,9 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
         }
         if (rawDelays) {
           try { setEstadioMatchDelays(JSON.parse(rawDelays)); } catch {}
+        }
+        if (rawOverrides) {
+          try { setMatchEventOverrides(JSON.parse(rawOverrides)); } catch {}
         }
         if (savedToken) setPushTokenState(savedToken);
         if (savedPerm === 'granted' || savedPerm === 'denied') {
@@ -201,6 +239,76 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
     [estadioMatchDelays, prefs.estadioDelay],
   );
 
+  // ── Per-match event overrides ───────────────────────────────────────────
+  const persistOverrides = useCallback((next: MatchEventOverrides) => {
+    AsyncStorage.setItem(OVERRIDES_KEY, JSON.stringify(next)).catch(() => {});
+  }, []);
+
+  const setMatchEventOverride = useCallback(
+    (matchId: string, key: MatchEventPrefKey, value: boolean) => {
+      setMatchEventOverrides(prev => {
+        const matchPrev = prev[matchId] ?? {};
+        const next: MatchEventOverrides = {
+          ...prev,
+          [matchId]: { ...matchPrev, [key]: value },
+        };
+        persistOverrides(next);
+        return next;
+      });
+    },
+    [persistOverrides],
+  );
+
+  const clearMatchEventOverride = useCallback(
+    (matchId: string, key: MatchEventPrefKey) => {
+      setMatchEventOverrides(prev => {
+        const matchPrev = prev[matchId];
+        if (!matchPrev || !(key in matchPrev)) return prev;
+        const { [key]: _drop, ...rest } = matchPrev;
+        const next: MatchEventOverrides = { ...prev };
+        if (Object.keys(rest).length === 0) {
+          delete next[matchId];
+        } else {
+          next[matchId] = rest;
+        }
+        persistOverrides(next);
+        return next;
+      });
+    },
+    [persistOverrides],
+  );
+
+  const clearAllMatchEventOverrides = useCallback(
+    (matchId: string) => {
+      setMatchEventOverrides(prev => {
+        if (!prev[matchId]) return prev;
+        const next: MatchEventOverrides = { ...prev };
+        delete next[matchId];
+        persistOverrides(next);
+        return next;
+      });
+    },
+    [persistOverrides],
+  );
+
+  const getEffectiveMatchEventPref = useCallback(
+    (matchId: string, key: MatchEventPrefKey): boolean => {
+      const override = matchEventOverrides[matchId]?.[key];
+      if (override !== undefined) return override;
+      return prefs[key];
+    },
+    [matchEventOverrides, prefs],
+  );
+
+  const hasMatchCustomization = useCallback(
+    (matchId: string) => {
+      if (mutedMatchIds.has(matchId)) return true;
+      const overrides = matchEventOverrides[matchId];
+      return !!overrides && Object.keys(overrides).length > 0;
+    },
+    [mutedMatchIds, matchEventOverrides],
+  );
+
   const setPushToken = useCallback((token: string | null) => {
     setPushTokenState(token);
     // AsyncStorage persistence is handled by requestPermissionsAndGetToken in the service.
@@ -220,6 +328,9 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
         mutedMatchIds, toggleMatchMute, isMatchMuted,
         estadioMatchIds, toggleMatchEstadio, isMatchEstadio,
         estadioMatchDelays, setMatchEstadioDelay, getMatchEstadioDelay,
+        matchEventOverrides,
+        setMatchEventOverride, clearMatchEventOverride, clearAllMatchEventOverrides,
+        getEffectiveMatchEventPref, hasMatchCustomization,
         pushToken, setPushToken,
         permissionStatus, setPermissionStatus,
       }}

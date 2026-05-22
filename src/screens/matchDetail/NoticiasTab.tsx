@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, Image } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
 import type { Match, MatchDetail } from '../../data/types';
+import { getLeagueDisplayName } from '../../config/leagues';
 
 // ── Placeholder news data ───────────────────────────────────────────────────
 const PLACEHOLDER_NEWS = [
@@ -78,7 +79,7 @@ export const NoticiasTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ m
         <NewsCard
           key={news.id}
           image={news.image}
-          league={match.league}
+          league={getLeagueDisplayName(match.leagueId, match.league)}
           title={news.title}
           source={news.source}
           timeAgo={news.timeAgo}

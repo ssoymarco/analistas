@@ -1,0 +1,3 @@
+node_modules
+.crawl-service-account.json
+.crawl-progress.json

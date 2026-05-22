@@ -9,10 +9,13 @@
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
     "lint": "eslint src/",
-    "clean": "rm -rf lib/"
+    "clean": "rm -rf lib/",
+    "crawl": "npm run build && node lib/scripts/crawl-historical.js",
+    "crawl:reset": "rm -f .crawl-progress.json && echo 'crawl progress reset'",
+    "rebuild:index": "npm run build && node lib/scripts/rebuild-season-index.js"
   },
   "engines": {
-    "node": "18"
+    "node": "22"
   },
   "dependencies": {
     "firebase-admin": "^13.0.0",

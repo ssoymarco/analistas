@@ -30,6 +30,7 @@ import { useNotificationPrefs } from '../../contexts/NotificationPrefsContext';
 import { getSearchableTeams, getSearchableLeagues, getSearchablePlayers } from '../../services/sportsApi';
 import { normalize } from '../../utils/normalize';
 import { requestPermissionsAndGetToken } from '../../services/notifications';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { useGoogleAuth } from '../../services/authGoogle';
 import { signInWithApple, isAppleAuthAvailable } from '../../services/authApple';
 import type { SearchableTeam, SearchableLeague, SearchablePlayer } from '../../services/sportsApi';
@@ -219,7 +220,8 @@ const CTAButton: React.FC<{
   onPress: () => void;
   disabled?: boolean;
   glow?: boolean;
-}> = ({ label, onPress, disabled, glow }) => (
+  style?: object;
+}> = ({ label, onPress, disabled, glow, style }) => (
   <TouchableOpacity
     onPress={onPress}
     disabled={disabled}
@@ -228,6 +230,7 @@ const CTAButton: React.FC<{
       cta.btn,
       disabled && { opacity: 0.4 },
       glow && { shadowColor: BLUE, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.55, shadowRadius: 14, elevation: 10 },
+      style,
     ]}
   >
     <Text style={cta.label}>{label}</Text>
@@ -789,9 +792,16 @@ const Screen4Players: React.FC<{
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return players;
+    // Filter out players with invalid/duplicate IDs first
+    const seen = new Set<number>();
+    const validPlayers = players.filter(p => {
+      if (!p.id || p.id <= 0 || seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+    if (!query.trim()) return validPlayers;
     const q = normalize(query);
-    return players.filter(p =>
+    return validPlayers.filter(p =>
       normalize(p.name).includes(q) ||
       (p.teamName && normalize(p.teamName).includes(q)),
     );
@@ -840,7 +850,7 @@ const Screen4Players: React.FC<{
         ) : (
           <FlatList
             data={filtered}
-            keyExtractor={it => String(it.id)}
+            keyExtractor={(it, index) => `player-${it.id}-${index}`}
             renderItem={({ item }) => (
               <PlayerRow
                 player={item}
@@ -1224,6 +1234,12 @@ const s7 = StyleSheet.create({
   rowSub: { fontSize: 12, marginTop: 2 },
 });
 
+// ── Google G logo (official PNG asset) ───────────────────────────────────────
+const GOOGLE_G = require('../../../assets/google-g.png');
+const GoogleGLogo: React.FC<{ size?: number }> = ({ size = 22 }) => (
+  <Image source={GOOGLE_G} style={{ width: size, height: size }} resizeMode="contain" />
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SCREEN 8 — Name + Auth
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1307,21 +1323,13 @@ const Screen8Name: React.FC<{
 
         {/* Auth buttons */}
         {appleAvailable && (
-          <TouchableOpacity
-            style={[s8.appleBtn, authLoading && { opacity: 0.6 }]}
+          <AppleAuthentication.AppleAuthenticationButton
+            buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+            cornerRadius={14}
+            style={[s8.appleOfficialBtn, authLoading && { opacity: 0.6 }]}
             onPress={() => !authLoading && onAuth('apple')}
-            activeOpacity={0.85}
-            disabled={authLoading}
-          >
-            {authLoading ? (
-              <ActivityIndicator size="small" color="#000" />
-            ) : (
-              <View style={s8.appleLogo}>
-                <Text style={{ fontSize: 18, color: '#000' }}>🍎</Text>
-              </View>
-            )}
-            <Text style={s8.appleBtnText}>{t('onboarding.continueWithApple')}</Text>
-          </TouchableOpacity>
+          />
         )}
 
         <TouchableOpacity
@@ -1333,7 +1341,7 @@ const Screen8Name: React.FC<{
           {authLoading ? (
             <ActivityIndicator size="small" color={th.TEXT_PRIMARY} />
           ) : (
-            <Text style={{ fontSize: 18 }}>🌐</Text>
+            <GoogleGLogo size={22} />
           )}
           <Text style={[s8.googleBtnText, { color: th.TEXT_PRIMARY }]}>{t('onboarding.continueWithGoogle')}</Text>
         </TouchableOpacity>
@@ -1379,13 +1387,10 @@ const s8 = StyleSheet.create({
   input: { fontSize: 18, fontWeight: '700' },
   reflect: { fontSize: 13, textAlign: 'center', marginBottom: 8 },
   registerHint: { fontSize: 14, textAlign: 'center', marginBottom: 20 },
-  appleBtn: {
-    backgroundColor: '#FFFFFF', borderRadius: 14, paddingVertical: 16,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+  appleOfficialBtn: {
+    height: 52,
     marginBottom: 10,
   },
-  appleLogo: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
-  appleBtnText: { fontSize: 16, fontWeight: '700', color: '#000' },
   googleBtn: {
     backgroundColor: 'transparent', borderRadius: 14, paddingVertical: 16,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
@@ -1515,9 +1520,6 @@ const Screen9Personalizing: React.FC<{
         }
       });
 
-      // Request push permissions
-      requestPermissionsAndGetToken().catch(() => {});
-
       // Auth
       if (state.authMethod) {
         login(state.authMethod, state.name.trim() || 'Analista').catch(() => {});
@@ -1539,9 +1541,17 @@ const Screen9Personalizing: React.FC<{
   }, []);
 
   return (
-    <View style={[s9.container, { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: th.BG }]}>
-      {/* Pulsing A circle */}
+    <LinearGradient
+      colors={th.isDark
+        ? ['#0A0F1E', '#0D1525', '#0A0F1E']
+        : ['#EEF3FF', '#F5F8FF', '#EEF3FF']}
+      style={[s9.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
+      start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }}
+    >
+      {/* Radial glow rings */}
+      <Animated.View style={[s9.glowRing2, { opacity: glowOpacity, transform: [{ scale: circleScale }] }]} />
       <Animated.View style={[s9.glowOuter, { opacity: glowOpacity }]} />
+      {/* Pulsing A circle */}
       <Animated.View style={[s9.circleWrap, { transform: [{ scale: circleScale }] }]}>
         <LinearGradient colors={[BLUE, '#1A4DB0']} style={s9.circle} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
           <Text style={s9.aLetter}>A</Text>
@@ -1565,7 +1575,7 @@ const Screen9Personalizing: React.FC<{
 
       {/* Status message */}
       <Text style={[s9.msg, { color: th.TEXT_DIM }]}>{msgs[msgIndex]}</Text>
-    </View>
+    </LinearGradient>
   );
 };
 
@@ -1575,10 +1585,17 @@ const s9 = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', gap: 16,
     paddingHorizontal: SIDE_PAD,
   },
+  glowRing2: {
+    position: 'absolute',
+    width: 320, height: 320, borderRadius: 160,
+    borderWidth: 1,
+    borderColor: 'rgba(46,124,246,0.12)',
+    backgroundColor: 'transparent',
+  },
   glowOuter: {
     position: 'absolute',
-    width: 200, height: 200, borderRadius: 100,
-    backgroundColor: 'rgba(46,124,246,0.20)',
+    width: 220, height: 220, borderRadius: 110,
+    backgroundColor: 'rgba(46,124,246,0.13)',
   },
   circleWrap: { marginBottom: 8 },
   circle: {
@@ -1684,7 +1701,10 @@ const Screen10Final: React.FC<{
           {displayName},
         </Text>
 
-        <Text style={[s10.finalHeadline, { color: th.TEXT_PRIMARY }]}>{t('onboarding.welcomeFinalTitle')}</Text>
+        <Text style={[s10.finalHeadline, { color: th.TEXT_PRIMARY }]}>
+          {t('onboarding.welcomeFinalLine1')}{'\n'}
+          <Text style={s10.finalHeadlineAccent}>{t('onboarding.welcomeFinalLine2')}</Text>
+        </Text>
 
         {/* Accent line */}
         <View style={s10.accentLine} />
@@ -1702,7 +1722,7 @@ const Screen10Final: React.FC<{
           </View>
         )}
 
-        <CTAButton label={t('onboarding.start_btn')} onPress={onStart} glow />
+        <CTAButton label={t('onboarding.start_btn')} onPress={onStart} glow style={s10.ctaFull} />
       </Animated.View>
     </View>
   );
@@ -1721,10 +1741,12 @@ const s10 = StyleSheet.create({
   nameText: { fontWeight: '900', color: BLUE, letterSpacing: -1, textAlign: 'center' },
   finalHeadline: {
     fontSize: 22, fontWeight: '700',
-    textAlign: 'center', lineHeight: 30,
+    textAlign: 'center', lineHeight: 32,
   },
+  finalHeadlineAccent: { color: BLUE, fontWeight: '900' },
   accentLine: { width: 48, height: 3, backgroundColor: BLUE, borderRadius: 2 },
-  finalSub: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  finalSub: { fontSize: 17, textAlign: 'center', lineHeight: 24, fontWeight: '500' },
+  ctaFull: { alignSelf: 'stretch', marginHorizontal: 0 },
   hookCard: {
     borderRadius: 16, padding: 16,
     borderWidth: 1.5,
@@ -1810,6 +1832,13 @@ export function OnboardingScreen() {
 
   const goTo  = (n: number) => setScreen(n);
   const goNext = () => setScreen(s => s + 1);
+
+  // Screen 7 → 8: request push permissions FIRST (user just configured notification prefs,
+  // so the system dialog has perfect context), then advance.
+  const goNextFromNotifs = useCallback(() => {
+    requestPermissionsAndGetToken().catch(() => {});
+    setScreen(s => s + 1);
+  }, []);
   const goBack = () => setScreen(s => Math.max(1, s - 1));
 
   // Team names for the "following chip" in players screen
@@ -2008,9 +2037,9 @@ export function OnboardingScreen() {
           notifs={obState.notifications}
           onToggle={toggleNotif}
           fanLevel={obState.fanLevel}
-          onNext={goNext}
+          onNext={goNextFromNotifs}
           onBack={goBack}
-          onSkip={goNext}
+          onSkip={goNextFromNotifs}
         />
       );
 

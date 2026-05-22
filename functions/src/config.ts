@@ -7,7 +7,41 @@
 
 // ── SportMonks API ──────────────────────────────────────────────────────────
 
-export const SM_API_TOKEN = 'fJSTWbE3MXoQFM8cOTbZcoEomEMx9xJEh9F77IGS7RKjs2wGHd0vQDNanYIN';
+import { defineSecret } from 'firebase-functions/params';
+
+/**
+ * SportMonks API token — stored as a Firebase Secret (not in code).
+ * Set it once with:  firebase functions:secrets:set SPORTMONKS_TOKEN
+ * Every function that calls SportMonks must declare it in its `secrets: [...]` option.
+ */
+export const SPORTMONKS_TOKEN = defineSecret('SPORTMONKS_TOKEN');
+
+/**
+ * Resolve the SportMonks token at runtime. Two sources, in order:
+ *   1. Firebase Secret (when running inside a Cloud Function that binds
+ *      SPORTMONKS_TOKEN in its `secrets: []` option).
+ *   2. `process.env.SPORTMONKS_TOKEN` (for local scripts / CI / one-off
+ *      crawls that don't run inside a Firebase function).
+ *
+ * Throws if neither source has a value.
+ */
+export function getSportmonksToken(): string {
+  // 1. Cloud Function runtime
+  try {
+    const fromSecret = SPORTMONKS_TOKEN.value();
+    if (fromSecret) return fromSecret;
+  } catch {
+    // Reading defineSecret outside a function context can throw — fall through.
+  }
+  // 2. Local script / CI environment
+  const fromEnv = process.env.SPORTMONKS_TOKEN;
+  if (fromEnv) return fromEnv;
+  throw new Error(
+    'SPORTMONKS_TOKEN is not set. Either bind the Firebase secret in `secrets: [SPORTMONKS_TOKEN]` ' +
+    'or export SPORTMONKS_TOKEN in your local environment before running the script.',
+  );
+}
+
 export const SM_BASE_URL  = 'https://api.sportmonks.com/v3/football';
 
 /** Timeout for each SportMonks API request (ms) */
@@ -91,12 +125,19 @@ export const LEAGUES: LeagueConfig[] = [
   { id: 968,  name: 'J1 League',              country: 'Japan',       flag: '🇯🇵', currentSeasonId: 26810 },
   { id: 1034, name: 'K League 1',             country: 'South Korea', flag: '🇰🇷', currentSeasonId: 26894 },
   { id: 902,  name: 'Persian Gulf Pro League', country: 'Iran',       flag: '🇮🇷', currentSeasonId: 26175 },
+  // ── Europa — Copas continentales (UEFA) ───────────────────────────────────
+  { id: 2,    name: 'Champions League',        country: 'Europe',     flag: '⭐', currentSeasonId: 25580 },
+  { id: 5,    name: 'Europa League',           country: 'Europe',     flag: '🟠', currentSeasonId: 25582 },
+  { id: 2286, name: 'Europa Conference League', country: 'Europe',    flag: '🟢', currentSeasonId: 25581 },
   // ── Competiciones internacionales ─────────────────────────────────────────
   { id: 1122, name: 'Copa Libertadores',      country: 'South America', flag: '🏆', currentSeasonId: 26784 },
   { id: 1116, name: 'Copa Sudamericana',      country: 'South America', flag: '🏆', currentSeasonId: 26783 },
   { id: 1111, name: 'CONCACAF Champions Cup', country: 'North America', flag: '🏆', currentSeasonId: 26750 },
   { id: 1741, name: 'CONCACAF Nations League', country: 'North America', flag: '🏆', currentSeasonId: 27491 },
   { id: 1107, name: 'CAF Champions League',   country: 'Africa',      flag: '🏆', currentSeasonId: 26228 },
+  { id: 1108, name: 'CAF Confederation Cup',  country: 'Africa',      flag: '🏆', currentSeasonId: 26264 },
+  // ── Selecciones / mundialista ─────────────────────────────────────────────
+  { id: 732,  name: 'Mundial 2026',           country: 'World',       flag: '🌍', currentSeasonId: 26618 },
   // ── Otros + Femenil ───────────────────────────────────────────────────────
   { id: 1082, name: 'Amistosos Internacionales', country: 'World',    flag: '🌍', currentSeasonId: 26758 },
   { id: 1579, name: 'Liga MX Femenil',        country: 'Mexico',      flag: '🇲🇽', currentSeasonId: 25595 },

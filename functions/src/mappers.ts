@@ -63,13 +63,11 @@ function formatTimeDisplay(fixture: SMFixture, status: 'live' | 'finished' | 'sc
   if (status === 'live' && fixture.state_id === SM_STATE_IDS.HALF_TIME) return 'HT';
   if (status === 'live' && minute) return `${minute}'`;
 
-  // Scheduled: show local time
-  try {
-    const dt = new Date(fixture.starting_at);
-    return dt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-  } catch {
-    return fixture.starting_at?.slice(11, 16) ?? '--:--';
-  }
+  // Scheduled: store the raw UTC HH:MM. We can't compute the user's local time
+  // server-side (GCP runs in UTC, the client knows its own timezone). The app
+  // uses `startingAtUtc` to render the final local time per-user; this `time`
+  // string is a UTC fallback for any read path that doesn't do that conversion.
+  return fixture.starting_at?.slice(11, 16) ?? '--:--';
 }
 
 // ── Score Extraction ────────────────────────────────────────────────────────
@@ -95,6 +93,21 @@ function extractScores(fixture: SMFixture): {
   }
 
   return { homeScore, awayScore, homeScoreHT, awayScoreHT };
+}
+
+// ── Live enrichment extractor ───────────────────────────────────────────────
+// Pulls the subset of SMFixture fields that change during a live match —
+// events, statistics, periods. Returned as a plain object suitable for
+// nesting under MatchDoc.detail. Skips undefined values to keep Firestore
+// happy.
+function extractLiveEnrichment(fixture: SMFixture): Record<string, unknown> | null {
+  const f = fixture as any;
+  const out: Record<string, unknown> = {};
+  let any = false;
+  if (Array.isArray(f.events))     { out.events     = f.events;     any = true; }
+  if (Array.isArray(f.statistics)) { out.statistics = f.statistics; any = true; }
+  if (Array.isArray(f.periods))    { out.periods    = f.periods;    any = true; }
+  return any ? out : null;
 }
 
 // ── Fixture → MatchDoc ──────────────────────────────────────────────────────
@@ -129,7 +142,7 @@ export function mapFixtureToMatchDoc(fixture: SMFixture): MatchDoc | null {
     logo: away.image_path,
   };
 
-  return {
+  const doc: MatchDoc = {
     id: String(fixture.id),
     homeTeam,
     awayTeam,
@@ -150,6 +163,16 @@ export function mapFixtureToMatchDoc(fixture: SMFixture): MatchDoc | null {
     seasonId: fixture.season_id ?? null,
     updatedAt: Timestamp.now(),
   };
+
+  // Optional live enrichment — only present when called from pollLivescores
+  // (which pulls events/statistics/periods on /livescores/inplay).
+  const liveEnrich = extractLiveEnrichment(fixture);
+  if (liveEnrich) {
+    doc.detail = liveEnrich;
+    doc.detailUpdatedAt = Timestamp.now();
+  }
+
+  return doc;
 }
 
 // ── Standings → StandingsDoc ────────────────────────────────────────────────
@@ -221,8 +244,10 @@ export function mapTopScorersToDoc(
         playerId: String(pid),
         playerName: s.player?.display_name ?? s.player?.common_name ?? `Player ${pid}`,
         playerImage: s.player?.image_path ?? '',
-        teamName: '',  // SM top scorers don't always include team info
-        teamLogo: '',
+        // Team info now arrives via the `participant` include on the topscorers
+        // query — see fetchTopScorers in sportmonks.ts.
+        teamName: s.participant?.name ?? '',
+        teamLogo: s.participant?.image_path ?? '',
         goals: s.total,
         assists: 0,
         position: s.position,

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated, Platform } from 'react-native';
 import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPartidos } from '../components/Skeleton';
@@ -26,6 +26,10 @@ import type { LeagueWithMatches } from '../services/sportsApi';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { LEAGUE_TIER_1, LEAGUE_TIER_2 } from '../config/leagueTiers';
+import ATTModal from '../components/ATTModal';
+import { WorldCupBanner } from '../components/WorldCupBanner';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as TrackingTransparency from 'expo-tracking-transparency';
 
 function todayISO(): string {
   const d = new Date();
@@ -42,6 +46,32 @@ export const PartidosScreen: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [activeTab, setActiveTab] = useState<FilterTab>('todos');
   const [showCalendar, setShowCalendar] = useState(false);
+  const [showATT, setShowATT] = useState(false);
+
+  // Show ATT modal 7s after first mount — only once ever
+  useEffect(() => {
+    const ATT_KEY = 'analistas_att_shown';
+    let timer: ReturnType<typeof setTimeout>;
+    AsyncStorage.getItem(ATT_KEY).then(shown => {
+      if (!shown) {
+        timer = setTimeout(() => setShowATT(true), 7000);
+      }
+    });
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleATTContinue = async () => {
+    setShowATT(false);
+    await AsyncStorage.setItem('analistas_att_shown', '1');
+    if (Platform.OS === 'ios') {
+      await TrackingTransparency.requestTrackingPermissionsAsync().catch(() => {});
+    }
+  };
+
+  const handleATTSkip = async () => {
+    setShowATT(false);
+    await AsyncStorage.setItem('analistas_att_shown', '1');
+  };
 
   // ── Real data via hook ──────────────────────────────────────────────────────
   const { matches: allMatches, leagues: allLeagues, loading, refreshing, refresh, isPolling } = useFixtures(selectedDate);
@@ -517,6 +547,11 @@ export const PartidosScreen: React.FC = () => {
       )}
 
       <CalendarPicker visible={showCalendar} selectedDate={selectedDate} onSelectDate={handleCalendarSelect} onClose={() => setShowCalendar(false)} onGoToday={() => { handleGoToday(); setShowCalendar(false); }} />
+
+      <ATTModal visible={showATT} onContinue={handleATTContinue} onSkip={handleATTSkip} />
+
+      {/* World Cup 2026 floating countdown — auto-hides after July 19, 2026 */}
+      <WorldCupBanner />
 
     </SafeAreaView>
   );

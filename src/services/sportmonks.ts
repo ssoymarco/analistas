@@ -279,6 +279,22 @@ export interface SMFixtureCoach extends SMCoach {
     /** Links to SMParticipant.id — use to find home/away coach */
     participant_id: number;
   };
+  /** Populated when include `coaches.nationality` is used */
+  nationality?: SMCountry;
+  /** Populated when include `coaches.country` is used */
+  country?: SMCountry;
+}
+
+/** Country / nationality shape returned by SportMonks */
+export interface SMCountry {
+  id: number;
+  continent_id: number;
+  name: string;
+  official_name: string;
+  fifa_name: string;
+  iso2: string;
+  iso3: string;
+  image_path: string;
 }
 
 export interface SMRound {
@@ -647,10 +663,10 @@ async function fetchAllPages<T>(
 
 // ── Endpoint Functions ───────────────────────────────────────────────────────
 
-/** GET /fixtures/date/{date}?include=participants;scores;league;state;statistics */
+/** GET /fixtures/date/{date}?include=participants;scores;league;state;statistics;venue */
 export async function fetchFixturesByDate(date: string, leagueIds?: string): Promise<SMFixture[]> {
   const params: Record<string, string> = {
-    include: 'participants;scores;league;state;periods;statistics',
+    include: 'participants;scores;league;state;periods;statistics;venue',
   };
   if (leagueIds) {
     params.filters = `fixtureLeagues:${leagueIds}`;
@@ -662,7 +678,7 @@ export async function fetchFixturesByDate(date: string, leagueIds?: string): Pro
 export async function fetchFixtureById(id: number): Promise<SMFixture> {
   return fetchApi<SMFixture>(`fixtures/${id}`, {
     // Note: 'odds' causes 403 on Pro plan — omitted. Fetch separately if needed.
-    include: 'participants;scores;events;statistics;lineups.player;expectedLineups.player;coaches;venue;league;referees.referee;tvstations.tvstation;weatherreport;predictions;periods;aggregate.fixtures.scores;aggregate.fixtures.participants',
+    include: 'participants;scores;events;statistics;lineups.player;expectedLineups.player;coaches.nationality;venue;league;referees.referee;tvstations.tvstation;weatherreport;predictions;periods;aggregate.fixtures.scores;aggregate.fixtures.participants',
   });
 }
 
@@ -678,10 +694,10 @@ export async function fetchAggregateById(aggregateId: number): Promise<SMAggrega
   });
 }
 
-/** GET /livescores?include=participants;scores;league;state;statistics */
+/** GET /livescores?include=participants;scores;league;state;statistics;venue */
 export async function fetchLivescores(): Promise<SMFixture[]> {
   return fetchApi<SMFixture[]>('livescores', {
-    include: 'participants;scores;league;state;periods;statistics',
+    include: 'participants;scores;league;state;periods;statistics;venue',
   });
 }
 
@@ -713,7 +729,7 @@ export async function fetchFixturesBySeasonId(seasonId: number): Promise<SMFixtu
   // The /fixtures?filters=fixtureSeasonIds:{id} filter is BROKEN in SM v3 (returns wrong data).
   // Instead, use /seasons/{id}?include=fixtures.* which returns correct data in one call.
   const season = await fetchApi<{ fixtures?: SMFixture[] }>(`seasons/${seasonId}`, {
-    include: 'fixtures.participants;fixtures.scores;fixtures.state;fixtures.stage',
+    include: 'fixtures.participants;fixtures.scores;fixtures.state;fixtures.stage;fixtures.round',
   });
   return season.fixtures ?? [];
 }
@@ -733,18 +749,61 @@ export async function fetchFixturesByStage(stageId: number): Promise<SMFixture[]
 
 /**
  * GET /topscorers/seasons/{seasonId}?include=player
- * @param typeId  SM type_id filter: 208=goals, 209=assists, 84=yellow cards.
- *                Omit to return all types (caller must filter by type_id).
+ * @param typeId  SM type_id filter:
+ *                  208 = Goal Topscorer
+ *                  209 = Assist Topscorer
+ *                  210 = Card Topscorer
+ *                Omit to return all available types in the season.
+ *
+ * The filter is `seasontopscorerTypes:{id}` — NOT `topScorerTypes` (camelCase),
+ * which SportMonks silently ignores. With the wrong filter name the endpoint
+ * falls back to whatever default ranking it has on hand (typically cards),
+ * so you get cards back even when you asked for goals. Took an afternoon
+ * to figure that out — leaving this note so we don't relearn it.
  */
 export async function fetchTopScorers(seasonId: number, typeId?: number): Promise<SMTopScorer[]> {
-  const params: Record<string, string> = { include: 'player' };
-  if (typeId !== undefined) params.filters = `topScorerTypes:${typeId}`;
+  const params: Record<string, string> = { include: 'player;participant' };
+  if (typeId !== undefined) params.filters = `seasontopscorerTypes:${typeId}`;
   return fetchApi<SMTopScorer[]>(`topscorers/seasons/${seasonId}`, params);
 }
 
 /** GET /coaches/{id} — full coach profile with nationality & photo */
 export async function fetchCoachById(id: number): Promise<SMCoach> {
   return fetchApi<SMCoach>(`coaches/${id}`);
+}
+
+/** Coach career profile with teams + per-season statistics */
+export interface SMCoachProfile extends SMCoach {
+  teams?: Array<{
+    id: number;
+    coach_id: number;
+    team_id: number;
+    team?: SMParticipant;
+  }>;
+  statistics?: Array<{
+    id: number;
+    coach_id: number;
+    team_id: number;
+    season_id: number;
+    /** Populated when include `statistics.team` is used */
+    team?: SMParticipant;
+    details?: Array<{
+      type_id: number;
+      value: { count?: number; average?: number };
+    }>;
+  }>;
+}
+
+/**
+ * GET /coaches/{id} with includes for the career modal.
+ * IMPORTANT: SportMonks `teams[]` only holds the CURRENT team for most coaches.
+ * Career history of teams must be derived from `statistics[].team` instead
+ * (each statistics entry is one (coach, team, season) tuple).
+ */
+export async function fetchCoachProfile(id: number): Promise<SMCoachProfile> {
+  return fetchApi<SMCoachProfile>(`coaches/${id}`, {
+    include: 'teams.team;statistics.team;statistics.details',
+  });
 }
 
 /** GET /teams/seasons/{seasonId} */
@@ -771,14 +830,14 @@ export async function fetchGroupsBySeason(seasonId: number): Promise<SMGroup[]> 
 /** GET /teams/{id}?include=coach;venue;activeSeasons */
 export async function fetchTeamById(id: number): Promise<SMTeam> {
   return fetchApi<SMTeam>(`teams/${id}`, {
-    include: 'venue;activeSeasons',
+    include: 'venue;activeSeasons;coaches',
   });
 }
 
-/** GET /squads/seasons/{seasonId}/teams/{teamId}?include=player */
+/** GET /squads/seasons/{seasonId}/teams/{teamId}?include=player;player.teams.team */
 export async function fetchSquad(seasonId: number, teamId: number): Promise<SMSquadPlayer[]> {
   return fetchApi<SMSquadPlayer[]>(`squads/seasons/${seasonId}/teams/${teamId}`, {
-    include: 'player',
+    include: 'player;player.teams.team',
   });
 }
 
@@ -901,6 +960,33 @@ export interface SMSidelined {
 }
 
 /** GET /sidelined/seasons/{seasonId}/teams/{teamId}?include=player */
+// ── Match Facts (natural-language insights) ─────────────────────────────────
+
+/** A single fact: H2H stat, recent form, streak, etc. */
+export interface SMMatchFact {
+  id: number;
+  fixture_id: number;
+  type_id: number;
+  participant: 'home' | 'away' | 'both';
+  basis: 'h2h' | 'overall';
+  category: 'statistics' | 'streaks';
+  scope: string;
+  natural_language: string | null;
+  data: {
+    all?: { count?: number; percentage?: number; average?: number; streak?: number; matches?: number };
+    home?: { count?: number; percentage?: number; average?: number; streak?: number; matches?: number };
+    away?: { count?: number; percentage?: number; average?: number; streak?: number; matches?: number };
+  } & Record<string, unknown>;
+}
+
+/**
+ * GET /football/match-facts/{fixtureId} — pre-match intelligence (H2H,
+ * form streaks, scoring averages). Requires the "Match Facts" add-on.
+ */
+export async function fetchMatchFacts(fixtureId: number): Promise<SMMatchFact[]> {
+  return fetchApi<SMMatchFact[]>(`match-facts/${fixtureId}`);
+}
+
 export async function fetchSidelinedByTeam(seasonId: number, teamId: number): Promise<SMSidelined[]> {
   return fetchApi<SMSidelined[]>(`sidelined/seasons/${seasonId}/teams/${teamId}`, {
     include: 'player',
@@ -914,12 +1000,15 @@ export async function fetchSidelinedByTeam(seasonId: number, teamId: number): Pr
  * Free plan doesn't have /fixtures/latest/by-team, so we use date range instead.
  */
 export async function fetchTeamRecentFixtures(teamId: number): Promise<SMFixture[]> {
-  // Look back 60 days and forward 30 days
+  // Look back 60 days and forward 75 days. The forward window covers a full
+  // tournament group stage (e.g. World Cup matchdays span ~12 days but the
+  // bracket runs into knockouts) so users see all upcoming national-team
+  // fixtures including the WC group + R16 / R32.
   const now = new Date();
   const start = new Date(now);
   start.setDate(start.getDate() - 60);
   const end = new Date(now);
-  end.setDate(end.getDate() + 30);
+  end.setDate(end.getDate() + 75);
   const fmt = (d: Date) => d.toISOString().split('T')[0];
   return fetchApi<SMFixture[]>(
     `fixtures/between/${fmt(start)}/${fmt(end)}/${teamId}`,

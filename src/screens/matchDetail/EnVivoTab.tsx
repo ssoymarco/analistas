@@ -14,6 +14,8 @@ import { useDarkMode } from '../../contexts/DarkModeContext';
 import { haptics } from '../../utils/haptics';
 import { AnimatedPressable } from '../../components/AnimatedPressable';
 import { GoalPicker, GOAL_OPTIONS } from '../../components/GoalPicker';
+import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupVenues';
+import { getLeagueDisplayName } from '../../config/leagues';
 import type {
   Match, MatchDetail, MatchEvent, H2HResult, TeamFormEntry,
   OddsMarket, MatchPrediction, MissingPlayer, PressureIndex,
@@ -455,7 +457,7 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
       <View style={pc.headerRow}>
         <View style={[pc.headerBar, { backgroundColor: c.accent }]} />
         <Text style={[pc.headerTitle, { color: c.textPrimary }]}>{t('predictions.title')}</Text>
-        <Text style={[pc.headerLeague, { color: c.textTertiary }]}>  · {match.league}</Text>
+        <Text style={[pc.headerLeague, { color: c.textTertiary }]}>  · {getLeagueDisplayName(match.leagueId, match.league)}</Text>
         <View style={{ flex: 1 }} />
         <View style={pc.dots}>
           {cards.map((_, i) => (
@@ -1116,13 +1118,20 @@ const fm = StyleSheet.create({
 // ── Venue Detail Modal ───────────────────────────────────────────────────────
 const VenueDetailModal: React.FC<{
   venue: MatchVenue | null;
+  /** Used to apply the FIFA "clean venue" override for World Cup 2026 fixtures */
+  leagueId?: number;
   visible: boolean;
   onClose: () => void;
-}> = ({ venue, visible, onClose }) => {
+}> = ({ venue, leagueId, visible, onClose }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
   const { isDark } = useDarkMode();
   if (!venue) return null;
+  // Apply FIFA override (no-op outside the World Cup)
+  const displayName = getDisplayVenueName(venue.id, leagueId, venue.name) ?? venue.name;
+  const displayCity = getDisplayVenueCity(venue.id, leagueId, venue.city) ?? venue.city;
+  const showCity = !!displayCity
+    && !displayName.toLowerCase().includes(displayCity.toLowerCase());
   const sheetBg = isDark ? '#1c1c1e' : '#f2f2f7';
   const overlayBg = isDark ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.55)';
 
@@ -1149,10 +1158,10 @@ const VenueDetailModal: React.FC<{
           <Text style={{ fontSize: 36 }}>🏟️</Text>
           <View style={vdm.heroInfo}>
             <Text style={[vdm.venueName, { color: c.textPrimary }]} numberOfLines={2}>
-              {venue.name}
+              {displayName}
             </Text>
-            {!!venue.city && (
-              <Text style={[vdm.venueCity, { color: c.textSecondary }]}>📍 {venue.city}</Text>
+            {showCity && (
+              <Text style={[vdm.venueCity, { color: c.textSecondary }]}>📍 {displayCity}</Text>
             )}
           </View>
         </View>
@@ -1353,18 +1362,22 @@ const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match,
   type InfoRow = { icon: string; iconBg: string; label: string; sublabel?: string; rightText?: string; onPress?: () => void };
   const rows: InfoRow[] = [];
 
-  // Venue
+  // Venue (apply FIFA "clean venue" override for World Cup 2026 matches)
   if (detail.venue?.name) {
     const vSurface = detail.venue.surface ?? '';
     const vSurfaceLabel = !vSurface ? '' :
       vSurface.toLowerCase().includes('artif') ? t('matchInfo.surfaceArtificial') :
       vSurface.toLowerCase().includes('hybrid') ? t('matchInfo.surfaceHybrid') :
       t('matchInfo.surfaceGrass');
+    const leagueIdNum = Number(match.leagueId) || 0;
+    const vName = getDisplayVenueName(detail.venue.id, leagueIdNum, detail.venue.name) ?? detail.venue.name;
+    const vCity = getDisplayVenueCity(detail.venue.id, leagueIdNum, detail.venue.city) ?? detail.venue.city;
+    const showCity = !!vCity && !vName.toLowerCase().includes(vCity.toLowerCase());
     rows.push({
       icon: '📍', iconBg: 'rgba(16,185,129,0.15)',
-      label: detail.venue.name,
+      label: vName,
       sublabel: [
-        detail.venue.city,
+        showCity ? vCity : '',
         vSurfaceLabel,
       ].filter(Boolean).join(' · '),
       rightText: [
@@ -1463,6 +1476,7 @@ const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match,
       {/* Modals */}
       <VenueDetailModal
         venue={detail.venue ?? null}
+        leagueId={Number(match.leagueId) || undefined}
         visible={venueModal}
         onClose={() => setVenueModal(false)}
       />

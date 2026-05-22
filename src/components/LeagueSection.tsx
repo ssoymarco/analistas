@@ -4,6 +4,7 @@ import { useThemeColors } from '../theme/useTheme';
 import type { Match } from '../data/types';
 import type { LeagueWithMatches } from '../services/sportsApi';
 import { MatchCard } from './MatchCard';
+import { getLeagueDisplayName, getLeagueDisplayFlag, isCopyrightSensitiveLeague } from '../config/leagues';
 
 /** Renders a league flag — Image if URL, Text if emoji */
 const LeagueFlag = ({ logo, size = 18 }: { logo: string; size?: number }) => {
@@ -42,7 +43,13 @@ const LEAGUE_FLAGS: Record<string, string> = {
 export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPress, onLeaguePress, index = 0 }) => {
   const c = useThemeColors();
   const hasLive = league.matches.some(m => m.status === 'live');
-  const flag = league.logo || LEAGUE_FLAGS[league.id] || '🏆';
+
+  // Resolve display name + flag using the centralised helpers. For
+  // trademark-sensitive leagues (e.g. WC 2026) these return the curated
+  // config values; for everything else they pass through SportMonks' data.
+  const displayName = getLeagueDisplayName(league.id, league.name);
+  const fallbackLogo = league.logo || LEAGUE_FLAGS[league.id] || '🏆';
+  const flag = getLeagueDisplayFlag(league.id, fallbackLogo);
 
   // ── Staggered entry animation ──────────────────────────────────────────────
   const entryAnim = useRef(new Animated.Value(0)).current;
@@ -79,7 +86,7 @@ export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPre
       {/* Header */}
       <TouchableOpacity style={[s.header, { backgroundColor: c.surface, borderBottomColor: c.border }]} activeOpacity={0.7} onPress={() => onLeaguePress?.(league)}>
         <LeagueFlag logo={flag} />
-        <Text style={[s.leagueName, { color: c.textSecondary }]}>{league.name}</Text>
+        <Text style={[s.leagueName, { color: c.textSecondary }]}>{displayName}</Text>
         {hasLive && (
           <View style={s.liveBadge}>
             <View style={[s.liveDot, { backgroundColor: c.live }]} />

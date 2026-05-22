@@ -44,15 +44,15 @@ exports.loadSnapshot = loadSnapshot;
 exports.saveSnapshot = saveSnapshot;
 exports.detectChanges = detectChanges;
 exports.dispatchNotifications = dispatchNotifications;
-const admin = __importStar(require("firebase-admin"));
+const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
-const db = admin.firestore();
+const sync_league_data_1 = require("./sync-league-data");
 /**
  * Load the previous livescores snapshot from _meta/livescoresSnapshot.
  * Returns an empty snapshot if none exists yet.
  */
 async function loadSnapshot() {
-    const snap = await db.doc('_meta/livescoresSnapshot').get();
+    const snap = await admin_init_1.db.doc('_meta/livescoresSnapshot').get();
     if (!snap.exists)
         return {};
     return snap.data()?.matches ?? {};
@@ -70,9 +70,9 @@ async function saveSnapshot(matches) {
             stateId: m.stateId,
         };
     }
-    await db.doc('_meta/livescoresSnapshot').set({
+    await admin_init_1.db.doc('_meta/livescoresSnapshot').set({
         matches: snapshot,
-        updatedAt: admin.firestore.Timestamp.now(),
+        updatedAt: admin_init_1.admin.firestore.Timestamp.now(),
     });
 }
 /**
@@ -216,6 +216,14 @@ async function dispatchNotifications(changes) {
             starts: changes.filter(c => c.type === 'matchStart').length,
             ends: changes.filter(c => c.type === 'matchEnd').length,
         });
+        // Event-driven sync: refresh standings/topscorers for affected leagues
+        // immediately, so Messi-vs-Ronaldo races and league-position swaps
+        // surface in the app within seconds instead of waiting for the cron.
+        // Runs in parallel via Promise.allSettled inside the helper; one
+        // league's failure can't block another. We await so the sync finishes
+        // before the next poll cycle starts (still well under the 120s
+        // function timeout — single-league syncs take ~600ms).
+        await (0, sync_league_data_1.triggerLeagueSyncForChanges)(changes);
     }
 }
 //# sourceMappingURL=detect-changes.js.map

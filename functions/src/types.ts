@@ -36,6 +36,24 @@ export interface MatchDoc {
   startingAtUtc: string;      // raw SM starting_at
   seasonId: number | null;
   updatedAt: Timestamp;
+
+  // ── Enrichment (populated by syncMatchEnrichment + pollLivescores) ──
+  // Raw SM fixture payload with all includes. Stored as opaque JSON because
+  // the shape is complex (20+ sub-types) and the client already knows how to
+  // unpack a raw SMFixture into MatchDetail via the existing sportsApi mapper.
+  // Null when the match hasn't been enriched yet (will be populated by the
+  // next sync run if the match is in the hot window: live, near-kickoff, or
+  // recently-finished).
+  detail?: unknown;
+  /** ISO/Timestamp of last enrichment fetch — used by the sync to skip
+   *  matches that were updated very recently. */
+  detailUpdatedAt?: Timestamp;
+  /** H2H fixtures between home and away — fetched separately because
+   *  /fixtures/{id} doesn't include it. Lightweight payload. */
+  h2h?: unknown[];
+  /** Cached injury / suspension lists per team. Updated alongside detail. */
+  sidelinedHome?: unknown[];
+  sidelinedAway?: unknown[];
 }
 
 export interface StandingRowDoc {
@@ -73,7 +91,69 @@ export interface TopScorerDoc {
 export interface TopScorersDoc {
   seasonId: number;
   leagueId: number;
+  /** Goal scorers (SM type_id 208) — historical primary field. */
   scorers: TopScorerDoc[];
+  /** Top assists (SM type_id 209). Optional — populated by syncTopScorers
+   *  when the season has assists data. */
+  assists?: TopScorerDoc[];
+  /** Top yellow-card receivers (SM type_id 84). Optional. */
+  cards?: TopScorerDoc[];
+  updatedAt: Timestamp;
+}
+
+/** Full team info — stored in teams/{teamId}. Written by syncTeams (~daily).
+ *  Replaces per-user fetchTeamById calls from the client. */
+export interface TeamFullDoc {
+  id:           string;
+  name:         string;
+  shortName:    string;
+  logo:         string;
+  /** Trinational teams have `country: ''` (no single country). */
+  country:      string;
+  founded:      number;            // 0 when unknown
+  venueName:    string;
+  venueCity:    string;
+  venueCapacity: number;
+  venueImage:   string;
+  coachName:    string;
+  coachImage:   string;
+  coachAge:     number;            // 0 when unknown
+  /** League this team is associated with — derived from the seed season used
+   *  by syncTeams. Most teams belong to exactly one league, so this is fine
+   *  as a denormalised field. */
+  leagueId:     number;
+  leagueName:   string;
+  currentSeasonId: number | null;
+  updatedAt:    Timestamp;
+}
+
+/** One player's membership in a team's squad for a given season — stored
+ *  inside SquadDoc.players. */
+export interface SquadPlayerDoc {
+  /** Squad entry id (unique per player-season-team) */
+  id:           number;
+  playerId:     number;
+  name:         string;
+  displayName:  string;
+  number:       number;
+  positionId:   number;
+  /** ISO date of birth — empty string when unknown. Client computes age. */
+  dateOfBirth:  string;
+  image:        string;
+  isCaptain:    boolean;
+  /** Current club (non-national) when this is a national-team squad — used
+   *  to show e.g. "Real Madrid" next to a Brazil player. Empty for club
+   *  squads (where the squad's own team IS the player's club). */
+  clubName:     string;
+  clubLogo:     string;
+}
+
+/** Full squad for a given (seasonId, teamId) — stored in squads/{seasonId}_{teamId}.
+ *  Written by syncSquads (~daily). Replaces per-user fetchSquad calls. */
+export interface SquadDoc {
+  seasonId:  number;
+  teamId:    number;
+  players:   SquadPlayerDoc[];
   updatedAt: Timestamp;
 }
 
@@ -241,6 +321,13 @@ export interface SMTopScorer {
     common_name: string;
     display_name: string;
     image_path: string;
+  };
+  /** Team the scorer plays for — included via `participant` query param */
+  participant?: {
+    id: number;
+    name: string;
+    short_code?: string;
+    image_path?: string;
   };
 }
 

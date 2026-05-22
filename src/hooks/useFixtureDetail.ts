@@ -1,15 +1,30 @@
-// ── useFixtureDetail — loads full match data from SportMonks API ─────────────
-// For live matches, silently re-fetches every LIVE_POLL_MS milliseconds so the
-// user sees score updates, events and stats without needing to pull-to-refresh.
+// ── useFixtureDetail — Firestore-backed match detail (zero SM calls per user)
+//
+// Previous version called SportMonks `/fixtures/{id}` on mount AND polled it
+// every 10s while the match was live (360 calls/hour PER concurrent viewer
+// → instantly blew past the 3,000/hour per-entity cap with even a handful
+// of users).
+//
+// New design:
+//   1. Subscribe to `matches/{id}` in Firestore via onSnapshot.
+//   2. Cloud Functions write all data to that doc:
+//      - `pollLivescores` (every 15s for live matches): writes events,
+//        statistics, periods, score, state.
+//      - `syncMatchEnrichment` (every 5 min for hot-window matches):
+//        writes lineups, venue, referees, h2h, sidelined, predictions, etc.
+//   3. Client reads the doc and assembles MatchDetail with the existing
+//      mapper (`buildFixtureDetailFromFirestoreData`).
+//   4. Updates from the server arrive in the client within ~100ms of the
+//      Cloud Function write — same UX as polling, zero per-user SM calls.
+//
+// Fallback: when the doc isn't yet enriched (very cold match outside the
+// hot window), we make ONE proxy call to populate the screen and let the
+// scheduled enrichment catch up. Used only on first ever view.
+
 import { useState, useEffect, useRef } from 'react';
 import { getFixtureDetail } from '../services/sportsApi';
+import { subscribeMatchDetail } from '../services/firestoreApi';
 import type { Match, MatchDetail } from '../data/types';
-
-/** Re-fetch interval for live matches.
- *  10 s matches SportMonks' own recommended polling cadence for /livescores.
- *  SportMonks publishes goal events within ~10 s of real time.
- *  Cost: 1 API call/10 s = 360 calls/hour, well within the 3000/hour limit. */
-const LIVE_POLL_MS = 10_000;
 
 interface UseFixtureDetailResult {
   detail: MatchDetail | null;
@@ -50,85 +65,110 @@ function mapDetail(result: NonNullable<Awaited<ReturnType<typeof getFixtureDetai
   };
 }
 
-/**
- * @param matchId     Fixture ID
- * @param homeTeamId  Used as effect dependency so the hook resets on match change
- * @param awayTeamId  Same
- * @param matchStatus Pass match.status ('live' | 'scheduled' | 'finished').
- *                    When 'live', the hook polls silently every 25 s.
- */
 export function useFixtureDetail(
   matchId: string,
-  homeTeamId: string,
-  awayTeamId: string,
-  matchStatus?: string,
+  _homeTeamId?: number,    // kept for API compatibility
+  _awayTeamId?: number,
+  _matchStatus?: string,
 ): UseFixtureDetailResult {
-  const [detail, setDetail]       = useState<MatchDetail | null>(null);
+  const [detail, setDetail] = useState<MatchDetail | null>(null);
   const [liveMatch, setLiveMatch] = useState<Match | null>(null);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState<string | null>(null);
-  // isActuallyLive starts from nav-params but gets corrected by the first API
-  // response. This prevents the stale-nav-params problem where a match is live
-  // but the list patched the status back to 'scheduled' before navigation.
-  const [isActuallyLive, setIsActuallyLive] = useState(matchStatus === 'live');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
+  const didProxyFallbackRef = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
 
-  // ── Initial load ────────────────────────────────────────────────────────────
+  // Reset fallback flag when matchId changes
   useEffect(() => {
+    didProxyFallbackRef.current = false;
+  }, [matchId]);
+
+  useEffect(() => {
+    if (!matchId) return;
     setLoading(true);
     setError(null);
 
-    getFixtureDetail(Number(matchId))
-      .then(result => {
+    const unsubscribe = subscribeMatchDetail(
+      matchId,
+      sub => {
         if (!mounted.current) return;
-        if (!result) {
-          setDetail(null);
-          setLiveMatch(null);
-          setError('No se pudo cargar el detalle del partido');
-        } else {
-          setDetail(mapDetail(result));
-          setLiveMatch(result.match); // ← real score + status from API
-          // Sync live-polling gate with actual API status (nav params may be stale)
-          setIsActuallyLive(result.match.status === 'live');
+
+        // Always update liveMatch with the basic match shape (score, status,
+        // minute — these come from pollLivescores even before enrichment).
+        if (sub.match) setLiveMatch(sub.match);
+
+        if (sub.isEnriched && sub.detail) {
+          // Firestore has the full enrichment → render from it. Zero SM calls.
+          setDetail(mapDetail({ match: sub.match!, detail: sub.detail }));
+          setLoading(false);
+        } else if (sub.match && !sub.isEnriched && !didProxyFallbackRef.current) {
+          // Match exists in Firestore but enrichment hasn't been written yet
+          // (cold match outside the hot window). Make ONE proxy call to
+          // populate the screen — scheduled enrichment will catch up by the
+          // next 5-min tick.
+          didProxyFallbackRef.current = true;
+          getFixtureDetail(Number(matchId))
+            .then(result => {
+              if (!mounted.current || !result) return;
+              setDetail(mapDetail(result));
+              setLoading(false);
+            })
+            .catch(err => {
+              if (!mounted.current) return;
+              setError(err instanceof Error ? err.message : 'Error loading match');
+              setLoading(false);
+            });
+        } else if (!sub.match) {
+          // No doc at all in Firestore — proxy fallback once
+          if (!didProxyFallbackRef.current) {
+            didProxyFallbackRef.current = true;
+            getFixtureDetail(Number(matchId))
+              .then(result => {
+                if (!mounted.current) return;
+                if (!result) {
+                  setError('No se pudo cargar el detalle del partido');
+                } else {
+                  setDetail(mapDetail(result));
+                  setLiveMatch(result.match);
+                }
+                setLoading(false);
+              })
+              .catch(err => {
+                if (!mounted.current) return;
+                setError(err instanceof Error ? err.message : 'Error loading match');
+                setLoading(false);
+              });
+          }
         }
-        setLoading(false);
-      })
-      .catch(err => {
+      },
+      err => {
         if (!mounted.current) return;
-        setDetail(null);
-        setLiveMatch(null);
-        setError(err instanceof Error ? err.message : 'Error loading match');
-        setLoading(false);
-      });
-  }, [matchId, homeTeamId, awayTeamId]);
+        // Firestore subscription failed — fall back to proxy once
+        if (didProxyFallbackRef.current) return;
+        didProxyFallbackRef.current = true;
+        console.warn('[useFixtureDetail] Firestore unavailable, using proxy:', err.message);
+        getFixtureDetail(Number(matchId))
+          .then(result => {
+            if (!mounted.current || !result) return;
+            setDetail(mapDetail(result));
+            setLiveMatch(result.match);
+            setLoading(false);
+          })
+          .catch(e => {
+            if (!mounted.current) return;
+            setError(e instanceof Error ? e.message : 'Error loading match');
+            setLoading(false);
+          });
+      },
+    );
 
-  // ── Live polling — silent refresh every 10 s ────────────────────────────────
-  // Gated on isActuallyLive (derived from API) rather than nav-params matchStatus
-  // so polling starts even when the user navigated from a stale 'scheduled' card.
-  useEffect(() => {
-    if (!isActuallyLive) return;
-
-    const poll = setInterval(async () => {
-      if (!mounted.current) return;
-      try {
-        const result = await getFixtureDetail(Number(matchId));
-        if (!mounted.current || !result) return;
-        setDetail(mapDetail(result));
-        setLiveMatch(result.match); // ← keeps score/minute fresh
-        // Stop polling once the match is no longer live
-        if (result.match.status !== 'live') setIsActuallyLive(false);
-      } catch {
-        // Silently ignore polling errors — user still sees last known data
-      }
-    }, LIVE_POLL_MS);
-
-    return () => clearInterval(poll);
-  }, [matchId, isActuallyLive]);
+    return unsubscribe;
+  }, [matchId]);
 
   return { detail, liveMatch, loading, error };
 }

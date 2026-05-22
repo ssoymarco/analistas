@@ -13,7 +13,12 @@
  */
 export declare function syncStandingsHandler(): Promise<void>;
 /**
- * Sync top scorers for all configured leagues.
- * Same pattern as standings with rate limit courtesy pauses.
+ * Sync top scorers for all configured leagues. Fetches THREE separate stat
+ * categories per league — goals (208), assists (209), yellow cards (84) —
+ * and writes them all to the same topscorers/{seasonId} document so
+ * useLeagueDetail can render all three tabs from Firestore in one read.
+ *
+ * Cost: 51 leagues × 3 categories = 153 SM calls per run on the
+ * `topscorers` entity. ~3.6k/day at the hourly schedule. ~5% of cap.
  */
 export declare function syncTopScorersHandler(): Promise<void>;
