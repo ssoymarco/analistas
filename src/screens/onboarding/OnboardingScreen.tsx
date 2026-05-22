@@ -16,8 +16,10 @@ import React, {
 import {
   View, Text, StyleSheet, Animated, TouchableOpacity, FlatList, ScrollView,
   TextInput, Image, ImageBackground, Dimensions, Platform, ActivityIndicator,
-  Easing, KeyboardAvoidingView, Alert,
+  Easing, KeyboardAvoidingView, Alert, PanResponder,
 } from 'react-native';
+import { getRecentFixturesByTeam, getStandingsFromFirestore } from '../../services/firestoreApi';
+import type { Match, LeagueStanding } from '../../data/types';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -128,7 +130,7 @@ const MX_TEAM_IDS = new Set([2687, 427, 2626, 609, 2662, 2989, 2844, 967, 10036,
 const EU_TEAM_IDS = new Set([53, 83, 1044, 42, 496]);
 
 // ── State shape ───────────────────────────────────────────────────────────────
-type FanLevel = 'casual' | 'fan' | 'analista';
+type FanLevel = 'espectador' | 'casual' | 'fan' | 'analista';
 
 type NotifKey = 'goals' | 'kickoff' | 'results' | 'lineups' | 'transfers' | 'news';
 
@@ -143,9 +145,10 @@ type OnboardingState = {
 };
 
 const DEFAULT_NOTIFS_BY_LEVEL: Record<FanLevel, Record<NotifKey, boolean>> = {
-  casual:   { goals: false, kickoff: false, results: true,  lineups: true,  transfers: false, news: false },
-  fan:      { goals: true,  kickoff: true,  results: true,  lineups: true,  transfers: false, news: false },
-  analista: { goals: true,  kickoff: true,  results: true,  lineups: true,  transfers: true,  news: true  },
+  espectador: { goals: false, kickoff: false, results: false, lineups: false, transfers: false, news: false },
+  casual:     { goals: false, kickoff: false, results: true,  lineups: false, transfers: false, news: false },
+  fan:        { goals: true,  kickoff: true,  results: true,  lineups: true,  transfers: false, news: false },
+  analista:   { goals: true,  kickoff: true,  results: true,  lineups: true,  transfers: true,  news: true  },
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -477,8 +480,16 @@ const s1 = StyleSheet.create({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 2 — Fan Level
+// SCREEN 2 — Fan Level (slider)
 // ─────────────────────────────────────────────────────────────────────────────
+
+const LEVELS_DATA: { key: FanLevel; emoji: string; title: string; desc: string; color: string; glow: string }[] = [
+  { key: 'espectador', emoji: '👀', title: 'Espectador', desc: 'Solo los clásicos y grandes finales', color: '#6B7280', glow: 'rgba(107,114,128,0.30)' },
+  { key: 'casual',     emoji: '🙂', title: 'Casual',     desc: 'Sigo mi equipo cuando puedo',        color: '#38bdf8', glow: 'rgba(56,189,248,0.35)' },
+  { key: 'fan',        emoji: '⚽', title: 'Fan',         desc: 'Cada partido, cada resultado',        color: '#2E7CF6', glow: 'rgba(46,124,246,0.42)' },
+  { key: 'analista',   emoji: '🔥', title: 'Analista',   desc: 'El fútbol es mi segundo idioma',      color: '#F5B800', glow: 'rgba(245,184,0,0.42)' },
+];
+
 const Screen2FanLevel: React.FC<{
   selected: FanLevel | null;
   onSelect: (l: FanLevel) => void;
@@ -490,47 +501,192 @@ const Screen2FanLevel: React.FC<{
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
 
-  const options: { key: FanLevel; icon: string; title: string; sub: string }[] = [
-    { key: 'casual',   icon: '🙂', title: t('onboarding.casual'),   sub: t('onboarding.casualSub') },
-    { key: 'fan',      icon: '⚽', title: t('onboarding.fan'),      sub: t('onboarding.fanSub') },
-    { key: 'analista', icon: '🔥', title: t('onboarding.analista'), sub: t('onboarding.analistaSub') },
-  ];
+  // Start on 'fan' (index 2) by default; sync to `selected` on mount
+  const initIdx = Math.max(0, LEVELS_DATA.findIndex(l => l.key === selected));
+  const [levelIdx, setLevelIdx] = useState(initIdx >= 0 && selected ? initIdx : 2);
+  const level = LEVELS_DATA[levelIdx];
+
+  // Slider geometry — computed after layout
+  const trackRef     = useRef<View>(null);
+  const trackPageX   = useRef(0);
+  const trackW       = useRef(SCREEN_W - SIDE_PAD * 2); // updated on layout
+  const thumbAnim    = useRef(new Animated.Value(0)).current;
+  const levelIdxRef  = useRef(levelIdx);
+  levelIdxRef.current = levelIdx;
+
+  // Compute snap x-positions (thumb left, 0 = leftmost snap)
+  // thumb is 48px wide; we use the full track width so the thumb overflows edges
+  const snapX = (idx: number) => (idx / 3) * Math.max(trackW.current - 48, 1);
+
+  // Snap thumb to index + call onSelect if changed
+  const snapToRef = useRef((idx: number) => {
+    const x = snapX(idx);
+    Animated.spring(thumbAnim, { toValue: x, useNativeDriver: false, tension: 180, friction: 12 }).start();
+    if (levelIdxRef.current !== idx) {
+      levelIdxRef.current = idx;
+      setLevelIdx(idx);
+      onSelect(LEVELS_DATA[idx].key);
+      Haptics.selectionAsync();
+    }
+  });
+
+  // Always keep snapToRef current (avoids stale closure in PanResponder)
+  useEffect(() => {
+    snapToRef.current = (idx: number) => {
+      const x = snapX(idx);
+      Animated.spring(thumbAnim, { toValue: x, useNativeDriver: false, tension: 180, friction: 12 }).start();
+      if (levelIdxRef.current !== idx) {
+        levelIdxRef.current = idx;
+        setLevelIdx(idx);
+        onSelect(LEVELS_DATA[idx].key);
+        Haptics.selectionAsync();
+      }
+    };
+  });
+
+  // Initialize thumb + trigger first selection
+  useEffect(() => {
+    const idx = selected ? Math.max(0, LEVELS_DATA.findIndex(l => l.key === selected)) : 2;
+    const finalIdx = idx >= 0 ? idx : 2;
+    thumbAnim.setValue(snapX(finalIdx));
+    if (!selected) onSelect(LEVELS_DATA[finalIdx].key);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Convert pageX → nearest level index
+  const pageXToIdx = (pageX: number) => {
+    const relX = pageX - trackPageX.current;
+    const pct  = Math.max(0, Math.min(1, relX / (trackW.current - 48 || 1)));
+    return Math.round(pct * 3);
+  };
+
+  const panResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder:  () => true,
+    onPanResponderGrant:   (e) => snapToRef.current(pageXToIdx(e.nativeEvent.pageX)),
+    onPanResponderMove:    (e) => snapToRef.current(pageXToIdx(e.nativeEvent.pageX)),
+    onPanResponderRelease: (e) => snapToRef.current(pageXToIdx(e.nativeEvent.pageX)),
+  })).current;
+
+  const fillWidth = thumbAnim.interpolate({
+    inputRange: [0, Math.max(trackW.current - 48, 1)],
+    outputRange: ['0%', '100%'],
+    extrapolate: 'clamp',
+  });
 
   return (
-    <View style={[base.screen, { paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
+    <View style={[base.screen, { backgroundColor: th.BG, paddingBottom: insets.bottom + 16 }]}>
       <TopBar dotIndex={0} onBack={onBack} onSkip={onSkip} skipLabel={t('onboarding.skip')} />
 
-      <ScrollView contentContainerStyle={base.scrollContent} showsVerticalScrollIndicator={false}>
+      <View style={{ flex: 1, paddingHorizontal: SIDE_PAD }}>
         <Text style={[base.headline, { color: th.TEXT_PRIMARY }]}>{t('onboarding.fanLevelTitle')}</Text>
         <Text style={[base.sub, { color: th.TEXT_DIM }]}>{t('onboarding.fanLevelSub')}</Text>
 
-        <View style={{ gap: 12, marginTop: 24 }}>
-          {options.map(opt => {
-            const isSelected = selected === opt.key;
-            return (
-              <TouchableOpacity
-                key={opt.key}
-                onPress={() => { Haptics.selectionAsync(); onSelect(opt.key); }}
-                activeOpacity={0.85}
-              >
-                <View style={[s2.card, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#222' : '#E5E7EB' }, isSelected && { backgroundColor: th.BLUE_DIM, borderColor: BLUE }]}>
-                  <View style={[s2.iconBox, { backgroundColor: th.isDark ? '#1E1E1E' : '#F3F4F6' }, isSelected && { backgroundColor: th.BLUE_DIM }]}>
-                    <Text style={{ fontSize: 24 }}>{opt.icon}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[s2.cardTitle, { color: th.TEXT_PRIMARY }, isSelected && { color: BLUE }]}>{opt.title}</Text>
-                    <Text style={[s2.cardSub, { color: th.TEXT_DIM }]}>{opt.sub}</Text>
-                  </View>
-                  {/* Radio */}
-                  <View style={[s2.radio, { borderColor: th.isDark ? '#444' : '#D1D5DB' }, isSelected && { borderColor: BLUE }]}>
-                    {isSelected && <View style={s2.radioDot} />}
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+        {/* ── Hero card ── */}
+        <View style={{ flex: 1, justifyContent: 'center', paddingVertical: 8 }}>
+          <LinearGradient
+            colors={[`${level.color}18`, th.isDark ? '#111' : '#F8F8F8']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={[s2.heroCard, { borderColor: `${level.color}30` }]}
+          >
+            {/* Decorative blob */}
+            <View style={[s2.heroBlob, { backgroundColor: `${level.color}12` }]} />
+            {/* Emoji */}
+            <Text style={s2.heroEmoji}>{level.emoji}</Text>
+            {/* Level name */}
+            <Text style={[s2.heroTitle, { color: th.TEXT_PRIMARY }]}>
+              {level.title.toUpperCase()}
+            </Text>
+            {/* Description */}
+            <Text style={[s2.heroDesc, { color: th.TEXT_DIM }]}>{level.desc}</Text>
+            {/* Intensity bars: 1 bar per level filled up to current */}
+            <View style={s2.barsRow}>
+              {LEVELS_DATA.map((_, i) => (
+                <View
+                  key={i}
+                  style={[s2.intensityBar, { backgroundColor: i <= levelIdx ? level.color : th.isDark ? '#262626' : '#E5E7EB' }]}
+                />
+              ))}
+            </View>
+          </LinearGradient>
         </View>
-      </ScrollView>
+
+        {/* ── Slider ── */}
+        <View style={s2.sliderSection}>
+          <Text style={[s2.sliderHint, { color: th.isDark ? '#3A3A3A' : '#BBBBBB' }]}>
+            {t('onboarding.sliderHint').toUpperCase()}
+          </Text>
+
+          {/* Track area — PanResponder target */}
+          <View
+            ref={trackRef}
+            style={s2.trackContainer}
+            onLayout={() => {
+              trackRef.current?.measure((_fx, _fy, width, _height, px, _py) => {
+                trackPageX.current = px;
+                trackW.current = width;
+                // re-snap to current level with new width
+                const x = snapX(levelIdxRef.current);
+                thumbAnim.setValue(x);
+              });
+            }}
+            {...panResponder.panHandlers}
+          >
+            {/* Track bar */}
+            <View style={[s2.track, { backgroundColor: th.isDark ? '#1E1E1E' : '#E5E7EB' }]}>
+              <Animated.View style={[s2.trackFill, { width: fillWidth, backgroundColor: level.color }]} />
+            </View>
+
+            {/* Snap dots */}
+            {LEVELS_DATA.map((_, i) => (
+              <View
+                key={i}
+                style={[
+                  s2.snapDot,
+                  {
+                    left: `${(i / 3) * 100}%`,
+                    backgroundColor:
+                      i < levelIdx  ? level.color :
+                      i === levelIdx ? 'transparent' :
+                                       (th.isDark ? '#2D2D2D' : '#D1D5DB'),
+                  },
+                ]}
+              />
+            ))}
+
+            {/* Thumb */}
+            <Animated.View
+              style={[
+                s2.thumb,
+                {
+                  backgroundColor: level.color,
+                  left: thumbAnim,
+                  shadowColor: level.color,
+                  shadowOpacity: 0.6,
+                  shadowRadius: 12,
+                  elevation: 8,
+                },
+              ]}
+            >
+              <Text style={{ fontSize: 22 }}>{level.emoji}</Text>
+            </Animated.View>
+          </View>
+
+          {/* Level labels — also tappable */}
+          <View style={s2.labelsRow}>
+            {LEVELS_DATA.map((lv, i) => (
+              <TouchableOpacity
+                key={lv.key}
+                onPress={() => snapToRef.current(i)}
+                style={{ flex: 1, alignItems: 'center', paddingVertical: 4 }}
+              >
+                <Text style={[s2.labelText, { color: i === levelIdx ? level.color : (th.isDark ? '#444' : '#AAAAAA') }]}>
+                  {lv.title.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </View>
 
       <CTAButton label={t('onboarding.continue')} onPress={onNext} disabled={!selected} />
     </View>
@@ -538,22 +694,49 @@ const Screen2FanLevel: React.FC<{
 };
 
 const s2 = StyleSheet.create({
-  card: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    borderRadius: 16, borderWidth: 1.5,
-    padding: 16,
+  heroCard: {
+    borderRadius: 24, borderWidth: 1.5, padding: 28,
+    overflow: 'hidden', alignItems: 'center', position: 'relative',
   },
-  iconBox: {
-    width: 48, height: 48, borderRadius: 12,
+  heroBlob: {
+    position: 'absolute', top: -40, right: -40,
+    width: 220, height: 220, borderRadius: 110,
+  },
+  heroEmoji: { fontSize: 64 },
+  heroTitle: {
+    fontSize: 46, fontWeight: '900', textTransform: 'uppercase',
+    lineHeight: 50, marginTop: 10, letterSpacing: -0.5,
+  },
+  heroDesc: { fontSize: 15, marginTop: 8, textAlign: 'center', lineHeight: 21 },
+  barsRow: { flexDirection: 'row', gap: 6, marginTop: 20, width: '100%' },
+  intensityBar: { flex: 1, height: 4, borderRadius: 2 },
+  sliderSection: { paddingBottom: 8 },
+  sliderHint: {
+    fontSize: 10, fontWeight: '600', letterSpacing: 1.0,
+    textAlign: 'center', marginBottom: 18,
+  },
+  trackContainer: {
+    height: 56, justifyContent: 'center', position: 'relative',
+    overflow: 'visible',
+  },
+  track: {
+    height: 6, borderRadius: 3, marginHorizontal: 24,
+    overflow: 'hidden', position: 'relative',
+  },
+  trackFill: {
+    position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 3,
+  },
+  snapDot: {
+    position: 'absolute', width: 8, height: 8, borderRadius: 4,
+    top: '50%', marginTop: -4, marginLeft: 20, // 24 track margin - 4 half dot
+  },
+  thumb: {
+    position: 'absolute', top: 4,  // center in 56px container: (56-48)/2
+    width: 48, height: 48, borderRadius: 24,
     alignItems: 'center', justifyContent: 'center',
   },
-  cardTitle: { fontSize: 22, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
-  cardSub: { fontSize: 13, marginTop: 2 },
-  radio: {
-    width: 22, height: 22, borderRadius: 11, borderWidth: 2,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: BLUE },
+  labelsRow: { flexDirection: 'row', marginTop: 6 },
+  labelText: { fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -627,7 +810,7 @@ const Screen3Teams: React.FC<{
     />
   ), [selectedIds, onToggle]);
 
-  const headline = fanLevel === 'casual' ? t('onboarding.teamsTitleCasual') : t('onboarding.teamsTitle');
+  const headline = (fanLevel === 'casual' || fanLevel === 'espectador') ? t('onboarding.teamsTitleCasual') : t('onboarding.teamsTitle');
   const countLabel = t('onboarding.teamsSelected', { count: selectedIds.length });
 
   return (
@@ -1007,142 +1190,266 @@ const Screen6Feed: React.FC<{
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
 
-  const cardAnims = [0, 150, 300, 450].map(delay => {
-    const opacity = useRef(new Animated.Value(0)).current;
-    const translateY = useRef(new Animated.Value(30)).current;
-    return { opacity, translateY, delay };
-  });
+  // ── Real Firestore data ────────────────────────────────────────────────────
+  const [nextMatch, setNextMatch] = useState<Match | null>(null);
+  const [standings, setStandings] = useState<LeagueStanding[]>([]);
 
-  useEffect(() => {
-    cardAnims.forEach(({ opacity, translateY, delay }) => {
-      setTimeout(() => {
-        Animated.parallel([
-          Animated.timing(opacity, { toValue: 1, duration: 400, useNativeDriver: true }),
-          Animated.timing(translateY, { toValue: 0, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        ]).start();
-      }, delay);
-    });
-  }, []);
-
-  const firstTeam = teams.find(t2 => state.teamIds.includes(t2.id));
+  const firstTeam   = teams.find(t2 => state.teamIds.includes(t2.id));
   const firstPlayer = players.find(p => state.playerIds.includes(p.id));
   const firstLeague = leagues.find(l => state.leagueIds.includes(l.id));
 
+  useEffect(() => {
+    // Fetch next/recent match for the user's first team
+    if (firstTeam) {
+      getRecentFixturesByTeam(firstTeam.id, 10).then(fixtures => {
+        if (!fixtures.length) return;
+        const now = Date.now();
+        // Prefer upcoming; fall back to most recent
+        const upcoming = fixtures.find(f =>
+          f.status === 'scheduled' || new Date(f.startingAtUtc ?? f.date).getTime() > now
+        );
+        setNextMatch(upcoming ?? fixtures[0]);
+      }).catch(() => {});
+    }
+    // Fetch standings for the user's first league
+    const seasonId = firstLeague?.seasonId;
+    if (seasonId) {
+      getStandingsFromFirestore(seasonId).then(rows => {
+        if (rows.length > 0) setStandings(rows.slice(0, 5));
+      }).catch(() => {});
+    }
+  }, [firstTeam?.id, firstLeague?.seasonId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Entrance animations ────────────────────────────────────────────────────
+  const matchAnim  = useRef(new Animated.Value(0)).current;
+  const matchY     = useRef(new Animated.Value(16)).current;
+  const tableAnim  = useRef(new Animated.Value(0)).current;
+  const tableY     = useRef(new Animated.Value(16)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(matchAnim,  { toValue: 1, duration: 420, useNativeDriver: true }),
+      Animated.timing(matchY,     { toValue: 0, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(tableAnim, { toValue: 1, duration: 420, useNativeDriver: true }),
+        Animated.timing(tableY,    { toValue: 0, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start();
+    }, 130);
+  }, []);
+
+  // ── Derived display values ─────────────────────────────────────────────────
+  // homeTeam.id is string, firstTeam.id is number → convert for comparison
+  const isHome    = nextMatch && firstTeam && nextMatch.homeTeam.id === String(firstTeam.id);
+  const opponent  = nextMatch ? (isHome ? nextMatch.awayTeam : nextMatch.homeTeam) : null;
+  const matchDate = nextMatch?.startingAtUtc
+    ? new Date(nextMatch.startingAtUtc).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true })
+    : null;
+  const matchDay  = nextMatch?.startingAtUtc
+    ? new Date(nextMatch.startingAtUtc).toLocaleDateString('es-MX', { weekday: 'long' })
+    : null;
+
+  // Find user's team in standings (LeagueStanding.team.id is string, firstTeam.id is number)
+  const userStandingIdx = firstTeam
+    ? standings.findIndex(r => r.team.id === String(firstTeam.id))
+    : -1;
+
+  // Build table rows: show 5 rows centered around the user's team when possible
+  const tableRows = useMemo(() => {
+    if (!standings.length) return [];
+    if (userStandingIdx < 0) return standings.slice(0, 5);
+    const start = Math.max(0, Math.min(userStandingIdx - 1, standings.length - 5));
+    return standings.slice(start, start + 5);
+  }, [standings, userStandingIdx]);
+
+  const teamName = firstTeam?.shortName ?? firstTeam?.name ?? 'tu equipo';
+
   return (
-    <View style={[base.screen, { paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
+    <View style={[base.screen, { backgroundColor: th.BG, paddingBottom: insets.bottom + 8 }]}>
       <TopBar dotIndex={4} onBack={onBack} />
 
-      <ScrollView
-        contentContainerStyle={[base.scrollContent, { paddingHorizontal: SIDE_PAD }]}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={[base.headline, { color: th.TEXT_PRIMARY }]}>{t('onboarding.feedTitle')}</Text>
+      {/* ── Headline ── */}
+      <View style={{ paddingHorizontal: SIDE_PAD, paddingTop: 4, paddingBottom: 12 }}>
+        <Text style={[base.headline, { color: th.TEXT_PRIMARY, lineHeight: 34 }]}>
+          {t('onboarding.feedTitlePrefix')}{' '}
+          <Text style={{ color: BLUE }}>{teamName}</Text>
+        </Text>
         <Text style={[base.sub, { color: th.TEXT_DIM }]}>{t('onboarding.feedSub')}</Text>
+      </View>
 
-        <View style={{ gap: 12, marginTop: 20 }}>
-          {/* Card 1 — Next Match */}
-          <Animated.View style={[{ opacity: cardAnims[0].opacity, transform: [{ translateY: cardAnims[0].translateY }] }, th.SHADOW]}>
-            <LinearGradient colors={[th.isDark ? '#1A2A4A' : '#EFF6FF', th.isDark ? '#0D1520' : '#DBEAFE']} style={s6.card} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-              <View style={[s6.badge, { backgroundColor: th.BLUE_DIM }]}>
-                <Text style={[s6.badgeText, { color: BLUE }]}>{t('onboarding.nextMatchLabel')}</Text>
-              </View>
-              <View style={s6.matchRow}>
-                <View style={s6.teamBox}>
-                  {firstTeam ? <SmartLogo uri={firstTeam.logo} size={40} /> : <Text style={{ fontSize: 40 }}>⚽</Text>}
-                  <Text style={[s6.teamName, { color: th.TEXT_PRIMARY }]} numberOfLines={1}>{firstTeam?.shortName ?? 'EQP'}</Text>
-                </View>
-                <Text style={[s6.vs, { color: th.TEXT_DIM }]}>VS</Text>
-                <View style={s6.teamBox}>
-                  <Text style={{ fontSize: 40 }}>🆚</Text>
-                  <Text style={[s6.teamName, { color: th.TEXT_PRIMARY }]}>OPP</Text>
-                </View>
-              </View>
-              <Text style={[s6.matchTime, { color: th.SUB_TEXT }]}>Sábado · 21:00</Text>
-              {firstLeague && <Text style={[s6.leagueName, { color: th.TEXT_DIM }]}>{firstLeague.name}</Text>}
-            </LinearGradient>
-          </Animated.View>
+      {/* ── Two-section feed (no scroll) ── */}
+      <View style={{ flex: 1, paddingHorizontal: SIDE_PAD, gap: 10 }}>
 
-          {/* Card 2 — News */}
-          <Animated.View style={[{ opacity: cardAnims[1].opacity, transform: [{ translateY: cardAnims[1].translateY }] }, th.SHADOW]}>
-            <View style={[s6.card, { backgroundColor: th.SURFACE }]}>
-              <View style={s6.newsRow}>
-                <LinearGradient colors={[GOLD, '#E68A00']} style={s6.newsAvatar} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-                  <Text style={{ fontSize: 22 }}>⚽</Text>
-                </LinearGradient>
-                <View style={{ flex: 1 }}>
-                  <View style={[s6.badge, { backgroundColor: th.GOLD_DIM, alignSelf: 'flex-start', marginBottom: 4 }]}>
-                    <Text style={[s6.badgeText, { color: GOLD }]}>{t('onboarding.newsLabel')}</Text>
+        {/* MatchCardPro */}
+        <Animated.View style={{ opacity: matchAnim, transform: [{ translateY: matchY }] }}>
+          <LinearGradient
+            colors={[th.isDark ? '#0E1520' : '#EFF6FF', th.isDark ? '#0F1008' : '#F0FDF4']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={[s6.matchCard, { borderColor: th.isDark ? 'rgba(255,255,255,0.06)' : '#E2E8F0' }]}
+          >
+            {/* Subtle team-color glow on each side */}
+            <View style={[StyleSheet.absoluteFill, { borderRadius: 18, overflow: 'hidden' }]}>
+              <LinearGradient
+                colors={['rgba(46,124,246,0.12)', 'transparent']}
+                start={{ x: 0, y: 0.5 }} end={{ x: 0.42, y: 0.5 }}
+                style={StyleSheet.absoluteFill}
+              />
+              <LinearGradient
+                colors={['transparent', 'rgba(56,189,248,0.10)']}
+                start={{ x: 0.58, y: 0.5 }} end={{ x: 1, y: 0.5 }}
+                style={StyleSheet.absoluteFill}
+              />
+            </View>
+
+            {/* Body */}
+            <View style={s6.matchBody}>
+              {/* Home */}
+              <View style={s6.teamBlock}>
+                {firstTeam
+                  ? <SmartLogo uri={firstTeam.logo} size={52} />
+                  : <Text style={{ fontSize: 46 }}>⚽</Text>}
+                <Text style={[s6.teamLabel, { color: th.TEXT_PRIMARY }]} numberOfLines={1}>
+                  {firstTeam?.shortName ?? 'EQP'}
+                </Text>
+              </View>
+
+              {/* Center VS */}
+              <View style={s6.vsBlock}>
+                <Text style={[s6.vsLabel, { color: BLUE }]}>PRÓXIMO</Text>
+                <Text style={[s6.vsText, { color: th.TEXT_DIM }]}>VS</Text>
+                {matchDate && (
+                  <View style={[s6.timePill, { backgroundColor: th.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}>
+                    <Text style={[s6.timePillText, { color: th.TEXT_PRIMARY }]}>{matchDate}</Text>
                   </View>
-                  <Text style={[s6.newsTitle, { color: th.TEXT_PRIMARY }]} numberOfLines={2}>
-                    {firstPlayer ? `${firstPlayer.name} anotó doblete anoche` : 'Tu jugador favorito anotó anoche'}
-                  </Text>
-                </View>
+                )}
+              </View>
+
+              {/* Away */}
+              <View style={s6.teamBlock}>
+                {opponent
+                  ? <SmartLogo uri={opponent.logo} size={52} />
+                  : <Text style={{ fontSize: 46 }}>🆚</Text>}
+                <Text style={[s6.teamLabel, { color: th.TEXT_DIM }]} numberOfLines={1}>
+                  {opponent?.name ?? 'Rival'}
+                </Text>
               </View>
             </View>
-          </Animated.View>
 
-          {/* Card 3 — Table */}
-          <Animated.View style={[{ opacity: cardAnims[2].opacity, transform: [{ translateY: cardAnims[2].translateY }] }, th.SHADOW]}>
-            <View style={[s6.card, { backgroundColor: th.SURFACE }]}>
-              <View style={[s6.badge, { backgroundColor: th.BLUE_DIM, marginBottom: 10 }]}>
-                <Text style={[s6.badgeText, { color: BLUE }]}>{t('onboarding.tableLabel')}</Text>
-              </View>
-              {[1, 2, 3].map(pos => (
-                <View key={pos} style={[s6.tableRow, pos === 1 && firstTeam && { backgroundColor: th.BLUE_DIM, borderRadius: 8 }]}>
-                  <Text style={[s6.tablePos, { color: th.TEXT_DIM }]}>{pos}</Text>
-                  <Text style={[s6.tableName, { color: th.TEXT_PRIMARY }]} numberOfLines={1}>
-                    {pos === 1 && firstTeam ? firstTeam.name : pos === 2 ? 'Equipo B' : 'Equipo C'}
-                  </Text>
-                  <Text style={[s6.tablePoints, { color: th.TEXT_PRIMARY }]}>{36 - pos * 3} pts</Text>
-                </View>
-              ))}
-            </View>
-          </Animated.View>
-
-          {/* Card 4 — Stat */}
-          <Animated.View style={[{ opacity: cardAnims[3].opacity, transform: [{ translateY: cardAnims[3].translateY }] }, th.SHADOW]}>
-            <LinearGradient colors={[th.isDark ? '#1A1A1D' : '#FFFBEB', th.isDark ? '#2a1f00' : '#FEF3C7']} style={s6.card} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-              <View style={[s6.badge, { backgroundColor: th.GOLD_DIM, marginBottom: 10 }]}>
-                <Text style={[s6.badgeText, { color: GOLD }]}>{t('onboarding.statLabel')}</Text>
-              </View>
-              <Text style={s6.statNumber}>15</Text>
-              <View style={[s6.barContainer, { backgroundColor: th.isDark ? 'rgba(255,255,255,0.1)' : '#E5E7EB' }]}>
-                <LinearGradient colors={[GOLD, '#E68A00']} style={[s6.bar, { width: '75%' }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
-              </View>
-              <Text style={[s6.statSub, { color: th.TEXT_DIM }]}>
-                {firstPlayer ? `${firstPlayer.name} · Delantero` : 'Tu jugador · Delantero'}
+            {/* Footer */}
+            <View style={[s6.matchFooter, { borderTopColor: th.isDark ? 'rgba(255,255,255,0.05)' : '#E2E8F0', backgroundColor: th.isDark ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.03)' }]}>
+              <Text style={[s6.footerLeft, { color: th.TEXT_PRIMARY }]}>
+                {matchDay ? `${matchDay.charAt(0).toUpperCase() + matchDay.slice(1)} · ${matchDate}` : 'Próximo partido'}
               </Text>
-            </LinearGradient>
-          </Animated.View>
-        </View>
-      </ScrollView>
+              <Text style={[s6.footerRight, { color: th.TEXT_DIM }]} numberOfLines={1}>
+                {firstLeague?.name ?? nextMatch?.league ?? ''}
+              </Text>
+            </View>
+          </LinearGradient>
+        </Animated.View>
 
-      <CTAButton label={t('onboarding.likeWhatISee')} onPress={onNext} glow />
+        {/* TableCardPro */}
+        <Animated.View style={[{ flex: 1, opacity: tableAnim, transform: [{ translateY: tableY }] }, th.SHADOW]}>
+          <View style={[s6.tableCard, { backgroundColor: th.SURFACE, flex: 1 }]}>
+            {/* Table header */}
+            <View style={[s6.tableHeader, { borderBottomColor: th.isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9' }]}>
+              <View style={[s6.tableBadge, { backgroundColor: th.BLUE_DIM }]}>
+                <Text style={[s6.tableBadgeText, { color: BLUE }]}>TABLA</Text>
+              </View>
+              <Text style={[s6.tableLeagueName, { color: th.TEXT_DIM }]}>
+                {firstLeague?.name ?? 'Liga'}
+              </Text>
+            </View>
+
+            {/* Rows */}
+            {tableRows.length > 0
+              ? tableRows.map((row, idx) => {
+                  const isUser = row.team.id === String(firstTeam?.id ?? -1);
+                  return (
+                    <View
+                      key={`${row.team.id}-${idx}`}
+                      style={[
+                        s6.tableRowItem,
+                        isUser && { backgroundColor: th.isDark ? 'rgba(46,124,246,0.08)' : 'rgba(46,124,246,0.06)', borderLeftColor: BLUE },
+                        !isUser && { borderLeftColor: 'transparent' },
+                      ]}
+                    >
+                      <Text style={[s6.tableRowPos, { color: isUser ? BLUE : th.TEXT_DIM }]}>
+                        {row.position}
+                      </Text>
+                      <SmartLogo uri={row.team.logo ?? ''} size={20} />
+                      <Text style={[s6.tableRowName, { color: isUser ? th.TEXT_PRIMARY : th.TEXT_DIM, fontWeight: isUser ? '700' : '500' }]} numberOfLines={1}>
+                        {row.team.name}
+                      </Text>
+                      <Text style={[s6.tableRowPts, { color: isUser ? '#fff' : th.TEXT_DIM }]}>
+                        {row.points} pts
+                      </Text>
+                    </View>
+                  );
+                })
+              : /* Skeleton rows while loading */
+                [1, 2, 3, 4, 5].map(i => (
+                  <View key={i} style={[s6.tableRowItem, { borderLeftColor: 'transparent' }]}>
+                    <Text style={[s6.tableRowPos, { color: th.TEXT_DIM }]}>{i}</Text>
+                    <View style={[s6.skeletonLogo, { backgroundColor: th.isDark ? '#2A2A2A' : '#E5E7EB' }]} />
+                    <View style={[s6.skeletonText, { backgroundColor: th.isDark ? '#2A2A2A' : '#E5E7EB', width: `${55 + Math.random() * 25}%` as any }]} />
+                    <View style={[s6.skeletonPts, { backgroundColor: th.isDark ? '#2A2A2A' : '#E5E7EB' }]} />
+                  </View>
+                ))
+            }
+          </View>
+        </Animated.View>
+      </View>
+
+      <CTAButton label={t('onboarding.likeWhatISee')} onPress={onNext} glow style={{ marginTop: 10 }} />
     </View>
   );
 };
 
 const s6 = StyleSheet.create({
-  card: { borderRadius: 16, padding: 16, overflow: 'hidden' },
-  badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start' },
-  badgeText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
-  matchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', marginVertical: 12 },
-  teamBox: { alignItems: 'center', gap: 6, width: 80 },
-  teamName: { fontSize: 12, fontWeight: '800' },
-  vs: { fontSize: 18, fontWeight: '900' },
-  matchTime: { fontSize: 13, textAlign: 'center', marginTop: 4 },
-  leagueName: { fontSize: 11, textAlign: 'center', marginTop: 2 },
-  newsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  newsAvatar: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  newsTitle: { fontSize: 14, fontWeight: '700', lineHeight: 20 },
-  tableRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 4 },
-  tablePos: { fontSize: 14, fontWeight: '800', width: 20 },
-  tableName: { flex: 1, fontSize: 14, fontWeight: '600' },
-  tablePoints: { fontSize: 13, fontWeight: '700' },
-  statNumber: { fontSize: 84, fontWeight: '900', color: GOLD, lineHeight: 90 },
-  barContainer: { height: 6, borderRadius: 3, overflow: 'hidden', marginVertical: 8 },
-  bar: { height: 6, borderRadius: 3 },
-  statSub: { fontSize: 13 },
+  // Match card
+  matchCard: {
+    borderRadius: 18, borderWidth: 1, overflow: 'hidden',
+  },
+  matchBody: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 18, paddingTop: 18, paddingBottom: 14,
+  },
+  teamBlock: { alignItems: 'center', gap: 6, flex: 1 },
+  teamLabel: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
+  vsBlock: { alignItems: 'center', gap: 4, paddingHorizontal: 8 },
+  vsLabel: { fontSize: 9, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase' },
+  vsText: { fontSize: 24, fontWeight: '900', letterSpacing: 0.8 },
+  timePill: {
+    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3,
+  },
+  timePillText: { fontSize: 12, fontWeight: '700' },
+  matchFooter: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 18, paddingVertical: 9, borderTopWidth: 1,
+  },
+  footerLeft: { fontSize: 12, fontWeight: '600' },
+  footerRight: { fontSize: 11, fontWeight: '500', maxWidth: '50%' },
+  // Table card
+  tableCard: { borderRadius: 18, overflow: 'hidden' },
+  tableHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1,
+  },
+  tableBadge: { borderRadius: 5, paddingHorizontal: 8, paddingVertical: 3 },
+  tableBadgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 1.0 },
+  tableLeagueName: { flex: 1, fontSize: 11, fontWeight: '500' },
+  tableRowItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 12, paddingVertical: 7, borderLeftWidth: 3,
+  },
+  tableRowPos: { fontSize: 13, fontWeight: '800', width: 18 },
+  tableRowName: { flex: 1, fontSize: 13, lineHeight: 16 },
+  tableRowPts: { fontSize: 13, fontWeight: '700' },
+  // Skeleton placeholders
+  skeletonLogo: { width: 20, height: 20, borderRadius: 10 },
+  skeletonText: { flex: 1, height: 12, borderRadius: 6 },
+  skeletonPts: { width: 36, height: 12, borderRadius: 6 },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1177,8 +1484,9 @@ const Screen7Notifs: React.FC<{
   const th = useOBTheme();
 
   const subCopy =
-    fanLevel === 'analista' ? t('onboarding.notifsSubAnalista') :
-    fanLevel === 'fan'      ? t('onboarding.notifsSubFan') :
+    fanLevel === 'analista'   ? t('onboarding.notifsSubAnalista') :
+    fanLevel === 'fan'        ? t('onboarding.notifsSubFan') :
+    fanLevel === 'espectador' ? t('onboarding.notifsSubCasual') :
     t('onboarding.notifsSubCasual');
 
   return (
@@ -1602,8 +1910,8 @@ const s9 = StyleSheet.create({
     width: 96, height: 96, borderRadius: 48,
     alignItems: 'center', justifyContent: 'center',
   },
-  aLetter: { fontSize: 48, fontWeight: '900', color: '#FFFFFF' },
-  title: { fontSize: 20, fontWeight: '700' },
+  aLetter: { fontSize: 54, fontWeight: '900', color: '#FFFFFF' },
+  title: { fontSize: 36, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
   pct: { fontSize: 84, fontWeight: '900', color: BLUE, lineHeight: 90 },
   pctSymbol: { fontSize: 40, fontWeight: '700' },
   barTrack: {
@@ -1618,7 +1926,15 @@ const s9 = StyleSheet.create({
 // SCREEN 10 — Welcome Final (confetti)
 // ─────────────────────────────────────────────────────────────────────────────
 const CONFETTI_COUNT = 36;
-const CONFETTI_COLORS = [BLUE, GOLD, '#FF6B6B', '#51CF66', '#845EF7', '#FF922B', '#FFFFFF'];
+const CONFETTI_COLORS = [BLUE, GOLD, '#C8102E', '#006341', '#FFFFFF', '#4A90FF', '#F5B800'];
+
+// Edge-biased x-position: 50% left band (0-30%), 50% right band (70-100%)
+const edgeBiasedX = (i: number): number => {
+  const inLeftBand = i % 2 === 0;
+  return inLeftBand
+    ? Math.random() * SCREEN_W * 0.30
+    : SCREEN_W * 0.70 + Math.random() * SCREEN_W * 0.30;
+};
 
 const Screen10Final: React.FC<{
   name: string;
@@ -1630,13 +1946,14 @@ const Screen10Final: React.FC<{
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
 
-  // Confetti anims
+  // Confetti anims — edge-biased x positions so center text stays readable
   const confettiAnims = useRef(
-    Array.from({ length: CONFETTI_COUNT }).map(() => ({
+    Array.from({ length: CONFETTI_COUNT }).map((_, i) => ({
       y: new Animated.Value(-80),
-      x: new Animated.Value(Math.random() * SCREEN_W),
+      x: new Animated.Value(edgeBiasedX(i)),
       rotate: new Animated.Value(0),
       opacity: new Animated.Value(1),
+      isCenter: false, // all pieces are edge-biased
     })),
   ).current;
 
@@ -1647,7 +1964,7 @@ const Screen10Final: React.FC<{
     confettiAnims.forEach((anim, i) => {
       const startDelay = (i % 6) * 120;
       const duration   = 2500 + Math.random() * 2000;
-      anim.x.setValue(Math.random() * SCREEN_W);
+      anim.x.setValue(edgeBiasedX(i));
       Animated.loop(
         Animated.sequence([
           Animated.delay(startDelay),
