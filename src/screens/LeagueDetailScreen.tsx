@@ -1110,8 +1110,7 @@ function useTranslateStage() {
 
 const CalendarioTab: React.FC<{
   data: LeagueDetailData;
-  scrollHostRef?: React.RefObject<any>;
-}> = ({ data, scrollHostRef }) => {
+}> = ({ data }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
   const translateStage = useTranslateStage();
@@ -1122,71 +1121,25 @@ const CalendarioTab: React.FC<{
     navigation.push('MatchDetail', { match: fixtureToMatch(fix, leagueName, leagueLogo) });
   };
 
-  // ── Auto-scroll to current matchday ─────────────────────────────────────────
-  // Strategy: when the tab mounts (or fixtures change), find the most recent
-  // date that's ≤ today (i.e. last finished or in-progress matchday). If we
-  // haven't started yet (preseason), snap to the first upcoming date instead.
-  // The user can scroll up for past matches, down for future matches.
-  const dateNodeRefs = useRef<Map<string, View | null>>(new Map());
-  const didAutoScrollRef = useRef(false);
-
-  // Identify the target date once per fixtures-change.
-  const targetDateKey = React.useMemo(() => {
-    if (fixtures.length === 0) return null;
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const allDates = Array.from(new Set(fixtures.map(f => f.date.slice(0, 10)))).sort();
-    // Largest dateKey ≤ today
-    let target: string | null = null;
-    for (const d of allDates) {
-      if (d <= todayStr) target = d;
-      else break;
-    }
-    // If preseason (nothing past), snap to the first upcoming date
-    return target ?? allDates[0] ?? null;
-  }, [fixtures]);
-
-  // Re-arm when fixtures change (season switch) so we re-scroll once.
-  // Also clear the refs map so we don't accidentally measure an unmounted
-  // node from the previous season's render — that was the source of the
-  // "ref.measureLayout must be called with a ref to a native component"
-  // error on Fabric.
-  useEffect(() => {
-    didAutoScrollRef.current = false;
-    dateNodeRefs.current.clear();
-  }, [fixtures]);
-
-  const tryAutoScroll = () => {
-    if (didAutoScrollRef.current || !targetDateKey) return;
-    const node = dateNodeRefs.current.get(targetDateKey);
-    // The Fabric renderer wants a HostComponent ref. If our ref is null
-    // (unmounted) or doesn't expose `measure`, skip silently.
-    if (!node || typeof (node as any).measure !== 'function') return;
-    didAutoScrollRef.current = true;
-    // Defer to next frame so all sibling sections have a chance to lay out.
-    requestAnimationFrame(() => {
-      try {
-        // measure() — single arg, no relative-to ref required. pageY is the
-        // section's absolute Y on screen. At first render (no scroll yet)
-        // that equals its Y in scroll-content space; on subsequent runs
-        // we add the current scrollY anchor so the math still works after
-        // the user has scrolled.
-        (node as any).measure(
-          (_x: number, _y: number, _w: number, _h: number, _pX: number, pageY: number) => {
-            if (typeof pageY !== 'number' || isNaN(pageY)) return;
-            // pageY is the absolute screen Y of the section. At first render
-            // the ScrollView is at offset 0, so pageY ≈ position in scroll
-            // content. Approximate target = pageY minus the top chrome
-            // (~100px for safe area + tab bar) so the date label lands just
-            // below the sticky tab bar. On subsequent triggers (after the
-            // user has scrolled) the math is approximate but always gets
-            // them close — the feature degrades gracefully.
-            const target = Math.max(0, pageY - 100);
-            scrollHostRef?.current?.scrollTo?.({ y: target, animated: false });
-          },
-        );
-      } catch { /* best-effort — never crash render on a UX nicety */ }
-    });
-  };
+  // ── Auto-scroll to current matchday: REMOVED ─────────────────────────────
+  // The previous implementation (using View.measure inside a ref callback
+  // + requestAnimationFrame) had two recurring bugs:
+  //
+  //   1. measureLayout crash on Fabric when refs got stale on season switch
+  //   2. Visible "bounce" on first render: the ScrollView would jump down
+  //      to the target Y, then snap back to 0 once the final layout settled
+  //      (safe area + image loads + sticky header recomputed bounds), AND
+  //      the compact top bar would flash "🏆 Mundial 2026" briefly during
+  //      that bounce.
+  //
+  // Both came from the same root cause — we're trying to measure layout
+  // before it has fully stabilised. A robust implementation would need to
+  // pre-compute the contentOffset prop before the ScrollView renders, which
+  // requires knowing the height of every prior section without measuring
+  // them. Not worth the complexity for a nice-to-have.
+  //
+  // Current behaviour: page opens at the top. The user scrolls manually to
+  // find today's matches. Matches FotMob / Sofascore / ESPN default.
 
   if (fixtures.length === 0) {
     return (
@@ -1239,20 +1192,8 @@ const CalendarioTab: React.FC<{
               const [, mm, dd] = dateKey.split('-');
               const months = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
               const dateLabel = `${parseInt(dd, 10)} ${months[parseInt(mm, 10) - 1]}`;
-              const isTarget = dateKey === targetDateKey;
               return (
-                <View
-                  key={dateKey}
-                  ref={(n) => {
-                    // Track the section we want to scroll to; once it's mounted,
-                    // attempt the auto-scroll (best-effort, runs at most once).
-                    if (isTarget) {
-                      dateNodeRefs.current.set(dateKey, n);
-                      if (n) tryAutoScroll();
-                    }
-                  }}
-                  onLayout={isTarget ? tryAutoScroll : undefined}
-                >
+                <View key={dateKey}>
                   {/* Date divider */}
                   <View style={[ca.dateDivider, { borderTopColor: c.border }]}>
                     <Text style={[ca.dateDividerText, { color: c.accent }]}>{dateLabel}</Text>
@@ -1673,7 +1614,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
                       </View>
               ) : <ClasificacionTab data={data} />
             ) :
-            activeTab === 'partidos'      ? <CalendarioTab data={data} scrollHostRef={scrollHostRef} /> :
+            activeTab === 'partidos'      ? <CalendarioTab data={data} /> :
             activeTab === 'grupos'        ? <ClasificacionTab data={data} /> :
             activeTab === 'goleadores'    ? <GoleadoresTab data={data} /> :
             activeTab === 'asistencias'   ? <StatListTab data={data} type="assists" /> :
