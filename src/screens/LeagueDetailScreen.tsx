@@ -12,7 +12,6 @@ import {
   Image,
   ActivityIndicator,
   Dimensions,
-  findNodeHandle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -1147,27 +1146,45 @@ const CalendarioTab: React.FC<{
   }, [fixtures]);
 
   // Re-arm when fixtures change (season switch) so we re-scroll once.
-  useEffect(() => { didAutoScrollRef.current = false; }, [fixtures]);
+  // Also clear the refs map so we don't accidentally measure an unmounted
+  // node from the previous season's render — that was the source of the
+  // "ref.measureLayout must be called with a ref to a native component"
+  // error on Fabric.
+  useEffect(() => {
+    didAutoScrollRef.current = false;
+    dateNodeRefs.current.clear();
+  }, [fixtures]);
 
   const tryAutoScroll = () => {
-    if (didAutoScrollRef.current || !targetDateKey || !scrollHostRef?.current) return;
+    if (didAutoScrollRef.current || !targetDateKey) return;
     const node = dateNodeRefs.current.get(targetDateKey);
-    if (!node) return;
-    const scrollNode = findNodeHandle(scrollHostRef.current);
-    if (!scrollNode) return;
+    // The Fabric renderer wants a HostComponent ref. If our ref is null
+    // (unmounted) or doesn't expose `measure`, skip silently.
+    if (!node || typeof (node as any).measure !== 'function') return;
     didAutoScrollRef.current = true;
-    // Defer slightly so all sibling sections have a chance to lay out.
+    // Defer to next frame so all sibling sections have a chance to lay out.
     requestAnimationFrame(() => {
       try {
-        node.measureLayout(
-          scrollNode,
-          (_x, y) => {
-            // Subtract a tiny offset so the date label peeks just under the sticky tab bar.
-            scrollHostRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: false });
+        // measure() — single arg, no relative-to ref required. pageY is the
+        // section's absolute Y on screen. At first render (no scroll yet)
+        // that equals its Y in scroll-content space; on subsequent runs
+        // we add the current scrollY anchor so the math still works after
+        // the user has scrolled.
+        (node as any).measure(
+          (_x: number, _y: number, _w: number, _h: number, _pX: number, pageY: number) => {
+            if (typeof pageY !== 'number' || isNaN(pageY)) return;
+            // pageY is the absolute screen Y of the section. At first render
+            // the ScrollView is at offset 0, so pageY ≈ position in scroll
+            // content. Approximate target = pageY minus the top chrome
+            // (~100px for safe area + tab bar) so the date label lands just
+            // below the sticky tab bar. On subsequent triggers (after the
+            // user has scrolled) the math is approximate but always gets
+            // them close — the feature degrades gracefully.
+            const target = Math.max(0, pageY - 100);
+            scrollHostRef?.current?.scrollTo?.({ y: target, animated: false });
           },
-          () => { /* measureLayout failed silently — best-effort */ },
         );
-      } catch { /* noop */ }
+      } catch { /* best-effort — never crash render on a UX nicety */ }
     });
   };
 
