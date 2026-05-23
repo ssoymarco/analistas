@@ -32,8 +32,10 @@ WebBrowser.maybeCompleteAuthSession();
 
 // Client IDs from Firebase Console / GoogleService-Info.plist
 // iOS Client ID: from GoogleService-Info.plist → CLIENT_ID
+// Must match exactly the CLIENT_ID inside GoogleService-Info.plist; otherwise
+// expo-auth-session never gets a valid id_token back from Google's redirect.
 const IOS_CLIENT_ID =
-  '562270448336-mpuuee0qov1j96eea9g5idh6b0eh79m3.apps.googleusercontent.com';
+  '562270448336-7telon5j0pjscfbet7pqo3faq6mu3pc4.apps.googleusercontent.com';
 
 // Web Client ID: Firebase Console → Authentication → Sign-in method
 // → Google → Web SDK configuration → Web client ID

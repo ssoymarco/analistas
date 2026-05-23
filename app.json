@@ -39,7 +39,14 @@
         "UIBackgroundModes": [
           "remote-notification"
         ],
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "com.googleusercontent.apps.562270448336-7telon5j0pjscfbet7pqo3faq6mu3pc4"
+            ]
+          }
+        ]
       },
       "buildNumber": "2"
     },

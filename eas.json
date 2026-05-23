@@ -36,7 +36,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "562270448336-l6465c4ietcle0b6kgevabe0hglsjbv6.apps.googleusercontent.com"
       }
     }
   },
