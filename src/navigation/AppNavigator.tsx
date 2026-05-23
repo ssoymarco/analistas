@@ -5,6 +5,7 @@ import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useOnboarding } from '../contexts/OnboardingContext';
@@ -316,6 +317,7 @@ const TAB_ICONS: Record<string, (color: string, focused: boolean) => React.React
 function MainTabs() {
   const c = useThemeColors();
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -324,8 +326,11 @@ function MainTabs() {
           backgroundColor: c.tabBg,
           borderTopColor: c.border,
           borderTopWidth: 1,
-          height: Platform.OS === 'ios' ? 80 : 64,
-          paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+          // iOS keeps its existing manual hardcode (untouched, was already correct).
+          // Android: add the system bottom inset (3-button nav bar or gesture pill)
+          //   so the tab bar doesn't collide with the native bottom system buttons.
+          height: Platform.OS === 'ios' ? 80 : 64 + insets.bottom,
+          paddingBottom: Platform.OS === 'ios' ? 24 : 8 + insets.bottom,
           paddingTop: 8,
           elevation: 0,
           shadowOpacity: 0,
