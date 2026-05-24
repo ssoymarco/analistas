@@ -64,6 +64,24 @@
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.VIBRATE",
         "android.permission.POST_NOTIFICATIONS"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": {
+            "scheme": "com.googleusercontent.apps.562270448336-l6465c4ietcle0b6kgevabe0hglsjbv6"
+          }
+        },
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": {
+            "scheme": "com.googleusercontent.apps.562270448336-v86ai9gk29pgiv6ng9dosepvvl4pgeou"
+          }
+        }
       ]
     },
     "web": {
