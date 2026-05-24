@@ -38,6 +38,7 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from './firebase';
 import { resolveTeamLogo } from '../utils/teamLogoOverrides';
 import { buildFixtureDetailFromFirestoreData } from './sportsApi';
@@ -280,6 +281,25 @@ function matchFromDoc(d: MatchDoc): Match {
     homeScoreHT:    d.homeScoreHT ?? undefined,
     awayScoreHT:    d.awayScoreHT ?? undefined,
     stateLabel:     d.stateLabel ?? undefined,
+    // Live-clock anchor — used by useLiveTick to smoothly extrapolate the
+    // minute between server polls. Only populated for live matches.
+    liveClock:      (d as any).liveClock ?? undefined,
+    // Stage / round / group — needed by getCupBracket to partition cup
+    // fixtures into bracket cells (group stage vs. knockout). Optional on the
+    // MatchDoc; older docs written before syncFixtures pulled stage includes
+    // won't have these — they upgrade on the next 30-min syncFixtures run.
+    stageId:        (d as any).stageId ?? undefined,
+    roundId:        (d as any).roundId ?? undefined,
+    groupId:        (d as any).groupId ?? undefined,
+    stage:          (d as any).stage ?? undefined,
+    round:          (d as any).round ?? undefined,
+    group:          (d as any).group ?? undefined,
+    // Venue — used by bracket cells (CupBracketView) to render
+    // "Estadio X · Ciudad Y". Mundial 2026 venue_ids get an FIFA-clean
+    // overlay at render time via src/config/worldCupVenues.ts.
+    venueId:        (d as any).venueId ?? undefined,
+    venueName:      (d as any).venueName ?? undefined,
+    venueCity:      (d as any).venueCity ?? undefined,
   };
 }
 
@@ -683,14 +703,74 @@ export async function getTopScorersFromFirestore(seasonId: number): Promise<Fire
  *
  * Returns an unsubscribe function — call it on cleanup (useEffect return).
  */
+// ── AsyncStorage match cache ─────────────────────────────────────────────────
+//
+// The Firebase web SDK on React Native has no persistent local cache (the
+// `persistentLocalCache` option only persists via IndexedDB, which doesn't
+// exist on RN). Without a cache, every cold start of the app pays a full
+// network round-trip before the first onSnapshot callback fires — measured
+// at 15+ seconds on Android. To get parity with FotMob / 365scores / FlashScore
+// (which all show last-known data instantly on cold start), we keep our own
+// AsyncStorage-backed cache of the most recent match payload per query.
+//
+// Flow per subscription:
+//   1. On subscribe, kick off an AsyncStorage read in parallel.
+//   2. If the cache resolves before the first Firestore snapshot AND the
+//      cached entry isn't too stale, emit it immediately so the UI paints.
+//   3. Every Firestore snapshot overwrites the cache (fire-and-forget) so the
+//      next cold start has fresher data.
+//
+// Cache entries are TTL'd at 24 h to bound disk usage. PartidosScreen can
+// browse ±7 days so worst-case ~15 keys × <100 KB each = ~1.5 MB total.
+
+const MATCH_CACHE_PREFIX  = 'cache:matches:';
+const FIXTURES_CACHE_KEY  = (date: string) => `${MATCH_CACHE_PREFIX}date:${date}`;
+const LIVESCORES_CACHE_KEY = `${MATCH_CACHE_PREFIX}live`;
+const MATCH_CACHE_TTL_MS  = 24 * 60 * 60 * 1000; // 24 hours
+
+async function readMatchCache(key: string): Promise<Match[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { data: Match[]; timestamp: number };
+    if (typeof parsed?.timestamp !== 'number') return null;
+    if (Date.now() - parsed.timestamp > MATCH_CACHE_TTL_MS) return null;
+    if (!Array.isArray(parsed.data)) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeMatchCache(key: string, data: Match[]): void {
+  // Fire-and-forget. We never want cache writes to block UI updates.
+  AsyncStorage.setItem(
+    key,
+    JSON.stringify({ data, timestamp: Date.now() }),
+  ).catch(() => {});
+}
+
 export function subscribeLivescores(
   onChange: (matches: Match[]) => void,
   onError?: (err: Error) => void,
 ): Unsubscribe {
+  // Track whether the live Firestore snapshot has already fired so that a
+  // slow cache read doesn't overwrite fresher live data with stale cached data.
+  let liveDataReceived = false;
+
+  readMatchCache(LIVESCORES_CACHE_KEY).then(cached => {
+    if (cached && !liveDataReceived) onChange(cached);
+  });
+
   const q = query(collection(db, 'matches'), where('status', '==', 'live'));
   return onSnapshot(
     q,
-    snap => onChange(snap.docs.map(d => matchFromDoc(d.data() as MatchDoc))),
+    snap => {
+      liveDataReceived = true;
+      const matches = snap.docs.map(d => matchFromDoc(d.data() as MatchDoc));
+      onChange(matches);
+      writeMatchCache(LIVESCORES_CACHE_KEY, matches);
+    },
     err => onError?.(err),
   );
 }
@@ -717,6 +797,14 @@ export function subscribeFixturesByDate(
   const buckets: Record<string, Map<string, Match>> = {};
   for (const d of utcDates) buckets[d] = new Map();
 
+  // Same anti-overwrite guard as subscribeLivescores: don't let a slow cache
+  // read overwrite a fresher live snapshot if the network beats AsyncStorage.
+  let liveDataReceived = false;
+
+  readMatchCache(FIXTURES_CACHE_KEY(localDate)).then(cached => {
+    if (cached && !liveDataReceived) onChange(cached);
+  });
+
   const emit = () => {
     const seen = new Set<string>();
     const out: Match[] = [];
@@ -728,7 +816,9 @@ export function subscribeFixturesByDate(
         out.push(m);
       }
     }
+    liveDataReceived = true;
     onChange(out);
+    writeMatchCache(FIXTURES_CACHE_KEY(localDate), out);
   };
 
   const unsubs = utcDates.map(utcDate => {

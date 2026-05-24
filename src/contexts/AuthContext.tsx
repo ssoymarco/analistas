@@ -195,21 +195,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── onAuthStateChanged ─────────────────────────────────────────────────────
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async fbUser => {
+    const unsubscribe = onAuthStateChanged(auth, fbUser => {
       if (!fbUser) {
         setUser(null);
         setIsLoading(false);
         return;
       }
-      try {
-        const appUser = await ensureUserProfile(fbUser, pendingNameRef.current);
-        pendingNameRef.current = undefined;
-        setUser(appUser);
-      } catch {
-        setUser(null);
-      } finally {
-        setIsLoading(false);
-      }
+
+      // OPTIMISTIC: as soon as we know who's signed in, project a minimal
+      // user from the FirebaseUser and unblock the UI. The full profile
+      // (username + persisted displayName + provider mapping) is fetched in
+      // the background by ensureUserProfile and patched in when it lands.
+      //
+      // Why this matters: ensureUserProfile does a getDoc(users/{uid}) +
+      // possibly an updateDoc, both of which add network round-trips. On
+      // Android cold start those round-trips were holding isLoading=true
+      // for ~1-2s before the app could even start rendering Partidos, and
+      // they would stack on top of the Firestore subscription's own first
+      // snapshot wait. With this change the UI renders against cached
+      // fixtures immediately while auth and profile finish in parallel.
+      setUser(mapFirebaseUser(fbUser, {
+        displayName: fbUser.displayName ?? 'Analista',
+        username:    '',
+        email:       fbUser.email ?? null,
+        authMethod:  fbUser.isAnonymous
+          ? 'guest'
+          : (fbUser.providerData[0]?.providerId ?? 'guest'),
+      } as unknown as FirestoreProfile));
+      setIsLoading(false);
+
+      // Background: fetch / create the real profile and replace the
+      // optimistic user when it resolves. If this fails (offline,
+      // permission, etc.) we keep the optimistic user instead of
+      // dropping back to null so signed-in screens keep working.
+      ensureUserProfile(fbUser, pendingNameRef.current)
+        .then(appUser => {
+          pendingNameRef.current = undefined;
+          setUser(appUser);
+        })
+        .catch(() => {
+          // swallow — optimistic user remains
+        });
     });
     return unsubscribe;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
