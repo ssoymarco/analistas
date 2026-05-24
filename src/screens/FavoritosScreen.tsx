@@ -603,8 +603,47 @@ export const FavoritosScreen: React.FC = () => {
   // All = popular + Phase 2 squad data (~750 players from popular team rosters) → search only.
   // This prevents the suggestions list from being flooded with squad players (e.g. all of
   // América's roster), while still allowing the user to search for any squad player by name.
+  //
+  // Order: SAME country-aware ordering the onboarding picker uses
+  // (buildOnboardingPlayerNames). Mexican user lands on Santi Giménez +
+  // Raúl Jiménez first, then Messi/CR7/Mbappé/Haaland; Argentine sees Messi
+  // first; Brazilian sees Vini Jr / Neymar first; etc. Anything in
+  // POPULAR_PLAYERS that the country-aware function doesn't surface is
+  // appended at the end so we never drop a player from the suggestions.
   const enrichedPopularPlayers = useMemo(() => {
-    return POPULAR_PLAYERS.map(item => {
+    // Build a lookup of POPULAR_PLAYERS by normalized name for O(1) reorder
+    const playerByName = new Map<string, FavItem>();
+    POPULAR_PLAYERS.forEach(item => {
+      playerByName.set(normalize(item.name), item);
+    });
+
+    // Pull country-ordered names from the same function as the onboarding
+    const orderedNames = buildOnboardingPlayerNames(country, language);
+
+    // Project ordered names → FavItems (preserving local hardcoded metadata)
+    const ordered: FavItem[] = [];
+    const usedKeys = new Set<string>();
+    for (const name of orderedNames) {
+      const key = normalize(name);
+      const item = playerByName.get(key);
+      if (item && !usedKeys.has(key)) {
+        ordered.push(item);
+        usedKeys.add(key);
+      }
+    }
+
+    // Defensive tail: any POPULAR_PLAYERS not surfaced by buildOnboardingPlayerNames
+    // get appended at the end so we never silently drop a curated player.
+    for (const item of POPULAR_PLAYERS) {
+      const key = normalize(item.name);
+      if (!usedKeys.has(key)) {
+        ordered.push(item);
+        usedKeys.add(key);
+      }
+    }
+
+    // Enrich with live SportMonks player data (current club, image, jersey)
+    return ordered.map(item => {
       const sm = smPlayerMap.get(normalize(item.name));
       if (!sm) return item;
       // API-verified image only; do NOT fall back to hardcoded CDN path.
@@ -613,11 +652,11 @@ export const FavoritosScreen: React.FC = () => {
       // "{API-club} · {country-from-hardcoded-subtitle}" so transfers don't
       // leave stale team names visible (e.g. KdB moved Man City → Napoli).
       // The country is the part AFTER the last " · " in the original subtitle.
-      const country = item.subtitle.includes(' · ')
+      const playerNationality = item.subtitle.includes(' · ')
         ? item.subtitle.split(' · ').pop() ?? ''
         : item.subtitle;
       const subtitle = sm.teamName
-        ? `${sm.teamName} · ${country}`
+        ? `${sm.teamName} · ${playerNationality}`
         : item.subtitle;
       return {
         ...item,
@@ -630,7 +669,7 @@ export const FavoritosScreen: React.FC = () => {
         position: sm.position,
       };
     });
-  }, [smPlayerMap]);
+  }, [country, language, smPlayerMap]);
 
   const enrichedAllPlayers = useMemo(() => {
     const names = new Set(POPULAR_PLAYERS.map(p => normalize(p.name)));
