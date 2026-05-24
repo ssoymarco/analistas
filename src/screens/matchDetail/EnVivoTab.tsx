@@ -21,6 +21,7 @@ import type {
   OddsMarket, MatchPrediction, MissingPlayer, PressureIndex,
   MatchVenue, MatchReferee, RefereeStats,
 } from '../../data/types';
+import { isImageUri } from '../../utils/imageUri';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH   = SCREEN_WIDTH - 72; // prediction card width
@@ -63,7 +64,7 @@ function translateWeatherDesc(desc: string, t: (key: string) => string): string 
 // SHARED SUB-COMPONENTS
 // ══════════════════════════════════════════════════════════════════════════════
 
-function eventEmoji(type: string): string {
+function eventEmoji(type: string, injured?: boolean): string {
   switch (type) {
     case 'goal':          return '⚽';
     case 'own-goal':      return '⚽';
@@ -74,6 +75,8 @@ function eventEmoji(type: string): string {
     case 'red':           return '🟥';
     case 'sub':           return '🔄';
     case 'var':           return '📺';
+    case 'delay-start':   return injured ? '🚨' : '⏸️'; // injury vs generic pause
+    case 'delay-end':     return '▶️';
     default:              return '●';
   }
 }
@@ -145,7 +148,36 @@ const EventRow: React.FC<{ event: MatchEvent; match: Match }> = ({ event, match 
   const c = useThemeColors();
   const isHome = event.team === 'home';
   const isGoal = isGoalEvent(event.type);
+  const isDelay = event.type === 'delay-start' || event.type === 'delay-end';
   const minuteStr = `${event.minute}${event.addedTime ? `+${event.addedTime}` : ''}'`;
+
+  // Delays render as a single centered row — they don't belong to one team.
+  // Injury delays do carry a player_name so we show it; cooling breaks /
+  // weather pauses don't, so we use a generic "Pausa" / "Reanudación" label.
+  if (isDelay) {
+    const label =
+      event.type === 'delay-end'
+        ? 'Reanudación'
+        : event.injured && event.player
+          ? `Pausa por lesión · ${event.player}`
+          : 'Pausa';
+    return (
+      <View style={[ev.row, { borderBottomColor: c.border }]}>
+        <View style={ev.side} />
+        <View style={ev.center}>
+          <View style={[ev.iconWrap, { backgroundColor: c.surface }]}>
+            <Text style={ev.icon}>{eventEmoji(event.type, event.injured)}</Text>
+          </View>
+          <Text style={[ev.minute, { color: c.textTertiary }]}>{minuteStr}</Text>
+        </View>
+        <View style={[ev.side, { alignItems: 'flex-start' }]}>
+          <Text style={[ev.player, { color: c.textSecondary, flexShrink: 1 }]} numberOfLines={1}>
+            {label}
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[ev.row, { borderBottomColor: c.border }]}>
@@ -163,7 +195,7 @@ const EventRow: React.FC<{ event: MatchEvent; match: Match }> = ({ event, match 
       </View>
       <View style={ev.center}>
         <View style={[ev.iconWrap, { backgroundColor: c.surface }]}>
-          <Text style={ev.icon}>{eventEmoji(event.type)}</Text>
+          <Text style={ev.icon}>{eventEmoji(event.type, event.injured)}</Text>
         </View>
         <Text style={[ev.minute, { color: c.textTertiary }]}>{minuteStr}</Text>
       </View>
@@ -497,7 +529,7 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
 // Mini team badge for prediction cards
 function TeamBadgeMini({ name, logo, color }: { name: string; logo: string; color: string }) {
   const c = useThemeColors();
-  const isUrl = logo.startsWith('http');
+  const isUrl = isImageUri(logo);
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       {isUrl ? (
@@ -1055,7 +1087,7 @@ const FormSection: React.FC<{ homeForm?: TeamFormEntry[]; awayForm?: TeamFormEnt
   const renderTeamForm = (form: TeamFormEntry[], team: { shortName: string; logo: string }) => (
     <View style={fm.teamRow}>
       <View style={fm.teamInfo}>
-        {team.logo.startsWith('http') ? (
+        {isImageUri(team.logo) ? (
           <Image source={{ uri: team.logo }} style={fm.teamLogo} />
         ) : (
           <View style={[fm.teamLogo, { backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }]}>
@@ -1149,7 +1181,7 @@ const VenueDetailModal: React.FC<{
         <View style={[vdm.handle, { backgroundColor: c.border }]} />
 
         {/* Venue image */}
-        {!!venue.image && venue.image.startsWith('http') && (
+        {!!venue.image && isImageUri(venue.image) && (
           <Image source={{ uri: venue.image }} style={vdm.heroImage} resizeMode="cover" />
         )}
 
@@ -1250,7 +1282,7 @@ const RefereeDetailModal: React.FC<{
         {/* Photo + name */}
         <View style={rdm.heroRow}>
           <View style={[rdm.photoWrap, { borderColor: '#f59e0b60', backgroundColor: c.surface }]}>
-            {referee.imageUrl && referee.imageUrl.startsWith('http') ? (
+            {referee.imageUrl && isImageUri(referee.imageUrl) ? (
               <Image source={{ uri: referee.imageUrl }} style={rdm.photo} resizeMode="cover" />
             ) : (
               <Text style={{ fontSize: 40 }}>👤</Text>
@@ -1580,12 +1612,24 @@ function buildPressureCurve(
   homePressure: number,
   matchMinutes: number,
 ): number[] {
-  const total   = Math.max(matchMinutes, 90);
-  const points  = new Array<number>(total + 1).fill(50);
-  const impulse = new Array<number>(total + 1).fill(0);
+  // The X-axis of the chart always shows 0–90 so the labels and the half-time
+  // marker stay anchored. The CURVE itself, however, must only contain real
+  // data up to the current match minute — otherwise a match at minute 4 would
+  // render a noisy "history" through to minute 90 that the user reads as if it
+  // actually happened (reported on AC Milan 1-0 Cagliari at 4:48' on 2026-05-24).
+  // For finished matches we still extend to 90 so the full-match shape renders.
+  const total      = 90;
+  const elapsed    = Math.max(0, Math.min(matchMinutes, total)); // 0..90 cap
+  const points     = new Array<number>(total + 1).fill(50);
+  const impulse    = new Array<number>(total + 1).fill(0);
 
+  // Only ingest events that have actually happened — defensively skip any
+  // event minute beyond the current elapsed time (SportMonks occasionally
+  // backfills events with the next-period minute number while the period is
+  // still going).
   for (const ev of events) {
-    const min    = Math.min(ev.minute, total);
+    if (ev.minute > elapsed) continue;
+    const min    = Math.min(ev.minute, elapsed);
     const isHome = ev.team === 'home';
     if (ev.type === 'goal' || ev.type === 'penalty-goal' || ev.type === 'own-goal') {
       impulse[min] += isHome ? 15 : -15;
@@ -1596,15 +1640,20 @@ function buildPressureCurve(
     }
   }
 
+  // Walk momentum + bias + jitter ONLY through the elapsed window.
+  // Beyond `elapsed` we keep the neutral 50 fill — the chart will visually
+  // show an empty flat line for time the match hasn't reached yet.
   let momentum = 0;
-  for (let i = 0; i <= total; i++) {
+  const bias   = homePressure - 50;
+  for (let i = 0; i <= elapsed; i++) {
     momentum  = momentum * 0.91 + impulse[i];
     points[i] = 50 + momentum;
   }
-
-  const bias = homePressure - 50;
-  for (let i = 0; i <= total; i++) {
-    const t     = i / total;
+  for (let i = 0; i <= elapsed; i++) {
+    // Normalize t against the elapsed window so the sine wave shape feels
+    // proportional to how much of the match has played out so far. Guard
+    // against divide-by-zero when elapsed is 0.
+    const t     = elapsed > 0 ? i / elapsed : 0;
     const blend = 50 + bias * (0.5 + 0.5 * Math.sin(t * Math.PI * 3 + bias * 0.05));
     points[i]   = points[i] * 0.6 + blend * 0.4;
     points[i]  += Math.sin(i * 0.31) * 3.5 + Math.cos(i * 0.68) * 2.5;
@@ -1661,7 +1710,23 @@ const PressureSection: React.FC<{
 }> = ({ pressure, match, events = [] }) => {
   const c           = useThemeColors();
   const { isDark }  = useDarkMode();
-  const matchMinutes = match.minute ?? 90;
+  // How many minutes of the match have actually been played. Drives how far
+  // along the 0–90 X-axis the curve is filled with real momentum data; beyond
+  // this minute the chart stays neutral (50). The X-axis itself is always
+  // 0–90 so the half-time line and tick labels stay anchored.
+  //   • finished → 90 (full match shape)
+  //   • live     → current minute (curve grows over time)
+  //   • scheduled → 0 (curve stays flat — shouldn't render here at all, but
+  //                     the fallback is graceful)
+  // Previously `match.minute ?? 90` was used, which during a brief data revert
+  // (syncFixtures stomping the live state with stale scheduled state, observed
+  // on MEX 2-0 GHA on 2026-05-23) caused the FULL 90-min curve to render as if
+  // the match had ended — explicit status mapping prevents that.
+  const matchMinutes = match.status === 'finished'
+    ? 90
+    : match.status === 'live' && typeof match.minute === 'number' && match.minute > 0
+      ? match.minute
+      : 0;
 
   const rawCurve = React.useMemo(
     () => buildPressureCurve(events, pressure.home, matchMinutes),
@@ -1851,7 +1916,13 @@ const pi = StyleSheet.create({
     borderStyle: 'dashed' as const,
   },
 
-  xAxis:  { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 32, paddingVertical: 6 },
+  // Padding here MUST mirror the chart container's effective margins so the
+  // X-axis labels align with the bars and the half-time dashed line:
+  //   • Left: chartWrap.paddingLeft (4) + yAxis.width (Y_AXIS_W = 28) = 32
+  //   • Right: CHART_PAD_R = 14 (was previously 32, which pushed the "90'"
+  //     label 18 px inward and threw the MT label out of line with the
+  //     dashed half-time marker by 9 px).
+  xAxis:  { flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 32, paddingRight: CHART_PAD_R, paddingVertical: 6 },
   xLabel: { fontSize: 8, fontWeight: '500' },
 
   summary:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, gap: 10, borderTopWidth: 1 },
