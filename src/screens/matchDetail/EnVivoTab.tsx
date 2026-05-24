@@ -5,7 +5,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image,
-  ScrollView, Dimensions, Modal, Pressable,
+  ScrollView, Dimensions, Modal, Pressable, Animated, Easing,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTranslation } from 'react-i18next';
@@ -18,7 +18,7 @@ import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupV
 import { getLeagueDisplayName } from '../../config/leagues';
 import type {
   Match, MatchDetail, MatchEvent, H2HResult, TeamFormEntry,
-  OddsMarket, MatchPrediction, MissingPlayer, PressureIndex,
+  OddsMarket, MatchPrediction, MissingPlayer, PressureIndex, MatchStatCategory,
   MatchVenue, MatchReferee, RefereeStats,
 } from '../../data/types';
 import { isImageUri } from '../../utils/imageUri';
@@ -1707,7 +1707,13 @@ const PressureSection: React.FC<{
   pressure: PressureIndex;
   match: Match;
   events?: MatchEvent[];
-}> = ({ pressure, match, events = [] }) => {
+  /**
+   * Pass `detail.statistics` so the section can render a compact 4-stat strip
+   * below the chart (corners / fouls / saves / big chances). Optional — the
+   * strip is hidden entirely when stats are missing.
+   */
+  statistics?: MatchStatCategory[];
+}> = ({ pressure, match, events = [], statistics = [] }) => {
   const c           = useThemeColors();
   const { isDark }  = useDarkMode();
   // How many minutes of the match have actually been played. Drives how far
@@ -1758,6 +1764,60 @@ const PressureSection: React.FC<{
 
   const borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)';
   const gridColor   = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+
+  // ── Live playhead ──────────────────────────────────────────────────────────
+  // The pressure chart used to have no "you are here" indicator during live
+  // play — users couldn't tell which slice of the chart corresponded to the
+  // moment they were watching. Now we render a vertical accent line at the
+  // current minute (capped to the chart's 0–90 domain) plus a soft pulsing dot
+  // at the top of the line to draw the eye. Only visible during live; the
+  // chart stays clean for scheduled/finished matches.
+  const playheadMin: number | null =
+    match.status === 'live' &&
+    typeof match.minute === 'number' &&
+    match.minute > 0
+      ? Math.min(match.minute, 90)
+      : null;
+
+  const pulseAnim = React.useRef(new Animated.Value(0.45)).current;
+  React.useEffect(() => {
+    if (playheadMin === null) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0.45,
+          duration: 850,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playheadMin === null]);
+
+  // ── Extra stats strip ──────────────────────────────────────────────────────
+  // Compact 4-row block beneath the summary bar. Picks stats that AREN'T
+  // already in the top-level QuickStats card (possession/shots/xG) so the
+  // section adds genuinely new info instead of repeating numbers. Each entry
+  // is filtered out if the stat is missing from SportMonks for this match.
+  const extraStats = React.useMemo(() => {
+    const all = statistics.flatMap(c => c.stats);
+    const pick = (label: string) => all.find(s => s.label === label);
+    return [
+      { key: 'corners', label: 'Saques de esquina',  stat: pick('Saques de esquina') },
+      { key: 'fouls',   label: 'Faltas',             stat: pick('Faltas') },
+      { key: 'saves',   label: 'Salvadas de portero',stat: pick('Salvadas de portero') },
+      { key: 'chances', label: 'Grandes chances',    stat: pick('Grandes chances') },
+    ].filter(row => row.stat !== undefined);
+  }, [statistics]);
 
   return (
     <View style={[pi.card, { backgroundColor: c.card, borderColor: c.border }]}>
@@ -1814,6 +1874,36 @@ const PressureSection: React.FC<{
               left: (45 / totalMin) * chartW,
               borderColor: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)',
             }]} />
+
+            {/* Live playhead — only when the match is actually live. */}
+            {playheadMin !== null && (
+              <>
+                {/* Vertical line at the current minute */}
+                <View style={{
+                  position: 'absolute',
+                  left: (playheadMin / totalMin) * chartW,
+                  top: 0,
+                  bottom: 0,
+                  width: 1.5,
+                  backgroundColor: c.accent,
+                  opacity: 0.55,
+                }} />
+                {/* Pulsing dot anchored to the top of the line. Pokes a few
+                    pixels above the chart container so it sits between the
+                    chart and the row of home event markers above, drawing
+                    the eye without overlapping the curve. */}
+                <Animated.View style={{
+                  position: 'absolute',
+                  left: (playheadMin / totalMin) * chartW - 5,
+                  top: -3,
+                  width: 10,
+                  height: 10,
+                  borderRadius: 5,
+                  backgroundColor: c.accent,
+                  opacity: pulseAnim,
+                }} />
+              </>
+            )}
 
             {/* Red-card vertical lines */}
             {[...homeMarkers, ...awayMarkers]
@@ -1891,6 +1981,33 @@ const PressureSection: React.FC<{
         </View>
         <Text style={[pi.summaryValue, { color: PI_AWAY, textAlign: 'right' }]}>{pressure.away}%</Text>
       </View>
+
+      {/* ── Extra stats strip (corners / fouls / saves / big chances) ── */}
+      {extraStats.length > 0 && (
+        <View style={[pi.extraStats, { borderTopColor: borderColor }]}>
+          {extraStats.map((row, idx) => {
+            const stat = row.stat!;
+            return (
+              <View
+                key={row.key}
+                style={[
+                  pi.extraStatRow,
+                  idx > 0 && {
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderTopColor: borderColor,
+                  },
+                ]}
+              >
+                <Text style={[pi.extraStatVal, { color: PI_HOME }]}>{stat.home}</Text>
+                <Text style={[pi.extraStatLabel, { color: c.textSecondary }]} numberOfLines={1}>
+                  {row.label}
+                </Text>
+                <Text style={[pi.extraStatVal, { color: PI_AWAY, textAlign: 'right' }]}>{stat.away}</Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 };
@@ -1930,6 +2047,14 @@ const pi = StyleSheet.create({
   summaryBarWrap: { flex: 1 },
   summaryBarBg:   { height: 6, borderRadius: 3, overflow: 'hidden' },
   summaryBarHome: { height: 6, backgroundColor: PI_HOME, borderRadius: 3 },
+
+  // Compact stats strip below the summary bar. Same visual rhythm as the
+  // miniStatRow used by QuickStats so the two cards feel related, just
+  // narrower vertical padding to keep the section dense.
+  extraStats:     { borderTopWidth: 1 },
+  extraStatRow:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 7 },
+  extraStatVal:   { width: 36, fontSize: 13, fontWeight: '700', textAlign: 'center' },
+  extraStatLabel: { flex: 1, fontSize: 11, fontWeight: '500', textAlign: 'center' },
 });
 
 // ── Injuries section ─────────────────────────────────────────────────────────
@@ -2110,7 +2235,7 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
           <QuickStats match={match} detail={detail} />
 
           {/* Pressure index */}
-          {detail.pressureIndex && <PressureSection pressure={detail.pressureIndex} match={match} events={detail.events} />}
+          {detail.pressureIndex && <PressureSection pressure={detail.pressureIndex} match={match} events={detail.events} statistics={detail.statistics} />}
 
           {/* Poll results (locked after match) */}
           <PollResultsSection match={match} />
