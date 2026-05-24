@@ -1,109 +1,101 @@
 /**
  * authGoogle.ts
  *
- * Google Sign-In via expo-auth-session + Firebase credential.
- * Works in Expo Go (browser-based OAuth flow).
+ * Google Sign-In via the native @react-native-google-signin/google-signin
+ * SDK + Firebase credential. This is the path Firebase officially recommends
+ * for React Native apps.
  *
  * Flow:
- *  1. Open Google OAuth in the system browser via expo-auth-session
- *  2. Receive id_token back via redirect
- *  3. Create Firebase GoogleAuthProvider credential
- *  4. signInWithCredential(auth, credential) → Firebase user
+ *  1. GoogleSignin.signIn() opens the platform-native account picker
+ *     (Google Play Services on Android, ASAuthorizationController on iOS).
+ *  2. The SDK returns a real id_token directly — no OAuth code exchange,
+ *     no browser detour, no custom URI scheme dance.
+ *  3. We hand that id_token to Firebase via GoogleAuthProvider.credential
+ *     and signInWithCredential.
+ *  4. onAuthStateChanged in AuthContext fires with the real Firebase user.
  *
- * Android setup (required to enable Google Sign-In on Android):
- *  1. Firebase Console → Project Settings → Add Android app
- *     - Package name: app.analistas (must match app.json android.package)
- *     - Download google-services.json → place at project root
- *  2. Google Cloud Console → APIs & Services → Credentials
- *     - Create OAuth 2.0 Client ID → Android
- *     - Package name: app.analistas
- *     - SHA-1: run `eas credentials` or get from Firebase Console
- *  3. Set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID in .env with the Client ID
+ * Why we migrated from expo-auth-session/providers/google:
+ *  - That library uses the OAuth authorization-code flow with PKCE on
+ *    native, so Google's response only contains `code`, never `id_token`.
+ *    Our code expected id_token and broke at the last step (see commit
+ *    23c3898 for the diagnostic build that proved this — alert showed
+ *    "No id_token received from Google (params keys: state, iss, code,
+ *    scope, authuser, prompt)").
+ *  - The native SDK doesn't have that problem.
+ *
+ * Required setup (all already done, recorded here for posterity):
+ *  - Firebase Console → Authentication → Google provider enabled.
+ *  - Android: SHA-1 of Play app signing key registered in Firebase
+ *    (0f24...), google-services.json downloaded to project root.
+ *  - iOS: GoogleService-Info.plist at project root, CLIENT_ID and
+ *    REVERSED_CLIENT_ID match. The native SDK reads the plist
+ *    automatically — no manual iOS Client ID needed in JS.
+ *  - app.json plugin: "@react-native-google-signin/google-signin"
+ *    (added automatically by `npx expo install`).
+ *  - Web Client ID below is required so the id_token we get can be
+ *    validated against the Firebase project's web OAuth client.
  */
 
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
-import { Platform } from 'react-native';
-import { GoogleAuthProvider, signInWithCredential, linkWithCredential } from 'firebase/auth';
+import {
+  GoogleSignin,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
+import {
+  GoogleAuthProvider,
+  signInWithCredential,
+  linkWithCredential,
+} from 'firebase/auth';
 import { auth } from './firebase';
 
-// Required: warms up the browser on Android for faster auth
-WebBrowser.maybeCompleteAuthSession();
-
-// Client IDs from Firebase Console / GoogleService-Info.plist
-// iOS Client ID: from GoogleService-Info.plist → CLIENT_ID
-// Must match exactly the CLIENT_ID inside GoogleService-Info.plist; otherwise
-// expo-auth-session never gets a valid id_token back from Google's redirect.
-const IOS_CLIENT_ID =
-  '562270448336-7telon5j0pjscfbet7pqo3faq6mu3pc4.apps.googleusercontent.com';
-
-// Web Client ID: Firebase Console → Authentication → Sign-in method
-// → Google → Web SDK configuration → Web client ID
+// Web Client ID from Firebase Console → Project Settings → General →
+// Your apps → Web SDK configuration. The native SDK uses this to mint
+// id_tokens that Firebase will accept (the audience of the id_token is
+// the web client, not the platform-specific Android/iOS clients).
 const WEB_CLIENT_ID =
   '562270448336-d3ae5g54347do4nrmsoagjf7jsbc4d38.apps.googleusercontent.com';
 
-// Android Client ID: hardcoded because process.env.EXPO_PUBLIC_* substitution
-// was unreliable in Build 6 (the value was set in eas.json but the production
-// build still treated it as undefined at runtime, causing the sign-in to fail
-// instantly with "android_not_configured"). OAuth Client IDs are public —
-// no security risk in committing them.
-// This is the Android OAuth client paired with the Play app signing SHA-1
-// (0f24...), which is the SHA-1 that any Play Store install of this app uses.
-const ANDROID_CLIENT_ID =
-  '562270448336-l6465c4ietcle0b6kgevabe0hglsjbv6.apps.googleusercontent.com';
+// Configure the native SDK once at module load. Safe to call repeatedly;
+// the SDK ignores subsequent calls if config didn't change.
+GoogleSignin.configure({
+  webClientId: WEB_CLIENT_ID,
+  // offlineAccess: false → don't request a serverAuthCode; we only need
+  // the id_token for Firebase. Set to true only if we add a backend that
+  // needs to make Google API calls on the user's behalf.
+  offlineAccess: false,
+});
 
-/** Always configured now that the Android Client ID is hardcoded. */
-const ANDROID_GOOGLE_CONFIGURED = true;
+/**
+ * Pull an id_token out of the native sign-in result. The SDK has changed
+ * shape across major versions (v10 returned { idToken } at the top level,
+ * v13+ returns { type, data: { idToken } }), so check both.
+ */
+function extractIdToken(result: unknown): string | null {
+  const r = result as {
+    idToken?: string | null;
+    data?: { idToken?: string | null };
+  };
+  return r?.idToken ?? r?.data?.idToken ?? null;
+}
 
 export function useGoogleAuth() {
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    iosClientId: IOS_CLIENT_ID,
-    webClientId: WEB_CLIENT_ID,
-    // Always provide androidClientId on Android — expo-auth-session throws a
-    // synchronous render error if this is missing, crashing PerfilScreen entirely.
-    // We use the sentinel 'android_pending' until the real ID is configured.
-    androidClientId: Platform.OS === 'android' ? ANDROID_CLIENT_ID : undefined,
-  });
-
   const signInWithGoogle = async (): Promise<void> => {
-    if (!ANDROID_GOOGLE_CONFIGURED) {
-      throw new Error('android_not_configured');
-    }
-
-    const result = await promptAsync();
-
-    if (result.type !== 'success') {
-      if (result.type === 'cancel') throw new Error('cancelled');
-      // Surface as much info as possible so the caller can show what really
-      // went wrong (Google error code, OAuth error_description, etc.) instead
-      // of the generic "Google sign-in failed" message.
-      const params = (result as { params?: Record<string, string> }).params ?? {};
-      const errCode = params.error ?? '';
-      const errDesc = params.error_description ?? '';
-      const detail = errCode || errDesc
-        ? ` (${[errCode, errDesc].filter(Boolean).join(': ')})`
-        : '';
-      throw new Error(`Google sign-in failed [type=${result.type}]${detail}`);
-    }
-
-    const { id_token } = result.params;
-    if (!id_token) {
-      // Dump available param keys to help diagnose what we DID get back
-      const keys = Object.keys(result.params ?? {}).join(', ') || '<none>';
-      throw new Error(`No id_token received from Google (params keys: ${keys})`);
-    }
-
     try {
-      const credential = GoogleAuthProvider.credential(id_token);
+      // hasPlayServices throws on Android if Play Services is missing/outdated.
+      // No-op on iOS.
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+      const result = await GoogleSignin.signIn();
+      const idToken = extractIdToken(result);
+
+      if (!idToken) {
+        throw new Error('No idToken returned from native Google Sign-In SDK');
+      }
+
+      const credential = GoogleAuthProvider.credential(idToken);
       await signInWithCredential(auth, credential);
-      // After this, onAuthStateChanged in AuthContext fires with the real Firebase user
+      // AuthContext.onAuthStateChanged picks up the new Firebase user.
     } catch (err: unknown) {
-      // Re-throw with the Firebase error code/message attached so the caller
-      // can show it to the user in dev/testing.
-      const fbErr = err as { code?: string; message?: string };
-      const code = fbErr.code ?? '';
-      const msg  = fbErr.message ?? String(err);
-      throw new Error(`Firebase signInWithCredential failed${code ? ' [' + code + ']' : ''}: ${msg}`);
+      throw normalizeError(err);
     }
   };
 
@@ -111,48 +103,78 @@ export function useGoogleAuth() {
    * Links the current anonymous session to a Google account.
    * Falls back to a normal sign-in if the Google account already exists
    * (auth/credential-already-in-use), in which case Firestore favorites
-   * from the existing account take precedence.
+   * from the existing account take precedence over the anonymous data.
    */
   const upgradeWithGoogle = async (): Promise<'linked' | 'signed_in'> => {
-    if (!ANDROID_GOOGLE_CONFIGURED) {
-      throw new Error('android_not_configured');
-    }
+    try {
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
 
-    const result = await promptAsync();
-    if (result.type !== 'success') {
-      if (result.type === 'cancel') throw new Error('cancelled');
-      throw new Error('Google sign-in failed');
-    }
-    const { id_token } = result.params;
-    if (!id_token) throw new Error('No id_token received from Google');
-
-    const credential = GoogleAuthProvider.credential(id_token);
-    const currentUser = auth.currentUser;
-
-    if (currentUser?.isAnonymous) {
-      try {
-        await linkWithCredential(currentUser, credential);
-        return 'linked';
-      } catch (err: unknown) {
-        const firebaseErr = err as { code?: string };
-        if (firebaseErr.code === 'auth/credential-already-in-use') {
-          // Google account exists — sign in to it; FavoritesContext will load its data
-          await signInWithCredential(auth, credential);
-          return 'signed_in';
-        }
-        throw err;
+      const result = await GoogleSignin.signIn();
+      const idToken = extractIdToken(result);
+      if (!idToken) {
+        throw new Error('No idToken returned from native Google Sign-In SDK');
       }
-    }
 
-    await signInWithCredential(auth, credential);
-    return 'signed_in';
+      const credential = GoogleAuthProvider.credential(idToken);
+      const currentUser = auth.currentUser;
+
+      if (currentUser?.isAnonymous) {
+        try {
+          await linkWithCredential(currentUser, credential);
+          return 'linked';
+        } catch (linkErr: unknown) {
+          const e = linkErr as { code?: string };
+          if (e.code === 'auth/credential-already-in-use') {
+            // Existing Google account — sign in to it instead. FavoritesContext
+            // will load its data and the anonymous data is abandoned.
+            await signInWithCredential(auth, credential);
+            return 'signed_in';
+          }
+          throw linkErr;
+        }
+      }
+
+      await signInWithCredential(auth, credential);
+      return 'signed_in';
+    } catch (err: unknown) {
+      throw normalizeError(err);
+    }
   };
 
   return {
     signInWithGoogle,
     upgradeWithGoogle,
-    googleAuthReady: !!request && ANDROID_GOOGLE_CONFIGURED,
-    /** False on Android until EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID is configured. */
-    androidGoogleConfigured: ANDROID_GOOGLE_CONFIGURED,
+    // Kept for API compatibility with the old expo-auth-session implementation
+    // — consumers can still gate their UI on these but they're always ready
+    // with the native SDK.
+    googleAuthReady: true,
+    androidGoogleConfigured: true,
   };
+}
+
+/**
+ * Convert native SDK errors and Firebase errors into a single Error shape
+ * that the caller can pattern-match on. Notably, when the user dismisses
+ * the picker the SDK throws with code SIGN_IN_CANCELLED — we re-throw as
+ * Error('cancelled') so OnboardingScreen's existing check keeps working.
+ */
+function normalizeError(err: unknown): Error {
+  const e = err as { code?: string | number; message?: string };
+
+  // Native SDK cancellation codes — strings on iOS, numeric on Android in
+  // older versions. Both map to the same logical "user backed out" state.
+  if (
+    e.code === statusCodes.SIGN_IN_CANCELLED ||
+    e.code === 'SIGN_IN_CANCELLED' ||
+    e.code === '-5' || // historical iOS cancel
+    e.code === 12501 // historical Android cancel
+  ) {
+    return new Error('cancelled');
+  }
+
+  // Surface code + message so the diagnostic alert in OnboardingScreen
+  // still shows actionable info if something else goes wrong.
+  const code = e.code != null ? `[${e.code}] ` : '';
+  const msg = e.message ?? String(err);
+  return new Error(`${code}${msg}`);
 }

@@ -28,11 +28,17 @@
         {
           "userTrackingPermission": "Los anuncios nos permiten mantener Analistas gratis. Tu información nunca se vende a terceros."
         }
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.562270448336-7telon5j0pjscfbet7pqo3faq6mu3pc4"
+        }
       ]
     ],
     "ios": {
       "bundleIdentifier": "app.analistas",
-      "buildNumber": "3",
+      "buildNumber": "2",
       "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": true,
       "infoPlist": {
@@ -47,8 +53,7 @@
             ]
           }
         ]
-      },
-      "buildNumber": "2"
+      }
     },
     "android": {
       "package": "app.analistas",
@@ -69,7 +74,10 @@
         {
           "action": "VIEW",
           "autoVerify": false,
-          "category": ["BROWSABLE", "DEFAULT"],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
           "data": {
             "scheme": "com.googleusercontent.apps.562270448336-l6465c4ietcle0b6kgevabe0hglsjbv6"
           }
@@ -77,7 +85,10 @@
         {
           "action": "VIEW",
           "autoVerify": false,
-          "category": ["BROWSABLE", "DEFAULT"],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
           "data": {
             "scheme": "com.googleusercontent.apps.562270448336-v86ai9gk29pgiv6ng9dosepvvl4pgeou"
           }
