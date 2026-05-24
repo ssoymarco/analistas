@@ -329,8 +329,12 @@ function MainTabs() {
           // iOS keeps its existing manual hardcode (untouched, was already correct).
           // Android: add the system bottom inset (3-button nav bar or gesture pill)
           //   so the tab bar doesn't collide with the native bottom system buttons.
-          height: Platform.OS === 'ios' ? 80 : 64 + insets.bottom,
-          paddingBottom: Platform.OS === 'ios' ? 24 : 8 + insets.bottom,
+          //   Math.max with a 48dp floor because edge-to-edge on Android 15+ was
+          //   returning insets.bottom = 0 on some devices (3-button nav devices
+          //   in particular), leaving the tab labels glued to the system buttons.
+          //   48dp matches the 3-button nav bar height and is a safe minimum.
+          height: Platform.OS === 'ios' ? 80 : 64 + Math.max(insets.bottom, 48),
+          paddingBottom: Platform.OS === 'ios' ? 24 : 8 + Math.max(insets.bottom, 48),
           paddingTop: 8,
           elevation: 0,
           shadowOpacity: 0,

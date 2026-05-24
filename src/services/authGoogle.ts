@@ -42,19 +42,18 @@ const IOS_CLIENT_ID =
 const WEB_CLIENT_ID =
   '562270448336-d3ae5g54347do4nrmsoagjf7jsbc4d38.apps.googleusercontent.com';
 
-// Android Client ID: Firebase Console → Add Android app → google-services.json
-// Set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID in your .env file.
-// The sentinel value 'android_pending' prevents expo-auth-session from throwing
-// a render-time invariant error on Android while this is not yet configured —
-// sign-in attempts will fail gracefully until the real ID is provided.
+// Android Client ID: hardcoded because process.env.EXPO_PUBLIC_* substitution
+// was unreliable in Build 6 (the value was set in eas.json but the production
+// build still treated it as undefined at runtime, causing the sign-in to fail
+// instantly with "android_not_configured"). OAuth Client IDs are public —
+// no security risk in committing them.
+// This is the Android OAuth client paired with the Play app signing SHA-1
+// (0f24...), which is the SHA-1 that any Play Store install of this app uses.
 const ANDROID_CLIENT_ID =
-  process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? 'android_pending';
+  '562270448336-l6465c4ietcle0b6kgevabe0hglsjbv6.apps.googleusercontent.com';
 
-/** True once a real Android Client ID has been set in the environment. */
-const ANDROID_GOOGLE_CONFIGURED =
-  Platform.OS !== 'android' ||
-  (!!process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID &&
-    process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID !== 'android_pending');
+/** Always configured now that the Android Client ID is hardcoded. */
+const ANDROID_GOOGLE_CONFIGURED = true;
 
 export function useGoogleAuth() {
   const [request, response, promptAsync] = Google.useAuthRequest({
