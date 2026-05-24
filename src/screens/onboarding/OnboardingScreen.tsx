@@ -18,7 +18,13 @@ import {
   TextInput, Image, ImageBackground, Dimensions, Platform, ActivityIndicator,
   Easing, KeyboardAvoidingView, Alert, PanResponder,
 } from 'react-native';
-import { getRecentFixturesByTeam, getStandingsFromFirestore } from '../../services/firestoreApi';
+import {
+  getRecentFixturesByTeam,
+  getStandingsFromFirestore,
+  getTopScorersFromFirestore,
+  type FirestoreTopScorer,
+} from '../../services/firestoreApi';
+import { getStandings as getStandingsFromApi } from '../../services/sportsApi';
 import type { Match, LeagueStanding } from '../../data/types';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -29,7 +35,20 @@ import { useDarkMode } from '../../contexts/DarkModeContext';
 import { useFavorites } from '../../contexts/FavoritesContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotificationPrefs } from '../../contexts/NotificationPrefsContext';
-import { getSearchableTeams, getSearchableLeagues, getSearchablePlayers } from '../../services/sportsApi';
+import {
+  getSearchableTeams,
+  getSearchableLeagues,
+  getSearchablePlayers,
+  getAllSearchableTeams,
+  getAllSearchablePlayers,
+} from '../../services/sportsApi';
+import {
+  buildOnboardingTeamGrid,
+  buildOnboardingPlayerNames,
+} from '../../services/onboardingGrid';
+import { getCountryPreset } from '../../config/countryPresets';
+import { getLeaguePopularity } from '../../config/leagues';
+import { useUserCountry } from '../../hooks/useUserCountry';
 import { normalize } from '../../utils/normalize';
 import { requestPermissionsAndGetToken } from '../../services/notifications';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -37,6 +56,7 @@ import { useGoogleAuth } from '../../services/authGoogle';
 import { signInWithApple, isAppleAuthAvailable } from '../../services/authApple';
 import type { SearchableTeam, SearchableLeague, SearchablePlayer } from '../../services/sportsApi';
 import type { AuthMethod } from '../../contexts/AuthContext';
+import { isImageUri } from '../../utils/imageUri';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -140,6 +160,12 @@ type OnboardingState = {
   playerIds: number[];
   leagueIds: number[];
   notifications: Record<NotifKey, boolean>;
+  /**
+   * 🏟️ Modo Estadio: when ON, the app delays match notifications by N minutes
+   * to avoid spoiling live action while the user is at the stadium watching
+   * the match in person. Hooks into NotificationPrefsContext.estadioMode.
+   */
+  stadiumMode: boolean;
   name: string;
   authMethod: AuthMethod | null;
 };
@@ -286,7 +312,7 @@ const toCountryKey = (country: string) =>
 // SmartLogo
 const SmartLogo: React.FC<{ uri: string; size?: number; round?: boolean; fallback?: string }> = ({ uri, size = 40, round, fallback }) => {
   const [failed, setFailed] = useState(false);
-  if (uri && uri.startsWith('http') && !failed) {
+  if (uri && isImageUri(uri) && !failed) {
     return (
       <Image
         source={{ uri }}
@@ -593,7 +619,12 @@ const Screen2FanLevel: React.FC<{
             {/* Emoji */}
             <Text style={s2.heroEmoji}>{level.emoji}</Text>
             {/* Level name */}
-            <Text style={[s2.heroTitle, { color: th.TEXT_PRIMARY }]}>
+            <Text
+              style={[s2.heroTitle, { color: th.TEXT_PRIMARY }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.6}
+            >
               {level.title.toUpperCase()}
             </Text>
             {/* Description */}
@@ -761,11 +792,32 @@ const TeamCard: React.FC<{
     <TouchableOpacity onPress={handlePress} activeOpacity={0.85} style={{ width: CARD_W, marginBottom: CARD_GAP }}>
       <Animated.View style={[s3.card, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#222' : '#E5E7EB' }, selected && { backgroundColor: th.BLUE_DIM, borderColor: BLUE }, { transform: [{ scale }] }]}>
         <SmartLogo uri={team.logo} size={38} />
-        <Text style={[s3.name, { color: th.TEXT_PRIMARY }, selected && { color: BLUE }]} numberOfLines={1}>{team.shortName}</Text>
+        <Text
+          style={[s3.name, { color: th.TEXT_PRIMARY }, selected && { color: BLUE }]}
+          numberOfLines={2}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+        >
+          {team.name}
+        </Text>
         {selected && <View style={s3.check}><CheckIcon size={10} /></View>}
       </Animated.View>
     </TouchableOpacity>
   );
+});
+
+// Shared "Mostrar más" button styles — reused by teams + players screens
+const showMoreS = StyleSheet.create({
+  btn: {
+    marginTop: 12,
+    marginHorizontal: 4,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnText: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3 },
 });
 
 const s3 = StyleSheet.create({
@@ -781,8 +833,14 @@ const s3 = StyleSheet.create({
   },
 });
 
+const INITIAL_TEAM_GRID = 18;
+const TEAM_GRID_STEP    = 9;
+
 const Screen3Teams: React.FC<{
+  /** Curated, country-ordered list shown in the grid (~50-100 items). */
   teams: SearchableTeam[];
+  /** Full searchable catalog (~1,300 items). Used ONLY when query is non-empty. */
+  allTeams: SearchableTeam[];
   loading: boolean;
   selectedIds: number[];
   onToggle: (id: number) => void;
@@ -790,17 +848,25 @@ const Screen3Teams: React.FC<{
   onNext: () => void;
   onBack: () => void;
   onSkip: () => void;
-}> = ({ teams, loading, selectedIds, onToggle, fanLevel, onNext, onBack, onSkip }) => {
+}> = ({ teams, allTeams, loading, selectedIds, onToggle, fanLevel, onNext, onBack, onSkip }) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
-  const [query, setQuery] = useState('');
+  const [query, setQuery]                 = useState('');
+  const [visibleCount, setVisibleCount]   = useState(INITIAL_TEAM_GRID);
 
+  // Search hits the FULL catalog so niche clubs (e.g. Atlante in Liga Expansión)
+  // are findable. Without a query, show only the first `visibleCount` of the
+  // curated grid.
   const filtered = useMemo(() => {
-    if (!query.trim()) return teams;
+    if (!query.trim()) return teams.slice(0, visibleCount);
     const q = normalize(query);
-    return teams.filter(t2 => normalize(t2.name).includes(q) || normalize(t2.shortName).includes(q));
-  }, [teams, query]);
+    return allTeams.filter(t2 =>
+      normalize(t2.name).includes(q) || normalize(t2.shortName).includes(q),
+    );
+  }, [teams, allTeams, query, visibleCount]);
+
+  const canShowMore = !query.trim() && visibleCount < teams.length;
 
   const renderItem = useCallback(({ item }: { item: SearchableTeam }) => (
     <TeamCard
@@ -858,6 +924,25 @@ const Screen3Teams: React.FC<{
             contentContainerStyle={{ paddingBottom: 12 }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            ListFooterComponent={
+              canShowMore ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setVisibleCount(v => v + TEAM_GRID_STEP);
+                  }}
+                  activeOpacity={0.85}
+                  style={[
+                    showMoreS.btn,
+                    { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#333' : '#E5E7EB' },
+                  ]}
+                >
+                  <Text style={[showMoreS.btnText, { color: BLUE }]}>
+                    {t('onboarding.showMore', { defaultValue: 'Mostrar más' })}
+                  </Text>
+                </TouchableOpacity>
+              ) : null
+            }
           />
         )}
       </View>
@@ -958,8 +1043,14 @@ const s4 = StyleSheet.create({
   },
 });
 
+const INITIAL_PLAYER_GRID = 15;
+const PLAYER_GRID_STEP    = 9;
+
 const Screen4Players: React.FC<{
+  /** Curated, country-ordered list shown by default (~50 items). */
   players: SearchablePlayer[];
+  /** Full searchable catalog (~750 items). Used ONLY when query is non-empty. */
+  allPlayers: SearchablePlayer[];
   loading: boolean;
   selectedTeamIds: number[];
   selectedIds: number[];
@@ -968,27 +1059,33 @@ const Screen4Players: React.FC<{
   onBack: () => void;
   onSkip: () => void;
   teamNames: string[];
-}> = ({ players, loading, selectedTeamIds, selectedIds, onToggle, onNext, onBack, onSkip, teamNames }) => {
+}> = ({ players, allPlayers, loading, selectedTeamIds, selectedIds, onToggle, onNext, onBack, onSkip, teamNames }) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
-  const [query, setQuery] = useState('');
+  const [query, setQuery]               = useState('');
+  const [visibleCount, setVisibleCount] = useState(INITIAL_PLAYER_GRID);
 
   const filtered = useMemo(() => {
     // Filter out players with invalid/duplicate IDs first
-    const seen = new Set<number>();
-    const validPlayers = players.filter(p => {
-      if (!p.id || p.id <= 0 || seen.has(p.id)) return false;
-      seen.add(p.id);
-      return true;
-    });
-    if (!query.trim()) return validPlayers;
+    const dedupe = (list: SearchablePlayer[]) => {
+      const seen = new Set<number>();
+      return list.filter(p => {
+        if (!p.id || p.id <= 0 || seen.has(p.id)) return false;
+        seen.add(p.id);
+        return true;
+      });
+    };
+    if (!query.trim()) return dedupe(players).slice(0, visibleCount);
     const q = normalize(query);
-    return validPlayers.filter(p =>
+    const valid = dedupe(allPlayers);
+    return valid.filter(p =>
       normalize(p.name).includes(q) ||
       (p.teamName && normalize(p.teamName).includes(q)),
     );
-  }, [players, query]);
+  }, [players, allPlayers, query, visibleCount]);
+
+  const canShowMore = !query.trim() && visibleCount < players.length;
 
   const countLabel = t('onboarding.playersSelected', { count: selectedIds.length });
 
@@ -1045,6 +1142,25 @@ const Screen4Players: React.FC<{
             contentContainerStyle={{ paddingBottom: 12 }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            ListFooterComponent={
+              canShowMore ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setVisibleCount(v => v + PLAYER_GRID_STEP);
+                  }}
+                  activeOpacity={0.85}
+                  style={[
+                    showMoreS.btn,
+                    { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#333' : '#E5E7EB' },
+                  ]}
+                >
+                  <Text style={[showMoreS.btnText, { color: GOLD }]}>
+                    {t('onboarding.showMore', { defaultValue: 'Mostrar más' })}
+                  </Text>
+                </TouchableOpacity>
+              ) : null
+            }
           />
         )}
       </View>
@@ -1086,12 +1202,16 @@ const LeagueRow: React.FC<{
           <SmartLogo uri={league.image} size={30} fallback={league.flag} />
         </View>
 
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={s5.flag}>{league.flag}</Text>
-            <Text style={[s5.name, { color: th.TEXT_PRIMARY }, selected && { color: BLUE }]} numberOfLines={1}>{league.name}</Text>
-          </View>
-          <Text style={[s5.country, { color: th.TEXT_DIM }]}>{t(`countries.${toCountryKey(league.country)}` as any, { defaultValue: league.country })}</Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            style={[s5.name, { color: th.TEXT_PRIMARY }, selected && { color: BLUE }]}
+            numberOfLines={1}
+          >
+            {league.name}
+          </Text>
+          <Text style={[s5.country, { color: th.TEXT_DIM }]} numberOfLines={1}>
+            {t(`countries.${toCountryKey(league.country)}` as any, { defaultValue: league.country })}
+          </Text>
         </View>
 
         {isSuggested && (
@@ -1192,39 +1312,97 @@ const Screen6Feed: React.FC<{
 
   // ── Real Firestore data ────────────────────────────────────────────────────
   const [nextMatch, setNextMatch] = useState<Match | null>(null);
+  /**
+   * Whether the displayed match is in the future ('upcoming'), happening now
+   * ('live'), or already finished ('finished'). Drives the badge label on
+   * the match card ("PRÓXIMO" / "EN VIVO" / "ÚLTIMO").
+   */
+  const [matchState, setMatchState] = useState<'upcoming' | 'live' | 'finished'>('upcoming');
   const [standings, setStandings] = useState<LeagueStanding[]>([]);
+  const [topScorers, setTopScorers] = useState<FirestoreTopScorer[]>([]);
 
   const firstTeam   = teams.find(t2 => state.teamIds.includes(t2.id));
   const firstPlayer = players.find(p => state.playerIds.includes(p.id));
-  const firstLeague = leagues.find(l => state.leagueIds.includes(l.id));
+  // Prefer the league that matches the user's first team (so the table reflects
+  // where their team actually plays). Fall back to the first selected league.
+  const teamLeague   = firstTeam ? leagues.find(l => l.id === firstTeam.leagueId) : undefined;
+  const firstLeague  = teamLeague ?? leagues.find(l => state.leagueIds.includes(l.id));
 
   useEffect(() => {
-    // Fetch next/recent match for the user's first team
+    // Fetch best-match-to-show for the user's first team. Priority order:
+    //   1. LIVE — match happening right now (rare during onboarding but cool)
+    //   2. UPCOMING — nearest future kickoff (most common case)
+    //   3. FINISHED — last played match (fallback for end-of-season / pre-season
+    //      gap when the next-season calendar isn't published yet)
+    //
+    // getRecentFixturesByTeam returns fixtures ORDERED BY kickoff DESC, so we
+    // re-sort upcomings ASC (nearest first) and keep finisheds DESC (most
+    // recent first).
     if (firstTeam) {
-      getRecentFixturesByTeam(firstTeam.id, 10).then(fixtures => {
+      getRecentFixturesByTeam(firstTeam.id, 25).then(fixtures => {
         if (!fixtures.length) return;
         const now = Date.now();
-        // Prefer upcoming; fall back to most recent
-        const upcoming = fixtures.find(f =>
-          f.status === 'scheduled' || new Date(f.startingAtUtc ?? f.date).getTime() > now
-        );
-        setNextMatch(upcoming ?? fixtures[0]);
+
+        const live = fixtures.find(f => f.status === 'live');
+        if (live) {
+          setNextMatch(live);
+          setMatchState('live');
+          return;
+        }
+
+        const upcomings = fixtures
+          .filter(f => f.status === 'scheduled' || new Date(f.startingAtUtc ?? f.date).getTime() > now)
+          .sort((a, b) => {
+            const ta = new Date(a.startingAtUtc ?? a.date).getTime();
+            const tb = new Date(b.startingAtUtc ?? b.date).getTime();
+            return ta - tb;
+          });
+        if (upcomings.length > 0) {
+          setNextMatch(upcomings[0]);
+          setMatchState('upcoming');
+          return;
+        }
+
+        // Fallback: no upcoming → show the most recently FINISHED match so
+        // the card never feels empty. fixtures is already DESC by kickoff.
+        const finished = fixtures.find(f => f.status === 'finished') ?? fixtures[0];
+        setNextMatch(finished);
+        setMatchState('finished');
       }).catch(() => {});
     }
-    // Fetch standings for the user's first league
+    // Fetch standings for the user's first league (preferring the team's league)
+    // Firestore-first with API fallback so the table shows something even when
+    // the league hasn't been synced yet.
     const seasonId = firstLeague?.seasonId;
     if (seasonId) {
-      getStandingsFromFirestore(seasonId).then(rows => {
-        if (rows.length > 0) setStandings(rows.slice(0, 5));
+      (async () => {
+        try {
+          const fsRows = await getStandingsFromFirestore(seasonId);
+          if (fsRows.length > 0) {
+            setStandings(fsRows.slice(0, 5));
+            return;
+          }
+          // Fallback to direct API call when Firestore is empty
+          const apiRows = await getStandingsFromApi(seasonId);
+          if (apiRows.length > 0) setStandings(apiRows.slice(0, 5));
+        } catch {/* show skeleton */}
+      })();
+
+      // Fetch top 3 scorers of the same league (no API fallback — server
+      // populates this; if missing we just hide the card).
+      getTopScorersFromFirestore(seasonId).then(scorers => {
+        if (scorers.length > 0) setTopScorers(scorers.slice(0, 3));
       }).catch(() => {});
     }
   }, [firstTeam?.id, firstLeague?.seasonId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Entrance animations ────────────────────────────────────────────────────
-  const matchAnim  = useRef(new Animated.Value(0)).current;
-  const matchY     = useRef(new Animated.Value(16)).current;
-  const tableAnim  = useRef(new Animated.Value(0)).current;
-  const tableY     = useRef(new Animated.Value(16)).current;
+  const matchAnim    = useRef(new Animated.Value(0)).current;
+  const matchY       = useRef(new Animated.Value(16)).current;
+  const tableAnim    = useRef(new Animated.Value(0)).current;
+  const tableY       = useRef(new Animated.Value(16)).current;
+  const scorersAnim  = useRef(new Animated.Value(0)).current;
+  const scorersY     = useRef(new Animated.Value(16)).current;
 
   useEffect(() => {
     Animated.parallel([
@@ -1237,15 +1415,23 @@ const Screen6Feed: React.FC<{
         Animated.timing(tableY,    { toValue: 0, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
       ]).start();
     }, 130);
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(scorersAnim, { toValue: 1, duration: 420, useNativeDriver: true }),
+        Animated.timing(scorersY,    { toValue: 0, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start();
+    }, 260);
   }, []);
 
   // ── Derived display values ─────────────────────────────────────────────────
   // homeTeam.id is string, firstTeam.id is number → convert for comparison
   const isHome    = nextMatch && firstTeam && nextMatch.homeTeam.id === String(firstTeam.id);
   const opponent  = nextMatch ? (isHome ? nextMatch.awayTeam : nextMatch.homeTeam) : null;
-  const matchDate = nextMatch?.startingAtUtc
-    ? new Date(nextMatch.startingAtUtc).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true })
-    : null;
+  // Show only the day-of-week, never the kickoff time.
+  // Kickoff times require accurate timezone handling that's fragile during
+  // onboarding (expo-localization sometimes resolves to UTC on first run).
+  // The day alone is enough to give the user a sense of when the match is;
+  // exact time lives in the main app where useUserCountry is fully resolved.
   const matchDay  = nextMatch?.startingAtUtc
     ? new Date(nextMatch.startingAtUtc).toLocaleDateString('es-MX', { weekday: 'long' })
     : null;
@@ -1263,7 +1449,7 @@ const Screen6Feed: React.FC<{
     return standings.slice(start, start + 5);
   }, [standings, userStandingIdx]);
 
-  const teamName = firstTeam?.shortName ?? firstTeam?.name ?? 'tu equipo';
+  const teamName = firstTeam?.name ?? firstTeam?.shortName ?? 'tu equipo';
 
   return (
     <View style={[base.screen, { backgroundColor: th.BG, paddingBottom: insets.bottom + 8 }]}>
@@ -1314,15 +1500,30 @@ const Screen6Feed: React.FC<{
                 </Text>
               </View>
 
-              {/* Center VS */}
+              {/* Center VS — label adapts to match state */}
               <View style={s6.vsBlock}>
-                <Text style={[s6.vsLabel, { color: BLUE }]}>PRÓXIMO</Text>
-                <Text style={[s6.vsText, { color: th.TEXT_DIM }]}>VS</Text>
-                {matchDate && (
-                  <View style={[s6.timePill, { backgroundColor: th.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}>
-                    <Text style={[s6.timePillText, { color: th.TEXT_PRIMARY }]}>{matchDate}</Text>
-                  </View>
-                )}
+                <Text style={[
+                  s6.vsLabel,
+                  {
+                    color: matchState === 'live'     ? '#FF453A' :   // brand red
+                           matchState === 'finished' ? th.TEXT_DIM : // muted
+                                                       BLUE,         // upcoming
+                  },
+                ]}>
+                  {matchState === 'live'     ? t('onboarding.matchStateLive',     { defaultValue: 'EN VIVO' })  :
+                   matchState === 'finished' ? t('onboarding.matchStateFinished', { defaultValue: 'ÚLTIMO' })   :
+                                               t('onboarding.matchStateUpcoming', { defaultValue: 'PRÓXIMO' })}
+                </Text>
+                <Text style={[s6.vsText, { color: th.TEXT_DIM }]}>
+                  {matchState === 'finished' && nextMatch
+                    ? `${nextMatch.homeScore ?? 0} - ${nextMatch.awayScore ?? 0}`
+                    : 'VS'}
+                </Text>
+                {/* Time pill removed — kickoff times were rendering in UTC
+                    instead of the user's local time during onboarding (the
+                    expo-localization timezone is sometimes unreliable on
+                    first run before the user's region resolves). The day
+                    label in the footer is enough context. */}
               </View>
 
               {/* Away */}
@@ -1339,18 +1540,18 @@ const Screen6Feed: React.FC<{
             {/* Footer */}
             <View style={[s6.matchFooter, { borderTopColor: th.isDark ? 'rgba(255,255,255,0.05)' : '#E2E8F0', backgroundColor: th.isDark ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.03)' }]}>
               <Text style={[s6.footerLeft, { color: th.TEXT_PRIMARY }]}>
-                {matchDay ? `${matchDay.charAt(0).toUpperCase() + matchDay.slice(1)} · ${matchDate}` : 'Próximo partido'}
+                {matchDay ? matchDay.charAt(0).toUpperCase() + matchDay.slice(1) : 'Próximo partido'}
               </Text>
               <Text style={[s6.footerRight, { color: th.TEXT_DIM }]} numberOfLines={1}>
-                {firstLeague?.name ?? nextMatch?.league ?? ''}
+                {nextMatch?.league ?? firstLeague?.name ?? ''}
               </Text>
             </View>
           </LinearGradient>
         </Animated.View>
 
         {/* TableCardPro */}
-        <Animated.View style={[{ flex: 1, opacity: tableAnim, transform: [{ translateY: tableY }] }, th.SHADOW]}>
-          <View style={[s6.tableCard, { backgroundColor: th.SURFACE, flex: 1 }]}>
+        <Animated.View style={[{ opacity: tableAnim, transform: [{ translateY: tableY }] }, th.SHADOW]}>
+          <View style={[s6.tableCard, { backgroundColor: th.SURFACE }]}>
             {/* Table header */}
             <View style={[s6.tableHeader, { borderBottomColor: th.isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9' }]}>
               <View style={[s6.tableBadge, { backgroundColor: th.BLUE_DIM }]}>
@@ -1399,6 +1600,50 @@ const Screen6Feed: React.FC<{
             }
           </View>
         </Animated.View>
+
+        {/* ScorersCard — top 3 of the same league */}
+        {topScorers.length > 0 && (
+          <Animated.View style={[{ opacity: scorersAnim, transform: [{ translateY: scorersY }] }, th.SHADOW]}>
+            <View style={[s6.tableCard, { backgroundColor: th.SURFACE }]}>
+              <View style={[s6.tableHeader, { borderBottomColor: th.isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9' }]}>
+                <View style={[s6.tableBadge, { backgroundColor: th.GOLD_DIM }]}>
+                  <Text style={[s6.tableBadgeText, { color: GOLD }]}>GOLEADORES</Text>
+                </View>
+                <Text style={[s6.tableLeagueName, { color: th.TEXT_DIM }]}>
+                  {firstLeague?.name ?? 'Liga'}
+                </Text>
+              </View>
+              {topScorers.map((s, idx) => {
+                const isUserPlayer = firstPlayer && s.playerId === String(firstPlayer.id);
+                return (
+                  <View
+                    key={`${s.playerId}-${idx}`}
+                    style={[
+                      s6.tableRowItem,
+                      isUserPlayer
+                        ? { backgroundColor: th.isDark ? 'rgba(245,184,0,0.10)' : 'rgba(245,184,0,0.08)', borderLeftColor: GOLD }
+                        : { borderLeftColor: 'transparent' },
+                    ]}
+                  >
+                    <Text style={[s6.tableRowPos, { color: isUserPlayer ? GOLD : th.TEXT_DIM }]}>
+                      {s.position}
+                    </Text>
+                    <SmartLogo uri={s.teamLogo} size={20} />
+                    <Text
+                      style={[s6.tableRowName, { color: isUserPlayer ? th.TEXT_PRIMARY : th.TEXT_DIM, fontWeight: isUserPlayer ? '700' : '500' }]}
+                      numberOfLines={1}
+                    >
+                      {s.playerName}
+                    </Text>
+                    <Text style={[s6.tableRowPts, { color: isUserPlayer ? '#fff' : th.TEXT_DIM }]}>
+                      {s.goals} gol{s.goals === 1 ? '' : 'es'}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          </Animated.View>
+        )}
       </View>
 
       <CTAButton label={t('onboarding.likeWhatISee')} onPress={onNext} glow style={{ marginTop: 10 }} />
@@ -1474,11 +1719,13 @@ const NOTIF_ROWS: NotifRowItem[] = [
 const Screen7Notifs: React.FC<{
   notifs: Record<NotifKey, boolean>;
   onToggle: (key: NotifKey) => void;
+  stadiumMode: boolean;
+  onToggleStadiumMode: () => void;
   fanLevel: FanLevel | null;
   onNext: () => void;
   onBack: () => void;
   onSkip: () => void;
-}> = ({ notifs, onToggle, fanLevel, onNext, onBack, onSkip }) => {
+}> = ({ notifs, onToggle, stadiumMode, onToggleStadiumMode, fanLevel, onNext, onBack, onSkip }) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
@@ -1515,6 +1762,35 @@ const Screen7Notifs: React.FC<{
               <CustomToggle value={notifs[row.key]} onToggle={() => onToggle(row.key)} />
             </View>
           ))}
+
+          {/* ── Modo Estadio (special "pro feature" — gold accent) ──────── */}
+          <View style={[
+            s7.row,
+            s7.stadiumRow,
+            stadiumMode
+              ? { backgroundColor: th.GOLD_DIM, borderColor: GOLD }
+              : { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#332E1F' : '#FCE9A1' },
+          ]}>
+            <View style={[s7.iconBox, { backgroundColor: th.isDark ? '#332E1F' : '#FCE9A1' }]}>
+              <Text style={{ fontSize: 22 }}>🏟️</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={[s7.rowTitle, { color: th.TEXT_PRIMARY }]}>
+                  {t('onboarding.stadiumModeTitle', { defaultValue: 'Modo Estadio' })}
+                </Text>
+                <View style={[s7.proPill, { backgroundColor: GOLD }]}>
+                  <Text style={s7.proPillText}>NUEVO</Text>
+                </View>
+              </View>
+              <Text style={[s7.rowSub, { color: th.TEXT_DIM }]}>
+                {t('onboarding.stadiumModeSub', {
+                  defaultValue: 'Cuando vayas al estadio, retrasa las notificaciones para no spoilearte la jugada.',
+                })}
+              </Text>
+            </View>
+            <CustomToggle value={stadiumMode} onToggle={onToggleStadiumMode} />
+          </View>
         </View>
       </ScrollView>
 
@@ -1540,6 +1816,13 @@ const s7 = StyleSheet.create({
   },
   rowTitle: { fontSize: 15, fontWeight: '700' },
   rowSub: { fontSize: 12, marginTop: 2 },
+  // Modo Estadio — visually distinct row to highlight the "pro" feature
+  stadiumRow: { marginTop: 6 },
+  proPill: {
+    paddingHorizontal: 6, paddingVertical: 1,
+    borderRadius: 4,
+  },
+  proPillText: { fontSize: 9, fontWeight: '900', color: '#000', letterSpacing: 0.5 },
 });
 
 // ── Google G logo (official PNG asset) ───────────────────────────────────────
@@ -1828,6 +2111,11 @@ const Screen9Personalizing: React.FC<{
         }
       });
 
+      // Apply Modo Estadio (maps to prefs.estadioMode in NotificationPrefsContext)
+      if (state.stadiumMode !== prefs.estadioMode) {
+        togglePref('estadioMode');
+      }
+
       // Auth
       if (state.authMethod) {
         login(state.authMethod, state.name.trim() || 'Analista').catch(() => {});
@@ -2108,31 +2396,81 @@ export function OnboardingScreen() {
   const { completeOnboarding } = useOnboarding();
   const { t } = useTranslation();
 
+  // ── User country (drives the personalized grid ordering) ────────────────────
+  // Reads expo-localization regionCode instantly + verifies via Cloudflare /geo
+  // in the background. See hooks/useUserCountry.ts
+  const { country, language } = useUserCountry();
+
   // ── Data loading ────────────────────────────────────────────────────────────
-  const [teams, setTeams]     = useState<SearchableTeam[]>(FALLBACK_TEAMS);
-  const [leagues, setLeagues] = useState<SearchableLeague[]>(FALLBACK_LEAGUES);
-  const [players, setPlayers] = useState<SearchablePlayer[]>(FALLBACK_PLAYERS);
-  const [teamsLoading, setTeamsLoading]   = useState(true);
+  // `teams` is the curated grid (country-aware ordering) — used for display.
+  // `allTeams` is the complete catalog (~1,300) — used ONLY for search so niche
+  // clubs like Atlante (Liga Expansión MX) are findable.
+  // Same pattern for players.
+  const [teams, setTeams]         = useState<SearchableTeam[]>(FALLBACK_TEAMS);
+  const [allTeams, setAllTeams]   = useState<SearchableTeam[]>(FALLBACK_TEAMS);
+  const [leagues, setLeagues]     = useState<SearchableLeague[]>(FALLBACK_LEAGUES);
+  const [players, setPlayers]     = useState<SearchablePlayer[]>(FALLBACK_PLAYERS);
+  const [allPlayers, setAllPlayers] = useState<SearchablePlayer[]>(FALLBACK_PLAYERS);
+  const [teamsLoading, setTeamsLoading]     = useState(true);
   const [playersLoading, setPlayersLoading] = useState(true);
 
   useEffect(() => {
     const timeout3s = (promise: Promise<unknown>) =>
       Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))]);
 
-    timeout3s(getSearchableTeams())
-      .then(data => { if (Array.isArray(data) && data.length > 0) setTeams(data as SearchableTeam[]); })
+    // ── Curated grid (instant — all hardcoded data) ───────────────────────────
+    // Order depends on user's country. Re-runs when country resolves from
+    // worker (the locale-based default is used until then).
+    const curatedTeams = buildOnboardingTeamGrid(country, language);
+    setTeams(curatedTeams);
+    setAllTeams(curatedTeams); // initial value; will be replaced when full catalog loads
+    setTeamsLoading(false);
+
+    // Players curated list — names are resolved by sportsApi to enriched objects
+    timeout3s(getSearchablePlayers())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          // Reorder by country preset: local players first, then globals
+          const orderedNames = buildOnboardingPlayerNames(country, language);
+          const byNameLower = new Map<string, SearchablePlayer>();
+          (data as SearchablePlayer[]).forEach(p => byNameLower.set(p.name.toLowerCase(), p));
+          const ordered: SearchablePlayer[] = [];
+          const seen = new Set<number>();
+          for (const name of orderedNames) {
+            const p = byNameLower.get(name.toLowerCase());
+            if (p && !seen.has(p.id)) { seen.add(p.id); ordered.push(p); }
+          }
+          // Append any players that weren't in the ordering (safety)
+          for (const p of data as SearchablePlayer[]) {
+            if (!seen.has(p.id)) { seen.add(p.id); ordered.push(p); }
+          }
+          setPlayers(ordered);
+          setAllPlayers(ordered);
+        }
+      })
       .catch(() => {})
-      .finally(() => setTeamsLoading(false));
+      .finally(() => setPlayersLoading(false));
 
     // Leagues are synchronous
     const ls = getSearchableLeagues();
     if (ls.length > 0) setLeagues(ls);
 
-    timeout3s(getSearchablePlayers())
-      .then(data => { if (Array.isArray(data) && data.length > 0) setPlayers(data as SearchablePlayer[]); })
-      .catch(() => {})
-      .finally(() => setPlayersLoading(false));
-  }, []);
+    // ── Background: full catalog for search (cached 7 days) ──────────────────
+    // Doesn't block the UI — the grid is already showing the curated 18.
+    // When the catalog arrives, search will start finding ~1,300 teams instead
+    // of ~50.
+    getAllSearchableTeams()
+      .then(full => {
+        if (full.length > 0) setAllTeams(full);
+      })
+      .catch(() => {});
+
+    getAllSearchablePlayers()
+      .then(full => {
+        if (full.length > 0) setAllPlayers(full);
+      })
+      .catch(() => {});
+  }, [country, language]); // re-order when country resolves from Worker
 
   // ── Onboarding state ────────────────────────────────────────────────────────
   const [screen, setScreen] = useState(1);
@@ -2143,6 +2481,7 @@ export function OnboardingScreen() {
     playerIds: [],
     leagueIds: [],
     notifications: DEFAULT_NOTIFS_BY_LEVEL.fan,
+    stadiumMode: false,
     name: '',
     authMethod: null,
   });
@@ -2164,18 +2503,50 @@ export function OnboardingScreen() {
     [teams, obState.teamIds],
   );
 
-  // League suggestion logic
+  // League suggestion logic — driven by the country preset.
+  // The preset already encodes "Mundial 2026 first this season + local league
+  // + most-watched European leagues from that country's perspective".
+  // PRODUCT RULE: league selection is for FEED ORDERING ONLY — it does NOT
+  // trigger notifications. Only TEAM selection drives notifications.
+  // See countryPresets.ts for the full mapping.
   const suggestedLeagueIds = useMemo(() => {
-    const ids = new Set<number>();
-    const hasMX = obState.teamIds.some(id => MX_TEAM_IDS.has(id));
-    const hasEU = obState.teamIds.some(id => EU_TEAM_IDS.has(id));
-    if (hasMX) { ids.add(743); ids.add(2); } // Liga MX + Champions
-    if (hasEU) { ids.add(564); ids.add(8); ids.add(2); } // La Liga, Premier, Champions
-    if (!hasMX && !hasEU) { ids.add(743); ids.add(564); ids.add(8); }
-    return ids;
-  }, [obState.teamIds]);
+    const preset = getCountryPreset(country, language);
+    return new Set(preset.suggestedLeagueIds);
+  }, [country, language]);
 
-  // Auto-suggest leagues when entering screen 5
+  // Reorder the leagues list — 3 tiers:
+  //   1. preset.suggestedLeagueIds (top, with "Sugerida" badge)
+  //   2. preset.secondaryLeagueIds (next, no badge — Europa League, Copa
+  //      Libertadores, MLS for European users, etc.)
+  //   3. Everything else, ordered by popularity DESC (country-biased).
+  //      See config/leagues.ts LEAGUE_POPULARITY + LEAGUE_POPULARITY_BY_COUNTRY.
+  //      Result: an MX user sees CONCACAF Champions Cup above Bundesliga, an
+  //      AR user sees Copa Libertadores above Bundesliga, a US user sees MLS
+  //      as the second league after Mundial 2026, etc. Niche leagues (Russia,
+  //      Iran, China) always sink to the bottom regardless of country.
+  // Mundial 2026 (id 732) is always position 1 this season (preset top).
+  const orderedLeagues = useMemo(() => {
+    const preset = getCountryPreset(country, language);
+    const tierOrder = new Map<number, number>();
+    let pos = 0;
+    preset.suggestedLeagueIds.forEach(id => tierOrder.set(id, pos++));
+    preset.secondaryLeagueIds.forEach(id => {
+      if (!tierOrder.has(id)) tierOrder.set(id, pos++);
+    });
+    return [...leagues].sort((a, b) => {
+      const ai = tierOrder.has(a.id) ? tierOrder.get(a.id)! : null;
+      const bi = tierOrder.has(b.id) ? tierOrder.get(b.id)! : null;
+      // Both in preset → preset order wins
+      if (ai !== null && bi !== null) return ai - bi;
+      // Only one in preset → preset entry first
+      if (ai !== null) return -1;
+      if (bi !== null) return 1;
+      // Neither in preset → sort by popularity DESC (country-aware)
+      return getLeaguePopularity(b.id, country) - getLeaguePopularity(a.id, country);
+    });
+  }, [leagues, country, language]);
+
+  // Auto-suggest the top-3 from the country preset when entering screen 5
   const leagues5Initialized = useRef(false);
   useEffect(() => {
     if (screen === 5 && !leagues5Initialized.current) {
@@ -2215,6 +2586,10 @@ export function OnboardingScreen() {
       ...prev,
       notifications: { ...prev.notifications, [key]: !prev.notifications[key] },
     }));
+  }, []);
+
+  const toggleStadiumMode = useCallback(() => {
+    setObState(prev => ({ ...prev, stadiumMode: !prev.stadiumMode }));
   }, []);
 
   // Fan level selection updates notification defaults
@@ -2265,7 +2640,14 @@ export function OnboardingScreen() {
         const e = err as { message?: string };
         // 'cancelled' = user dismissed the Google sheet — silent
         if (e.message !== 'cancelled') {
-          Alert.alert(t('common.error'), t('onboarding.googleSignInError'));
+          // Diagnostic alert: surface the actual underlying error so we can
+          // figure out why Google Sign-In is failing on real devices. Strip
+          // this back to the generic translated message once auth is stable.
+          const realMsg = e.message ?? 'unknown error';
+          Alert.alert(
+            t('common.error'),
+            `${t('onboarding.googleSignInError')}\n\n[debug] ${realMsg}`,
+          );
         }
       } finally {
         setAuthLoading(false);
@@ -2298,6 +2680,7 @@ export function OnboardingScreen() {
       return (
         <Screen3Teams
           teams={teams}
+          allTeams={allTeams}
           loading={teamsLoading}
           selectedIds={obState.teamIds}
           onToggle={toggleTeamId}
@@ -2312,6 +2695,7 @@ export function OnboardingScreen() {
       return (
         <Screen4Players
           players={players}
+          allPlayers={allPlayers}
           loading={playersLoading}
           selectedTeamIds={obState.teamIds}
           selectedIds={obState.playerIds}
@@ -2326,7 +2710,7 @@ export function OnboardingScreen() {
     case 5:
       return (
         <Screen5Leagues
-          leagues={leagues}
+          leagues={orderedLeagues}
           selectedIds={obState.leagueIds}
           suggestedIds={suggestedLeagueIds}
           onToggle={toggleLeagueId}
@@ -2353,6 +2737,8 @@ export function OnboardingScreen() {
         <Screen7Notifs
           notifs={obState.notifications}
           onToggle={toggleNotif}
+          stadiumMode={obState.stadiumMode}
+          onToggleStadiumMode={toggleStadiumMode}
           fanLevel={obState.fanLevel}
           onNext={goNextFromNotifs}
           onBack={goBack}

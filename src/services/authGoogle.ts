@@ -74,15 +74,37 @@ export function useGoogleAuth() {
 
     if (result.type !== 'success') {
       if (result.type === 'cancel') throw new Error('cancelled');
-      throw new Error('Google sign-in failed');
+      // Surface as much info as possible so the caller can show what really
+      // went wrong (Google error code, OAuth error_description, etc.) instead
+      // of the generic "Google sign-in failed" message.
+      const params = (result as { params?: Record<string, string> }).params ?? {};
+      const errCode = params.error ?? '';
+      const errDesc = params.error_description ?? '';
+      const detail = errCode || errDesc
+        ? ` (${[errCode, errDesc].filter(Boolean).join(': ')})`
+        : '';
+      throw new Error(`Google sign-in failed [type=${result.type}]${detail}`);
     }
 
     const { id_token } = result.params;
-    if (!id_token) throw new Error('No id_token received from Google');
+    if (!id_token) {
+      // Dump available param keys to help diagnose what we DID get back
+      const keys = Object.keys(result.params ?? {}).join(', ') || '<none>';
+      throw new Error(`No id_token received from Google (params keys: ${keys})`);
+    }
 
-    const credential = GoogleAuthProvider.credential(id_token);
-    await signInWithCredential(auth, credential);
-    // After this, onAuthStateChanged in AuthContext fires with the real Firebase user
+    try {
+      const credential = GoogleAuthProvider.credential(id_token);
+      await signInWithCredential(auth, credential);
+      // After this, onAuthStateChanged in AuthContext fires with the real Firebase user
+    } catch (err: unknown) {
+      // Re-throw with the Firebase error code/message attached so the caller
+      // can show it to the user in dev/testing.
+      const fbErr = err as { code?: string; message?: string };
+      const code = fbErr.code ?? '';
+      const msg  = fbErr.message ?? String(err);
+      throw new Error(`Firebase signInWithCredential failed${code ? ' [' + code + ']' : ''}: ${msg}`);
+    }
   };
 
   /**
