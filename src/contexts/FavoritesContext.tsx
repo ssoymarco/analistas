@@ -19,12 +19,19 @@ interface FavoritesContextType {
   followedTeamIds: string[];
   isFollowingTeam: (teamId: string) => boolean;
   toggleFollowTeam: (teamId: string) => void;
+  /** Replace the entire followed-teams list (used by onboarding to commit the
+   *  user's picks WITHOUT accumulating previous-session selections). */
+  replaceFollowedTeams: (teamIds: string[]) => void;
   followedPlayerIds: string[];
   isFollowingPlayer: (playerId: string) => boolean;
   toggleFollowPlayer: (playerId: string) => void;
+  /** Replace the entire followed-players list (used by onboarding). */
+  replaceFollowedPlayers: (playerIds: string[]) => void;
   followedLeagueIds: string[];
   isFollowingLeague: (leagueId: string) => boolean;
   toggleFollowLeague: (leagueId: string) => void;
+  /** Replace the entire followed-leagues list (used by onboarding). */
+  replaceFollowedLeagues: (leagueIds: string[]) => void;
   /** True while the initial Firestore sync is in progress */
   isSyncing: boolean;
 }
@@ -36,12 +43,15 @@ const FavoritesContext = createContext<FavoritesContextType>({
   followedTeamIds: [],
   isFollowingTeam: () => false,
   toggleFollowTeam: () => {},
+  replaceFollowedTeams: () => {},
   followedPlayerIds: [],
   isFollowingPlayer: () => false,
   toggleFollowPlayer: () => {},
+  replaceFollowedPlayers: () => {},
   followedLeagueIds: [],
   isFollowingLeague: () => false,
   toggleFollowLeague: () => {},
+  replaceFollowedLeagues: () => {},
   isSyncing: false,
 });
 
@@ -214,12 +224,63 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // ── Replace helpers (used by onboarding) ───────────────────────────────────
+  // The onboarding bridge in Screen 9 needs to OVERWRITE the followed lists
+  // with the user's freshly-picked selections instead of merging on top of
+  // whatever was already there. Without these, repeated onboarding sessions
+  // (or completing onboarding when AsyncStorage still has data from a
+  // previous build / test session) accumulated stale picks — the user ended
+  // up "following" 11 teams after selecting only 1, etc.
+  //
+  // Deduplicated and string-cast at the boundary so callers can pass mixed
+  // numeric/string ID arrays safely. Firestore + AsyncStorage are kept in
+  // sync the same way the toggle methods do.
+
+  const replaceFollowedTeams = useCallback((teamIds: string[]) => {
+    const next = Array.from(new Set(teamIds.map(String)));
+    setFollowedTeamIds(next);
+    teamRef.current = next; // keep ref in sync immediately so persistToFirestore sees it
+    AsyncStorage.setItem(TEAM_STORAGE_KEY, JSON.stringify(next));
+    persistToFirestore({
+      matchIds:  matchRef.current,
+      teamIds:   next,
+      playerIds: playerRef.current,
+      leagueIds: leagueRef.current,
+    });
+  }, []);
+
+  const replaceFollowedPlayers = useCallback((playerIds: string[]) => {
+    const next = Array.from(new Set(playerIds.map(String)));
+    setFollowedPlayerIds(next);
+    playerRef.current = next;
+    AsyncStorage.setItem(PLAYER_STORAGE_KEY, JSON.stringify(next));
+    persistToFirestore({
+      matchIds:  matchRef.current,
+      teamIds:   teamRef.current,
+      playerIds: next,
+      leagueIds: leagueRef.current,
+    });
+  }, []);
+
+  const replaceFollowedLeagues = useCallback((leagueIds: string[]) => {
+    const next = Array.from(new Set(leagueIds.map(String)));
+    setFollowedLeagueIds(next);
+    leagueRef.current = next;
+    AsyncStorage.setItem(LEAGUE_STORAGE_KEY, JSON.stringify(next));
+    persistToFirestore({
+      matchIds:  matchRef.current,
+      teamIds:   teamRef.current,
+      playerIds: playerRef.current,
+      leagueIds: next,
+    });
+  }, []);
+
   return (
     <FavoritesContext.Provider value={{
       favoriteIds, isFavorite, toggleFavorite,
-      followedTeamIds, isFollowingTeam, toggleFollowTeam,
-      followedPlayerIds, isFollowingPlayer, toggleFollowPlayer,
-      followedLeagueIds, isFollowingLeague, toggleFollowLeague,
+      followedTeamIds, isFollowingTeam, toggleFollowTeam, replaceFollowedTeams,
+      followedPlayerIds, isFollowingPlayer, toggleFollowPlayer, replaceFollowedPlayers,
+      followedLeagueIds, isFollowingLeague, toggleFollowLeague, replaceFollowedLeagues,
       isSyncing,
     }}>
       {children}

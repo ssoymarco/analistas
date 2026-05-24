@@ -2005,7 +2005,9 @@ const Screen9Personalizing: React.FC<{
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
   const { setFanLevel } = useOnboarding();
-  const { isFollowingTeam, toggleFollowTeam, isFollowingLeague, toggleFollowLeague, isFollowingPlayer, toggleFollowPlayer } = useFavorites();
+  const {
+    replaceFollowedTeams, replaceFollowedPlayers, replaceFollowedLeagues,
+  } = useFavorites();
   const { login } = useAuth();
   const { togglePref, prefs } = useNotificationPrefs();
 
@@ -2081,20 +2083,16 @@ const Screen9Personalizing: React.FC<{
       // Apply fan level
       if (state.fanLevel) setFanLevel(state.fanLevel);
 
-      // Apply teams
-      state.teamIds.forEach(id => {
-        if (!isFollowingTeam(String(id))) toggleFollowTeam(String(id));
-      });
-
-      // Apply players
-      state.playerIds.forEach(id => {
-        if (!isFollowingPlayer(String(id))) toggleFollowPlayer(String(id));
-      });
-
-      // Apply leagues
-      state.leagueIds.forEach(id => {
-        if (!isFollowingLeague(String(id))) toggleFollowLeague(String(id));
-      });
+      // Apply selections — REPLACE the followed lists rather than toggling
+      // each id individually. Toggling accumulated picks across sessions
+      // (re-onboarding in dev / test builds would leave previous selections
+      // in AsyncStorage and the new run would merge on top), so a user who
+      // picked just "México" today would still see the 10 teams from a
+      // previous session listed as followed. Replace makes the onboarding
+      // selection the source of truth.
+      replaceFollowedTeams(state.teamIds.map(String));
+      replaceFollowedPlayers(state.playerIds.map(String));
+      replaceFollowedLeagues(state.leagueIds.map(String));
 
       // Apply notifications (map design keys → NotificationPrefsContext keys)
       const notifMap: Partial<Record<NotifKey, keyof typeof prefs>> = {
