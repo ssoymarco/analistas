@@ -534,9 +534,35 @@ export function useLeagueDetail(
         // Cards (type_id=84, yellow cards) — stored in `goals` field for UI reuse
         const topCards = buildStatRows(topCardsRaw);
 
+        // Sort: today/live first, then past matches (most recent first),
+        // then future matches (soonest first). Matches 365scores' UX where the
+        // current matchday is what the user lands on, scroll up = history,
+        // scroll down = upcoming. Previously this was a flat ascending sort
+        // which forced the user to scroll all the way down past the August
+        // games to find today's match.
+        const todayUTC = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
         const fixtures = fixturesRaw
           .map(mapFixture)
-          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+          .sort((a, b) => {
+            const dayA = a.date.slice(0, 10);
+            const dayB = b.date.slice(0, 10);
+            const isTodayA = dayA === todayUTC;
+            const isTodayB = dayB === todayUTC;
+            const isPastA  = dayA < todayUTC;
+            const isPastB  = dayB < todayUTC;
+
+            // Group precedence: today (0) > past (1) > future (2)
+            const groupA = isTodayA ? 0 : isPastA ? 1 : 2;
+            const groupB = isTodayB ? 0 : isPastB ? 1 : 2;
+            if (groupA !== groupB) return groupA - groupB;
+
+            // Within today: chronological (earliest kickoff first)
+            if (isTodayA) return new Date(a.date).getTime() - new Date(b.date).getTime();
+            // Within past: most recent first (descending)
+            if (isPastA)  return new Date(b.date).getTime() - new Date(a.date).getTime();
+            // Within future: soonest first (ascending)
+            return new Date(a.date).getTime() - new Date(b.date).getTime();
+          });
 
         setData({
           leagueId,

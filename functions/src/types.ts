@@ -37,6 +37,17 @@ export interface MatchDoc {
   seasonId: number | null;
   updatedAt: Timestamp;
 
+  // ── Live clock anchor (populated by pollLivescores during in-play) ──
+  // Lets the client smoothly tick the displayed minute between server polls.
+  // periodStartedAt = unix seconds when the current period kicked off.
+  // periodMinuteOffset = base minute for the period (0 for 1H, 45 for 2H, etc.).
+  // Absent for scheduled, halftime, and finished matches (the client falls back
+  // to `minute` in those cases).
+  liveClock?: {
+    periodStartedAt: number;
+    periodMinuteOffset: number;
+  };
+
   // ── Enrichment (populated by syncMatchEnrichment + pollLivescores) ──
   // Raw SM fixture payload with all includes. Stored as opaque JSON because
   // the shape is complex (20+ sub-types) and the client already knows how to
@@ -246,6 +257,24 @@ export interface SMLeague {
   category: number;
 }
 
+/** SportMonks period — one phase of the match (1H, HT, 2H, ET, PEN). */
+export interface SMPeriod {
+  id: number;
+  fixture_id: number;
+  type_id: number;          // 1=1H, 2=HT, 3=2H, 4=ET, 5=PEN
+  started: number | null;   // epoch seconds — when this period kicked off
+  ended: number | null;
+  counts_from: number;      // 0, 45, 60, 75, 90 — base minute for this period
+  ticking: boolean;         // true if this period is currently running
+  sort_order: number;
+  description?: string;
+  time_added?: number | null;
+  period_length?: number;
+  minutes?: number;
+  seconds?: number | null;
+  has_timer?: boolean;
+}
+
 export interface SMFixture {
   id: number;
   sport_id: number;
@@ -268,6 +297,8 @@ export interface SMFixture {
   scores?: SMScore[];
   state?: SMState;
   league?: SMLeague;
+  /** include=periods — required for live clock extrapolation. */
+  periods?: SMPeriod[];
 }
 
 export interface SMStandingDetail {

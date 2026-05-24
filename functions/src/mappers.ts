@@ -95,6 +95,28 @@ function extractScores(fixture: SMFixture): {
   return { homeScore, awayScore, homeScoreHT, awayScoreHT };
 }
 
+// ── Live clock anchor ───────────────────────────────────────────────────────
+// Extract the timestamp + minute offset of the currently-ticking period so the
+// client can smoothly advance the displayed minute between server polls.
+// Mirrors `getLiveClockAnchor` in src/services/sportsApi.ts so both ends of the
+// pipeline use the same logic. Returns undefined for HT (no period ticking),
+// scheduled, and finished matches — the client falls back to `minute` then.
+function getLiveClockAnchor(fixture: SMFixture):
+  | { periodStartedAt: number; periodMinuteOffset: number }
+  | undefined
+{
+  const periods = fixture.periods;
+  if (!periods || periods.length === 0) return undefined;
+  const ticking = periods.find(p => p.ticking);
+  if (!ticking) return undefined;
+  if (typeof ticking.started !== 'number' || ticking.started <= 0) return undefined;
+  const offset = typeof ticking.counts_from === 'number' ? ticking.counts_from : 0;
+  return {
+    periodStartedAt: ticking.started,
+    periodMinuteOffset: Math.max(0, offset),
+  };
+}
+
 // ── Live enrichment extractor ───────────────────────────────────────────────
 // Pulls the subset of SMFixture fields that change during a live match —
 // events, statistics, periods. Returned as a plain object suitable for
@@ -163,6 +185,14 @@ export function mapFixtureToMatchDoc(fixture: SMFixture): MatchDoc | null {
     seasonId: fixture.season_id ?? null,
     updatedAt: Timestamp.now(),
   };
+
+  // Live clock anchor — populated only when a period is actively ticking.
+  // Without this the client UI freezes the minute between server polls (15s
+  // intervals); with it the displayed minute advances smoothly every second.
+  const liveClock = getLiveClockAnchor(fixture);
+  if (liveClock) {
+    doc.liveClock = liveClock;
+  }
 
   // Optional live enrichment — only present when called from pollLivescores
   // (which pulls events/statistics/periods on /livescores/inplay).
