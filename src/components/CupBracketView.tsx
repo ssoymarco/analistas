@@ -14,6 +14,10 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import type { CupRound, CupTie, CupLeg } from '../services/sportsApi';
+import { translateTeamName } from '../utils/nationalTeams';
+import { localizeCityName } from '../utils/cityI18n';
+import { getDisplayVenueName, getDisplayVenueCity } from '../config/worldCupVenues';
+import { isImageUri } from '../utils/imageUri';
 
 // ── Date helper: "2026-05-22" → "22/05" (DD/MM, Spanish format) ──────────────
 const formatLegDate = (iso: string): string => {
@@ -22,9 +26,28 @@ const formatLegDate = (iso: string): string => {
   return `${parts[2]}/${parts[1]}`;
 };
 
+/**
+ * Render a friendly "11 jun" (day + localized 3-letter month) from an ISO
+ * date string. Uses the device locale; falls back to the literal DD/MM
+ * format if Intl is unavailable.
+ */
+const formatTieDate = (iso: string, lang: string): string => {
+  const parts = iso.split('-');
+  if (parts.length < 3) return iso;
+  try {
+    const d = new Date(`${iso}T00:00:00Z`);
+    const monthShort = new Intl.DateTimeFormat(lang, { month: 'short', timeZone: 'UTC' })
+      .format(d)
+      .replace('.', '');
+    return `${parseInt(parts[2], 10)} ${monthShort}`;
+  } catch {
+    return formatLegDate(iso);
+  }
+};
+
 // ── Team Logo ─────────────────────────────────────────────────────────────────
 const Logo: React.FC<{ uri: string; size?: number }> = ({ uri, size = 22 }) => {
-  if (uri?.startsWith('http')) {
+  if (isImageUri(uri)) {
     return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: 3 }} resizeMode="contain" />;
   }
   return <Text style={{ fontSize: size - 4 }}>{uri || '⚽'}</Text>;
@@ -86,7 +109,8 @@ const LegDetail: React.FC<{ leg: CupLeg; canonicalHomeId: string }> = ({ leg, ca
 // ── Tie Card (full-width) ─────────────────────────────────────────────────────
 const TieCard: React.FC<{ tie: CupTie; onPress?: (tie: CupTie) => void }> = ({ tie, onPress }) => {
   const c = useThemeColors();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const currentLang = (i18n.language || 'es').slice(0, 2);
   const [expanded, setExpanded] = useState(tie.isCurrentMatch);
   const homeWon = tie.winner?.id === tie.homeTeam.id;
   const awayWon = tie.winner?.id === tie.awayTeam.id;
@@ -99,6 +123,16 @@ const TieCard: React.FC<{ tie: CupTie; onPress?: (tie: CupTie) => void }> = ({ t
   const homeScore = hasAgg ? tie.aggregate!.home : tie.legs[0]?.homeScore;
   const awayScore = hasAgg ? tie.aggregate!.away : tie.legs[0]?.awayScore;
   const hasScore = homeScore !== null && homeScore !== undefined;
+  // Penalty shootout result — populated by mapTie when the leg's scores[]
+  // included a 'PENALTIES' row. The tie is decided in penalties when the
+  // ONLY leg (single-leg knockout) ended in pens; for two-leg ties the
+  // shootout lives on the second leg, but the aggregate label already says
+  // which side advances so we surface the shootout row from whichever leg
+  // carries it.
+  const penLeg = tie.legs.find(l => typeof l.homePenScore === 'number');
+  const penResult = penLeg
+    ? `${penLeg.homePenScore}-${penLeg.awayPenScore} pen`
+    : null;
 
   if (isTBD) {
     return (
@@ -143,7 +177,7 @@ const TieCard: React.FC<{ tie: CupTie; onPress?: (tie: CupTie) => void }> = ({ t
           ]}
           numberOfLines={1}
         >
-          {tie.homeTeam.name}
+          {translateTeamName(tie.homeTeam.name)}
         </Text>
         <Text style={[
           s.scoreNum,
@@ -166,7 +200,7 @@ const TieCard: React.FC<{ tie: CupTie; onPress?: (tie: CupTie) => void }> = ({ t
           ]}
           numberOfLines={1}
         >
-          {tie.awayTeam.name}
+          {translateTeamName(tie.awayTeam.name)}
         </Text>
         <Text style={[
           s.scoreNum,
@@ -176,6 +210,39 @@ const TieCard: React.FC<{ tie: CupTie; onPress?: (tie: CupTie) => void }> = ({ t
           {hasScore ? awayScore : '–'}
         </Text>
       </View>
+
+      {/* Date · venue · city — only when we have leg metadata (skip for
+          inferred/projected ties where this would just say "Por definir") */}
+      {!isInferred && tie.legs.length > 0 && (() => {
+        const leg = tie.legs[0];
+        const dateLabel = leg.date ? formatTieDate(leg.date, currentLang) : null;
+        // World Cup 2026 venues get the FIFA-clean overlay (Estadio Ciudad de
+        // México instead of Estadio Banorte, etc.). For other leagues we fall
+        // back to the raw SportMonks name.
+        const venueLabel = getDisplayVenueName(leg.venueId, leg.leagueId, leg.venueName);
+        const cityRaw = getDisplayVenueCity(leg.venueId, leg.leagueId, leg.venueCity);
+        // City names also get the Spanish-localization pass ("New York" →
+        // "Nueva York", "Munich" → "Múnich"). The WC overlay already gives
+        // Spanish names for known venues so this is mostly a no-op for them.
+        const cityLabel = cityRaw ? localizeCityName(cityRaw) : null;
+        const segments: string[] = [];
+        if (dateLabel) segments.push(dateLabel);
+        if (venueLabel) segments.push(venueLabel);
+        if (cityLabel && cityLabel !== venueLabel) segments.push(cityLabel);
+        // FotMob-style shootout suffix on the meta line — the score column
+        // already shows the regulation/ET tie ("3 / 3"), so we surface the
+        // shootout result here where it gets more space than in the column.
+        if (penResult) segments.push(penResult);
+        if (segments.length === 0) return null;
+        return (
+          <Text
+            style={[s.metaLine, { color: c.textTertiary }]}
+            numberOfLines={2}
+          >
+            {segments.join(' · ')}
+          </Text>
+        );
+      })()}
 
       {/* Expand hint for two-legged ties */}
       {isTwoLeg && hasScore && (
@@ -407,6 +474,7 @@ const s = StyleSheet.create({
   teamName: { flex: 1, fontSize: 14, fontWeight: '600' },
   scoreNum: { fontSize: 18, fontWeight: '800', minWidth: 24, textAlign: 'right' },
   expandHint: { fontSize: 11, textAlign: 'center', marginTop: 4 },
+  metaLine:   { fontSize: 11, marginTop: 6, paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.06)' },
 
   // Expanded legs
   legsContainer: {

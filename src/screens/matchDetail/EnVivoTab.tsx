@@ -22,6 +22,9 @@ import type {
   MatchVenue, MatchReferee, RefereeStats,
 } from '../../data/types';
 import { isImageUri } from '../../utils/imageUri';
+import {
+  MATCH_PHASES, matchHadExtraTime, maxRegulationMinute,
+} from '../../utils/matchPhases';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH   = SCREEN_WIDTH - 72; // prediction card width
@@ -1623,15 +1626,18 @@ function buildPressureCurve(
   events: MatchEvent[],
   homePressure: number,
   matchMinutes: number,
+  totalMin: number = 90,
 ): number[] {
-  // The X-axis of the chart always shows 0–90 so the labels and the half-time
-  // marker stay anchored. The CURVE itself, however, must only contain real
-  // data up to the current match minute — otherwise a match at minute 4 would
-  // render a noisy "history" through to minute 90 that the user reads as if it
-  // actually happened (reported on AC Milan 1-0 Cagliari at 4:48' on 2026-05-24).
-  // For finished matches we still extend to 90 so the full-match shape renders.
-  const total      = 90;
-  const elapsed    = Math.max(0, Math.min(matchMinutes, total)); // 0..90 cap
+  // The X-axis of the chart always shows 0–`totalMin` so the labels and the
+  // half-time marker stay anchored. The CURVE itself, however, must only
+  // contain real data up to the current match minute — otherwise a match at
+  // minute 4 would render a noisy "history" through to minute 90 that the
+  // user reads as if it actually happened (reported on AC Milan 1-0 Cagliari
+  // at 4:48' on 2026-05-24). For finished matches we still extend to the
+  // full `totalMin` (90 for regulation, 120 for ET matches) so the full-
+  // match shape renders.
+  const total      = totalMin;
+  const elapsed    = Math.max(0, Math.min(matchMinutes, total)); // 0..total cap
   const points     = new Array<number>(total + 1).fill(50);
   const impulse    = new Array<number>(total + 1).fill(0);
 
@@ -1728,11 +1734,18 @@ const PressureSection: React.FC<{
 }> = ({ pressure, match, events = [], statistics = [] }) => {
   const c           = useThemeColors();
   const { isDark }  = useDarkMode();
+  // The X-axis maxes out at 90 for a regulation match and 120 when extra
+  // time happened — see matchPhases.maxRegulationMinute. This is what lets
+  // FotMob-style ET goals (Mbappé 108', Messi 118', Petković 117') sit on
+  // the chart instead of being silently dropped past the 90-minute mark.
+  const totalMin = maxRegulationMinute(match, events);
+
   // How many minutes of the match have actually been played. Drives how far
-  // along the 0–90 X-axis the curve is filled with real momentum data; beyond
-  // this minute the chart stays neutral (50). The X-axis itself is always
-  // 0–90 so the half-time line and tick labels stay anchored.
-  //   • finished → 90 (full match shape)
+  // along the 0–`totalMin` X-axis the curve is filled with real momentum
+  // data; beyond this minute the chart stays neutral (50). The X-axis
+  // itself is always 0–`totalMin` so the half-time line and tick labels
+  // stay anchored.
+  //   • finished → totalMin (full match shape)
   //   • live     → current minute (curve grows over time)
   //   • scheduled → 0 (curve stays flat — shouldn't render here at all, but
   //                     the fallback is graceful)
@@ -1741,14 +1754,14 @@ const PressureSection: React.FC<{
   // on MEX 2-0 GHA on 2026-05-23) caused the FULL 90-min curve to render as if
   // the match had ended — explicit status mapping prevents that.
   const matchMinutes = match.status === 'finished'
-    ? 90
+    ? totalMin
     : match.status === 'live' && typeof match.minute === 'number' && match.minute > 0
       ? match.minute
       : 0;
 
   const rawCurve = React.useMemo(
-    () => buildPressureCurve(events, pressure.home, matchMinutes),
-    [events, pressure.home, matchMinutes],
+    () => buildPressureCurve(events, pressure.home, matchMinutes, totalMin),
+    [events, pressure.home, matchMinutes, totalMin],
   );
 
   // Catmull-Rom upsample → Gaussian smooth → final smooth wave
@@ -1757,7 +1770,8 @@ const PressureSection: React.FC<{
     return gaussianSmooth(up, 6);
   }, [rawCurve]);
 
-  const totalMin    = rawCurve.length - 1; // original minute count for marker x-pos
+  // `totalMin` declared above (~line 1741) — drives both buildPressureCurve
+  // and the x-axis labels. rawCurve.length === totalMin + 1 by construction.
   const numBars     = smoothCurve.length;
 
   // Measure actual chart pixel width via onLayout
@@ -1788,7 +1802,7 @@ const PressureSection: React.FC<{
     match.status === 'live' &&
     typeof match.minute === 'number' &&
     match.minute > 0
-      ? Math.min(match.minute, 90)
+      ? Math.min(match.minute, totalMin)
       : null;
 
   const pulseAnim = React.useRef(new Animated.Value(0.45)).current;
@@ -1886,6 +1900,16 @@ const PressureSection: React.FC<{
               left: (45 / totalMin) * chartW,
               borderColor: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)',
             }]} />
+            {/* Full-time dotted line — only when the chart extends into ET,
+                so the user can read where regulation ended (90') vs. where
+                extra time began. For 0-90 charts this is the right edge of
+                the chart, where a dashed line would be invisible. */}
+            {totalMin === 120 && (
+              <View style={[pi.htLine, {
+                left: (90 / totalMin) * chartW,
+                borderColor: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)',
+              }]} />
+            )}
 
             {/* Live playhead — only when the match is actually live. */}
             {playheadMin !== null && (
@@ -1974,13 +1998,31 @@ const PressureSection: React.FC<{
 
       {/* ── X-axis labels ── */}
       <View style={pi.xAxis}>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>0'</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>15'</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>30'</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>MT</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>60'</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>75'</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>90'</Text>
+        {/* X-axis labels adapt to whether the chart extends into extra time.
+            Regulation matches: 7 anchors evenly spaced 0'..90' with "MT"
+            (medio tiempo) at the halftime position. ET matches: collapse
+            to 4 anchors (0', MT=45', TC=90', AET=120') — mirrors the FotMob
+            "Inercia" pattern so users get a clear visual cue that the chart
+            covers ET. We use the same flexbox container so spacing stays
+            even regardless of label count. */}
+        {totalMin === 120 ? (
+          <>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>0'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>MT</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>TC</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>AET</Text>
+          </>
+        ) : (
+          <>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>0'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>15'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>30'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>MT</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>60'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>75'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>90'</Text>
+          </>
+        )}
       </View>
 
       {/* ── Summary bar ── */}
@@ -2145,14 +2187,26 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
     .filter(isShootoutEvent)
     .sort((a, b) => (a.shootoutOrder ?? 0) - (b.shootoutOrder ?? 0));
 
-  // Filter + split regulation/ET events into halves
+  // Filter + bucket regulation/ET events into phase sections. The MATCH_PHASES
+  // array (utils/matchPhases.ts) drives this — adding a new phase later means
+  // changing one constant, not patching every consumer.
   const regulationEvents = detail.events.filter(e => !isShootoutEvent(e));
   const filteredEvents = showAllEvents
     ? regulationEvents
     : regulationEvents.filter(e => IMPORTANT_TYPES.has(e.type));
-  const firstFiltered  = filteredEvents.filter(e => e.minute <= 45).sort((a, b) => a.minute - b.minute);
-  const secondFiltered = filteredEvents.filter(e => e.minute > 45).sort((a, b) => a.minute - b.minute);
+  const phaseBuckets = MATCH_PHASES.map(phase => ({
+    phase,
+    events: filteredEvents
+      .filter(e => e.minute >= phase.minRange[0] && e.minute <= phase.minRange[1])
+      .sort((a, b) => a.minute - b.minute),
+  }));
+  const visiblePhaseBuckets = phaseBuckets.filter(b => b.events.length > 0);
   const hasEvents = detail.events.length > 0;
+  // Show "FIN DEL PARTIDO" terminator only when the match has actually ended
+  // (regulation OR after-ET) AND we've rendered at least one phase section.
+  // Penalty matches put the terminator BEFORE the shootout block so the
+  // reading order is "1ER → 2DO → ET → FIN → Tanda".
+  const showMatchEndMarker = isFinished && visiblePhaseBuckets.length > 0;
   const hasMissing = (detail.missingPlayers?.home?.length ?? 0) > 0 || (detail.missingPlayers?.away?.length ?? 0) > 0;
 
   // ── Timeline block — reused in two positions (finished: top, live: below stats)
@@ -2188,7 +2242,7 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
         </TouchableOpacity>
       </View>
       {/* Event rows or empty state */}
-      {firstFiltered.length === 0 && secondFiltered.length === 0 ? (
+      {visiblePhaseBuckets.length === 0 && shootoutEvents.length === 0 ? (
         <View style={tl.emptyHighlights}>
           <Text style={[tl.emptyHighlightsText, { color: c.textTertiary }]}>
             {t('timeline.noHighlights')}
@@ -2196,20 +2250,31 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
         </View>
       ) : (
         <>
-          {firstFiltered.length > 0 && (
-            <>
+          {/* Render every non-empty phase in chronological order. Headers
+              only emit when a phase has events, so a regulation FT match
+              never shows an empty "1ER TIEMPO EXTRA" label. */}
+          {visiblePhaseBuckets.map(({ phase, events }) => (
+            <React.Fragment key={phase.key}>
               <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
-                <Text style={[tl.halfSepText, { color: c.textTertiary }]}>{t('timeline.firstHalf')}</Text>
+                <Text style={[tl.halfSepText, { color: c.textTertiary }]}>{t(phase.i18nKey)}</Text>
               </View>
-              {firstFiltered.map(e => <EventRow key={e.id} event={e} match={match} />)}
-            </>
-          )}
-          {firstFiltered.length > 0 && secondFiltered.length > 0 && (
+              {events.map(e => <EventRow key={e.id} event={e} match={match} />)}
+            </React.Fragment>
+          ))}
+
+          {/* "FIN DEL PARTIDO" terminator — closes off the regulation/ET
+              run before the penalty shootout (if any). Mirrors the
+              "1ER TIEMPO" / "2DO TIEMPO" separator style but with a bold
+              text treatment so it reads as the end of the match clock,
+              not just another phase. */}
+          {showMatchEndMarker && (
             <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
-              <Text style={[tl.halfSepText, { color: c.textTertiary }]}>{t('timeline.secondHalf')}</Text>
+              <Text style={[tl.halfSepText, { color: c.textPrimary, fontWeight: '700' }]}>
+                {t('timeline.matchEnd')}
+              </Text>
             </View>
           )}
-          {secondFiltered.map(e => <EventRow key={e.id} event={e} match={match} />)}
+
           {/* Penalty shootout section — only renders when SM provided shootout
               kicks (type_ids 22/23). Ordered by `shootoutOrder` so kicks read
               top-to-bottom in firing order (1, 2, 3 …). Each row reuses the

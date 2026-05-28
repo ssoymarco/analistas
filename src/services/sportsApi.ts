@@ -209,6 +209,22 @@ function getHalfTimeGoals(scores: SMScore[] | undefined, location: 'home' | 'awa
   return ht !== undefined ? ht.score.goals : undefined;
 }
 
+/**
+ * Penalty shootout final goals per side. Lives in `scores[]` with
+ * `description: 'PENALTIES'` (canonical SM v3) — some legacy feeds use the
+ * literal 'PENALTY_SHOOTOUT' so we accept both. Returns `undefined` when no
+ * shootout row exists, which is the common case for every non-knockout
+ * fixture.
+ */
+function getPenaltyShootoutGoals(scores: SMScore[] | undefined, location: 'home' | 'away'): number | undefined {
+  if (!scores || scores.length === 0) return undefined;
+  const pen = scores.find(
+    s => (s.description === 'PENALTIES' || s.description === 'PENALTY_SHOOTOUT')
+      && s.score.participant === location,
+  );
+  return pen !== undefined ? pen.score.goals : undefined;
+}
+
 // ── Timezone utilities ───────────────────────────────────────────────────────
 // SportMonks returns starting_at as UTC ("2026-04-15 00:00:00").
 // These helpers convert UTC to the device's local timezone automatically —
@@ -373,6 +389,8 @@ function mapFixtureToMatch(fixture: SMFixture): Match {
 
   const homeScoreHT = getHalfTimeGoals(fixture.scores, 'home');
   const awayScoreHT = getHalfTimeGoals(fixture.scores, 'away');
+  const homePenScore = getPenaltyShootoutGoals(fixture.scores, 'home');
+  const awayPenScore = getPenaltyShootoutGoals(fixture.scores, 'away');
 
   // Red cards from statistics (type_id=83) — match by participant_id like mapStatistics does
   const getStatVal = (participantId: number, typeId: number): number => {
@@ -393,12 +411,17 @@ function mapFixtureToMatch(fixture: SMFixture): Match {
     awayScore: getGoals(fixture.scores, 'away'),
     homeScoreHT,
     awayScoreHT,
+    homePenScore,
+    awayPenScore,
     homeRedCards,
     awayRedCards,
     status,
     time: getTimeDisplay(fixture),
     minute: getLiveMinute(fixture),
-    stateLabel: mapStateLabel(fixture.state_id),
+    // Suppress the in-game stateLabel ("1T"/"HT"/"2T"/"ET"/"PEN") when the
+    // match has already ended — otherwise a cached value from the last live
+    // poll keeps showing "DESCANSO" on the hero pill of a finished match.
+    stateLabel: status === 'finished' ? undefined : mapStateLabel(fixture.state_id),
     liveClock: getLiveClockAnchor(fixture),
     league: fixture.league?.name ?? leagueConfig?.name ?? 'Unknown',
     leagueLogo: fixture.league?.image_path || undefined,
@@ -421,11 +444,15 @@ function mapEventType(typeId: number): MatchEventType {
     case SM_EVENT_TYPES.OWN_GOAL: return 'own-goal';
     case SM_EVENT_TYPES.PENALTY_GOAL: return 'penalty-goal';
     case SM_EVENT_TYPES.PENALTY_MISS: return 'penalty-miss';
+    case SM_EVENT_TYPES.PENALTY_SHOOTOUT_GOAL: return 'shootout-goal';
+    case SM_EVENT_TYPES.PENALTY_SHOOTOUT_MISS: return 'shootout-miss';
     case SM_EVENT_TYPES.YELLOW_CARD: return 'yellow';
     case SM_EVENT_TYPES.SECOND_YELLOW: return 'second-yellow';
     case SM_EVENT_TYPES.RED_CARD: return 'red';
     case SM_EVENT_TYPES.SUBSTITUTION: return 'sub';
     case SM_EVENT_TYPES.VAR: return 'var';
+    case SM_EVENT_TYPES.DELAY_START: return 'delay-start';
+    case SM_EVENT_TYPES.DELAY_END:   return 'delay-end';
     default: return 'goal'; // filtered out before this is reached
   }
 }
@@ -457,15 +484,26 @@ function mapEvents(events: SMEvent[] | undefined, fixture: SMFixture): MatchEven
       seen.add(key);
       return true;
     })
-    .map(e => ({
-      id: String(e.id),
-      minute: e.minute,
-      addedTime: e.extra_minute ?? undefined,
-      type: mapEventType(e.type_id),
-      team: mapEventTeam(e, fixture),
-      player: e.player_name,
-      relatedPlayer: e.related_player_name ?? undefined,
-    }));
+    .map(e => {
+      const type = mapEventType(e.type_id);
+      const isShootout = type === 'shootout-goal' || type === 'shootout-miss';
+      return {
+        id: String(e.id),
+        minute: e.minute,
+        addedTime: e.extra_minute ?? undefined,
+        type,
+        team: mapEventTeam(e, fixture),
+        player: e.player_name,
+        relatedPlayer: e.related_player_name ?? undefined,
+        // Only meaningful on delay-start events; undefined elsewhere.
+        // SportMonks sends `injured: true` when the delay is injury-related.
+        injured: e.injured === true ? true : undefined,
+        // Shootout-only fields. `sort_order` orders kicks 1..N; `result` is
+        // the running scoreboard at the moment of the kick (e.g. "4-2").
+        shootoutOrder:  isShootout ? ((e as any).sort_order ?? undefined) : undefined,
+        shootoutResult: isShootout ? ((e as any).result      ?? undefined) : undefined,
+      };
+    });
 }
 
 // ── Statistics Mapper ───────────────────────────────────────────────────────
@@ -1985,7 +2023,25 @@ export interface CupLeg {
   awayTeam: Team;
   homeScore: number | null;  // null if not yet played
   awayScore: number | null;
+  /** Penalty shootout final goals. Set only when this leg ended in a
+   *  shootout (SM `description: 'PENALTIES'` in scores[]). Lets the
+   *  bracket TieCard render the FotMob-style "(4-2 pen)" inline notation
+   *  in the same place that already shows the regulation/ET score. */
+  homePenScore?: number;
+  awayPenScore?: number;
   legLabel: string;          // "IDA" | "VUELTA" | ""
+  /** Venue info — populated for fixtures with a `venue` SM include
+   *  (currently syncFixtures, getFixtureDetail). For Mundial 2026 the
+   *  consuming view applies the FIFA-clean overlay from
+   *  src/config/worldCupVenues.ts via getVenueDisplayName(venueId, leagueId).
+   *  Falls back to undefined when the venue isn't known yet. */
+  venueId?: number;
+  venueName?: string;
+  venueCity?: string;
+  /** League ID of this leg — needed to decide whether to apply the
+   *  World Cup venue overlay (league 732). Stored on every leg so the
+   *  bracket renderer doesn't have to thread it down separately. */
+  leagueId?: number;
 }
 
 /** One matchup between two teams (may have 1 or 2 legs) */
@@ -2155,6 +2211,12 @@ function mapTie(fixtures: SMFixture[], currentFixtureId?: string): CupTie {
     const fAway = getParticipant(fixture, 'away');
     const status = mapStateToStatus(fixture.state_id, fixture.starting_at);
     const played = status !== 'scheduled';
+    // Shootout total — present only when the fixture's `scores[]` includes
+    // a 'PENALTIES' row. Both the SM proxy path and the Firestore-shim path
+    // populate this when applicable (see shim above + extractScores in
+    // functions/src/mappers.ts).
+    const homePenScore = getPenaltyShootoutGoals(fixture.scores, 'home');
+    const awayPenScore = getPenaltyShootoutGoals(fixture.scores, 'away');
     return {
       fixtureId: String(fixture.id),
       date: fixture.starting_at.split(' ')[0],
@@ -2163,7 +2225,17 @@ function mapTie(fixtures: SMFixture[], currentFixtureId?: string): CupTie {
       awayTeam: mapParticipantToTeam(fAway),
       homeScore: played ? getGoals(fixture.scores, 'home') : null,
       awayScore: played ? getGoals(fixture.scores, 'away') : null,
+      homePenScore,
+      awayPenScore,
       legLabel: getLegLabel(fixture.leg, totalLegs),
+      // Venue — present when SM fixture include carries `venue`.
+      // For the Firestore-fed path (sync-fixtures with `venue` include) this
+      // is populated. For older docs and the proxy fallback (without venue)
+      // these stay undefined and the bracket cell skips the venue line.
+      venueId:    (fixture as any).venue?.id ?? undefined,
+      venueName:  (fixture as any).venue?.name ?? undefined,
+      venueCity:  (fixture as any).venue?.city_name ?? undefined,
+      leagueId:   (fixture as any).league_id ?? undefined,
     };
   });
 
@@ -2243,29 +2315,67 @@ export async function getCupBracket(
         fixtures = fsMatches.map(m => {
           const homeId = Number(m.homeTeam.id) || 0;
           const awayId = Number(m.awayTeam.id) || 0;
-          const stateId = m.status === 'finished' ? 5 : m.status === 'live' ? 22 : 1;
+          // Preserve the penalty / ET signal that lives on the Match doc as
+          // `homePenScore` / `awayPenScore`. Without this, finished penalty
+          // matches were collapsed to plain FT (state 5) which broke the
+          // bracket cell's "(4-2 pen)" rendering — see Mundial 2022 final
+          // bug (visible in user screenshots).
+          const endedInPenalties = m.status === 'finished'
+            && typeof m.homePenScore === 'number'
+            && typeof m.awayPenScore === 'number';
+          const stateId = endedInPenalties
+            ? 8                                      // FT_PEN
+            : m.status === 'finished' ? 5            // FT
+            : m.status === 'live'     ? 22           // INPLAY_2ND_HALF
+            : 1;                                     // NS
+          // Preserve stage/round/group from the Match doc (populated by
+          // syncFixtures with stage;round;group SM includes). If the doc is
+          // pre-enrichment (older than the stage/round wire-up) these will
+          // be undefined → fall back to 0/null, which makes the bracket
+          // builder lump all fixtures into a single stage. Better than
+          // crashing, and self-heals on the next 30-min syncFixtures run.
+          const scores = m.status !== 'scheduled' ? [
+            { type_id: 1525, participant_id: homeId, score: { goals: m.homeScore, participant: 'home' as const }, description: 'CURRENT' },
+            { type_id: 1525, participant_id: awayId, score: { goals: m.awayScore, participant: 'away' as const }, description: 'CURRENT' },
+          ] : [];
+          if (endedInPenalties) {
+            // Inject a PENALTIES row so downstream readers (mapTie →
+            // getPenaltyShootoutGoals) can recover the shootout total.
+            // Same shape SportMonks uses on its native /fixtures payload.
+            scores.push(
+              { type_id: 1525, participant_id: homeId, score: { goals: m.homePenScore!, participant: 'home' as const }, description: 'PENALTIES' },
+              { type_id: 1525, participant_id: awayId, score: { goals: m.awayPenScore!, participant: 'away' as const }, description: 'PENALTIES' },
+            );
+          }
           return {
             id: Number(m.id) || 0,
             league_id: Number(m.leagueId) || 0,
             season_id: m.seasonId ?? 0,
-            stage_id: 0,
-            group_id: null,
+            stage_id: m.stageId ?? 0,
+            group_id: m.groupId ?? null,
             aggregate_id: null,
-            round_id: 0,
+            round_id: m.roundId ?? 0,
             starting_at: m.startingAtUtc ?? '',
             starting_at_timestamp: m.startingAtUtc ? Math.floor(new Date(m.startingAtUtc).getTime() / 1000) : 0,
-            length: 90,
+            length: endedInPenalties ? 120 : 90,
             state_id: stateId,
             participants: [
               { id: homeId, name: m.homeTeam.name, short_code: m.homeTeam.shortName, image_path: m.homeTeam.logo, meta: { location: 'home' } },
               { id: awayId, name: m.awayTeam.name, short_code: m.awayTeam.shortName, image_path: m.awayTeam.logo, meta: { location: 'away' } },
             ],
-            scores: m.status !== 'scheduled' ? [
-              { type_id: 1525, participant_id: homeId, score: { goals: m.homeScore, participant: 'home' }, description: 'CURRENT' },
-              { type_id: 1525, participant_id: awayId, score: { goals: m.awayScore, participant: 'away' }, description: 'CURRENT' },
-            ] : [],
+            scores,
             league: { id: Number(m.leagueId) || 0, name: m.league, image_path: m.leagueLogo ?? '' },
             state: { id: stateId, state: m.status, name: m.status },
+            stage: m.stage ?? undefined,
+            round: m.round ?? undefined,
+            group: m.group ?? undefined,
+            // Venue — synthesize an SM-shaped `venue` object so the same
+            // mapTie() consumer downstream works for both the proxy and
+            // Firestore paths. `m.venueId` is populated by the Firestore
+            // mapper after syncFixtures pulls the `venue` include.
+            venue: m.venueId
+              ? { id: m.venueId, name: m.venueName ?? '', city_name: m.venueCity ?? '' }
+              : undefined,
           } as unknown as SMFixture;
         });
       }
@@ -2279,6 +2389,27 @@ export async function getCupBracket(
     }
     if (fixtures.length === 0) return [];
 
+    // ── Drop group-stage fixtures from the bracket ───────────────────────────
+    // For competitions with both group stage AND knockout (Mundial 2026,
+    // Champions League, Copa Libertadores, etc.) the bracket should ONLY
+    // contain the knockout phase. SportMonks marks group-stage fixtures with
+    // a non-null `group_id` (or `group` object); knockout fixtures don't have
+    // one. Filtering by group_id is more reliable than guessing by stage name
+    // because stage names vary by language and tournament version.
+    //
+    // Note: this filter is safe even for cups WITHOUT a group stage
+    // (Copa del Rey, FA Cup, etc.) — those have group_id=null for every
+    // fixture so nothing is dropped.
+    const knockoutFixtures = fixtures.filter(f => {
+      const groupId = (f as any).group_id;
+      const group   = (f as any).group;
+      return groupId == null && group == null;
+    });
+    // If filtering wiped everything (e.g. older docs without group_id metadata),
+    // fall back to all fixtures to avoid showing a blank bracket. The Firestore
+    // upgrade path (next 30-min syncFixtures) fixes this organically.
+    const bracketFixtures = knockoutFixtures.length > 0 ? knockoutFixtures : fixtures;
+
     // ── Group by STAGE (not round) ────────────────────────────────────────────
     // SportMonks structure: Stage = bracket phase (R16, QF, SF, Final)
     //                       Round = matchday within a stage (leg 1, leg 2)
@@ -2288,10 +2419,10 @@ export async function getCupBracket(
       sortOrder: number;
       isCurrent: boolean;
       isFinished: boolean;
-      fixtures: typeof fixtures;
+      fixtures: typeof bracketFixtures;
     }>();
 
-    for (const fixture of fixtures) {
+    for (const fixture of bracketFixtures) {
       const stageId = fixture.stage_id ?? fixture.round?.stage_id ?? 0;
       if (!stageMap.has(stageId)) {
         const stage = (fixture as any).stage;
@@ -2399,9 +2530,15 @@ export async function getCupBracket(
       // Build the ordered list of teams advancing from the previous round
       const advancing: Team[] = prevRound.ties.map((tie, ti) => {
         if (tie.isFinished && tie.winner) return { ...tie.winner };
+        // Use i18n.t('cup.winner') instead of hardcoded "Ganador" so this
+        // localizes when the user runs the app in en/fr/de/it/etc. Team
+        // names go through translateNationalTeam first so "Mexico" becomes
+        // "México" / "Mexique" / "Mexiko" per locale.
+        const homeLabel = abbreviate(translateNationalTeam(tie.homeTeam.name));
+        const awayLabel = abbreviate(translateNationalTeam(tie.awayTeam.name));
         return {
           id: `tbd-${prevRound.id}-${ti}`,
-          name: `Ganador ${abbreviate(tie.homeTeam.name)} vs ${abbreviate(tie.awayTeam.name)}`,
+          name: i18n.t('cup.winner', { teams: `${homeLabel} vs ${awayLabel}` }) as string,
           shortName: 'TBD',
           logo: '⚽',
         };
@@ -2441,15 +2578,21 @@ export async function getCupBracket(
 
           // Build team labels — only use confirmed winner if the tie is 100% finished
           const confirmedHome = (t1.isFinished && t1.winner) ? t1.winner : null;
+          // Use i18n + translateNationalTeam for the placeholder "Winner X vs Y"
+          // labels — same rationale as the previous-round backfill above.
+          const t1Home = abbreviate(translateNationalTeam(t1.homeTeam.name));
+          const t1Away = abbreviate(translateNationalTeam(t1.awayTeam.name));
           const homeTeam = confirmedHome
             ? { ...confirmedHome }
-            : { id: `tbd-${order}-${i}`, name: `Ganador ${abbreviate(t1.homeTeam.name)} vs ${abbreviate(t1.awayTeam.name)}`, shortName: 'TBD', logo: '⚽' };
+            : { id: `tbd-${order}-${i}`, name: i18n.t('cup.winner', { teams: `${t1Home} vs ${t1Away}` }) as string, shortName: 'TBD', logo: '⚽' };
 
           const confirmedAway = t2 && t2.isFinished && t2.winner ? t2.winner : null;
+          const t2Home = t2 ? abbreviate(translateNationalTeam(t2.homeTeam.name)) : '';
+          const t2Away = t2 ? abbreviate(translateNationalTeam(t2.awayTeam.name)) : '';
           const awayTeam = t2
             ? (confirmedAway
               ? { ...confirmedAway }
-              : { id: `tbd-${order}-${i + 1}`, name: `Ganador ${abbreviate(t2.homeTeam.name)} vs ${abbreviate(t2.awayTeam.name)}`, shortName: 'TBD', logo: '⚽' })
+              : { id: `tbd-${order}-${i + 1}`, name: i18n.t('cup.winner', { teams: `${t2Home} vs ${t2Away}` }) as string, shortName: 'TBD', logo: '⚽' })
             : { id: `tbd-${order}-bye`, name: 'TBD', shortName: 'TBD', logo: '⚽' };
 
           nextTies.push({
@@ -2671,7 +2814,7 @@ export function getSearchableLeagues(): SearchableLeague[] {
 // ── Popular Teams (hardcoded for instant onboarding, sorted by global popularity) ──
 
 // All IDs verified against SportMonks API (April 2026)
-const POPULAR_TEAMS: SearchableTeam[] = [
+export const POPULAR_TEAMS: SearchableTeam[] = [
   // Liga MX — México (first for Mexican market)
   { id: 2687,   name: 'América',              shortName: 'AME', logo: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
   { id: 427,    name: 'Guadalajara',          shortName: 'GUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
@@ -2703,8 +2846,74 @@ const POPULAR_TEAMS: SearchableTeam[] = [
   { id: 1024,   name: 'Flamengo',             shortName: 'FLA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/0/1024.png', leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
   // Saudi Arabia
   { id: 2506,   name: 'Al Nassr',             shortName: 'ANA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/10/2506.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
-  { id: 7011,   name: 'Al Hilal',             shortName: 'ALH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/3/7011.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
+  { id: 7011,   name: 'Al Hilal',             shortName: 'ALH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/3/7011.png',  leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
 
+  // ── Country-preset additions (May 2026) — added for onboarding country presets ──
+  // La Liga extras
+  { id: 7980,   name: 'Atlético Madrid',      shortName: 'ATM', logo: 'https://cdn.sportmonks.com/images/soccer/teams/12/7980.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  { id: 676,    name: 'Sevilla',              shortName: 'SEV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/4/676.png',   leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  { id: 13258,  name: 'Athletic Club',        shortName: 'ATH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/10/13258.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  { id: 594,    name: 'Real Sociedad',        shortName: 'RSO', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/594.png',  leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  { id: 214,    name: 'Valencia',             shortName: 'VAL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/22/214.png',  leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  { id: 485,    name: 'Real Betis',           shortName: 'BET', logo: 'https://cdn.sportmonks.com/images/soccer/teams/5/485.png',   leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  { id: 3477,   name: 'Villarreal',           shortName: 'VIL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/21/3477.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  // Liga Profesional Argentina extras
+  { id: 3608,   name: 'Racing Club',          shortName: 'RAC', logo: 'https://cdn.sportmonks.com/images/soccer/teams/24/3608.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
+  { id: 10840,  name: 'Independiente',        shortName: 'IND', logo: 'https://cdn.sportmonks.com/images/soccer/teams/24/10840.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
+  { id: 520,    name: 'San Lorenzo',          shortName: 'SLO', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/520.png',   leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
+  { id: 9335,   name: 'Estudiantes LP',       shortName: 'EST', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/9335.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
+  { id: 9904,   name: 'Vélez Sarsfield',      shortName: 'VEL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/16/9904.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
+  // Brasileirão extras
+  { id: 3422,   name: 'Palmeiras',            shortName: 'PAL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/30/3422.png', leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
+  { id: 303,    name: 'Corinthians',          shortName: 'CTH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/15/303.png',  leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
+  { id: 3496,   name: 'São Paulo',            shortName: 'SAO', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/3496.png',  leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
+  { id: 1095,   name: 'Fluminense',           shortName: 'FLU', logo: 'https://cdn.sportmonks.com/images/soccer/teams/7/1095.png',  leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
+  { id: 3427,   name: 'Atlético Mineiro',     shortName: 'AMN', logo: 'https://cdn.sportmonks.com/images/soccer/teams/3/3427.png',  leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
+  { id: 2925,   name: 'Grêmio',               shortName: 'GRE', logo: 'https://cdn.sportmonks.com/images/soccer/teams/13/2925.png', leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
+  { id: 3684,   name: 'Santos',               shortName: 'STS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/4/3684.png',  leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
+  // MLS extras
+  { id: 147671, name: 'Los Angeles FC',       shortName: 'LAF', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/147671.png', leagueName: 'MLS', leagueId: 779, seasonId: 26720 },
+  { id: 3645,   name: 'Atlanta United',       shortName: 'ATL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/29/3645.png', leagueName: 'MLS', leagueId: 779, seasonId: 26720 },
+  { id: 2649,   name: 'Seattle Sounders',     shortName: 'SEA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/25/2649.png', leagueName: 'MLS', leagueId: 779, seasonId: 26720 },
+  { id: 413,    name: 'LA Galaxy',            shortName: 'LAG', logo: 'https://cdn.sportmonks.com/images/soccer/teams/29/413.png',  leagueName: 'MLS', leagueId: 779, seasonId: 26720 },
+];
+
+// ── Popular National Teams (hardcoded for instant onboarding) ───────────────
+// All IDs verified live against SportMonks via Mundial 2026 season 26618.
+// `leagueId: 0` is the convention for national teams (they participate in many
+// competitions, not tied to a single league). The Mundial 2026 leagueId (732)
+// is referenced from `seasonId: 26618` so fixture queries still work.
+//
+// Italy, Chile and Peru are NOT in this list because they didn't qualify for
+// Mundial 2026. They remain findable via search through getAllSearchableTeams().
+export const POPULAR_NATIONAL_TEAMS: SearchableTeam[] = [
+  // CONCACAF — Mundial 2026 hosts
+  { id: 18576, name: 'México',          shortName: 'MEX', logo: 'https://cdn.sportmonks.com/images/soccer/teams/16/18576.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18571, name: 'Estados Unidos',  shortName: 'USA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/18571.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18572, name: 'Canadá',          shortName: 'CAN', logo: 'https://cdn.sportmonks.com/images/soccer/teams/12/18572.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  // CONMEBOL
+  { id: 18644, name: 'Argentina',       shortName: 'ARG', logo: 'https://cdn.sportmonks.com/images/soccer/teams/20/18644.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18704, name: 'Brasil',          shortName: 'BRA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/16/18704.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 15251, name: 'Uruguay',         shortName: 'URU', logo: 'https://cdn.sportmonks.com/images/soccer/teams/19/15251.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18720, name: 'Colombia',        shortName: 'COL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/0/18720.png',  leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18573, name: 'Ecuador',         shortName: 'ECU', logo: 'https://cdn.sportmonks.com/images/soccer/teams/13/18573.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18723, name: 'Paraguay',        shortName: 'PAR', logo: 'https://cdn.sportmonks.com/images/soccer/teams/3/18723.png',  leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  // UEFA — Top global brands
+  { id: 18710, name: 'España',          shortName: 'ESP', logo: 'https://cdn.sportmonks.com/images/soccer/teams/22/18710.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18647, name: 'Francia',         shortName: 'FRA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/18647.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18645, name: 'Inglaterra',      shortName: 'ENG', logo: 'https://cdn.sportmonks.com/images/soccer/teams/21/18645.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18660, name: 'Alemania',        shortName: 'GER', logo: 'https://cdn.sportmonks.com/images/soccer/teams/4/18660.png',  leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18701, name: 'Portugal',        shortName: 'POR', logo: 'https://cdn.sportmonks.com/images/soccer/teams/13/18701.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18694, name: 'Países Bajos',    shortName: 'NED', logo: 'https://cdn.sportmonks.com/images/soccer/teams/6/18694.png',  leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18743, name: 'Bélgica',         shortName: 'BEL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/18743.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18588, name: 'Croacia',         shortName: 'CRO', logo: 'https://cdn.sportmonks.com/images/soccer/teams/28/18588.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  // África
+  { id: 18551, name: 'Marruecos',       shortName: 'MAR', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/18551.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  // Asia / Oceanía
+  { id: 18597, name: 'Japón',           shortName: 'JPN', logo: 'https://cdn.sportmonks.com/images/soccer/teams/5/18597.png',  leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18567, name: 'Corea del Sur',   shortName: 'KOR', logo: 'https://cdn.sportmonks.com/images/soccer/teams/7/18567.png',  leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18562, name: 'Arabia Saudita',  shortName: 'KSA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/2/18562.png',  leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
+  { id: 18730, name: 'Australia',       shortName: 'AUS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/10/18730.png', leagueName: 'Selección Nacional', leagueId: 0, seasonId: 26618 },
 ];
 
 // ── Popular Players (resolved by name, NOT hardcoded IDs) ───────────────────
@@ -2750,7 +2959,7 @@ interface PopularPlayerSpec {
 // (`/squads/teams/{teamId}`) on 2026-04-29 — see git log for the lookup queries.
 // IDs are stable across transfers (only `team` changes), so they don't need
 // maintenance when players move clubs.
-const POPULAR_PLAYER_NAMES: PopularPlayerSpec[] = [
+export const POPULAR_PLAYER_NAMES: PopularPlayerSpec[] = [
   // ── Global TOP ─────────────────────────────────────────────────────────────
   { name: 'Lionel Messi',           country: 'Argentina',   id: 184798 },
   { name: 'Cristiano Ronaldo',      country: 'Portugal',    id: 580 },
@@ -2802,6 +3011,27 @@ const POPULAR_PLAYER_NAMES: PopularPlayerSpec[] = [
   { name: 'Leny Yoro',              country: 'France',      id: 37600357 },
   { name: 'Mathys Tel',             country: 'France',      id: 37531504 },
   { name: 'Alejandro Balde',        country: 'Spain',       id: 37316480 },
+  // ── Country-preset additions (May 2026) — resolved by name ────────────────
+  // Argentina
+  { name: 'Lautaro Martínez',       country: 'Argentina' },
+  { name: 'Julián Álvarez',         country: 'Argentina' },
+  { name: 'Enzo Fernández',         country: 'Argentina' },
+  { name: 'Alexis Mac Allister',    country: 'Argentina' },
+  { name: 'Rodrigo De Paul',        country: 'Argentina' },
+  { name: 'Paulo Dybala',           country: 'Argentina' },
+  // Brazil
+  { name: 'Rodrygo',                country: 'Brazil' },
+  { name: 'Casemiro',               country: 'Brazil' },
+  { name: 'Marquinhos',             country: 'Brazil' },
+  // USA
+  { name: 'Christian Pulisic',      country: 'USA' },
+  { name: 'Weston McKennie',        country: 'USA' },
+  { name: 'Folarin Balogun',        country: 'USA' },
+  // England (Cole Palmer is the missing megastar)
+  { name: 'Cole Palmer',            country: 'England' },
+  { name: 'Declan Rice',            country: 'England' },
+  // Mexico — Edson is also missing from the curated list
+  { name: 'Edson Álvarez',          country: 'Mexico' },
   // ── Mexico stars ───────────────────────────────────────────────────────────
   { name: 'Santiago Giménez',       country: 'Mexico',      id: 2503729 },
   { name: 'Raúl Jiménez',           country: 'Mexico',      id: 160217 },
@@ -2809,6 +3039,181 @@ const POPULAR_PLAYER_NAMES: PopularPlayerSpec[] = [
   { name: 'Guillermo Ochoa',        country: 'Mexico',      id: 95174 },
   { name: 'Hirving Lozano',         country: 'Mexico',      id: 253463 },
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLAYER POPULARITY RANKING
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Two-layer system mirroring LEAGUE_POPULARITY in config/leagues.ts.
+// Drives the order of players in the picker (Screen4Players).
+//
+//   1. PLAYER_POPULARITY         — global default score (0-100)
+//   2. PLAYER_POPULARITY_BY_COUNTRY — per-market overrides
+//
+// Use getPlayerPopularity(name, country) — country override takes precedence.
+// Names match POPULAR_PLAYER_NAMES (and the localPlayerNames of country
+// presets). Names missing from this map fall back to a low default (10) so
+// they still appear at the bottom — never disappear completely.
+
+/** Global popularity score (0-100) per player name. Higher = appears earlier. */
+export const PLAYER_POPULARITY: Record<string, number> = {
+  // ── Tier S: Ballon d'Or class (95-100) ────────────────────────────────────
+  'Lionel Messi':            100,
+  'Cristiano Ronaldo':        99,
+  'Kylian Mbappé':            98,
+  'Erling Haaland':           97,
+  'Vinícius Júnior':          95,
+  // ── Tier A: Global megastars (85-94) ──────────────────────────────────────
+  'Jude Bellingham':          92,
+  'Lamine Yamal':             90,
+  'Harry Kane':               88,
+  'Pedri':                    88,
+  'Mohamed Salah':            86,
+  'Rodri':                    86,
+  'Bukayo Saka':              85,
+  // ── Tier B: Top continental (75-84) ───────────────────────────────────────
+  'Phil Foden':               84,
+  'Robert Lewandowski':       83,
+  'Raphinha':                 82,
+  'Virgil van Dijk':          80,
+  'Bernardo Silva':           80,
+  'Kevin De Bruyne':          80,
+  'Cole Palmer':              79,
+  'Lautaro Martínez':         78,
+  'Julián Álvarez':           78,
+  'Neymar Jr':                78,
+  'Florian Wirtz':            77,
+  'Khvicha Kvaratskhelia':    76,
+  'Victor Osimhen':           75,
+  'Rodrygo':                  75,
+  // ── Tier C: Big names (65-74) ─────────────────────────────────────────────
+  'Rúben Dias':               72,
+  'Trent Alexander-Arnold':   72,
+  'Casemiro':                 72,
+  'Luka Modrić':              70,
+  'Paulo Dybala':             70,
+  'Karim Benzema':            68,
+  'Antoine Griezmann':        68,
+  'Endrick':                  68,
+  'Federico Valverde':        67,
+  'Marcus Rashford':          66,
+  'Christian Pulisic':        66,
+  'Marquinhos':               66,
+  'Nico Williams':            65,
+  'Declan Rice':              65,
+  // ── Tier D: Recognized (55-64) ────────────────────────────────────────────
+  'Pau Cubarsí':              63,
+  'Achraf Hakimi':            62,
+  'Luis Díaz':                62,
+  'Dušan Vlahović':           60,
+  'Gavi':                     60,
+  'Alexis Mac Allister':      59,
+  'Enzo Fernández':           59,
+  'Cody Gakpo':               58,
+  'Darwin Núñez':             58,
+  'Alejandro Garnacho':       57,
+  'Ousmane Dembélé':          56,
+  'Rúben Neves':              55,
+  'Vitinha':                  55,
+  'Richarlison':              55,
+  'Rodrigo De Paul':          55,
+  // ── Tier E: Mid (45-54) ────────────────────────────────────────────────────
+  'Jonathan David':           54,
+  'Mathys Tel':               53,
+  'Tijjani Reijnders':        52,
+  'Warren Zaïre-Emery':       52,
+  'Leny Yoro':                52,
+  'Alejandro Balde':          51,
+  'Serhou Guirassy':          50,
+  'Santiago Giménez':         48,  // boosted to 95+ in MX
+  'Raúl Jiménez':             46,  // boosted in MX
+  'Edson Álvarez':            45,  // boosted in MX
+  'Weston McKennie':          45,  // boosted in US
+  // ── Tier F: Local heroes (20-44) ──────────────────────────────────────────
+  'Folarin Balogun':          43,  // US boost
+  'Guillermo Ochoa':          40,  // MX boost (legend, retiring)
+  'Julián Quiñones':          38,  // MX/COL dual-nat
+  'Hirving Lozano':           28,  // bajó por poca actividad
+};
+
+/**
+ * Per-country popularity overrides.
+ * ISO 3166-1 alpha-2 → name → popularity (0-100).
+ *
+ * Falls back to PLAYER_POPULARITY if a country/name pair is missing.
+ * Values above 100 are allowed and create "super-priority" entries that
+ * bubble to the very top (e.g. Santi Giménez 103 in MX, above Messi 100).
+ */
+export const PLAYER_POPULARITY_BY_COUNTRY: Record<string, Record<string, number>> = {
+  // 🇲🇽 México — top local stars before global megastars, then Messi/CR boosted
+  MX: {
+    'Santiago Giménez':       103, // top scorer Liga MX historia + Milan
+    'Raúl Jiménez':           102, // capitán selección
+    'Edson Álvarez':           96, // midfield titular MX
+    'Guillermo Ochoa':         88, // legend
+    'Julián Quiñones':         60,
+  },
+  // 🇦🇷 Argentina — Messi super-boost, then locals
+  AR: {
+    'Lionel Messi':           105, // GOAT for AR
+    'Julián Álvarez':          98,
+    'Lautaro Martínez':        96,
+    'Paulo Dybala':            90,
+    'Rodrigo De Paul':         85,
+    'Alexis Mac Allister':     85,
+    'Enzo Fernández':          83,
+  },
+  // 🇧🇷 Brasil — Vini/Rodrygo top, then locals
+  BR: {
+    'Vinícius Júnior':        103, // top BR star, Real Madrid
+    'Rodrygo':                 95,
+    'Raphinha':                94,
+    'Neymar Jr':               92,
+    'Endrick':                 88,
+    'Casemiro':                85,
+    'Marquinhos':              80,
+  },
+  // 🇺🇸 USA — Pulisic top, then locals
+  US: {
+    'Christian Pulisic':      100, // captain & Milan starter
+    'Weston McKennie':         85, // Juventus
+    'Folarin Balogun':         78, // Mónaco
+  },
+  // 🇪🇸 España — Yamal super-boost (above Messi for ES users), then locals
+  ES: {
+    'Lamine Yamal':           105, // generational
+    'Pedri':                  100,
+    'Rodri':                   98, // Ballon d'Or 2024
+    'Nico Williams':           92,
+    'Pau Cubarsí':             85,
+    'Gavi':                    82,
+    'Alejandro Balde':         78,
+  },
+  // 🏴 Inglaterra — Bellingham + Kane + Foden + Saka boosted
+  GB: {
+    'Jude Bellingham':        102, // top english star
+    'Harry Kane':             100,
+    'Phil Foden':              95,
+    'Bukayo Saka':             93,
+    'Cole Palmer':             90,
+    'Declan Rice':             82,
+    'Marcus Rashford':         76,
+    'Trent Alexander-Arnold':  82,
+  },
+};
+
+/**
+ * Returns the popularity of a player, country-aware.
+ * Falls back to PLAYER_POPULARITY, then to 10 (so unknown names still appear
+ * at the bottom rather than vanishing).
+ */
+export function getPlayerPopularity(name: string, country?: string): number {
+  if (country) {
+    const v = PLAYER_POPULARITY_BY_COUNTRY[country]?.[name];
+    if (typeof v === 'number') return v;
+  }
+  return PLAYER_POPULARITY[name] ?? 10;
+}
 
 /**
  * Resolves a single player by name via SportMonks search.

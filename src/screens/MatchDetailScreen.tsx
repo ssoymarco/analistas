@@ -425,18 +425,24 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
       return parts.length >= 2 ? parts[1] : parts[0];
     };
 
+    // Format a minute including any added/stoppage time, so an ET goal at
+    // SM minute=105 + extra_minute=1 reads as "105+1'" instead of being
+    // truncated to "105'" (the form FotMob and 365scores both render).
+    const formatMinute = (g: typeof goals[number]) =>
+      g.addedTime ? `${g.minute}+${g.addedTime}'` : `${g.minute}'`;
+
     const build = (side: 'home' | 'away') => {
       const sideGoals = goals.filter(g => g.team === side);
-      const byPlayer = new Map<string, number[]>();
+      const byPlayer = new Map<string, string[]>();
       for (const g of sideGoals) {
         if (!byPlayer.has(g.player)) byPlayer.set(g.player, []);
-        byPlayer.get(g.player)!.push(g.minute);
+        byPlayer.get(g.player)!.push(formatMinute(g));
       }
       const seen = new Set<string>();
       return sideGoals.reduce<string[]>((acc, g) => {
         if (seen.has(g.player)) return acc;
         seen.add(g.player);
-        const mins = byPlayer.get(g.player)!.map(m => `${m}'`).join(', ');
+        const mins = byPlayer.get(g.player)!.join(', ');
         const suffix = g.type === 'own-goal' ? ' (pp)' : '';
         acc.push(`${firstLastName(g.player)}${suffix} ${mins}`);
         return acc;
@@ -808,12 +814,21 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               </TouchableOpacity>
             </View>
             <Text style={[scr.compactDate, { color: hTextSoft }]}>
+              {/* Sticky header status line.
+                  • Live → minute / halftime label / live clock
+                  • Finished + ended in penalties → render NOTHING here, the
+                    score line above already says "3 - 3 (4-2 pen)" which
+                    implies finished. Stacking another "Finalizado" pill
+                    underneath in the compact sticky header was visually
+                    crowded (user feedback) — drop it for pens matches.
+                  • Finished, regulation → "Finalizado"
+                  • Scheduled → kickoff date */}
               {isLive
                 ? displayMatch.stateLabel === 'HT'
                   ? t('matchStatus.halfTimeLong')
                   : liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`
                 : isFinished
-                ? 'Finalizado'
+                ? (typeof displayMatch.homePenScore === 'number' ? '' : 'Finalizado')
                 : displayDate}
             </Text>
           </Animated.View>
