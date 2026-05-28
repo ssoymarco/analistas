@@ -6,6 +6,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
+import {
+  subscribeTeamTopics, unsubscribeTeamTopics,
+  subscribeLeagueTopics, unsubscribeLeagueTopics,
+  subscribePlayerTopics, unsubscribePlayerTopics,
+  reconcileSubscriptions,
+} from '../services/fcmTopics';
 
 const MATCH_STORAGE_KEY  = 'analistas_match_favorites';
 const TEAM_STORAGE_KEY   = 'analistas_team_favorites';
@@ -91,10 +97,23 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       AsyncStorage.getItem(PLAYER_STORAGE_KEY),
       AsyncStorage.getItem(LEAGUE_STORAGE_KEY),
     ]).then(([m, t, p, l]) => {
+      let parsedTeams:   string[] = [];
+      let parsedPlayers: string[] = [];
+      let parsedLeagues: string[] = [];
       try { const v = JSON.parse(m ?? '[]'); if (Array.isArray(v)) setFavoriteIds(v); } catch {}
-      try { const v = JSON.parse(t ?? '[]'); if (Array.isArray(v)) setFollowedTeamIds(v); } catch {}
-      try { const v = JSON.parse(p ?? '[]'); if (Array.isArray(v)) setFollowedPlayerIds(v); } catch {}
-      try { const v = JSON.parse(l ?? '[]'); if (Array.isArray(v)) setFollowedLeagueIds(v); } catch {}
+      try { const v = JSON.parse(t ?? '[]'); if (Array.isArray(v)) { setFollowedTeamIds(v);   parsedTeams   = v; } } catch {}
+      try { const v = JSON.parse(p ?? '[]'); if (Array.isArray(v)) { setFollowedPlayerIds(v); parsedPlayers = v; } } catch {}
+      try { const v = JSON.parse(l ?? '[]'); if (Array.isArray(v)) { setFollowedLeagueIds(v); parsedLeagues = v; } } catch {}
+
+      // Reconcile FCM topic subscriptions on cold start so the subscriptions
+      // match the user's persisted favorites even if a previous session
+      // crashed mid-toggle or the user changed devices. Fire and forget —
+      // FCM operations are network-bound, we don't want to block first paint.
+      reconcileSubscriptions({
+        teamIds:   parsedTeams,
+        leagueIds: parsedLeagues,
+        playerIds: parsedPlayers,
+      }).catch(() => {});
     });
   }, []);
 
@@ -133,6 +152,14 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
             AsyncStorage.setItem(PLAYER_STORAGE_KEY, JSON.stringify(p)),
             AsyncStorage.setItem(LEAGUE_STORAGE_KEY, JSON.stringify(l)),
           ]);
+
+          // Reconcile FCM topic subscriptions against the freshly-loaded
+          // cloud favorites — without this, signing in on a new device would
+          // leave the user subscribed to the wrong topics (or nothing) for
+          // their actual favorites.
+          reconcileSubscriptions({
+            teamIds: t, leagueIds: l, playerIds: p,
+          }).catch(() => {});
         } else {
           // First login (or empty cloud) — migrate local favorites to Firestore
           const favs: FirestoreFavorites = {
@@ -187,9 +214,17 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
   const toggleFollowTeam = useCallback((teamId: string) => {
     setFollowedTeamIds(prev => {
-      const next = prev.includes(teamId) ? prev.filter(id => id !== teamId) : [...prev, teamId];
+      const isFollowing = prev.includes(teamId);
+      const next = isFollowing ? prev.filter(id => id !== teamId) : [...prev, teamId];
       AsyncStorage.setItem(TEAM_STORAGE_KEY, JSON.stringify(next));
       persistToFirestore({ matchIds: matchRef.current, teamIds: next, playerIds: playerRef.current, leagueIds: leagueRef.current });
+      // Mirror the change into FCM topic subscriptions. Best-effort —
+      // notification reliability shouldn't ever block UI state updates.
+      if (isFollowing) {
+        unsubscribeTeamTopics(teamId).catch(() => {});
+      } else {
+        subscribeTeamTopics(teamId).catch(() => {});
+      }
       return next;
     });
   }, []);
@@ -202,9 +237,15 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
   const toggleFollowPlayer = useCallback((playerId: string) => {
     setFollowedPlayerIds(prev => {
-      const next = prev.includes(playerId) ? prev.filter(id => id !== playerId) : [...prev, playerId];
+      const isFollowing = prev.includes(playerId);
+      const next = isFollowing ? prev.filter(id => id !== playerId) : [...prev, playerId];
       AsyncStorage.setItem(PLAYER_STORAGE_KEY, JSON.stringify(next));
       persistToFirestore({ matchIds: matchRef.current, teamIds: teamRef.current, playerIds: next, leagueIds: leagueRef.current });
+      if (isFollowing) {
+        unsubscribePlayerTopics(playerId).catch(() => {});
+      } else {
+        subscribePlayerTopics(playerId).catch(() => {});
+      }
       return next;
     });
   }, []);
@@ -217,9 +258,15 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
   const toggleFollowLeague = useCallback((leagueId: string) => {
     setFollowedLeagueIds(prev => {
-      const next = prev.includes(leagueId) ? prev.filter(id => id !== leagueId) : [...prev, leagueId];
+      const isFollowing = prev.includes(leagueId);
+      const next = isFollowing ? prev.filter(id => id !== leagueId) : [...prev, leagueId];
       AsyncStorage.setItem(LEAGUE_STORAGE_KEY, JSON.stringify(next));
       persistToFirestore({ matchIds: matchRef.current, teamIds: teamRef.current, playerIds: playerRef.current, leagueIds: next });
+      if (isFollowing) {
+        unsubscribeLeagueTopics(leagueId).catch(() => {});
+      } else {
+        subscribeLeagueTopics(leagueId).catch(() => {});
+      }
       return next;
     });
   }, []);

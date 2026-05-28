@@ -34,6 +34,16 @@
         {
           "iosUrlScheme": "com.googleusercontent.apps.562270448336-7telon5j0pjscfbet7pqo3faq6mu3pc4"
         }
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
       ]
     ],
     "ios": {
