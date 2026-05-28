@@ -351,8 +351,8 @@ const Screen1Welcome: React.FC<{ onNext: () => void }> = ({ onNext }) => {
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
   const bgImage = th.isDark
-    ? require('../../../assets/DarkModeAnalistas.png')
-    : require('../../../assets/LightModeAnalistas.png');
+    ? require('../../../assets/Medida_night.png')
+    : require('../../../assets/Medida_light.png');
 
   const logoOpacity  = useRef(new Animated.Value(0)).current;
   const logoY        = useRef(new Animated.Value(-10)).current;
@@ -2145,10 +2145,16 @@ const Screen9Personalizing: React.FC<{
       {/* Radial glow rings */}
       <Animated.View style={[s9.glowRing2, { opacity: glowOpacity, transform: [{ scale: circleScale }] }]} />
       <Animated.View style={[s9.glowOuter, { opacity: glowOpacity }]} />
-      {/* Pulsing A circle */}
+      {/* Pulsing logo circle — Analistas shield in white inside a blue gradient.
+          Previously rendered a generic "A" letter; the brand mark gives more
+          recognition and consistency with Screen 1 and Screen 10. */}
       <Animated.View style={[s9.circleWrap, { transform: [{ scale: circleScale }] }]}>
         <LinearGradient colors={[BLUE, '#1A4DB0']} style={s9.circle} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-          <Text style={s9.aLetter}>A</Text>
+          <Image
+            source={require('../../../assets/logo-white.png')}
+            style={s9.logoInside}
+            resizeMode="contain"
+          />
         </LinearGradient>
       </Animated.View>
 
@@ -2197,6 +2203,7 @@ const s9 = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   aLetter: { fontSize: 54, fontWeight: '900', color: '#FFFFFF' },
+  logoInside: { width: 64, height: 64, tintColor: '#FFFFFF' },
   title: { fontSize: 36, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
   pct: { fontSize: 84, fontWeight: '900', color: BLUE, lineHeight: 90 },
   pctSymbol: { fontSize: 40, fontWeight: '700' },
@@ -2209,18 +2216,12 @@ const s9 = StyleSheet.create({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 10 — Welcome Final (confetti)
+// SCREEN 10 — Welcome Final (themed illustration)
 // ─────────────────────────────────────────────────────────────────────────────
-const CONFETTI_COUNT = 36;
-const CONFETTI_COLORS = [BLUE, GOLD, '#C8102E', '#006341', '#FFFFFF', '#4A90FF', '#F5B800'];
-
-// Edge-biased x-position: 50% left band (0-30%), 50% right band (70-100%)
-const edgeBiasedX = (i: number): number => {
-  const inLeftBand = i % 2 === 0;
-  return inLeftBand
-    ? Math.random() * SCREEN_W * 0.30
-    : SCREEN_W * 0.70 + Math.random() * SCREEN_W * 0.30;
-};
+// Prior version generated 36 hand-drawn confetti pieces with edge-biased x
+// positions and a 2.5-5s drop animation each. Replaced by the themed
+// Bienvenida illustration that already contains paper confetti baked into
+// the artwork — see the heroImage selection inside Screen10Final.
 
 const Screen10Final: React.FC<{
   name: string;
@@ -2232,72 +2233,53 @@ const Screen10Final: React.FC<{
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
 
-  // Confetti anims — edge-biased x positions so center text stays readable
-  const confettiAnims = useRef(
-    Array.from({ length: CONFETTI_COUNT }).map((_, i) => ({
-      y: new Animated.Value(-80),
-      x: new Animated.Value(edgeBiasedX(i)),
-      rotate: new Animated.Value(0),
-      opacity: new Animated.Value(1),
-      isCenter: false, // all pieces are edge-biased
-    })),
-  ).current;
-
+  // Animated content fade-in. The previously hand-rolled confetti layer was
+  // removed when the themed hero illustration (Bienvenida_Dia/Noche) landed —
+  // the artwork already has paper confetti baked in around the footballer, so
+  // the extra animated layer was duplicating motion and adding GPU load with
+  // no visible gain.
   const contentOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Start confetti
-    confettiAnims.forEach((anim, i) => {
-      const startDelay = (i % 6) * 120;
-      const duration   = 2500 + Math.random() * 2000;
-      anim.x.setValue(edgeBiasedX(i));
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(startDelay),
-          Animated.parallel([
-            Animated.timing(anim.y, { toValue: 900, duration, useNativeDriver: true, easing: Easing.linear }),
-            Animated.timing(anim.rotate, { toValue: Math.random() * 360, duration, useNativeDriver: true }),
-            Animated.sequence([
-              Animated.timing(anim.opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-              Animated.delay(duration - 400),
-              Animated.timing(anim.opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-            ]),
-          ]),
-        ]),
-      ).start();
-    });
-
     Animated.timing(contentOpacity, { toValue: 1, duration: 600, useNativeDriver: true }).start();
   }, []);
 
   const firstTeam = teams.find(t2 => selectedTeamIds.includes(t2.id));
   const displayName = name.trim() || t('onboarding.defaultName');
 
-  return (
-    <View style={[s10.container, { paddingTop: insets.top, paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
-      {/* Confetti layer */}
-      {confettiAnims.map((anim, i) => (
-        <Animated.View
-          key={i}
-          style={[
-            s10.confetti,
-            {
-              transform: [
-                { translateX: anim.x },
-                { translateY: anim.y },
-                { rotate: anim.rotate.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] }) },
-              ],
-              opacity: anim.opacity,
-              backgroundColor: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-            },
-          ]}
-        />
-      ))}
+  // Themed full-bleed illustration — Bienvenida_Dia (light) / Bienvenida_Noche
+  // (dark). The artwork already includes a footballer walking out of the
+  // tunnel + confetti, so the animated confetti below is suppressed when the
+  // hero image is present to avoid visual doubling.
+  const heroImage = th.isDark
+    ? require('../../../assets/Bienvenida_Noche.png')
+    : require('../../../assets/Bienvenida_Dia.png');
 
-      {/* Content */}
+  // Top-to-bottom gradient overlay — keeps the upper half of the illustration
+  // visible while building enough opacity below the midpoint for the text and
+  // CTA to remain readable on either theme.
+  const overlayColors: readonly [string, string, string, string] = th.isDark
+    ? ['rgba(0,0,0,0)', 'rgba(0,0,0,0.35)', 'rgba(8,12,24,0.92)', 'rgba(8,12,24,1)']
+    : ['rgba(255,255,255,0)', 'rgba(255,255,255,0.35)', 'rgba(255,255,255,0.92)', 'rgba(255,255,255,1)'];
+
+  return (
+    <ImageBackground
+      source={heroImage}
+      resizeMode="cover"
+      style={[s10.container, { paddingTop: insets.top, paddingBottom: insets.bottom + 16 }]}
+    >
+      {/* Legibility gradient over the artwork */}
+      <LinearGradient
+        colors={overlayColors}
+        locations={[0, 0.35, 0.68, 1]}
+        style={StyleSheet.absoluteFillObject}
+        pointerEvents="none"
+      />
+
+      {/* Content sits in the lower half so the illustration breathes above it */}
       <Animated.View style={[s10.content, { opacity: contentOpacity }]}>
         {/* Big logo */}
-        <AnalistasLogo size={80} tint={th.isDark ? '#FFFFFF' : '#2E7CF6'} />
+        <AnalistasLogo size={72} tint={th.isDark ? '#FFFFFF' : '#2E7CF6'} />
 
         {/* Name */}
         <Text style={[s10.nameText, { fontSize: Math.max(28, Math.min(56, Math.floor(220 / Math.max(displayName.length, 4)))) }]}>
@@ -2327,19 +2309,15 @@ const Screen10Final: React.FC<{
 
         <CTAButton label={t('onboarding.start_btn')} onPress={onStart} glow style={s10.ctaFull} />
       </Animated.View>
-    </View>
+    </ImageBackground>
   );
 };
 
 const s10 = StyleSheet.create({
   container: { flex: 1, overflow: 'hidden' },
-  confetti: {
-    position: 'absolute', top: 0,
-    width: 8, height: 14, borderRadius: 3,
-  },
   content: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: SIDE_PAD, gap: 12,
+    flex: 1, alignItems: 'center', justifyContent: 'flex-end',
+    paddingHorizontal: SIDE_PAD, gap: 12, paddingBottom: 16,
   },
   nameText: { fontWeight: '900', color: BLUE, letterSpacing: -1, textAlign: 'center' },
   finalHeadline: {
