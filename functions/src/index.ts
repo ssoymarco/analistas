@@ -95,20 +95,27 @@ const BACKFILL_ADMIN_UIDS = new Set<string>([
   // Operator UIDs allowed to trigger the backfill. Populate via Firebase Auth.
 ]);
 
+import { defineSecret } from 'firebase-functions/params';
+const BACKFILL_TOKEN = defineSecret('BACKFILL_TOKEN');
+
 export const backfillFixturesByDates = onCall(
   {
     timeoutSeconds: 540,
     memory: '512MiB',
     region: 'us-central1',
-    secrets: [SPORTMONKS_TOKEN],
+    secrets: [SPORTMONKS_TOKEN, BACKFILL_TOKEN],
+    // Allow CORS + unauthenticated invocation — the token check inside the
+    // body is the actual gate. Callable v2 enforces the App Check / IAM
+    // layer by default which would block our one-shot curl invocation.
+    invoker: 'public',
   },
   async (req) => {
     // Allow the configured admin UIDs OR a temporary bearer set via the
-    // FIREBASE_BACKFILL_TOKEN env var (used for one-shot manual cleanups via
-    // gcloud functions:call — handy when no app user has admin rights yet).
+    // BACKFILL_TOKEN Firebase secret (used for one-shot manual cleanups
+    // via curl — handy when no app user has admin rights yet).
     const uid = req.auth?.uid ?? '';
     const tokenHeader = (req.data?.adminToken as string | undefined) ?? '';
-    const expectedToken = process.env.FIREBASE_BACKFILL_TOKEN ?? '';
+    const expectedToken = BACKFILL_TOKEN.value();
     const tokenOk = expectedToken.length > 0 && tokenHeader === expectedToken;
     const uidOk   = uid.length > 0 && BACKFILL_ADMIN_UIDS.has(uid);
     if (!tokenOk && !uidOk) {
