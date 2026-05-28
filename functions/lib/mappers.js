@@ -24,16 +24,50 @@ function getStateLabel(stateId) {
         default: return null;
     }
 }
-function getMatchStatus(stateId) {
+/**
+ * Map a SportMonks state_id to our internal MatchStatus.
+ *
+ * Why the time-based fallback exists:
+ *   1. SportMonks occasionally adds new state IDs (or our constants drift out
+ *      of date — see the historical note in types.ts). Without a fallback,
+ *      any unknown ID silently becomes 'scheduled' and the client renders
+ *      the pre-match view for an active live match.
+ *   2. Some lower-tier or regional feeds lag — they keep `state_id: 1`
+ *      (NOT_STARTED) for several minutes after actual kickoff.
+ *
+ * The fallback is intentionally conservative:
+ *   - Only triggers for state IDs we don't recognize (or NOT_STARTED).
+ *   - Never overrides a DEAD state (postponed/cancelled/abandoned/etc.).
+ *   - 2-min minimum elapsed avoids prematurely marking a fixture live just
+ *     because clocks are slightly off.
+ *   - 135-min maximum elapsed covers 90' regulation + ~15' HT + 30' ET +
+ *     ~5' penalty shootout + buffer, while still rejecting matches that
+ *     started hours ago and clearly should have ended.
+ *
+ * Mirror of `mapStateToStatus` in src/services/sportsApi.ts — keep both
+ * in sync so server-side writes match client-side reads.
+ */
+function getMatchStatus(stateId, startingAt) {
     if (types_1.LIVE_STATE_IDS.has(stateId))
         return 'live';
     if (types_1.FINISHED_STATE_IDS.has(stateId))
         return 'finished';
+    if (types_1.DEAD_STATE_IDS.has(stateId))
+        return 'scheduled';
+    // Time-based inference for NOT_STARTED, unknown IDs, or lagging feeds.
+    if (startingAt) {
+        const kickoffMs = new Date(startingAt.replace(' ', 'T') + 'Z').getTime();
+        if (!Number.isNaN(kickoffMs)) {
+            const elapsedMin = (Date.now() - kickoffMs) / 60000;
+            if (elapsedMin > 2 && elapsedMin < 135)
+                return 'live';
+        }
+    }
     return 'scheduled';
 }
 // ── Live Minute Calculation ─────────────────────────────────────────────────
 function calculateLiveMinute(fixture) {
-    const status = getMatchStatus(fixture.state_id);
+    const status = getMatchStatus(fixture.state_id, fixture.starting_at);
     if (status !== 'live')
         return null;
     if (fixture.state_id === types_1.SM_STATE_IDS.HALF_TIME)
@@ -85,6 +119,27 @@ function extractScores(fixture) {
     }
     return { homeScore, awayScore, homeScoreHT, awayScoreHT };
 }
+// ── Live clock anchor ───────────────────────────────────────────────────────
+// Extract the timestamp + minute offset of the currently-ticking period so the
+// client can smoothly advance the displayed minute between server polls.
+// Mirrors `getLiveClockAnchor` in src/services/sportsApi.ts so both ends of the
+// pipeline use the same logic. Returns undefined for HT (no period ticking),
+// scheduled, and finished matches — the client falls back to `minute` then.
+function getLiveClockAnchor(fixture) {
+    const periods = fixture.periods;
+    if (!periods || periods.length === 0)
+        return undefined;
+    const ticking = periods.find(p => p.ticking);
+    if (!ticking)
+        return undefined;
+    if (typeof ticking.started !== 'number' || ticking.started <= 0)
+        return undefined;
+    const offset = typeof ticking.counts_from === 'number' ? ticking.counts_from : 0;
+    return {
+        periodStartedAt: ticking.started,
+        periodMinuteOffset: Math.max(0, offset),
+    };
+}
 // ── Live enrichment extractor ───────────────────────────────────────────────
 // Pulls the subset of SMFixture fields that change during a live match —
 // events, statistics, periods. Returned as a plain object suitable for
@@ -115,7 +170,7 @@ function mapFixtureToMatchDoc(fixture) {
     const away = participants.find(p => p.meta?.location === 'away');
     if (!home || !away)
         return null;
-    const status = getMatchStatus(fixture.state_id);
+    const status = getMatchStatus(fixture.state_id, fixture.starting_at);
     const minute = calculateLiveMinute(fixture);
     const { homeScore, awayScore, homeScoreHT, awayScoreHT } = extractScores(fixture);
     const time = formatTimeDisplay(fixture, status, minute);
@@ -155,6 +210,13 @@ function mapFixtureToMatchDoc(fixture) {
         seasonId: fixture.season_id ?? null,
         updatedAt: firestore_1.Timestamp.now(),
     };
+    // Live clock anchor — populated only when a period is actively ticking.
+    // Without this the client UI freezes the minute between server polls (15s
+    // intervals); with it the displayed minute advances smoothly every second.
+    const liveClock = getLiveClockAnchor(fixture);
+    if (liveClock) {
+        doc.liveClock = liveClock;
+    }
     // Optional live enrichment — only present when called from pollLivescores
     // (which pulls events/statistics/periods on /livescores/inplay).
     const liveEnrich = extractLiveEnrichment(fixture);

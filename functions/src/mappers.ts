@@ -8,7 +8,7 @@
 import { Timestamp } from 'firebase-admin/firestore';
 import { getLeagueConfig } from './config';
 import {
-  LIVE_STATE_IDS, FINISHED_STATE_IDS, SM_STATE_IDS, STANDING_DETAIL_TYPES,
+  LIVE_STATE_IDS, FINISHED_STATE_IDS, DEAD_STATE_IDS, SM_STATE_IDS, STANDING_DETAIL_TYPES,
 } from './types';
 import type {
   SMFixture, SMStandingGroup, SMTopScorer,
@@ -29,16 +29,52 @@ function getStateLabel(stateId: number): string | null {
   }
 }
 
-function getMatchStatus(stateId: number): 'live' | 'finished' | 'scheduled' {
+/**
+ * Map a SportMonks state_id to our internal MatchStatus.
+ *
+ * Why the time-based fallback exists:
+ *   1. SportMonks occasionally adds new state IDs (or our constants drift out
+ *      of date — see the historical note in types.ts). Without a fallback,
+ *      any unknown ID silently becomes 'scheduled' and the client renders
+ *      the pre-match view for an active live match.
+ *   2. Some lower-tier or regional feeds lag — they keep `state_id: 1`
+ *      (NOT_STARTED) for several minutes after actual kickoff.
+ *
+ * The fallback is intentionally conservative:
+ *   - Only triggers for state IDs we don't recognize (or NOT_STARTED).
+ *   - Never overrides a DEAD state (postponed/cancelled/abandoned/etc.).
+ *   - 2-min minimum elapsed avoids prematurely marking a fixture live just
+ *     because clocks are slightly off.
+ *   - 135-min maximum elapsed covers 90' regulation + ~15' HT + 30' ET +
+ *     ~5' penalty shootout + buffer, while still rejecting matches that
+ *     started hours ago and clearly should have ended.
+ *
+ * Mirror of `mapStateToStatus` in src/services/sportsApi.ts — keep both
+ * in sync so server-side writes match client-side reads.
+ */
+function getMatchStatus(
+  stateId: number,
+  startingAt?: string,
+): 'live' | 'finished' | 'scheduled' {
   if ((LIVE_STATE_IDS as Set<number>).has(stateId)) return 'live';
   if ((FINISHED_STATE_IDS as Set<number>).has(stateId)) return 'finished';
+  if ((DEAD_STATE_IDS as Set<number>).has(stateId)) return 'scheduled';
+
+  // Time-based inference for NOT_STARTED, unknown IDs, or lagging feeds.
+  if (startingAt) {
+    const kickoffMs = new Date(startingAt.replace(' ', 'T') + 'Z').getTime();
+    if (!Number.isNaN(kickoffMs)) {
+      const elapsedMin = (Date.now() - kickoffMs) / 60000;
+      if (elapsedMin > 2 && elapsedMin < 135) return 'live';
+    }
+  }
   return 'scheduled';
 }
 
 // ── Live Minute Calculation ─────────────────────────────────────────────────
 
 function calculateLiveMinute(fixture: SMFixture): number | null {
-  const status = getMatchStatus(fixture.state_id);
+  const status = getMatchStatus(fixture.state_id, fixture.starting_at);
   if (status !== 'live') return null;
   if (fixture.state_id === SM_STATE_IDS.HALF_TIME) return 45;
 
@@ -141,7 +177,7 @@ export function mapFixtureToMatchDoc(fixture: SMFixture): MatchDoc | null {
 
   if (!home || !away) return null;
 
-  const status = getMatchStatus(fixture.state_id);
+  const status = getMatchStatus(fixture.state_id, fixture.starting_at);
   const minute = calculateLiveMinute(fixture);
   const { homeScore, awayScore, homeScoreHT, awayScoreHT } = extractScores(fixture);
   const time = formatTimeDisplay(fixture, status, minute);

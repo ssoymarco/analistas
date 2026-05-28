@@ -225,9 +225,31 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   // Prefer the API-fresh match (real score, correct minute) over the prop (may be time-inferred)
   const displayMatch = liveMatch ?? match;
 
-  const isLive      = displayMatch.status === 'live';
-  const isFinished  = displayMatch.status === 'finished';
-  const isScheduled = displayMatch.status === 'scheduled';
+  const rawIsLive      = displayMatch.status === 'live';
+  const rawIsFinished  = displayMatch.status === 'finished';
+  const rawIsScheduled = displayMatch.status === 'scheduled';
+
+  // ── Sticky "match is past kick-off" ─────────────────────────────────────
+  // Belt-and-suspenders against the 2H-reset bug: once we've EVER observed
+  // status='live' or status='finished' (or a non-zero minute) for this
+  // match, never let the UI flip back to the pre-match Previa view, even if
+  // a later snapshot re-asserts 'scheduled' (which would normally trigger a
+  // status-driven re-render of the wrong tab).
+  //
+  // The state-id and time-based fixes upstream (mappers.ts + firestoreApi.ts)
+  // should prevent this from being needed in practice, but a ref keeps the
+  // UX stable for any future regression of the upstream feed.
+  const startedRef = useRef(false);
+  if (rawIsLive || rawIsFinished || (typeof displayMatch.minute === 'number' && displayMatch.minute > 0)) {
+    startedRef.current = true;
+  }
+
+  const isFinished  = rawIsFinished;
+  // Once started, force "live" treatment even if status briefly flickers to
+  // 'scheduled'. This keeps the user on the EnVivo tab and the live
+  // indicator visible until the server explicitly reports 'finished'.
+  const isLive      = rawIsLive || (startedRef.current && !rawIsFinished);
+  const isScheduled = rawIsScheduled && !startedRef.current;
   const { incrementMatchesViewed } = useUserStats();
   const {
     prefs,

@@ -553,28 +553,67 @@ export const SM_EVENT_TYPES = {
   RED_CARD: 21,
   SUBSTITUTION: 18,
   VAR: 24,
+  /**
+   * Match delay (hydration break, injury stop, weather, fan incident, etc.).
+   * Introduced by SportMonks May 26, 2026. Mundial 2026 will be the first big
+   * competition affected — especially relevant given summer heat at USA/MX/CA
+   * venues. When `injured: true` is present, the delay is injury-related and
+   * the event also carries `player_id` + `player_name` of the injured player.
+   * See: https://docs.sportmonks.com/football/api/timeline (Delay events)
+   */
+  DELAY_START: 132791,
+  DELAY_END:   132792,
 } as const;
 
 // ── State ID mapping ─────────────────────────────────────────────────────────
 
+/**
+ * SportMonks v3 Football API state IDs.
+ *
+ * Verified 2026-05-28 against docs.sportmonks.com/v3/tutorials-and-guides/
+ * tutorials/includes/states. Must stay in sync with `functions/src/types.ts`
+ * — see the historical note there for context on the previous wrong map.
+ */
 export const SM_STATE_IDS = {
+  // Pre-match
   NOT_STARTED: 1,
-  FIRST_HALF: 2,
-  HALF_TIME: 3,
-  SECOND_HALF: 4,
-  FULL_TIME: 5,
-  EXTRA_TIME: 6,
-  PENALTIES: 7,
-  BREAK: 8,
-  FINISHED_AET: 9,
-  FINISHED_PEN: 10,
-  POSTPONED: 13,
-  CANCELLED: 14,
-  SUSPENDED: 15,
-  INTERRUPTED: 16,
-  ABANDONED: 17,
-  DELETED: 22,
-  TBD: 25,
+
+  // Live, regulation
+  FIRST_HALF: 2,                  // INPLAY_1ST_HALF
+  HALF_TIME: 3,                   // HT
+  SECOND_HALF: 22,                // INPLAY_2ND_HALF — was wrongly 4
+
+  // Live, beyond regulation
+  ET_BREAK: 4,                    // BREAK awaiting ET (was wrongly named BREAK=8)
+  EXTRA_TIME: 6,                  // INPLAY_ET
+  EXTRA_TIME_BREAK: 21,           // Between ET halves
+  PENALTIES: 9,                   // INPLAY_PENALTIES — was wrongly 7
+  PEN_BREAK: 25,                  // Between penalty rounds
+
+  // Finished
+  FULL_TIME: 5,                   // FT
+  FINISHED_AET: 7,                // AET — was wrongly 9
+  FINISHED_PEN: 8,                // FT_PEN — was wrongly 10
+  AWARDED: 17,                    // (was wrongly ABANDONED)
+
+  // Dead / not-played
+  POSTPONED: 10,                  // was wrongly 13
+  SUSPENDED: 11,                  // was wrongly 15
+  CANCELLED: 12,                  // was wrongly 14
+  TBA: 13,                        // was wrongly TBD=25
+  WALK_OVER: 14,
+  ABANDONED: 15,                  // was wrongly 17
+  DELAYED: 16,
+  INTERRUPTED: 18,                // was wrongly 16
+  AWAITING_UPDATES: 19,
+  DELETED: 20,                    // was wrongly 22
+  PENDING: 26,
+
+  // ── Aliases for backwards-compatible imports ──
+  /** @deprecated use SECOND_HALF instead. Now value 4 (real BREAK ID). */
+  BREAK: 4,
+  /** @deprecated use TBA instead. */
+  TBD: 13,
 } as const;
 
 // ── Generic Fetch Helper ─────────────────────────────────────────────────────

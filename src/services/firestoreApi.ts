@@ -225,6 +225,43 @@ function teamFromDoc(t: TeamDoc): Team {
 }
 
 function matchFromDoc(d: MatchDoc): Match {
+  // ── Defensive status correction ──
+  // The Cloud Function mapper writes `status` based on `state_id`. If
+  // SportMonks adds new state IDs (or briefly returns one we don't yet
+  // recognise — e.g. a transition state during HT → 2H), the doc may
+  // momentarily carry `status: 'scheduled'` for a match that's actually
+  // playing. Without this guard, the MatchDetailScreen would flip to the
+  // pre-match Previa tab and "reset" the user.
+  //
+  // The fix mirrors `reapplyLiveStatus` from sportsApi.ts: if the doc is
+  // tagged "scheduled" but the kickoff is between 2 and 135 min ago, infer
+  // 'live' on the client. Safe because:
+  //   - 'live' / 'finished' docs are passed through untouched
+  //   - Definitively dead matches (postponed/cancelled) take longer than
+  //     135 min to be re-fetched as "scheduled", so we don't accidentally
+  //     revive them
+  //   - The minute counter falls back to time-derived when `d.minute` is null
+  let correctedStatus: typeof d.status = d.status;
+  let correctedMinute: number | null = d.minute;
+  if (d.status === 'scheduled' && d.startingAtUtc) {
+    try {
+      const kickoffMs = new Date(d.startingAtUtc.replace(' ', 'T').replace(/Z?$/, 'Z')).getTime();
+      if (!Number.isNaN(kickoffMs)) {
+        const elapsedMin = (Date.now() - kickoffMs) / 60000;
+        if (elapsedMin > 2 && elapsedMin < 135) {
+          correctedStatus = 'live';
+          if (correctedMinute == null || correctedMinute === 0) {
+            // Approximate the live minute when the server hasn't published one.
+            // Subtract the ~15-min HT break if elapsed is past minute 50.
+            let m = Math.floor(elapsedMin);
+            if (m > 50) m = Math.max(46, m - 15);
+            correctedMinute = Math.max(1, Math.min(m, 120));
+          }
+        }
+      }
+    } catch { /* keep the original status as best-effort */ }
+  }
+
   // ── Timezone fix ──
   // The mapper on the Cloud Function stores `time` as the raw UTC HH:MM
   // because the server doesn't know the user's timezone. For scheduled
@@ -233,7 +270,7 @@ function matchFromDoc(d: MatchDoc): Match {
   // proxy-path behaviour, where `getTimeDisplay` does the same conversion).
   // Live ('45'', 'HT') and finished ('FT') strings are left untouched.
   let time = d.time;
-  if (d.status === 'scheduled' && d.startingAtUtc) {
+  if (correctedStatus === 'scheduled' && d.startingAtUtc) {
     try {
       const iso = d.startingAtUtc.replace(' ', 'T').replace(/Z?$/, 'Z');
       const dt = new Date(iso);
@@ -269,9 +306,9 @@ function matchFromDoc(d: MatchDoc): Match {
     awayTeam:       teamFromDoc(d.awayTeam),
     homeScore:      d.homeScore,
     awayScore:      d.awayScore,
-    status:         d.status,
+    status:         correctedStatus,
     time,
-    minute:         d.minute ?? undefined,
+    minute:         correctedMinute ?? undefined,
     league:         d.league,
     leagueLogo:     d.leagueLogo || undefined,
     leagueId:       d.leagueId,

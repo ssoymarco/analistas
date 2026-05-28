@@ -87,29 +87,45 @@ import { AVAILABLE_LEAGUES, getLeagueConfig, LEAGUE_IDS } from '../config/league
 import i18n from '../i18n';
 import { normalize } from '../utils/normalize';
 import { resolveTeamLogo } from '../utils/teamLogoOverrides';
+import { translateNationalTeam } from '../utils/nationalTeams';
 
 // ── State Mapping ───────────────────────────────────────────────────────────
 
+// Live = match is actively being played (regulation, ET, penalties, all
+// brief mid-match breaks). When the corrected SM_STATE_IDS map landed
+// (see sportmonks.ts), SECOND_HALF flipped from 4 → 22 — the real ID for
+// INPLAY_2ND_HALF — which is the actual fix for the 2H-reset bug. The
+// remaining additions (ET_BREAK, EXTRA_TIME_BREAK, PEN_BREAK) close
+// related gaps that produced the same symptom in ET / penalty matches.
 const LIVE_STATE_IDS = new Set<number>([
-  SM_STATE_IDS.FIRST_HALF,
-  SM_STATE_IDS.HALF_TIME,
-  SM_STATE_IDS.SECOND_HALF,
-  SM_STATE_IDS.EXTRA_TIME,
-  SM_STATE_IDS.PENALTIES,
-  SM_STATE_IDS.BREAK,
+  SM_STATE_IDS.FIRST_HALF,         // 2
+  SM_STATE_IDS.HALF_TIME,          // 3
+  SM_STATE_IDS.SECOND_HALF,        // 22
+  SM_STATE_IDS.ET_BREAK,           // 4  (BREAK awaiting ET start)
+  SM_STATE_IDS.EXTRA_TIME,         // 6
+  SM_STATE_IDS.EXTRA_TIME_BREAK,   // 21
+  SM_STATE_IDS.PENALTIES,          // 9
+  SM_STATE_IDS.PEN_BREAK,          // 25
 ]);
 
 const FINISHED_STATE_IDS = new Set<number>([
-  SM_STATE_IDS.FULL_TIME,
-  SM_STATE_IDS.FINISHED_AET,
-  SM_STATE_IDS.FINISHED_PEN,
+  SM_STATE_IDS.FULL_TIME,          // 5
+  SM_STATE_IDS.FINISHED_AET,       // 7
+  SM_STATE_IDS.FINISHED_PEN,       // 8
+  SM_STATE_IDS.AWARDED,            // 17
 ]);
 
 // State IDs that definitively mean "not playing" (postponed, cancelled, etc.)
 const DEAD_STATE_IDS = new Set<number>([
-  SM_STATE_IDS.POSTPONED, SM_STATE_IDS.CANCELLED,
-  SM_STATE_IDS.SUSPENDED,  SM_STATE_IDS.INTERRUPTED,
-  SM_STATE_IDS.ABANDONED,  SM_STATE_IDS.DELETED, SM_STATE_IDS.TBD,
+  SM_STATE_IDS.POSTPONED,          // 10
+  SM_STATE_IDS.SUSPENDED,          // 11
+  SM_STATE_IDS.CANCELLED,          // 12
+  SM_STATE_IDS.WALK_OVER,          // 14
+  SM_STATE_IDS.ABANDONED,          // 15
+  SM_STATE_IDS.DELAYED,            // 16
+  SM_STATE_IDS.INTERRUPTED,        // 18
+  SM_STATE_IDS.DELETED,            // 20
+  SM_STATE_IDS.TBA,                // 13  (renamed from TBD)
 ]);
 
 /**
@@ -157,12 +173,14 @@ export function reapplyLiveStatus(matches: Match[]): Match[] {
 /** Human-readable state label for the live indicator (e.g. "1T", "HT", "2T", "ET", "PEN") */
 function mapStateLabel(stateId: number): string | undefined {
   switch (stateId) {
-    case SM_STATE_IDS.FIRST_HALF:    return '1T';
-    case SM_STATE_IDS.HALF_TIME:     return 'HT';
-    case SM_STATE_IDS.SECOND_HALF:   return '2T';
-    case SM_STATE_IDS.EXTRA_TIME:    return 'ET';
-    case SM_STATE_IDS.PENALTIES:     return 'PEN';
-    case SM_STATE_IDS.BREAK:         return 'HT';
+    case SM_STATE_IDS.FIRST_HALF:        return '1T';
+    case SM_STATE_IDS.HALF_TIME:         return 'HT';
+    case SM_STATE_IDS.SECOND_HALF:       return '2T';
+    case SM_STATE_IDS.ET_BREAK:          return 'ET';   // regulation finished, awaiting ET
+    case SM_STATE_IDS.EXTRA_TIME:        return 'ET';
+    case SM_STATE_IDS.EXTRA_TIME_BREAK:  return 'ET';
+    case SM_STATE_IDS.PENALTIES:         return 'PEN';
+    case SM_STATE_IDS.PEN_BREAK:         return 'PEN';
     default: return undefined;
   }
 }
