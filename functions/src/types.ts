@@ -168,20 +168,31 @@ export interface SquadDoc {
   updatedAt: Timestamp;
 }
 
-/** Snapshot for diff detection — stored in _meta/livescoresSnapshot */
+/** Snapshot for diff detection — stored in _meta/livescoresSnapshot.
+ *  redCardsHome / redCardsAway track the running count of red cards per side
+ *  so the detector can fire a 'redCard' DetectedChange when the count goes up. */
 export interface LivescoresSnapshot {
   matches: Record<string, {
     homeScore: number;
     awayScore: number;
     status: string;
     stateId: number;
+    redCardsHome: number;
+    redCardsAway: number;
   }>;
   updatedAt: Timestamp;
 }
 
 // ── Change Detection Types ──────────────────────────────────────────────────
 
-export type ChangeType = 'goal' | 'matchStart' | 'matchEnd' | 'statusChange';
+export type ChangeType =
+  | 'goal'         // Regular goal (subtype carries 'normal' | 'penalty' | 'own')
+  | 'goalCancelled'// Goal scored then disallowed (VAR overturned)
+  | 'matchStart'   // Kickoff (transition: scheduled → live, state 1)
+  | 'halftime'     // First-half ended (state 12)
+  | 'matchEnd'     // Final whistle (transition: live → finished)
+  | 'redCard'      // Red card shown (count went up since last poll)
+  | 'statusChange';// Catch-all for any other state transition (paused, suspended, etc.)
 
 export interface DetectedChange {
   type: ChangeType;
@@ -192,8 +203,17 @@ export interface DetectedChange {
   awayScore: number;
   league: string;
   leagueId: string;
-  /** Which side scored (for goal events) */
+  /** Which side caused the event (for goal/redCard) */
   scoringTeamSide?: 'home' | 'away';
+  /** Subtype for goals: 'normal' | 'penalty' | 'own'. Default = 'normal'. */
+  goalKind?: 'normal' | 'penalty' | 'own';
+  /** Goal scorer name + minute (best-effort — may be missing if SportMonks
+   *  hasn't published the event payload yet, in which case the notification
+   *  goes out without the name). */
+  scorerName?: string;
+  /** For red cards: the player who was sent off (best-effort, may be missing). */
+  playerName?: string;
+  /** Match minute when the event occurred. */
   minute?: number | null;
 }
 
@@ -299,6 +319,8 @@ export interface SMFixture {
   league?: SMLeague;
   /** include=periods — required for live clock extrapolation. */
   periods?: SMPeriod[];
+  /** include=events — required for red card / scorer detection. */
+  events?: SMFixtureEvent[];
 }
 
 export interface SMStandingDetail {
@@ -409,3 +431,37 @@ export const STANDING_DETAIL_TYPES = {
   GA: 134,   // Goals Against
   GD: 179,   // Goal Difference
 } as const;
+
+/** SportMonks event type_id → semantic meaning. Mirrors the client-side
+ *  SM_EVENT_TYPES in src/services/sportmonks.ts — keep both in sync. */
+export const SM_EVENT_TYPES = {
+  GOAL: 14,
+  PENALTY_GOAL: 15,
+  OWN_GOAL: 16,
+  PENALTY_MISS: 17,
+  SUBSTITUTION: 18,
+  YELLOW_CARD: 19,
+  SECOND_YELLOW: 20,
+  RED_CARD: 21,
+  VAR: 24,
+} as const;
+
+/** Subset of a SportMonks event payload we care about for change detection.
+ *  The full payload has more fields; we only type what we read. */
+export interface SMFixtureEvent {
+  id: number;
+  fixture_id: number;
+  type_id: number;
+  participant_id?: number;
+  minute?: number | null;
+  extra_minute?: number | null;
+  player_id?: number | null;
+  player_name?: string | null;
+  related_player_id?: number | null;
+  related_player_name?: string | null;
+  result?: string | null;
+  /** SportMonks sometimes marks goals as cancelled by VAR. */
+  cancelled?: boolean;
+  /** Some VAR events have an `info` string explaining the call. */
+  info?: string | null;
+}
