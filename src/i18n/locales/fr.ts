@@ -980,6 +980,7 @@ const fr: TranslationKeys = {
     showAll: 'Tout voir',
     firstHalf: '1re Mi-temps',
     secondHalf: '2e Mi-temps',
+    penaltyShootout: 'Tirs au but',
     noHighlights: 'Aucun événement clé',
   },
 };

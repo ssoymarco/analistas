@@ -28,6 +28,10 @@ export declare const pollLivescores: import("firebase-functions/v2/scheduler").S
  * Runs every 30 minutes.
  */
 export declare const syncFixtures: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const backfillFixturesByDates: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    ok: boolean;
+    dates: any[];
+}>, unknown>;
 /**
  * Sync league standings for all configured leagues.
  * Runs every 1 hour — keeps tables fresh after match days.

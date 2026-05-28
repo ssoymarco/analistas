@@ -24,6 +24,15 @@ export interface MatchDoc {
   awayScore: number;
   homeScoreHT: number | null;
   awayScoreHT: number | null;
+  /** Penalty shootout final score. Populated ONLY when the fixture's
+   *  state_id reaches FT_PEN (8) — extracted from `scores[]` entries with
+   *  `description: 'PENALTIES'` in `extractScores()`. UI surfaces these as
+   *  the FotMob-style `"3-3 (4-2 pen)"` suffix and the 365scores-style
+   *  "Argentina ganó en penales" caption. Absent / null on every other
+   *  fixture, including ones still in regulation, ET, or that ended in
+   *  a regular FT / AET decision. */
+  homePenScore: number | null;
+  awayPenScore: number | null;
   status: 'live' | 'finished' | 'scheduled';
   stateId: number;
   stateLabel: string | null;
@@ -501,6 +510,13 @@ export const SM_EVENT_TYPES = {
   YELLOW_CARD: 19,
   SECOND_YELLOW: 20,
   RED_CARD: 21,
+  /** Penalty shootout kick — missed (type_id 22). Distinct from in-play
+   *  PENALTY_MISS (17). Only appears on fixtures that go to a shootout. */
+  PENALTY_SHOOTOUT_MISS: 22,
+  /** Penalty shootout kick — scored (type_id 23). Distinct from in-play
+   *  PENALTY_GOAL (15). Pair with PENALTY_SHOOTOUT_MISS to render the
+   *  full kick-by-kick shootout timeline. */
+  PENALTY_SHOOTOUT_GOAL: 23,
   VAR: 24,
 } as const;
 

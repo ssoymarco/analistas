@@ -80,10 +80,17 @@ function getTargetDates() {
  * config (women's leagues, lower divisions, regional friendlies, etc.).
  * Pull-to-refresh used the proxy with no filter and showed them, which
  * looked like a sync bug to users. The proxy and Firestore now have parity.
+ *
+ * @param explicitDates Optional override — when present, the function will
+ *   sync exactly these dates instead of yesterday/today/tomorrow. Used by
+ *   the on-demand `backfillFixturesByDates` callable (see index.ts) to repair
+ *   historical matches stuck with stale mappings (e.g. the 2022 World Cup
+ *   penalty matches whose status was written under the old, scrambled
+ *   SM_STATE_IDS map and never got re-touched by the scheduled pollLivescores).
  */
-async function syncFixturesHandler() {
-    const dates = getTargetDates();
-    logger.info(`📅 syncFixtures: syncing ${dates.length} dates (all leagues)`);
+async function syncFixturesHandler(explicitDates) {
+    const dates = explicitDates && explicitDates.length > 0 ? explicitDates : getTargetDates();
+    logger.info(`📅 syncFixtures: syncing ${dates.length} dates (all leagues)${explicitDates ? ' [backfill mode]' : ''}`);
     const allMatchDocs = [];
     for (const date of dates) {
         try {

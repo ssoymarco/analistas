@@ -980,6 +980,7 @@ const de: TranslationKeys = {
     showAll: 'Alle anzeigen',
     firstHalf: '1. Halbzeit',
     secondHalf: '2. Halbzeit',
+    penaltyShootout: 'Elfmeterschießen',
     noHighlights: 'Keine wichtigen Ereignisse',
   },
 };

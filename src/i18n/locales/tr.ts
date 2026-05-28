@@ -977,6 +977,7 @@ const tr: TranslationKeys = {
     showAll: 'Tümünü gör',
     firstHalf: '1. Devre',
     secondHalf: '2. Devre',
+    penaltyShootout: 'Penaltı atışları',
     noHighlights: 'Önemli olay yok',
   },
 };

@@ -552,6 +552,14 @@ export const SM_EVENT_TYPES = {
   SECOND_YELLOW: 20,
   RED_CARD: 21,
   SUBSTITUTION: 18,
+  /** Penalty shootout kick — missed. Distinct from the in-play
+   *  PENALTY_MISS (17) which fires for missed in-game penalties. */
+  PENALTY_SHOOTOUT_MISS: 22,
+  /** Penalty shootout kick — scored. Distinct from the in-play
+   *  PENALTY_GOAL (15). Pair with PENALTY_SHOOTOUT_MISS to assemble the
+   *  kick-by-kick shootout timeline (sort_order field on the event gives
+   *  the kick sequence). */
+  PENALTY_SHOOTOUT_GOAL: 23,
   VAR: 24,
   /**
    * Match delay (hydration break, injury stop, weather, fan incident, etc.).

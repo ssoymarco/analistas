@@ -41,6 +41,7 @@ import { BackArrow, ShareIcon } from '../components/NavIcons';
 import { MatchNotificationsSheet } from '../components/MatchNotificationsSheet';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatMatchTime } from '../utils/formatMatchTime';
+import { isImageUri } from '../utils/imageUri';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'MatchDetail'>;
 type Tab  = 'previa' | 'alineacion' | 'estadisticas' | 'tabla' | 'noticias';
@@ -163,7 +164,7 @@ function UpChevron({ color }: { color: string }) {
 
 // ── Team badge (large) ───────────────────────────────────────────────────────
 function TeamBadge({ name, logo, size = 80 }: { name: string; logo: string; size?: number }) {
-  const isUrl = logo.startsWith('http');
+  const isUrl = isImageUri(logo);
   const hue = name.charCodeAt(0) * 37 % 360;
   // Real logo → transparent container (logo is self-contained)
   // Fallback text/emoji → colored pill so the initials are legible
@@ -187,7 +188,7 @@ function TeamBadge({ name, logo, size = 80 }: { name: string; logo: string; size
 
 // ── Team badge (small — compact header) ──────────────────────────────────────
 function TeamBadgeSmall({ name, logo, size = 32 }: { name: string; logo: string; size?: number }) {
-  const isUrl = logo.startsWith('http');
+  const isUrl = isImageUri(logo);
   const hue = name.charCodeAt(0) * 37 % 360;
   const bg  = isUrl ? 'transparent' : `hsl(${hue}, 40%, 18%)`;
   const fg  = `hsl(${hue}, 70%, 70%)`;
@@ -468,7 +469,18 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     const monthStr = monthsShort[m - 1];
     return `${dayName} ${d} ${monthStr}`;
   })();
-  const compactScoreText = isScheduled ? displayTime : `${displayMatch.homeScore} - ${displayMatch.awayScore}`;
+  // Compact header score — kickoff time when scheduled, regulation score
+  // otherwise, plus the FotMob-style "(pen X-Y)" suffix when the match ended
+  // in a penalty shootout. The compact form stays single-line so the sticky
+  // header keeps its tight visual rhythm.
+  const compactScoreText = (() => {
+    if (isScheduled) return displayTime;
+    const base = `${displayMatch.homeScore} - ${displayMatch.awayScore}`;
+    if (typeof displayMatch.homePenScore === 'number' && typeof displayMatch.awayPenScore === 'number') {
+      return `${base} (${displayMatch.homePenScore}-${displayMatch.awayPenScore} pen)`;
+    }
+    return base;
+  })();
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
@@ -545,7 +557,14 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               if (h > HERO_COMPACT) setHeroExpandedH(h);
             }}
           >
-            {/* Live pill */}
+            {/* Live pill — only renders for actually-live matches. The
+                `stateLabel === 'HT'` branch is the "DESCANSO" halftime
+                badge. The bug it used to produce on finished penalty
+                matches (showing "DESCANSO" on 2022 World Cup games years
+                after they ended) is fixed at the data layer: the server
+                mapper now clears stateLabel when status='finished'. This
+                guard remains belt-and-suspenders so a stale Firestore
+                doc still doesn't leak the live pill onto a finished view. */}
             {isLive && (
               <View style={scr.livePill}>
                 <View style={scr.liveDot} />
@@ -658,6 +677,17 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                     {detail?.aggregateScore && (
                       <Text style={[scr.aggregateLabel, { color: hTextSoft }]}>
                         ({detail.aggregateScore.home}-{detail.aggregateScore.away} {t('matches.aggregateAbbr')})
+                      </Text>
+                    )}
+                    {/* Penalty shootout caption — matches the 365scores
+                        pattern: regulation/ET score on the main row, then a
+                        small "Pen 4-2" line directly below. We use both the
+                        compact "Pen X-Y" notation and the more descriptive
+                        "{Winner} ganó en penales" caption to combine the
+                        clarity of FotMob with the friendliness of 365scores. */}
+                    {typeof displayMatch.homePenScore === 'number' && typeof displayMatch.awayPenScore === 'number' && (
+                      <Text style={[scr.aggregateLabel, { color: hTextSoft, marginTop: 2 }]}>
+                        Pen {displayMatch.homePenScore}–{displayMatch.awayPenScore}
                       </Text>
                     )}
                   </>

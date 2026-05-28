@@ -70,6 +70,10 @@ function eventEmoji(type: string, injured?: boolean): string {
     case 'own-goal':      return '⚽';
     case 'penalty-goal':  return '⚽';
     case 'penalty-miss':  return '❌';
+    // Shootout kicks live in their own timeline section. Green check for a
+    // scored kick, red cross for a miss — matches the 365scores treatment.
+    case 'shootout-goal': return '✅';
+    case 'shootout-miss': return '❌';
     case 'yellow':        return '🟨';
     case 'second-yellow': return '🟨🟥';
     case 'red':           return '🟥';
@@ -149,7 +153,15 @@ const EventRow: React.FC<{ event: MatchEvent; match: Match }> = ({ event, match 
   const isHome = event.team === 'home';
   const isGoal = isGoalEvent(event.type);
   const isDelay = event.type === 'delay-start' || event.type === 'delay-end';
-  const minuteStr = `${event.minute}${event.addedTime ? `+${event.addedTime}` : ''}'`;
+  const isShootout = event.type === 'shootout-goal' || event.type === 'shootout-miss';
+  // Shootout kicks happen after the 90/120-minute mark, but SM reports them
+  // all stamped at the period start (e.g. minute=120). Showing "120'" for
+  // ten consecutive kicks reads poorly — instead surface the running tally
+  // ("4-2") when SM provides it, falling back to "Pen 5" when only the
+  // sort order is known.
+  const minuteStr = isShootout
+    ? (event.shootoutResult ?? (event.shootoutOrder != null ? `Pen ${event.shootoutOrder}` : 'Pen'))
+    : `${event.minute}${event.addedTime ? `+${event.addedTime}` : ''}'`;
 
   // Delays render as a single centered row — they don't belong to one team.
   // Injury delays do carry a player_name so we show it; cooling breaks /
@@ -2108,7 +2120,13 @@ const injS = StyleSheet.create({
 // MAIN TAB COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
 
-const IMPORTANT_TYPES = new Set(['goal', 'own-goal', 'penalty-goal', 'red', 'second-yellow', 'var']);
+// Events that always show in "Destacados" mode. Shootout kicks are added here
+// so a saved penalty or a missed kick is never hidden under the "Mostrar todo"
+// toggle — every kick is consequential when a final goes to penalties.
+const IMPORTANT_TYPES = new Set([
+  'goal', 'own-goal', 'penalty-goal', 'red', 'second-yellow', 'var',
+  'shootout-goal', 'shootout-miss',
+]);
 
 export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ match, detail }) => {
   const c = useThemeColors();
@@ -2117,10 +2135,21 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
   const isFinished  = match.status === 'finished';
   const [showAllEvents, setShowAllEvents] = useState(false);
 
-  // Filter + split events into halves
+  // Split shootout kicks out of the regulation timeline before the half
+  // split — otherwise SM tends to report them at minute 120 which would
+  // bunch all 10+ kicks at the bottom of "Segundo tiempo" and break the
+  // chronological reading flow. They get their own section instead.
+  const isShootoutEvent = (e: typeof detail.events[number]) =>
+    e.type === 'shootout-goal' || e.type === 'shootout-miss';
+  const shootoutEvents = detail.events
+    .filter(isShootoutEvent)
+    .sort((a, b) => (a.shootoutOrder ?? 0) - (b.shootoutOrder ?? 0));
+
+  // Filter + split regulation/ET events into halves
+  const regulationEvents = detail.events.filter(e => !isShootoutEvent(e));
   const filteredEvents = showAllEvents
-    ? detail.events
-    : detail.events.filter(e => IMPORTANT_TYPES.has(e.type));
+    ? regulationEvents
+    : regulationEvents.filter(e => IMPORTANT_TYPES.has(e.type));
   const firstFiltered  = filteredEvents.filter(e => e.minute <= 45).sort((a, b) => a.minute - b.minute);
   const secondFiltered = filteredEvents.filter(e => e.minute > 45).sort((a, b) => a.minute - b.minute);
   const hasEvents = detail.events.length > 0;
@@ -2181,6 +2210,30 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
             </View>
           )}
           {secondFiltered.map(e => <EventRow key={e.id} event={e} match={match} />)}
+          {/* Penalty shootout section — only renders when SM provided shootout
+              kicks (type_ids 22/23). Ordered by `shootoutOrder` so kicks read
+              top-to-bottom in firing order (1, 2, 3 …). Each row reuses the
+              existing EventRow component, which already knows how to render
+              'shootout-goal' / 'shootout-miss' via the type→emoji map. */}
+          {shootoutEvents.length > 0 && (
+            <>
+              <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
+                <Text style={[tl.halfSepText, { color: c.textTertiary }]}>
+                  {t('timeline.penaltyShootout')}
+                </Text>
+              </View>
+              {/* Final shootout tally banner — gives the reader the resolved
+                  score immediately, before scrolling each kick. */}
+              {typeof match.homePenScore === 'number' && typeof match.awayPenScore === 'number' && (
+                <View style={[tl.halfSep, { backgroundColor: c.surface, paddingTop: 0 }]}>
+                  <Text style={[tl.halfSepText, { color: c.textPrimary, fontWeight: '700' }]}>
+                    {match.homePenScore} – {match.awayPenScore}
+                  </Text>
+                </View>
+              )}
+              {shootoutEvents.map(e => <EventRow key={e.id} event={e} match={match} />)}
+            </>
+          )}
         </>
       )}
     </View>

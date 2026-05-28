@@ -67,6 +67,11 @@ interface MatchDoc {
   awayScore: number;
   homeScoreHT: number | null;
   awayScoreHT: number | null;
+  /** Penalty shootout final score — null on every fixture that didn't go
+   *  to a shootout. See identically-named fields on the Match interface
+   *  and the server-side MatchDoc for full semantics. */
+  homePenScore: number | null;
+  awayPenScore: number | null;
   status: MatchStatus;
   stateId: number;
   stateLabel: string | null;
@@ -317,6 +322,8 @@ function matchFromDoc(d: MatchDoc): Match {
     seasonId:       d.seasonId ?? undefined,
     homeScoreHT:    d.homeScoreHT ?? undefined,
     awayScoreHT:    d.awayScoreHT ?? undefined,
+    homePenScore:   d.homePenScore ?? undefined,
+    awayPenScore:   d.awayPenScore ?? undefined,
     stateLabel:     d.stateLabel ?? undefined,
     // Live-clock anchor — used by useLiveTick to smoothly extrapolate the
     // minute between server polls. Only populated for live matches.

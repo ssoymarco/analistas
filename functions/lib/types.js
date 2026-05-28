@@ -113,6 +113,13 @@ exports.SM_EVENT_TYPES = {
     YELLOW_CARD: 19,
     SECOND_YELLOW: 20,
     RED_CARD: 21,
+    /** Penalty shootout kick — missed (type_id 22). Distinct from in-play
+     *  PENALTY_MISS (17). Only appears on fixtures that go to a shootout. */
+    PENALTY_SHOOTOUT_MISS: 22,
+    /** Penalty shootout kick — scored (type_id 23). Distinct from in-play
+     *  PENALTY_GOAL (15). Pair with PENALTY_SHOOTOUT_MISS to render the
+     *  full kick-by-kick shootout timeline. */
+    PENALTY_SHOOTOUT_GOAL: 23,
     VAR: 24,
 };
 //# sourceMappingURL=types.js.map

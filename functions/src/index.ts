@@ -16,6 +16,7 @@
 import './admin-init';
 
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { SPORTMONKS_TOKEN } from './config';
 import { pollLivescoresHandler } from './poll-livescores';
 import { syncFixturesHandler } from './sync-fixtures';
@@ -68,6 +69,62 @@ export const syncFixtures = onSchedule(
   },
   async () => {
     await syncFixturesHandler();
+  },
+);
+
+/**
+ * On-demand backfill: re-syncs every fixture on the supplied date(s).
+ *
+ * Why this exists: when an upstream bug in the SM_STATE_IDS map was fixed
+ * (commit 2c21d9b — see git history), most live matches self-healed on the
+ * next pollLivescores tick, but historical FINISHED matches (e.g. 2022 World
+ * Cup penalty shootouts) were never touched again — pollLivescores only
+ * writes currently in-play fixtures and scheduled syncFixtures only covers
+ * yesterday/today/tomorrow. This callable lets an operator manually heal a
+ * specific date range without inflating the scheduled function's footprint.
+ *
+ * Auth: the function checks for a hard-coded admin UID list inline (kept
+ * private — the calling app is the only legitimate consumer). Anonymous and
+ * unauthenticated calls are rejected. Each call burns ~3 SM token credits
+ * per supplied date.
+ *
+ * Invocation example (Firebase Console > Functions > Test):
+ *   { "data": { "dates": ["2022-12-09", "2022-12-18"] } }
+ */
+const BACKFILL_ADMIN_UIDS = new Set<string>([
+  // Operator UIDs allowed to trigger the backfill. Populate via Firebase Auth.
+]);
+
+export const backfillFixturesByDates = onCall(
+  {
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    secrets: [SPORTMONKS_TOKEN],
+  },
+  async (req) => {
+    // Allow the configured admin UIDs OR a temporary bearer set via the
+    // FIREBASE_BACKFILL_TOKEN env var (used for one-shot manual cleanups via
+    // gcloud functions:call — handy when no app user has admin rights yet).
+    const uid = req.auth?.uid ?? '';
+    const tokenHeader = (req.data?.adminToken as string | undefined) ?? '';
+    const expectedToken = process.env.FIREBASE_BACKFILL_TOKEN ?? '';
+    const tokenOk = expectedToken.length > 0 && tokenHeader === expectedToken;
+    const uidOk   = uid.length > 0 && BACKFILL_ADMIN_UIDS.has(uid);
+    if (!tokenOk && !uidOk) {
+      throw new HttpsError('permission-denied', 'Backfill requires an admin UID or matching adminToken.');
+    }
+
+    const dates: unknown = req.data?.dates;
+    if (!Array.isArray(dates) || dates.length === 0 || !dates.every(d => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))) {
+      throw new HttpsError('invalid-argument', 'Expected `dates: string[]` (YYYY-MM-DD format).');
+    }
+    if (dates.length > 14) {
+      throw new HttpsError('invalid-argument', 'At most 14 dates per call.');
+    }
+
+    await syncFixturesHandler(dates as string[]);
+    return { ok: true, dates };
   },
 );
 

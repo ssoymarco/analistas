@@ -12,11 +12,12 @@
  * - syncTopScorers:   Every 12 hours → top scorers for all configured leagues
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.syncFixtures = exports.pollLivescores = void 0;
+exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = void 0;
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
 // before any other module touches admin.firestore().
 require("./admin-init");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
+const https_1 = require("firebase-functions/v2/https");
 const config_1 = require("./config");
 const poll_livescores_1 = require("./poll-livescores");
 const sync_fixtures_1 = require("./sync-fixtures");
@@ -61,6 +62,55 @@ exports.syncFixtures = (0, scheduler_1.onSchedule)({
     secrets: [config_1.SPORTMONKS_TOKEN],
 }, async () => {
     await (0, sync_fixtures_1.syncFixturesHandler)();
+});
+/**
+ * On-demand backfill: re-syncs every fixture on the supplied date(s).
+ *
+ * Why this exists: when an upstream bug in the SM_STATE_IDS map was fixed
+ * (commit 2c21d9b — see git history), most live matches self-healed on the
+ * next pollLivescores tick, but historical FINISHED matches (e.g. 2022 World
+ * Cup penalty shootouts) were never touched again — pollLivescores only
+ * writes currently in-play fixtures and scheduled syncFixtures only covers
+ * yesterday/today/tomorrow. This callable lets an operator manually heal a
+ * specific date range without inflating the scheduled function's footprint.
+ *
+ * Auth: the function checks for a hard-coded admin UID list inline (kept
+ * private — the calling app is the only legitimate consumer). Anonymous and
+ * unauthenticated calls are rejected. Each call burns ~3 SM token credits
+ * per supplied date.
+ *
+ * Invocation example (Firebase Console > Functions > Test):
+ *   { "data": { "dates": ["2022-12-09", "2022-12-18"] } }
+ */
+const BACKFILL_ADMIN_UIDS = new Set([
+// Operator UIDs allowed to trigger the backfill. Populate via Firebase Auth.
+]);
+exports.backfillFixturesByDates = (0, https_1.onCall)({
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    secrets: [config_1.SPORTMONKS_TOKEN],
+}, async (req) => {
+    // Allow the configured admin UIDs OR a temporary bearer set via the
+    // FIREBASE_BACKFILL_TOKEN env var (used for one-shot manual cleanups via
+    // gcloud functions:call — handy when no app user has admin rights yet).
+    const uid = req.auth?.uid ?? '';
+    const tokenHeader = req.data?.adminToken ?? '';
+    const expectedToken = process.env.FIREBASE_BACKFILL_TOKEN ?? '';
+    const tokenOk = expectedToken.length > 0 && tokenHeader === expectedToken;
+    const uidOk = uid.length > 0 && BACKFILL_ADMIN_UIDS.has(uid);
+    if (!tokenOk && !uidOk) {
+        throw new https_1.HttpsError('permission-denied', 'Backfill requires an admin UID or matching adminToken.');
+    }
+    const dates = req.data?.dates;
+    if (!Array.isArray(dates) || dates.length === 0 || !dates.every(d => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))) {
+        throw new https_1.HttpsError('invalid-argument', 'Expected `dates: string[]` (YYYY-MM-DD format).');
+    }
+    if (dates.length > 14) {
+        throw new https_1.HttpsError('invalid-argument', 'At most 14 dates per call.');
+    }
+    await (0, sync_fixtures_1.syncFixturesHandler)(dates);
+    return { ok: true, dates };
 });
 /**
  * Sync league standings for all configured leagues.

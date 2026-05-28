@@ -101,23 +101,40 @@ function formatTimeDisplay(fixture, status, minute) {
 function extractScores(fixture) {
     let homeScore = 0, awayScore = 0;
     let homeScoreHT = null, awayScoreHT = null;
+    // Penalty shootout final score — kept as `null` rather than 0 so the
+    // client can distinguish "no shootout took place" from "shootout ended 0-0"
+    // (which is impossible in practice but useful semantically).
+    let homePenScore = null, awayPenScore = null;
     if (fixture.scores && Array.isArray(fixture.scores)) {
         for (const s of fixture.scores) {
+            // CURRENT = the regulation/ET score (i.e. the in-play total). For a
+            // fixture that ends in penalties this stays at the ET tied value
+            // (e.g. 3-3 for the 2022 final) — the shootout result lives in a
+            // separate row described as 'PENALTIES' (see below).
             if (s.description === 'CURRENT') {
                 if (s.score.participant === 'home')
                     homeScore = s.score.goals;
                 else
                     awayScore = s.score.goals;
             }
-            if (s.description === '1ST_HALF') {
+            else if (s.description === '1ST_HALF') {
                 if (s.score.participant === 'home')
                     homeScoreHT = s.score.goals;
                 else
                     awayScoreHT = s.score.goals;
             }
+            else if (s.description === 'PENALTIES' || s.description === 'PENALTY_SHOOTOUT') {
+                // SportMonks v3 docs spell it 'PENALTIES'; some legacy/third-party
+                // feeds use the more literal 'PENALTY_SHOOTOUT'. Accept both — the
+                // semantic is identical (final shootout tally).
+                if (s.score.participant === 'home')
+                    homePenScore = s.score.goals;
+                else
+                    awayPenScore = s.score.goals;
+            }
         }
     }
-    return { homeScore, awayScore, homeScoreHT, awayScoreHT };
+    return { homeScore, awayScore, homeScoreHT, awayScoreHT, homePenScore, awayPenScore };
 }
 // ── Live clock anchor ───────────────────────────────────────────────────────
 // Extract the timestamp + minute offset of the currently-ticking period so the
@@ -172,7 +189,7 @@ function mapFixtureToMatchDoc(fixture) {
         return null;
     const status = getMatchStatus(fixture.state_id, fixture.starting_at);
     const minute = calculateLiveMinute(fixture);
-    const { homeScore, awayScore, homeScoreHT, awayScoreHT } = extractScores(fixture);
+    const { homeScore, awayScore, homeScoreHT, awayScoreHT, homePenScore, awayPenScore, } = extractScores(fixture);
     const time = formatTimeDisplay(fixture, status, minute);
     // League info from config or SM response
     const leagueCfg = (0, config_1.getLeagueConfig)(fixture.league_id);
@@ -197,9 +214,15 @@ function mapFixtureToMatchDoc(fixture) {
         awayScore,
         homeScoreHT,
         awayScoreHT,
+        homePenScore,
+        awayPenScore,
         status,
         stateId: fixture.state_id,
-        stateLabel: getStateLabel(fixture.state_id),
+        // For finished fixtures we suppress the in-game stateLabel ("HT", "2T",
+        // "ET" …) so the UI doesn't keep rendering "DESCANSO" or "EN VIVO" on a
+        // match that ended hours/years ago. The UI uses status='finished' alone
+        // to drive the "FT" / final-score presentation.
+        stateLabel: status === 'finished' ? null : getStateLabel(fixture.state_id),
         minute,
         time,
         league: leagueCfg?.name ?? league?.name ?? 'Unknown',

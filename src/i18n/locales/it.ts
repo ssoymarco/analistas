@@ -980,6 +980,7 @@ const it: TranslationKeys = {
     showAll: 'Tutto',
     firstHalf: '1° Tempo',
     secondHalf: '2° Tempo',
+    penaltyShootout: 'Calci di rigore',
     noHighlights: 'Nessun evento chiave',
   },
 };

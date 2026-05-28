@@ -1078,6 +1078,7 @@ const en: TranslationKeys = {
     showAll: 'Show all',
     firstHalf: '1st Half',
     secondHalf: '2nd Half',
+    penaltyShootout: 'Penalty Shootout',
     noHighlights: 'No key events',
   },
 

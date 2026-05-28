@@ -981,6 +981,7 @@ const pt: TranslationKeys = {
     showAll: 'Ver tudo',
     firstHalf: '1º Tempo',
     secondHalf: '2º Tempo',
+    penaltyShootout: 'Disputa de pênaltis',
     noHighlights: 'Nenhum evento importante',
   },
 };
