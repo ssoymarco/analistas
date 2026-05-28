@@ -1239,8 +1239,19 @@ const FixtureRow: React.FC<{ fixture: LeagueFixture; onPress?: () => void; showD
   const c = useThemeColors();
   const { t } = useTranslation();
   const { timeFormat } = useTimeFormat();
-  const isFinished = f.stateShort === 'FT';
-  const isLive = ['1H', '2H', 'HT', 'ET', 'PEN'].includes(f.stateShort);
+  // SM uses `state.short_name` to encode the lifecycle phase. For finished
+  // matches the value depends on how the match ended:
+  //   FT      = regulation
+  //   AET     = after extra time
+  //   FT_PEN  = after penalty shootout
+  //   AWARDED = decided administratively
+  // Previously this row only checked `FT`, which is why the 2022 World Cup
+  // final and the NED-ARG QF (both decided on penalties → short_name
+  // `FT_PEN`) silently rendered as "upcoming" with the kick-off time and
+  // "-" placeholders instead of the final 3-3 / 2-2 score. Same root cause
+  // and same fix as the MatchCard / MatchDetail flow.
+  const isFinished = ['FT', 'FT_PEN', 'AET', 'AWARDED'].includes(f.stateShort);
+  const isLive = ['1H', '2H', 'HT', 'ET', 'PEN', 'PEN_LIVE', 'BREAK'].includes(f.stateShort);
 
   return (
     <TouchableOpacity
