@@ -436,8 +436,6 @@ export const NewsDetailScreen: React.FC = () => {
             )}
           </View>
 
-          {/* Small rectangular banner at bottom of every article */}
-          <PlaceholderBannerAd variant="telcel-banner" />
         </View>
       </Animated.ScrollView>
     </View>

@@ -308,8 +308,8 @@ export const NoticiasScreen: React.FC = () => {
               </View>
             )}
 
-            {/* Banner ad — below hero, above "Más noticias" */}
-            <PlaceholderBannerAd variant="amazon-banner" />
+            {/* Caliente banner — below hero, above "Más noticias" */}
+            <PlaceholderBannerAd variant="caliente-banner" />
 
             {/* Stories horizontal scroll */}
             {stories.length > 0 && (
@@ -337,8 +337,6 @@ export const NoticiasScreen: React.FC = () => {
               </View>
             )}
 
-            {/* Small banner at bottom of news list */}
-            <PlaceholderBannerAd variant="telcel-banner" />
           </>
         )}
         <View style={{ height: 24 }} />

@@ -412,48 +412,29 @@ export const PartidosScreen: React.FC = () => {
           </View>
         ) : (
           (() => {
-            // ── Helper: render one global league + its optional rotating
-            //   secondary banner (amazon/corona alternating after every 2nd
-            //   league). Defined inline so it captures `navigation` and
-            //   `visibleGlobalLeagues` cleanly without prop drilling.
-            //
-            //   `suppressSecondaryAd` lets the caller skip the secondary banner
-            //   for the league sitting immediately before the Caliente banner,
-            //   so we never render two ads back-to-back.
-            const renderGlobalLeague = (
-              league: LeagueWithMatches,
-              idx: number,
-              suppressSecondaryAd: boolean = false
-            ) => {
-              const totalVisible = visibleGlobalLeagues.length;
-              const showSecondaryAd =
-                !suppressSecondaryAd &&
-                (idx + 1) % 2 === 0 &&
-                idx + 1 < totalVisible;
-              return (
-                <React.Fragment key={league.id}>
-                  <LeagueSection
-                    league={league}
-                    index={idx}
-                    onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
-                    onLeaguePress={lg => {
-                      const seasonId = lg.matches[0]?.seasonId;
-                      navigation.navigate('LeagueDetail', {
-                        leagueId: Number(lg.id),
-                        leagueName: lg.name,
-                        leagueLogo: lg.logo,
-                        ...(seasonId ? { seasonId } : {}),
-                      });
-                    }}
-                  />
-                  {showSecondaryAd && (
-                    <PlaceholderBannerAd
-                      variant={Math.floor((idx + 1) / 2) % 2 === 1 ? 'amazon-banner' : 'corona-banner'}
-                    />
-                  )}
-                </React.Fragment>
-              );
-            };
+            // ── Helper: render one global league section. Inlined to capture
+            //   `navigation` cleanly without prop drilling. Previously this
+            //   helper also intercalated rotating secondary banner ads
+            //   (amazon/corona) every 2nd league, but those mock ads were
+            //   removed in the v1.0 ad-cleanup — Caliente is the only paid
+            //   sponsor for v1.0 and it has its own fixed slot (see below).
+            const renderGlobalLeague = (league: LeagueWithMatches, idx: number) => (
+              <LeagueSection
+                key={league.id}
+                league={league}
+                index={idx}
+                onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
+                onLeaguePress={lg => {
+                  const seasonId = lg.matches[0]?.seasonId;
+                  navigation.navigate('LeagueDetail', {
+                    leagueId: Number(lg.id),
+                    leagueName: lg.name,
+                    leagueLogo: lg.logo,
+                    ...(seasonId ? { seasonId } : {}),
+                  });
+                }}
+              />
+            );
 
             return (
               <>
@@ -527,15 +508,9 @@ export const PartidosScreen: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    {/* First chunk: up to LEAGUES_PER_BLOCK leagues above the banner.
-                       Suppress the secondary ad on the last league of this chunk so
-                       it doesn't render right next to the Caliente banner. */}
+                    {/* First chunk: up to LEAGUES_PER_BLOCK leagues above the banner. */}
                     {visibleGlobalLeagues.slice(0, LEAGUES_PER_BLOCK).map((lg, idx) =>
-                      renderGlobalLeague(
-                        lg,
-                        idx,
-                        idx === Math.min(LEAGUES_PER_BLOCK, visibleGlobalLeagues.length) - 1
-                      )
+                      renderGlobalLeague(lg, idx)
                     )}
 
                     {/* Banner only when there's at least one league above — keeps
