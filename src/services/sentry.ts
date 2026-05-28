@@ -43,12 +43,41 @@ export function initSentry(): void {
     // Log Sentry SDK activity in dev (remove if too noisy).
     debug: false,
 
-    // Called before every event is sent — perfect for scrubbing PII.
+    // Called before every event is sent. Used for two things:
+    //   1. Scrubbing PII (email, etc.) — none today, hook is here for later.
+    //   2. Dropping known-benign noise that the auto-fetch instrumentation
+    //      captures even though our code already handles it (see below).
     beforeSend(event) {
-      // Example: strip user email from breadcrumbs
-      // if (event.user?.email) event.user.email = '[redacted]';
+      // ── Drop AbortError ────────────────────────────────────────────────
+      // The Sentry React-Native SDK auto-instruments `fetch()` and reports
+      // EVERY rejection, including intentional aborts via AbortController.
+      // We use timeouts in two places and both already catch + fall back:
+      //
+      //   • useUserCountry.ts        4s timeout on the Cloudflare /geo Worker
+      //                              → returns null, falls back to device locale.
+      //
+      //   • services/sportmonks.ts  15s timeout on SportMonks calls
+      //                              → throws cleanly, caller decides how to
+      //                                react (typically retry or use cache).
+      //
+      // Both are non-fatal and already log/handle. Reporting them to Sentry
+      // produces noise that drowns out real bugs, so we drop the event here.
+      // We match conservatively: the exception's `type` is "AbortError" AND
+      // its `value` is "Aborted" (DOM spec exact wording).
+      const ex = event.exception?.values?.[0];
+      if (ex?.type === 'AbortError' && ex?.value === 'Aborted') {
+        return null;
+      }
+
       return event;
     },
+
+    // Belt-and-suspenders: even if `beforeSend` somehow misses the event
+    // (e.g. error thrown outside a fetch wrapper), this regex stops Sentry
+    // from capturing it at SDK level. Cheap and idempotent.
+    ignoreErrors: [
+      /AbortError/i,
+    ],
   });
 }
 
