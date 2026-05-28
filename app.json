@@ -16,8 +16,7 @@
       [
         "expo-notifications",
         {
-          "color": "#00E096",
-          "defaultChannel": "analistas-live"
+          "color": "#00E096"
         }
       ],
       "expo-web-browser",
