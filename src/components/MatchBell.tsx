@@ -33,19 +33,20 @@ interface MatchBellProps {
 export const MatchBell: React.FC<MatchBellProps> = React.memo(({ match, reservedWidth = 0 }) => {
   const { t } = useTranslation();
   const c = useThemeColors();
-  const { isFollowingTeam, isFollowingLeague } = useFavorites();
+  const { isFollowingTeam } = useFavorites();
   const { isMatchMuted, toggleMatchMute } = useNotificationPrefs();
 
   // ── Decide whether to render ─────────────────────────────────────────────
-  // A match is "followed" if the user follows either team or the league.
-  // Players-in-match would also count, but lineup data isn't available at the
-  // list-card level, so we keep it simple here.
+  // PRODUCT RULE: notifications fire ONLY for followed TEAMS.
+  // League selection is for feed-display ordering only (Partidos screen),
+  // NOT for notifications. So the bell shows if-and-only-if the user follows
+  // one of the two competing teams — never just because they follow the
+  // league (e.g. picking "MLS" shouldn't notify on every Houston vs RSL match).
   const isFollowed = useMemo(
     () =>
       isFollowingTeam(match.homeTeam.id) ||
-      isFollowingTeam(match.awayTeam.id) ||
-      isFollowingLeague(match.leagueId),
-    [match.homeTeam.id, match.awayTeam.id, match.leagueId, isFollowingTeam, isFollowingLeague],
+      isFollowingTeam(match.awayTeam.id),
+    [match.homeTeam.id, match.awayTeam.id, isFollowingTeam],
   );
 
   const muted = isMatchMuted(match.id);

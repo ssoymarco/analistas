@@ -5,10 +5,11 @@ import type { Match } from '../data/types';
 import type { LeagueWithMatches } from '../services/sportsApi';
 import { MatchCard } from './MatchCard';
 import { getLeagueDisplayName, getLeagueDisplayFlag, isCopyrightSensitiveLeague } from '../config/leagues';
+import { isImageUri } from '../utils/imageUri';
 
 /** Renders a league flag — Image if URL, Text if emoji */
 const LeagueFlag = ({ logo, size = 18 }: { logo: string; size?: number }) => {
-  const isUrl = logo.startsWith('http');
+  const isUrl = isImageUri(logo);
   if (isUrl) {
     return (
       <Image

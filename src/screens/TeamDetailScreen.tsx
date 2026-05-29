@@ -36,6 +36,7 @@ import { CupBracketView } from '../components/CupBracketView';
 import { useCupBracket } from '../hooks/useCupBracket';
 import type { CupTie } from '../services/sportsApi';
 import { getLeagueConfig, type LeagueZone } from '../config/leagues';
+import { isImageUri } from '../utils/imageUri';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'TeamDetail'>;
 type Tab = 'resumen' | 'partidos' | 'plantilla' | 'tabla' | 'bracket';
@@ -66,7 +67,7 @@ function formatMatchDate(dateStr: string, monthsAbbr: string[]): string {
 // ── Logo component — graceful fallback ───────────────────────────────────────
 const TeamLogo: React.FC<{ uri: string; size: number; radius?: number }> = ({ uri, size, radius }) => {
   const r = radius ?? size / 2;
-  if (uri?.startsWith('http')) {
+  if (isImageUri(uri)) {
     return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: r }} />;
   }
   return (
@@ -116,15 +117,17 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
   const cardBg  = c.surface;
   const border  = c.border;
 
-  // Split matches into past / future
+  // Split matches into past / future.
+  // PAST = only finished matches (status === 'finished'). A scheduled match
+  // whose calendar date is today/yesterday is NOT in the past — it's pending
+  // and belongs in "Próximo Partido". Previously this used `m.date <= today`
+  // which mis-classified today's upcoming fixtures (e.g. Mexico vs Ghana
+  // playing today at 20:00 was shown as "Último Partido").
   const today = new Date().toISOString().split('T')[0];
-  const pastMatches   = data.recentMatches.filter(m => m.isFinished || m.date <= today);
-  const futureMatches = data.recentMatches.filter(m => !m.isFinished && m.date > today);
-  const lastMatch  = pastMatches[0] ?? null;
-  const nextMatch  = futureMatches[futureMatches.length - 1] ?? null; // furthest future is last element after sort
+  const pastMatches = data.recentMatches.filter(m => m.isFinished);
+  const lastMatch   = pastMatches[0] ?? null;
 
-  // Actually futureMatches come from sortedRecent (desc), so the nearest next match is the last one
-  // Let's get the actual nearest upcoming: filter raw recentMatches for upcoming, sort asc
+  // Nearest upcoming: filter raw recentMatches for non-finished, sort ASC.
   const upcomingSorted = data.recentMatches
     .filter(m => !m.isFinished && m.date >= today)
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -205,9 +208,8 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
   const MatchCard: React.FC<{ match: RecentMatch; isNext?: boolean }> = ({ match, isNext }) => {
     const comp = getCompetitionInfo(match.league);
     const dateStr = formatMatchDate(match.date, monthsAbbr);
-    const isHome = match.isHome;
-    const result = match.result;
-    const resultColor = result === 'W' ? '#10b981' : result === 'L' ? '#ef4444' : '#f59e0b';
+    // `match.result` (W/D/L pill) intentionally not rendered — the score
+    // already conveys win/draw/loss to the user.
 
     return (
       <TouchableOpacity
@@ -223,7 +225,7 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
           <Text style={[rs.matchDateText, { color: textSec }]}>{dateStr}</Text>
         </View>
 
-        {/* Teams + score */}
+        {/* Teams + score — score aligned to logo height (bottom row) */}
         <View style={rs.matchTeamsRow}>
           {/* Home */}
           <View style={[rs.matchTeamBlock, { alignItems: 'flex-end' }]}>
@@ -231,7 +233,7 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
             <TeamLogo uri={match.homeLogo} size={40} radius={6} />
           </View>
 
-          {/* Score or VS */}
+          {/* Score or VS — paddingTop pushes score down to logo level */}
           <View style={rs.scoreBlock}>
             {match.isFinished ? (
               <View style={rs.scoreRow}>
@@ -241,11 +243,6 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
               </View>
             ) : (
               <Text style={[rs.scoreVS, { color: textSec }]}>VS</Text>
-            )}
-            {result && (
-              <View style={[rs.resultPill, { backgroundColor: resultColor }]}>
-                <Text style={rs.resultPillText}>{t(`team.formLabels.${result}`)}</Text>
-              </View>
             )}
           </View>
 
@@ -384,7 +381,7 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
           {s.position}
         </Text>
         <View style={rs.tdTeamCell}>
-          {s.team.logo?.startsWith('http')
+          {isImageUri(s.team.logo)
             ? <Image source={{ uri: s.team.logo }} style={rs.miniLogo} />
             : <View style={[rs.miniLogo, { backgroundColor: 'rgba(255,255,255,0.08)' }]} />
           }
@@ -422,7 +419,7 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
           <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>{t('team.coachLabel')}</Text>
         </View>
         <View style={rs.coachRow}>
-          {coachImage?.startsWith('http') ? (
+          {isImageUri(coachImage) ? (
             <Image source={{ uri: coachImage }} style={rs.coachImg} />
           ) : (
             <View style={[rs.coachImg, { backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }]}>
@@ -551,14 +548,17 @@ const rs = StyleSheet.create({
   compBadgeText: { fontSize: 10, fontWeight: '700' },
   matchDateText: { fontSize: 11 },
   matchTeamsRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between',
   },
   matchTeamBlock: {
     flex: 1, gap: 6, alignItems: 'center',
   },
   matchTeamName: { fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  // Bottom-aligned so the score sits visually between the two logos rather
+  // than higher up next to the team names.
   scoreBlock: {
-    alignItems: 'center', paddingHorizontal: 10, gap: 4, minWidth: 80,
+    alignItems: 'center', paddingHorizontal: 10, minWidth: 80,
+    paddingBottom: 4,
   },
   // Inline row so "3 — 3" reads left-to-right instead of stacking vertically
   scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -913,7 +913,7 @@ const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
       </View>
 
       {/* Photo */}
-      {player.image?.startsWith('http') ? (
+      {isImageUri(player.image) ? (
         <Image source={{ uri: player.image }} style={pl.playerImg} />
       ) : (
         <View style={[pl.playerImg, { backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }]}>
@@ -935,7 +935,7 @@ const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
         </View>
         {player.clubName ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
-            {player.clubLogo?.startsWith('http') && (
+            {isImageUri(player.clubLogo) && (
               <Image source={{ uri: player.clubLogo }} style={pl.clubLogo} />
             )}
             <Text style={[pl.clubName, { color: textSec }]} numberOfLines={1}>{player.clubName}</Text>
@@ -956,7 +956,7 @@ const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
       {info.coach ? (
         <View style={[pl.coachCard, { backgroundColor: cardBg, borderColor: border }]}>
           <View style={pl.coachInner}>
-            {info.coachImage?.startsWith('http') ? (
+            {isImageUri(info.coachImage) ? (
               <Image source={{ uri: info.coachImage }} style={pl.coachImg} />
             ) : (
               <View style={[pl.coachImg, { backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }]}>
@@ -1151,7 +1151,7 @@ const GroupCard: React.FC<{
                 {s.position}
               </Text>
               <View style={tl.tdTeamCell}>
-                {s.team.logo?.startsWith('http')
+                {isImageUri(s.team.logo)
                   ? <Image source={{ uri: s.team.logo }} style={compact ? tl.logoSm : tl.logo} />
                   : <View style={[compact ? tl.logoSm : tl.logo, { backgroundColor: 'rgba(255,255,255,0.08)' }]} />
                 }
@@ -1556,7 +1556,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
           </TouchableOpacity>
 
           <Animated.View style={[hs.compactCenter, { opacity: compactOpacity }]}>
-            {teamLogo?.startsWith('http') ? (
+            {isImageUri(teamLogo) ? (
               <Image source={{ uri: teamLogo }} style={hs.compactLogo} />
             ) : null}
             <Text style={[hs.compactName, { color: hText }]} numberOfLines={1}>
@@ -1595,7 +1595,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
 
             {/* Logo */}
             <View style={[hs.logoWrap, { backgroundColor: hLogoBg }]}>
-              {teamLogo?.startsWith('http') ? (
+              {isImageUri(teamLogo) ? (
                 <Image source={{ uri: teamLogo }} style={hs.logo} />
               ) : (
                 <View style={[hs.logo, { backgroundColor: hLogoBg, alignItems: 'center', justifyContent: 'center' }]}>

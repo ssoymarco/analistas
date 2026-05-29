@@ -117,6 +117,34 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /// teams/{teamId} — club + national team info (badge, founded, stadium, etc.)
+    /// Populated by syncTeams cron daily.
+    match /teams/{teamId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// squads/{seasonId}_{teamId} — full roster per team-season
+    /// Populated by syncSquads cron daily.
+    match /squads/{squadId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// coaches/{coachId} — coach profiles + career stats
+    /// Populated by syncCoaches cron daily.
+    match /coaches/{coachId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// players/{playerId} — player profiles + season stats
+    /// Populated by syncPlayers cron daily.
+    match /players/{playerId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // ── Deny everything else (including _meta) ────────────────────────────────
     // _meta/livescoresSnapshot is internal diff state for Cloud Functions only —
     // no client should ever need to read it.

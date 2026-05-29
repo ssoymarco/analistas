@@ -23,6 +23,7 @@ import type { Match, MatchDetail, LineupPlayer, MatchLineup, MissingPlayer } fro
 import { getCoachProfile, type CoachProfile } from '../../services/sportsApi';
 import { translateCountry } from '../../i18n/countries';
 import { translateNationalTeam } from '../../utils/nationalTeams';
+import { isImageUri } from '../../utils/imageUri';
 
 // ── Optional packages (graceful degradation if missing) ──────────────────────
 let ViewShot: any = null;
@@ -135,7 +136,7 @@ const PlayerDot: React.FC<{ player: LineupPlayer; color: string; theme: PitchThe
           <View style={dot.cardBadge}><View style={[dot.cardRect, { backgroundColor: '#ef4444' }]} /></View>
         )}
         <View style={[dot.circle, { backgroundColor: bgColor }, borderStyle]}>
-          {player.imageUrl && player.imageUrl.startsWith('http') ? (
+          {player.imageUrl && isImageUri(player.imageUrl) ? (
             <Image source={{ uri: player.imageUrl }} style={dot.image} />
           ) : (
             <Text style={dot.number}>{player.number}</Text>
@@ -440,7 +441,7 @@ const CoachDetailModal: React.FC<{
             ) : null}
             {/* Team badge */}
             <View style={cdm.teamRow}>
-              {teamLogo?.startsWith('http') ? (
+              {isImageUri(teamLogo) ? (
                 <Image source={{ uri: teamLogo }} style={cdm.teamLogo} resizeMode="contain" />
               ) : null}
               <Text style={[cdm.teamName, { color: c.textTertiary }]} numberOfLines={1}>
@@ -549,7 +550,7 @@ const CoachDetailModal: React.FC<{
                     <Text style={{ fontSize: 16 }}>⚽</Text>
                   )}
                   <Text style={[cdm.teamChipName, { color: c.textPrimary }]} numberOfLines={1}>
-                    {team.name}
+                    {translateNationalTeam(team.name)}
                   </Text>
                 </View>
               ))}
@@ -874,7 +875,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
       {/* ── Formation header ── */}
       <View style={[ms.formationHeader, { backgroundColor: c.card, borderColor: c.border }]}>
         <View style={ms.formationSide}>
-          {match.homeTeam.logo.startsWith('http') ? (
+          {isImageUri(match.homeTeam.logo) ? (
             <Image source={{ uri: match.homeTeam.logo }} style={ms.formationLogo} />
           ) : null}
           <Text style={[ms.formationTeam, { color: c.textPrimary }]}>{match.homeTeam.shortName}</Text>
@@ -884,7 +885,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
         <View style={[ms.formationSide, { justifyContent: 'flex-end' }]}>
           <View style={[ms.formationDot, { backgroundColor: AWAY_COLOR }]} />
           <Text style={[ms.formationTeam, { color: c.textPrimary }]}>{match.awayTeam.shortName}</Text>
-          {match.awayTeam.logo.startsWith('http') ? (
+          {isImageUri(match.awayTeam.logo) ? (
             <Image source={{ uri: match.awayTeam.logo }} style={ms.formationLogo} />
           ) : null}
         </View>

@@ -8,7 +8,7 @@ import {
   type SMSquadPlayer,
   type SMFixture,
 } from '../services/sportmonks';
-import { getStandings } from '../services/sportsApi';
+import { getStandings, POPULAR_NATIONAL_TEAMS, POPULAR_TEAMS } from '../services/sportsApi';
 import {
   getStandingsFromFirestore,
   getRecentFixturesByTeam,
@@ -17,7 +17,75 @@ import {
 } from '../services/firestoreApi';
 import { getLeagueConfig } from '../config/leagues';
 import { resolveTeamLogo } from '../utils/teamLogoOverrides';
+import { localizeCityName } from '../utils/cityI18n';
 import type { LeagueStanding, Match } from '../data/types';
+
+/**
+ * Set of SportMonks team IDs that are NATIONAL TEAMS (México, Argentina,
+ * Brazil, etc.). Used to suppress venue/capacity info, which for selecciones
+ * comes back as the venue of whichever friendly happens to be next on the
+ * schedule (e.g. México showing as Soldier Field, Chicago because of an
+ * upcoming friendly there). Selecciones rotate venues so a "home stadium" is
+ * not a meaningful concept.
+ */
+const NATIONAL_TEAM_IDS: ReadonlySet<number> = new Set(
+  POPULAR_NATIONAL_TEAMS.map(t => t.id),
+);
+
+/**
+ * Map of popular team IDs → their canonical DOMESTIC league info.
+ * Used to override `leagueId/leagueName/currentSeasonId` from Firestore
+ * when syncTeams (pre-fix) writes the cup league as the team's primary
+ * league. E.g. Pumas should show "Liga MX" with seasonId 25539, not
+ * "CONCACAF Champions Cup" with seasonId 26750. The currentSeasonId override
+ * is critical — it drives which season's squad/standings get fetched.
+ * The backend now sorts non-cup leagues first so future syncs will be
+ * correct, but this client-side override gives the user the right data
+ * immediately without waiting 24h for the next cron.
+ */
+const POPULAR_TEAM_DOMESTIC_LEAGUE: ReadonlyMap<
+  number,
+  { leagueId: number; leagueName: string; seasonId: number | null }
+> = new Map(
+  POPULAR_TEAMS.map(t => [
+    t.id,
+    {
+      leagueId:   t.leagueId,
+      leagueName: t.leagueName,
+      seasonId:   t.seasonId ?? null,
+    },
+  ]),
+);
+
+/**
+ * Selecciones nacionales → liga "principal" durante el ciclo Mundial 2026.
+ *
+ * SportMonks marks national-team docs with whatever competition's currentSeasonId
+ * happens to be iterated last by syncTeams — typically Amistosos Internacionales
+ * (seasonId 26758) because friendlies are non-cup and iterated first. Result:
+ * `teams/15251.currentSeasonId = 26758`, which has NO standings (friendlies don't
+ * have a league table). The team's Tabla tab then shows "Sin tabla disponible"
+ * even though the same team has full group-stage standings in
+ * `standings/26618` (Mundial 2026, populated by syncStandings).
+ *
+ * This override forces all national teams in POPULAR_NATIONAL_TEAMS to point
+ * to the Mundial 2026 season during the World Cup cycle. After the Final
+ * (Jul 20, 2026) this override should be removed or pointed to whatever
+ * tournament comes next (e.g. Copa América 2027).
+ */
+const NATIONAL_TEAM_PRIMARY_LEAGUE: ReadonlyMap<
+  number,
+  { leagueId: number; leagueName: string; seasonId: number }
+> = new Map(
+  POPULAR_NATIONAL_TEAMS.map(t => [
+    t.id,
+    {
+      leagueId:   732,           // FIFA World Cup
+      leagueName: 'Mundial 2026',
+      seasonId:   t.seasonId ?? 26618,
+    },
+  ]),
+);
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -189,15 +257,54 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
         // OR before the first syncTeams run lands).
         const fsInfo = await getTeamFromFirestore(teamId);
         if (mounted.current && fsInfo) {
-          const effSeasonId = seasonId ?? fsInfo.currentSeasonId ?? null;
+          // Domestic-league season override: if fsInfo's currentSeasonId is
+          // a cup (e.g. CONCACAF Champions Cup 26750 for Pumas) we want to
+          // use the team's DOMESTIC season (Liga MX 25539) to fetch squad
+          // and standings. Otherwise getSquadFromFirestore(26750_2989) and
+          // getStandingsFromFirestore(26750) return empty because squads/
+          // standings are keyed by the domestic season.
+          // Priority for which seasonId drives standings/squad fetches:
+          //   1. explicit `seasonId` arg from caller (season picker)
+          //   2. national-team Mundial override (so Tabla shows World Cup groups)
+          //   3. popular-team domestic override (so Tabla shows Liga MX, not CCC)
+          //   4. whatever syncTeams wrote (worst case — may be cup/Amistosos)
+          const domesticPreset = POPULAR_TEAM_DOMESTIC_LEAGUE.get(teamId);
+          const nationalPreset = NATIONAL_TEAM_PRIMARY_LEAGUE.get(teamId);
+          const effSeasonId =
+            seasonId
+            ?? nationalPreset?.seasonId
+            ?? domesticPreset?.seasonId
+            ?? fsInfo.currentSeasonId
+            ?? null;
+          // Standings: Firestore-first, fall back to proxy when Firestore is
+          // empty. The Mundial 2026 case is the motivating example —
+          // `standings/26618` exists in Firestore but `rows: []` (the
+          // tournament hasn't started, syncStandings writes an empty array).
+          // SportMonks DOES return seeded group standings via the proxy
+          // (the LeagueDetailScreen for Mundial works precisely because it
+          // hits the proxy fallback in `getCupGroupStandings`). Applying the
+          // same fallback here means the team's Tabla tab shows the Mundial
+          // group as soon as we have an effSeasonId pointing to a populated
+          // season. Works for all national teams (via NATIONAL_TEAM_PRIMARY_LEAGUE
+          // override) without touching the backend.
+          const standingsPromise: Promise<LeagueStanding[]> = effSeasonId
+            ? getStandingsFromFirestore(effSeasonId)
+                .then(rows => rows.length > 0
+                  ? rows
+                  : getStandings(effSeasonId).catch(() => [] as LeagueStanding[])
+                )
+                .catch(() => effSeasonId
+                  ? getStandings(effSeasonId).catch(() => [] as LeagueStanding[])
+                  : Promise.resolve([] as LeagueStanding[])
+                )
+            : Promise.resolve([] as LeagueStanding[]);
+
           const [squadFs, recentMatchesRaw, standingsFs] = await Promise.all([
             effSeasonId
               ? getSquadFromFirestore(effSeasonId, teamId).catch(() => [])
               : Promise.resolve([]),
             getRecentFixturesByTeam(teamId, 25).catch(() => [] as Match[]),
-            effSeasonId
-              ? getStandingsFromFirestore(effSeasonId).catch(() => [] as LeagueStanding[])
-              : Promise.resolve([] as LeagueStanding[]),
+            standingsPromise,
           ]);
           if (!mounted.current) return;
 
@@ -239,9 +346,43 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
               .filter(rm => rm.result !== null)
               .slice(0, 5)
               .map(rm => ({ result: rm.result! }));
+            // National teams don't have a fixed home stadium — SportMonks
+            // returns the venue of their next scheduled friendly which is
+            // misleading (e.g. México vs Ghana in Soldier Field, Chicago).
+            // Suppress venue + city for them.
+            const isNationalTeam = NATIONAL_TEAM_IDS.has(teamId);
+            // Domestic-league override: if this team is in POPULAR_TEAMS,
+            // force the leagueId/leagueName to its domestic league. Without
+            // this, teams like Pumas/Real Madrid show their LAST-iterated
+            // cup league (CONCACAF Champions Cup / Champions League) instead
+            // of their actual home league (Liga MX / La Liga). See sync-teams.ts
+            // for the matching backend fix; this override gives the user the
+            // correct label immediately without waiting for the next sync.
+            // Resolve the displayed league name in the same priority order
+            // as effSeasonId: national-team override > domestic override > Firestore default.
+            const domesticOverride = POPULAR_TEAM_DOMESTIC_LEAGUE.get(teamId);
+            const nationalOverride = NATIONAL_TEAM_PRIMARY_LEAGUE.get(teamId);
+            const leagueOverride = nationalOverride ?? domesticOverride;
             const info: TeamInfo = {
               ...fsInfo,
               currentSeasonId: effSeasonId,
+              ...(leagueOverride && {
+                leagueId:   leagueOverride.leagueId,
+                leagueName: leagueOverride.leagueName,
+              }),
+              ...(isNationalTeam && {
+                venueName:     '',
+                venueCapacity: 0,
+                venueImage:    undefined,
+                city:          '',
+              }),
+              // City i18n: SportMonks returns canonical English ("Mexico City",
+              // "New York"). Apply localization map so Spanish users see
+              // "Ciudad de México", "Nueva York", etc. Skip if national team
+              // (city already cleared above).
+              ...(!isNationalTeam && fsInfo.city && {
+                city: localizeCityName(fsInfo.city),
+              }),
             };
             setData({
               info,
@@ -360,7 +501,7 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
           shortCode: team.short_code || team.name.slice(0, 3).toUpperCase(),
           logo: resolveTeamLogo(team.id, team.image_path),
           country: '',
-          city: isWCNationalTeam ? '' : (team.venue?.city_name ?? ''),
+          city: isWCNationalTeam ? '' : localizeCityName(team.venue?.city_name ?? ''),
           founded: team.founded,
           coach: coachName,
           coachImage: coachImg,
