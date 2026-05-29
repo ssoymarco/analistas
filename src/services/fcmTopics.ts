@@ -41,6 +41,45 @@
 
 import messaging from '@react-native-firebase/messaging';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fcmReady } from './fcmInit';
+
+/**
+ * Wrapper around messaging().subscribeToTopic that:
+ *   (1) waits for FCM to be initialised — without this, subscribes go to
+ *       an unbound FCM token and silently no-op on the server. This was
+ *       THE Build 13 bug that nuked all push delivery (see fcmInit.ts).
+ *   (2) actually surfaces errors instead of swallowing them, so future
+ *       regressions don't repeat the silent-failure pattern.
+ */
+async function safeSubscribe(topic: string): Promise<boolean> {
+  const token = await fcmReady();
+  if (!token) {
+    // eslint-disable-next-line no-console
+    console.warn(`[FCM] subscribe(${topic}) skipped — FCM not initialised (token=null)`);
+    return false;
+  }
+  try {
+    await messaging().subscribeToTopic(topic);
+    return true;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[FCM] subscribe(${topic}) failed:`, err);
+    return false;
+  }
+}
+
+async function safeUnsubscribe(topic: string): Promise<boolean> {
+  const token = await fcmReady();
+  if (!token) return false;
+  try {
+    await messaging().unsubscribeFromTopic(topic);
+    return true;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[FCM] unsubscribe(${topic}) failed:`, err);
+    return false;
+  }
+}
 
 // Persistent record of what topics we believe we're subscribed to, so that on
 // app launch we can reconcile against the user's current follow list without
@@ -123,7 +162,7 @@ export async function subscribeTeamTopics(teamId: string): Promise<void> {
   if (toAdd.length === 0) return;
 
   await Promise.all(
-    toAdd.map(t => messaging().subscribeToTopic(t).catch(() => {})),
+    toAdd.map(t => safeSubscribe(t)),
   );
   toAdd.forEach(t => subscribed.add(t));
   await writeSubscribedTopics(subscribed);
@@ -136,7 +175,7 @@ export async function unsubscribeTeamTopics(teamId: string): Promise<void> {
   if (toRemove.length === 0) return;
 
   await Promise.all(
-    toRemove.map(t => messaging().unsubscribeFromTopic(t).catch(() => {})),
+    toRemove.map(t => safeUnsubscribe(t)),
   );
   toRemove.forEach(t => subscribed.delete(t));
   await writeSubscribedTopics(subscribed);
@@ -149,7 +188,7 @@ export async function subscribeLeagueTopics(leagueId: string): Promise<void> {
   if (toAdd.length === 0) return;
 
   await Promise.all(
-    toAdd.map(t => messaging().subscribeToTopic(t).catch(() => {})),
+    toAdd.map(t => safeSubscribe(t)),
   );
   toAdd.forEach(t => subscribed.add(t));
   await writeSubscribedTopics(subscribed);
@@ -162,7 +201,7 @@ export async function unsubscribeLeagueTopics(leagueId: string): Promise<void> {
   if (toRemove.length === 0) return;
 
   await Promise.all(
-    toRemove.map(t => messaging().unsubscribeFromTopic(t).catch(() => {})),
+    toRemove.map(t => safeUnsubscribe(t)),
   );
   toRemove.forEach(t => subscribed.delete(t));
   await writeSubscribedTopics(subscribed);
@@ -175,7 +214,7 @@ export async function subscribePlayerTopics(playerId: string): Promise<void> {
   if (toAdd.length === 0) return;
 
   await Promise.all(
-    toAdd.map(t => messaging().subscribeToTopic(t).catch(() => {})),
+    toAdd.map(t => safeSubscribe(t)),
   );
   toAdd.forEach(t => subscribed.add(t));
   await writeSubscribedTopics(subscribed);
@@ -188,7 +227,7 @@ export async function unsubscribePlayerTopics(playerId: string): Promise<void> {
   if (toRemove.length === 0) return;
 
   await Promise.all(
-    toRemove.map(t => messaging().unsubscribeFromTopic(t).catch(() => {})),
+    toRemove.map(t => safeUnsubscribe(t)),
   );
   toRemove.forEach(t => subscribed.delete(t));
   await writeSubscribedTopics(subscribed);
@@ -224,8 +263,8 @@ export async function reconcileSubscriptions(args: {
   if (toAdd.length === 0 && toRemove.length === 0) return;
 
   await Promise.all([
-    ...toAdd.map(t    => messaging().subscribeToTopic(t).catch(() => {})),
-    ...toRemove.map(t => messaging().unsubscribeFromTopic(t).catch(() => {})),
+    ...toAdd.map(t    => safeSubscribe(t)),
+    ...toRemove.map(t => safeUnsubscribe(t)),
   ]);
 
   // Replace the persisted set entirely so it matches the new reality

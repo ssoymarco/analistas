@@ -20,6 +20,7 @@ import { NetworkProvider } from './src/contexts/NetworkContext';
 import { TimeFormatProvider } from './src/contexts/TimeFormatContext';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { initialize } from './src/services/notifications';
+import { initializeFCM, attachFCMHandlers } from './src/services/fcmInit';
 import { navigateToMatch } from './src/utils/navigationRef';
 import type { NotificationPayload } from './src/services/notifications';
 import type { Match } from './src/data/types';
@@ -109,6 +110,7 @@ function SentryUserSync() {
 
 function App() {
   const notifResponseListener = useRef<Notifications.Subscription | null>(null);
+  const detachFcmHandlers = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     // Restore user's saved language preference (overrides device default).
@@ -116,6 +118,25 @@ function App() {
 
     // Bootstrap: configure foreground handler + Android channel (no permissions yet).
     initialize().catch(() => {});
+
+    // FCM init — this is the step that was missing on Build 13 and made
+    // every topic subscription a silent no-op. requestPermission() on iOS
+    // binds the APNs delegate; getToken() materialises the FCM token so
+    // FCM's topic-subscriber set actually includes this device. Without
+    // this call, the entire push system looks healthy from the app's POV
+    // (subscribe calls resolve, AsyncStorage records them) but no remote
+    // push ever arrives.
+    //
+    // Safe to call on every launch — idempotent, no-op when permission
+    // already granted and APNs token already bound.
+    initializeFCM().catch(() => {});
+
+    // Foreground + token-refresh handlers. The foreground handler forwards
+    // FCM messages received while the app is open into expo-notifications
+    // so the banner actually renders (FCM does NOT auto-display in
+    // foreground; without this the user only sees push when the app is
+    // backgrounded).
+    detachFcmHandlers.current = attachFCMHandlers();
 
     // Handle notification TAP (user tapped the banner/notification center entry).
     notifResponseListener.current = Notifications.addNotificationResponseReceivedListener(
@@ -133,6 +154,7 @@ function App() {
 
     return () => {
       notifResponseListener.current?.remove();
+      detachFcmHandlers.current?.();
     };
   }, []);
 
