@@ -500,21 +500,27 @@ export const STANDING_DETAIL_TYPES = {
 } as const;
 
 /** SportMonks event type_id → semantic meaning. Mirrors the client-side
- *  SM_EVENT_TYPES in src/services/sportmonks.ts — keep both in sync. */
+ *  SM_EVENT_TYPES in src/services/sportmonks.ts — keep both in sync.
+ *
+ *  ⚠️ Verified 2026-05-29 against docs.sportmonks.com/v3/definitions/types/events.
+ *  PENALTY_GOAL↔OWN_GOAL (15/16) and RED_CARD↔SECOND_YELLOW (20/21) were
+ *  previously swapped. Red-card DETECTION here was unaffected (countRedCards
+ *  matches the {RED_CARD, SECOND_YELLOW} set, identical either way), but the
+ *  goalKind label and timeline icons were wrong. */
 export const SM_EVENT_TYPES = {
   GOAL: 14,
-  PENALTY_GOAL: 15,
-  OWN_GOAL: 16,
+  PENALTY_GOAL: 16,     // was wrongly 15 (15 is Own Goal)
+  OWN_GOAL: 15,         // was wrongly 16 (16 is Penalty)
   PENALTY_MISS: 17,
   SUBSTITUTION: 18,
   YELLOW_CARD: 19,
-  SECOND_YELLOW: 20,
-  RED_CARD: 21,
+  SECOND_YELLOW: 21,    // was wrongly 20 (20 is Red Card)
+  RED_CARD: 20,         // was wrongly 21 (21 is Yellowred / second yellow)
   /** Penalty shootout kick — missed (type_id 22). Distinct from in-play
    *  PENALTY_MISS (17). Only appears on fixtures that go to a shootout. */
   PENALTY_SHOOTOUT_MISS: 22,
   /** Penalty shootout kick — scored (type_id 23). Distinct from in-play
-   *  PENALTY_GOAL (15). Pair with PENALTY_SHOOTOUT_MISS to render the
+   *  PENALTY_GOAL (16). Pair with PENALTY_SHOOTOUT_MISS to render the
    *  full kick-by-kick shootout timeline. */
   PENALTY_SHOOTOUT_GOAL: 23,
   VAR: 24,

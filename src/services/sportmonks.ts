@@ -543,20 +543,28 @@ export const SM_STAT_TYPES = {
 
 // ── Known Event Type IDs ─────────────────────────────────────────────────────
 
+// ⚠️ Verified 2026-05-29 against docs.sportmonks.com/v3/definitions/types/events
+// (two independent sources). The original constants had penalty↔own-goal and
+// red↔second-yellow SWAPPED, which made Messi/Mbappé penalties in the 2022
+// World Cup final render with the "(pp)" own-goal indicator. Detection of
+// goals (score-delta) and red cards (the {RED, SECOND_YELLOW} set) was
+// unaffected — only the displayed labels/icons were wrong. VAR (24) could
+// not be positively confirmed from docs; left as-is since goalCancelled
+// detection is score-based and independent of the VAR event type_id.
 export const SM_EVENT_TYPES = {
   GOAL: 14,
-  OWN_GOAL: 16,
-  PENALTY_GOAL: 15,
+  OWN_GOAL: 15,         // was wrongly 16 (16 is Penalty)
+  PENALTY_GOAL: 16,     // was wrongly 15 (15 is Own Goal)
   PENALTY_MISS: 17,
   YELLOW_CARD: 19,
-  SECOND_YELLOW: 20,
-  RED_CARD: 21,
+  RED_CARD: 20,         // was wrongly 21 (21 is Yellowred / second yellow)
+  SECOND_YELLOW: 21,    // was wrongly 20 (20 is Red Card)
   SUBSTITUTION: 18,
   /** Penalty shootout kick — missed. Distinct from the in-play
    *  PENALTY_MISS (17) which fires for missed in-game penalties. */
   PENALTY_SHOOTOUT_MISS: 22,
   /** Penalty shootout kick — scored. Distinct from the in-play
-   *  PENALTY_GOAL (15). Pair with PENALTY_SHOOTOUT_MISS to assemble the
+   *  PENALTY_GOAL (16). Pair with PENALTY_SHOOTOUT_MISS to assemble the
    *  kick-by-kick shootout timeline (sort_order field on the event gives
    *  the kick sequence). */
   PENALTY_SHOOTOUT_GOAL: 23,
