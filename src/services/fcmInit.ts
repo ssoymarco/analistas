@@ -237,11 +237,50 @@ async function reportTokenToServer(fcmToken: string, hasApns: boolean): Promise<
  * to the OS — no JS handler needed for the notification banner to show.
  */
 export function attachFCMHandlers(): () => void {
+  // Foreground dedup cache. The server already dedups background pushes via
+  // apns-collapse-id / android tag (see functions/src/detect-changes.ts), but
+  // those OS-level mechanisms only apply to notifications the OS displays —
+  // i.e. when the app is backgrounded/killed. When the app is in the
+  // FOREGROUND, FCM hands the message to our onMessage handler instead and we
+  // schedule a local notification ourselves, bypassing the collapse logic.
+  // So a user subscribed to both a team and its league would see the same
+  // goal twice while the app is open. We replicate the dedup here with an
+  // in-memory "recently shown" map keyed by the same id the server uses.
+  const recentlyShown = new Map<string, number>();
+  const DEDUP_WINDOW_MS = 30_000;
+
+  const buildDedupId = (data: Record<string, unknown> | undefined): string | null => {
+    if (!data) return null;
+    const matchId   = data.matchId;
+    const type      = data.type;
+    const homeScore = data.homeScore;
+    const awayScore = data.awayScore;
+    if (matchId == null || type == null) return null;
+    return `${matchId}_${type}_${homeScore ?? ''}-${awayScore ?? ''}`;
+  };
+
   // Foreground messages. The expo-notifications foreground handler
   // (notifications.ts → configureNotificationHandler) governs whether
   // they render as a banner.
   const unsubMessage = messaging().onMessage(async (remoteMessage: FirebaseMessagingTypes.RemoteMessage) => {
     if (!remoteMessage.notification) return;
+
+    // ── Foreground dedup ──
+    const dedupId = buildDedupId(remoteMessage.data as Record<string, unknown> | undefined);
+    if (dedupId) {
+      const now = Date.now();
+      const last = recentlyShown.get(dedupId);
+      if (last && now - last < DEDUP_WINDOW_MS) {
+        // Duplicate of an event shown within the window — suppress.
+        return;
+      }
+      recentlyShown.set(dedupId, now);
+      // Prune old entries so the map doesn't grow unbounded over a long session.
+      for (const [k, t] of recentlyShown) {
+        if (now - t > DEDUP_WINDOW_MS) recentlyShown.delete(k);
+      }
+    }
+
     try {
       await Notifications.scheduleNotificationAsync({
         content: {

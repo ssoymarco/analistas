@@ -462,6 +462,28 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
     if (change.playerName)      data.playerName      = change.playerName;
     if (change.minute != null)  data.minute          = String(change.minute);
 
+    // ── Deduplication key ──────────────────────────────────────────────────
+    // A single event (e.g. a Boca goal) is dispatched to MULTIPLE topics:
+    //   team_<home>_goals · team_<away>_goals · league_<id>_start
+    // A user who follows BOTH a team AND its league is subscribed to two of
+    // those topics, so FCM delivers the SAME event twice → duplicate banner.
+    // The same happens if a device has more than one live FCM token (e.g.
+    // mid app-reinstall, before FCM expires the stale token).
+    //
+    // We attach a stable id to every send for the same logical event:
+    //   • iOS  → `apns-collapse-id` header. APNs collapses notifications
+    //            sharing this id into a SINGLE banner on the device, even
+    //            across separate topic deliveries. This is the primary fix
+    //            because most pushes are received while the app is
+    //            backgrounded/killed (where no JS runs to dedup).
+    //   • Android → notification `tag`. A new notification with the same tag
+    //            REPLACES the prior one instead of stacking.
+    //
+    // Key = matchId + type + score. For goals/VAR the score uniquely
+    // identifies the moment; for matchStart/halftime/matchEnd the type alone
+    // is unique per match. Capped to 64 bytes (APNs limit).
+    const dedupId = `${change.matchId}_${change.type}_${change.homeScore}-${change.awayScore}`.slice(0, 64);
+
     for (const topic of topics) {
       sendPromises.push(
         messaging.send({
@@ -470,12 +492,17 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
           data,
           android: {
             priority: 'high',
+            collapseKey: dedupId,
             notification: {
               channelId: 'analistas-live',
               sound:     'default',
+              tag:       dedupId,
             },
           },
           apns: {
+            headers: {
+              'apns-collapse-id': dedupId,
+            },
             payload: {
               aps: { sound: 'default', badge: 0 },
             },
