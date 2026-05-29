@@ -24,6 +24,7 @@ import { radius, ui } from '../theme/tokens';
 import { useFavorites } from '../contexts/FavoritesContext';
 import {
   getSearchableTeams,
+  getAllSearchableTeams,
   getSearchablePlayers,
   getAllSearchablePlayers,
   getSearchableLeagues,
@@ -472,7 +473,9 @@ export const FavoritosScreen: React.FC = () => {
 
   // ── Load SportMonks enrichment data ──
   useEffect(() => {
-    // Phase 1: quick results — teams + 15 hardcoded popular players (fast, ~1-2s)
+    // Phase 1: quick results — the curated ~30 popular teams + 15 hardcoded
+    // popular players (fast, ~1-2 s). Renders MIS SEGUIDOS / SUGERIDOS for
+    // mainstream picks immediately so the tab feels snappy.
     Promise.all([
       getSearchableTeams().then(setSmTeams).catch(() => {}),
       getSearchablePlayers().then(setSmPlayers).catch(() => {}),
@@ -480,12 +483,28 @@ export const FavoritosScreen: React.FC = () => {
 
     setSmLeagues(getSearchableLeagues());
 
-    // Phase 2: background enrichment — replaces smPlayers with full squad data
-    // that has CORRECT player IDs sourced directly from live team squad API responses.
-    // This fixes navigation bugs where hardcoded IDs map to the wrong player.
+    // Phase 2: background enrichment.
+    //
+    // Teams: previously stopped at the 30-team popular list, which produced
+    // the visible bug where a user who followed Cruzeiro (in onboarding's
+    // FULL search) couldn't find it in MIS SEGUIDOS, and "Equipos (N)"
+    // miscounted the followed list. Now upgrade to the same
+    // getAllSearchableTeams() result the onboarding uses — cached for 7
+    // days under `searchable_teams_all_v1`, so this is a cache hit on
+    // first launch after onboarding (the screen the user came from
+    // populated the cache). Length-guard keeps us from regressing if
+    // the full-list call fails or returns empty.
+    //
+    // Players: replaces the hardcoded 15 with full squad data sourced
+    // directly from live team-squad API responses — fixes navigation
+    // bugs where hardcoded IDs map to the wrong player.
+    getAllSearchableTeams()
+      .then(full => { if (full.length > smTeams.length) setSmTeams(full); })
+      .catch(() => {});
     getAllSearchablePlayers()
       .then(full => { if (full.length > 15) setSmPlayers(full); })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Reset visible count when tab/search changes

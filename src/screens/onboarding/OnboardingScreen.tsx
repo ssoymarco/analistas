@@ -855,16 +855,26 @@ const Screen3Teams: React.FC<{
   const [query, setQuery]                 = useState('');
   const [visibleCount, setVisibleCount]   = useState(INITIAL_TEAM_GRID);
 
-  // Search hits the FULL catalog so niche clubs (e.g. Atlante in Liga Expansión)
-  // are findable. Without a query, show only the first `visibleCount` of the
-  // curated grid.
+  // Search hits the FULL catalog so niche clubs (e.g. Atlante in Liga Expansión,
+  // Cruzeiro in Brasileirão) are findable. Without a query, show the curated
+  // grid — but PREPEND any team the user has already selected that isn't in
+  // the curated slice. Without this, a user who searched for Cruzeiro and
+  // tapped to follow had no way to see / un-follow it from the main grid
+  // (they'd have to re-search by name). Selected non-grid picks now stay
+  // visible at the top alongside the default suggestions, with the existing
+  // selected-state styling.
   const filtered = useMemo(() => {
-    if (!query.trim()) return teams.slice(0, visibleCount);
-    const q = normalize(query);
-    return allTeams.filter(t2 =>
-      normalize(t2.name).includes(q) || normalize(t2.shortName).includes(q),
-    );
-  }, [teams, allTeams, query, visibleCount]);
+    if (query.trim()) {
+      const q = normalize(query);
+      return allTeams.filter(t2 =>
+        normalize(t2.name).includes(q) || normalize(t2.shortName).includes(q),
+      );
+    }
+    const curated = teams.slice(0, visibleCount);
+    const curatedIds = new Set(curated.map(t => t.id));
+    const extras = allTeams.filter(t => selectedIds.includes(t.id) && !curatedIds.has(t.id));
+    return [...extras, ...curated];
+  }, [teams, allTeams, query, visibleCount, selectedIds]);
 
   const canShowMore = !query.trim() && visibleCount < teams.length;
 
@@ -1076,14 +1086,23 @@ const Screen4Players: React.FC<{
         return true;
       });
     };
-    if (!query.trim()) return dedupe(players).slice(0, visibleCount);
-    const q = normalize(query);
-    const valid = dedupe(allPlayers);
-    return valid.filter(p =>
-      normalize(p.name).includes(q) ||
-      (p.teamName && normalize(p.teamName).includes(q)),
-    );
-  }, [players, allPlayers, query, visibleCount]);
+    if (query.trim()) {
+      const q = normalize(query);
+      const valid = dedupe(allPlayers);
+      return valid.filter(p =>
+        normalize(p.name).includes(q) ||
+        (p.teamName && normalize(p.teamName).includes(q)),
+      );
+    }
+    // No query: curated suggestions + selected-but-not-in-curated picks.
+    // Same rationale as Screen3Teams — a user who searched and tapped a
+    // niche player needs to be able to see that selection in the default
+    // view, otherwise the only way to deselect is to re-search by name.
+    const curated = dedupe(players).slice(0, visibleCount);
+    const curatedIds = new Set(curated.map(p => p.id));
+    const extras = dedupe(allPlayers).filter(p => selectedIds.includes(p.id) && !curatedIds.has(p.id));
+    return [...extras, ...curated];
+  }, [players, allPlayers, query, visibleCount, selectedIds]);
 
   const canShowMore = !query.trim() && visibleCount < players.length;
 
