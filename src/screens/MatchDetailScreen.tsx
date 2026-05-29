@@ -476,17 +476,20 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     return `${dayName} ${d} ${monthStr}`;
   })();
   // Compact header score — kickoff time when scheduled, regulation score
-  // otherwise, plus the FotMob-style "(pen X-Y)" suffix when the match ended
-  // in a penalty shootout. The compact form stays single-line so the sticky
-  // header keeps its tight visual rhythm.
-  const compactScoreText = (() => {
-    if (isScheduled) return displayTime;
-    const base = `${displayMatch.homeScore} - ${displayMatch.awayScore}`;
-    if (typeof displayMatch.homePenScore === 'number' && typeof displayMatch.awayPenScore === 'number') {
-      return `${base} (${displayMatch.homePenScore}-${displayMatch.awayPenScore} pen)`;
-    }
-    return base;
-  })();
+  // otherwise. The penalty shootout result is rendered as a SEPARATE, smaller
+  // text element next to the main score (see `compactPenText` below) so it
+  // doesn't blow up the sticky header's width/height. The main score stays
+  // in the large compact font; the "(3-0 pen)" sits beside it at a reduced
+  // size, keeping the tight visual rhythm.
+  const compactScoreText = isScheduled
+    ? displayTime
+    : `${displayMatch.homeScore} - ${displayMatch.awayScore}`;
+  const compactPenText =
+    !isScheduled
+    && typeof displayMatch.homePenScore === 'number'
+    && typeof displayMatch.awayPenScore === 'number'
+      ? `(${displayMatch.homePenScore}-${displayMatch.awayPenScore} pen)`
+      : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
@@ -794,6 +797,9 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               <View style={scr.compactCenter} pointerEvents="none">
                 {isLive && <View style={scr.compactLiveDot} />}
                 <Text style={[scr.compactScore, { color: hText }]}>{compactScoreText}</Text>
+                {compactPenText && (
+                  <Text style={[scr.compactPen, { color: hTextSoft }]}>{compactPenText}</Text>
+                )}
               </View>
               <TouchableOpacity
                 onPress={() => {
@@ -1124,6 +1130,13 @@ const scr = StyleSheet.create({
   },
   compactScore: {
     fontSize: 28, fontWeight: '900', color: '#fff', letterSpacing: -0.5,
+  },
+  // Penalty shootout suffix in the sticky compact header — much smaller than
+  // the main score so "(3-0 pen)" reads as a secondary annotation instead of
+  // dominating the header width. Nudged down to sit on the score's baseline.
+  compactPen: {
+    fontSize: 12, fontWeight: '700', letterSpacing: -0.2,
+    marginBottom: 3,
   },
   compactDate: {
     fontSize: 11, fontWeight: '500', color: 'rgba(255,255,255,0.5)',
