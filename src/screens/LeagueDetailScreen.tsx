@@ -1037,10 +1037,10 @@ const wch = StyleSheet.create({
 // ── Converter: LeagueFixture → Match (for MatchDetail navigation) ────────────
 function fixtureToMatch(f: LeagueFixture, leagueName: string, leagueLogo: string): Match {
   const s = f.stateShort;
-  const status: MatchStatus =
-    ['FT', 'AET', 'FT_PEN'].includes(s) ? 'finished' :
-    ['1H', '2H', 'HT', 'ET', 'PEN'].includes(s) ? 'live' :
-    'scheduled';
+  // Use the robust numeric-state-id status (set by useLeagueDetail) so cup
+  // matches decided on penalties navigate into MatchDetail as 'finished'
+  // instead of 'scheduled'. stateShort is only used for the live label below.
+  const status: MatchStatus = f.status;
 
   // Display time: "HH:MM" for upcoming, state label for live, "FT" for finished
   const d = new Date(f.date);
@@ -1239,19 +1239,16 @@ const FixtureRow: React.FC<{ fixture: LeagueFixture; onPress?: () => void; showD
   const c = useThemeColors();
   const { t } = useTranslation();
   const { timeFormat } = useTimeFormat();
-  // SM uses `state.short_name` to encode the lifecycle phase. For finished
-  // matches the value depends on how the match ended:
-  //   FT      = regulation
-  //   AET     = after extra time
-  //   FT_PEN  = after penalty shootout
-  //   AWARDED = decided administratively
-  // Previously this row only checked `FT`, which is why the 2022 World Cup
-  // final and the NED-ARG QF (both decided on penalties → short_name
-  // `FT_PEN`) silently rendered as "upcoming" with the kick-off time and
-  // "-" placeholders instead of the final 3-3 / 2-2 score. Same root cause
-  // and same fix as the MatchCard / MatchDetail flow.
-  const isFinished = ['FT', 'FT_PEN', 'AET', 'AWARDED'].includes(f.stateShort);
-  const isLive = ['1H', '2H', 'HT', 'ET', 'PEN', 'PEN_LIVE', 'BREAK'].includes(f.stateShort);
+  // Drive off the robust numeric-state-id status (useLeagueDetail.deriveFixtureStatus)
+  // rather than the string `stateShort`. The Firestore shim doesn't populate
+  // `state.short_name` (it was undefined → 'NS'), which made every cup match
+  // that went to penalties — 2022 World Cup final, NED-ARG QF, etc. — render
+  // as "upcoming" with the kick-off time and "-" placeholders instead of the
+  // final score. `status` is computed from the verified FINISHED/LIVE state-id
+  // sets + a time fallback, so it's correct on BOTH the Firestore and proxy
+  // paths regardless of how the match was decided (FT / AET / penalties).
+  const isFinished = f.status === 'finished';
+  const isLive = f.status === 'live';
 
   return (
     <TouchableOpacity
