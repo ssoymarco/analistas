@@ -20,7 +20,7 @@ import { NetworkProvider } from './src/contexts/NetworkContext';
 import { TimeFormatProvider } from './src/contexts/TimeFormatContext';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { initialize } from './src/services/notifications';
-import { initializeFCM, attachFCMHandlers } from './src/services/fcmInit';
+import { initializeFCM, initializeFCMAtStartup, attachFCMHandlers } from './src/services/fcmInit';
 import { navigateToMatch } from './src/utils/navigationRef';
 import type { NotificationPayload } from './src/services/notifications';
 import type { Match } from './src/data/types';
@@ -123,13 +123,18 @@ function App() {
     // callback never reached `[FIRMessaging appDidReceiveMessage]`, so
     // FCM's token was a "phantom" — subscribeToTopic resolved fine, the
     // server-side topic membership filed correctly, but every push got
-    // dropped at the APNs layer because the device wasn't bound. Putting
-    // initializeFCM() first lets RNFB grab the delegate slot before
-    // expo-notifications.
+    // dropped at the APNs layer because the device wasn't bound.
     //
-    // Idempotent — safe to call on every launch via the cached singleton
-    // promise in fcmInit.ts.
-    initializeFCM().catch(() => {});
+    // We now call `initializeFCMAtStartup` instead of `initializeFCM` to
+    // avoid showing the iOS permission dialog on the very first screen.
+    //   • Android: full init runs immediately (no dialog — permission granted
+    //     at install or managed at API 33+ via expo-notifications separately).
+    //   • iOS returning user (permission already granted): full init runs.
+    //   • iOS new user: only registers the RNFB delegate; the actual
+    //     requestPermission() call is deferred to after the onboarding
+    //     notification-preferences screen (goNextFromNotifs in
+    //     OnboardingScreen.tsx → initializeFCM()).
+    initializeFCMAtStartup().catch(() => {});
 
     // Foreground + token-refresh handlers — registered BEFORE expo-notifications
     // takes the foreground display reins so onMessage callbacks fire correctly.

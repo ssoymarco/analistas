@@ -51,6 +51,7 @@ import { getLeaguePopularity } from '../../config/leagues';
 import { useUserCountry } from '../../hooks/useUserCountry';
 import { normalize } from '../../utils/normalize';
 import { requestPermissionsAndGetToken } from '../../services/notifications';
+import { initializeFCM } from '../../services/fcmInit';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useGoogleAuth } from '../../services/authGoogle';
 import { signInWithApple, isAppleAuthAvailable } from '../../services/authApple';
@@ -2484,10 +2485,18 @@ export function OnboardingScreen() {
   const goTo  = (n: number) => setScreen(n);
   const goNext = () => setScreen(s => s + 1);
 
-  // Screen 7 → 8: request push permissions FIRST (user just configured notification prefs,
-  // so the system dialog has perfect context), then advance.
+  // Screen 7 → 8: request push permissions AFTER the user has configured
+  // their notification preferences, then advance.
+  // We call BOTH:
+  //   1. requestPermissionsAndGetToken() — asks expo-notifications permission
+  //      (shows the iOS system dialog "Analistas quiere enviarte notificaciones")
+  //   2. initializeFCM() — binds APNs ↔ FCM so topic subscriptions actually
+  //      deliver. For first-time iOS users this is where the real FCM
+  //      registration token gets materialised; App.tsx startup only registered
+  //      the delegate and skipped this step for new users.
   const goNextFromNotifs = useCallback(() => {
     requestPermissionsAndGetToken().catch(() => {});
+    initializeFCM().catch(() => {});
     setScreen(s => s + 1);
   }, []);
   const goBack = () => setScreen(s => Math.max(1, s - 1));

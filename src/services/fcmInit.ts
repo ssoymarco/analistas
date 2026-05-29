@@ -63,14 +63,63 @@ let fcmInitPromise: Promise<string | null> | null = null;
  * Initialize Firebase Messaging — request permission via the Firebase SDK
  * path, wait for APNs binding, fetch the FCM token, and persist it.
  *
+ * ⚠️  WHEN TO CALL THIS:
+ *   - On Android: call from App.tsx startup (the permission dialog was shown
+ *     at install time, so requestPermission() is a silent no-op here).
+ *   - On iOS: ONLY call AFTER the user has explicitly chosen their notification
+ *     preferences in the onboarding (Screen 7). Calling it at app startup
+ *     triggers the iOS system permission dialog ("Analistas quiere enviarte
+ *     notificaciones") on the very first screen the user sees, with zero
+ *     context about why they're being asked. The correct call site on iOS
+ *     is `goNextFromNotifs` in OnboardingScreen.tsx (for first-time users) or
+ *     at auth-restore time when permission was already granted in a prior session.
+ *
  * Safe to call multiple times; idempotent (returns the cached promise on
  * subsequent calls). Returns the FCM token on success, null when
- * permission is denied or the platform can't deliver push (simulator,
- * Expo Go, etc.).
+ * permission is denied or the platform can't deliver push.
  */
 export function initializeFCM(): Promise<string | null> {
   if (!fcmInitPromise) fcmInitPromise = doInitializeFCM();
   return fcmInitPromise;
+}
+
+/**
+ * Lightweight startup hook for App.tsx that:
+ *   1. Registers the Firebase Messaging delegate (Android + iOS) so it owns
+ *      the UNUserNotificationCenter slot BEFORE expo-notifications.
+ *   2. On Android, immediately proceeds with full FCM init (permission is
+ *      granted at install, no dialog shown).
+ *   3. On iOS, SKIPS the permission request — deferred to after the
+ *      onboarding notification-preferences screen. If permission was already
+ *      granted in a prior session (returning user), full init runs immediately.
+ *
+ * Never shows the iOS permission dialog at startup.
+ */
+export async function initializeFCMAtStartup(): Promise<void> {
+  if (Platform.OS === 'android') {
+    // Android: full init at startup, no dialog involved.
+    initializeFCM().catch(() => {});
+    return;
+  }
+
+  // iOS — check existing permission first.
+  try {
+    const status = await messaging().hasPermission();
+    const alreadyGranted =
+      status === messaging.AuthorizationStatus.AUTHORIZED ||
+      status === messaging.AuthorizationStatus.PROVISIONAL;
+
+    if (alreadyGranted) {
+      // Returning user who already said "Permitir" — full init is safe.
+      initializeFCM().catch(() => {});
+    }
+    // First-time user: do NOT call initializeFCM() here. The onboarding's
+    // goNextFromNotifs (Screen 7 → 8) will call it after the user has
+    // seen and configured their notification preferences.
+  } catch {
+    // If hasPermission() fails (e.g. fresh install cold crash), stay silent —
+    // the onboarding will trigger the permission flow.
+  }
 }
 
 /**
