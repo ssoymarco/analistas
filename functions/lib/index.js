@@ -11,13 +11,47 @@
  * - syncStandings:    Every 6 hours → league tables for all configured leagues
  * - syncTopScorers:   Every 12 hours → top scorers for all configured leagues
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = void 0;
+exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.sendTestPush = exports.reportFcmToken = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = void 0;
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
 // before any other module touches admin.firestore().
 require("./admin-init");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const https_1 = require("firebase-functions/v2/https");
+const logger = __importStar(require("firebase-functions/logger"));
 const config_1 = require("./config");
 const poll_livescores_1 = require("./poll-livescores");
 const sync_fixtures_1 = require("./sync-fixtures");
@@ -86,6 +120,7 @@ const BACKFILL_ADMIN_UIDS = new Set([
 // Operator UIDs allowed to trigger the backfill. Populate via Firebase Auth.
 ]);
 const params_1 = require("firebase-functions/params");
+const admin_init_1 = require("./admin-init");
 const BACKFILL_TOKEN = (0, params_1.defineSecret)('BACKFILL_TOKEN');
 exports.backfillFixturesByDates = (0, https_1.onCall)({
     timeoutSeconds: 540,
@@ -117,6 +152,94 @@ exports.backfillFixturesByDates = (0, https_1.onCall)({
     }
     await (0, sync_fixtures_1.syncFixturesHandler)(dates);
     return { ok: true, dates };
+});
+/**
+ * Diagnostic endpoint: send a test FCM push to an arbitrary topic so an
+ * operator can verify that a specific device is subscribed end-to-end.
+ *
+ * Why this exists — the user reported zero notifications on Build 13 +
+ * Build 14 because the client never bound APNs↔FCM (see commit ea1be8f).
+ * After Build 15 ships the fix, we need a way to confirm the binding
+ * worked WITHOUT having to wait for a real goal to be scored. This
+ * endpoint takes a topic + title + body and dispatches via the same
+ * `admin.messaging().send({topic})` path the real notifications use.
+ *
+ * Gated on the same BACKFILL_TOKEN as the other diagnostic endpoint —
+ * an explicit allow-list approach is cleaner than wiring per-endpoint
+ * secrets.
+ *
+ * Invocation example (curl):
+ *   curl -X POST .../sendTestPush -d '{
+ *     "data": {
+ *       "adminToken": "...",
+ *       "topic": "team_3371_goals",
+ *       "title": "Test",
+ *       "body":  "Si ves esto el binding funciona"
+ *     }
+ *   }'
+ */
+/**
+ * Diagnostic endpoint: records the FCM + APNs tokens reported by a device
+ * after `initializeFCM` runs. Used to verify end-to-end binding when the
+ * topic-targeted push diagnostic fails — a direct token-targeted push
+ * bypasses topic membership entirely and isolates whether the device is
+ * truly registered with FCM or whether the registration token itself
+ * is a phantom.
+ *
+ * Public endpoint (the device hits it on launch, no auth available there).
+ * Tokens are PII-adjacent — store in logs only, no Firestore write, so
+ * they age out with the normal Cloud Logging retention.
+ */
+exports.reportFcmToken = (0, https_1.onCall)({
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    region: 'us-central1',
+    invoker: 'public',
+}, async (req) => {
+    const fcmToken = String(req.data?.fcmToken ?? '');
+    const apnsToken = String(req.data?.apnsToken ?? '');
+    const platform = String(req.data?.platform ?? 'unknown');
+    const buildNum = String(req.data?.buildNum ?? 'unknown');
+    // Log the full FCM token so the operator can use it for a direct
+    // sendToken push. APNs token is logged truncated — it's only useful
+    // as a "did APNs bind?" signal, not a delivery target.
+    logger.info('📲 FCM_DIAG', {
+        platform,
+        buildNum,
+        hasFcmToken: fcmToken.length > 0,
+        hasApnsToken: apnsToken.length > 0,
+        fcmToken: fcmToken,
+        apnsFirst16: apnsToken.slice(0, 16),
+        ts: Date.now(),
+    });
+    return { ok: true };
+});
+exports.sendTestPush = (0, https_1.onCall)({
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    region: 'us-central1',
+    secrets: [BACKFILL_TOKEN],
+    invoker: 'public',
+}, async (req) => {
+    const tokenHeader = req.data?.adminToken ?? '';
+    const expectedToken = BACKFILL_TOKEN.value();
+    if (!expectedToken || tokenHeader !== expectedToken) {
+        throw new https_1.HttpsError('permission-denied', 'sendTestPush requires a matching adminToken.');
+    }
+    const topic = req.data?.topic;
+    const title = req.data?.title ?? 'Analistas';
+    const body = req.data?.body ?? 'Test push';
+    if (!topic || typeof topic !== 'string') {
+        throw new https_1.HttpsError('invalid-argument', 'Expected `topic: string`.');
+    }
+    const messageId = await admin_init_1.admin.messaging().send({
+        topic,
+        notification: { title, body },
+        data: { type: 'test', ts: String(Date.now()) },
+        apns: { payload: { aps: { sound: 'default' } } },
+        android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
+    });
+    return { ok: true, messageId, topic };
 });
 /**
  * Sync league standings for all configured leagues.
