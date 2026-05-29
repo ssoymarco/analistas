@@ -42,6 +42,7 @@
 import messaging from '@react-native-firebase/messaging';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fcmReady } from './fcmInit';
+import { addBreadcrumb, Sentry } from './sentry';
 
 /**
  * Wrapper around messaging().subscribeToTopic that:
@@ -54,16 +55,16 @@ import { fcmReady } from './fcmInit';
 async function safeSubscribe(topic: string): Promise<boolean> {
   const token = await fcmReady();
   if (!token) {
-    // eslint-disable-next-line no-console
-    console.warn(`[FCM] subscribe(${topic}) skipped — FCM not initialised (token=null)`);
+    addBreadcrumb('fcm', 'subscribe skipped — no token', { topic });
     return false;
   }
   try {
     await messaging().subscribeToTopic(topic);
+    addBreadcrumb('fcm', 'subscribed', { topic });
     return true;
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn(`[FCM] subscribe(${topic}) failed:`, err);
+    addBreadcrumb('fcm', 'subscribe failed', { topic, err: String(err) });
+    Sentry.setContext('fcm_subscribe_failure', { topic, err: String(err) });
     return false;
   }
 }
@@ -73,10 +74,10 @@ async function safeUnsubscribe(topic: string): Promise<boolean> {
   if (!token) return false;
   try {
     await messaging().unsubscribeFromTopic(topic);
+    addBreadcrumb('fcm', 'unsubscribed', { topic });
     return true;
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn(`[FCM] unsubscribe(${topic}) failed:`, err);
+    addBreadcrumb('fcm', 'unsubscribe failed', { topic, err: String(err) });
     return false;
   }
 }

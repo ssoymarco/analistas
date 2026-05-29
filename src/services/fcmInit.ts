@@ -43,6 +43,7 @@ import messaging, {
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import { Sentry, addBreadcrumb, captureError } from './sentry';
 
 const FCM_TOKEN_KEY = 'analistas_fcm_token';
 /** Bump this string whenever a release ships an FCM-init change that
@@ -89,7 +90,26 @@ export function fcmReady(timeoutMs = 10_000): Promise<string | null> {
 }
 
 async function doInitializeFCM(): Promise<string | null> {
+  addBreadcrumb('fcm', 'initializeFCM started', { platform: Platform.OS });
   try {
+    // ── Step 0 (NEW): wipe the legacy subscription record FIRST. ──────────
+    // This used to live at the END of init (after the slow APNs/FCM token
+    // wait), which produced a race condition: FavoritesContext's
+    // reconcileSubscriptions runs as soon as AsyncStorage loads the
+    // follow-list (~10 ms after mount), well before the FCM token wait
+    // completed (~3-5 s). reconcile saw the stale "subscribed" set from
+    // Build 13/14 (every entry phantom because FCM was never bound),
+    // computed wanted === current, and exited without re-subscribing.
+    // Doing the wipe FIRST means even if reconcile runs early it sees an
+    // empty list and triggers fresh safeSubscribe calls — which then
+    // await fcmReady() and dispatch through the freshly-bound FCM token.
+    const storedVersion = await AsyncStorage.getItem(FCM_INIT_VERSION_KEY).catch(() => null);
+    if (storedVersion !== FCM_INIT_VERSION) {
+      await AsyncStorage.removeItem(SUBSCRIBED_TOPICS_KEY).catch(() => {});
+      await AsyncStorage.setItem(FCM_INIT_VERSION_KEY, FCM_INIT_VERSION).catch(() => {});
+      addBreadcrumb('fcm', 'legacy subscribed-topics wiped');
+    }
+
     // Step 1 — Permission gate. On iOS this triggers UNUserNotificationCenter
     // *via* Firebase's delegate, which is what binds APNs → FCM. On Android
     // it's a no-op (notification permission is granted at install time on
@@ -101,9 +121,9 @@ async function doInitializeFCM(): Promise<string | null> {
     const granted =
       authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
       authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+    addBreadcrumb('fcm', 'permission resolved', { authStatus, granted });
     if (!granted) {
-      // User declined. The expo-notifications local notifications still
-      // work for foreground display, but no remote push can arrive.
+      Sentry.setContext('fcm', { granted: false, authStatus });
       return null;
     }
 
@@ -111,6 +131,7 @@ async function doInitializeFCM(): Promise<string | null> {
     // for this, but on a TestFlight production build the APNs handshake
     // can take a beat after permission. Poll a few times so we don't
     // race the first launch.
+    let apnsHadToken = false;
     if (Platform.OS === 'ios') {
       let apnsToken = await messaging().getAPNSToken();
       let attempts = 0;
@@ -119,13 +140,14 @@ async function doInitializeFCM(): Promise<string | null> {
         apnsToken = await messaging().getAPNSToken();
         attempts++;
       }
+      apnsHadToken = !!apnsToken;
+      addBreadcrumb('fcm', 'APNs token result', { hasToken: apnsHadToken, attempts });
       if (!apnsToken) {
-        // 5 s elapsed with no APNs token — likely a sandbox/production
-        // mismatch in Firebase Console (.p8 key needs to cover both
-        // environments) or running in the simulator. Log and continue;
-        // FCM topic subs will be no-ops but the app shouldn't crash.
-        // eslint-disable-next-line no-console
-        console.warn('[FCM] APNs token did not arrive within 5 s — push delivery may be broken.');
+        // 5 s elapsed with no APNs token — historically this meant the
+        // IPA was missing the `aps-environment` entitlement (Build 15
+        // bug, fixed in app.json for Build 16). On any future occurrence,
+        // it's still useful as a diagnostic flag.
+        Sentry.setContext('fcm', { apns_token_missing: true });
       }
     }
 
@@ -137,23 +159,16 @@ async function doInitializeFCM(): Promise<string | null> {
     if (fcmToken) {
       await AsyncStorage.setItem(FCM_TOKEN_KEY, fcmToken).catch(() => {});
     }
-
-    // Step 4 — One-shot subscription reset for users upgrading from
-    // Build 13 (where every topic sub was a silent no-op because FCM
-    // was never initialised). If we've never recorded a successful
-    // FCM init at this version, clear the stale "subscribed" set so
-    // FavoritesContext's reconcileSubscriptions re-fires every
-    // subscribe through the now-properly-bound FCM token.
-    const storedVersion = await AsyncStorage.getItem(FCM_INIT_VERSION_KEY).catch(() => null);
-    if (storedVersion !== FCM_INIT_VERSION) {
-      await AsyncStorage.removeItem(SUBSCRIBED_TOPICS_KEY).catch(() => {});
-      await AsyncStorage.setItem(FCM_INIT_VERSION_KEY, FCM_INIT_VERSION).catch(() => {});
-    }
+    addBreadcrumb('fcm', 'FCM token result', { hasToken: !!fcmToken });
+    Sentry.setContext('fcm', {
+      apns_token_obtained: apnsHadToken,
+      fcm_token_obtained:  !!fcmToken,
+      fcm_token_first12:   fcmToken?.substring(0, 12) ?? null,
+    });
 
     return fcmToken ?? null;
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn('[FCM] initializeFCM failed:', err);
+    captureError(err, { component: 'fcm-init' });
     return null;
   }
 }

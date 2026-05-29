@@ -51,6 +51,9 @@
       "buildNumber": "2",
       "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": true,
+      "entitlements": {
+        "aps-environment": "production"
+      },
       "infoPlist": {
         "UIBackgroundModes": [
           "remote-notification"

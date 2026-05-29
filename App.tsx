@@ -116,27 +116,29 @@ function App() {
     // Restore user's saved language preference (overrides device default).
     applyStoredLanguage().catch(() => {});
 
-    // Bootstrap: configure foreground handler + Android channel (no permissions yet).
-    initialize().catch(() => {});
-
-    // FCM init — this is the step that was missing on Build 13 and made
-    // every topic subscription a silent no-op. requestPermission() on iOS
-    // binds the APNs delegate; getToken() materialises the FCM token so
-    // FCM's topic-subscriber set actually includes this device. Without
-    // this call, the entire push system looks healthy from the app's POV
-    // (subscribe calls resolve, AsyncStorage records them) but no remote
-    // push ever arrives.
+    // ⚠️ ORDER MATTERS — FCM must register its UNUserNotificationCenter
+    // delegate BEFORE expo-notifications swizzles the same delegate.
+    // Whichever lib runs first wins on iOS. When expo-notifications won
+    // (Build 15), the APNs `didRegisterForRemoteNotificationsWithDeviceToken`
+    // callback never reached `[FIRMessaging appDidReceiveMessage]`, so
+    // FCM's token was a "phantom" — subscribeToTopic resolved fine, the
+    // server-side topic membership filed correctly, but every push got
+    // dropped at the APNs layer because the device wasn't bound. Putting
+    // initializeFCM() first lets RNFB grab the delegate slot before
+    // expo-notifications.
     //
-    // Safe to call on every launch — idempotent, no-op when permission
-    // already granted and APNs token already bound.
+    // Idempotent — safe to call on every launch via the cached singleton
+    // promise in fcmInit.ts.
     initializeFCM().catch(() => {});
 
-    // Foreground + token-refresh handlers. The foreground handler forwards
-    // FCM messages received while the app is open into expo-notifications
-    // so the banner actually renders (FCM does NOT auto-display in
-    // foreground; without this the user only sees push when the app is
-    // backgrounded).
+    // Foreground + token-refresh handlers — registered BEFORE expo-notifications
+    // takes the foreground display reins so onMessage callbacks fire correctly.
     detachFcmHandlers.current = attachFCMHandlers();
+
+    // Bootstrap expo-notifications: configure foreground handler + Android channel
+    // (no permissions yet). Runs AFTER FCM init so the delegate ordering is
+    // RNFB → expo-notifications → user permission flow.
+    initialize().catch(() => {});
 
     // Handle notification TAP (user tapped the banner/notification center entry).
     notifResponseListener.current = Notifications.addNotificationResponseReceivedListener(
