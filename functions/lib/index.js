@@ -45,7 +45,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.sendTestPush = exports.reportFcmToken = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = void 0;
+exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.sendTestPush = exports.backfillEnrichmentByMatchIds = exports.reportFcmToken = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = void 0;
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
 // before any other module touches admin.firestore().
 require("./admin-init");
@@ -214,6 +214,40 @@ exports.reportFcmToken = (0, https_1.onCall)({
     });
     return { ok: true };
 });
+/**
+ * Backfill enrichment (events, lineups, h2h, statistics) for arbitrary match
+ * IDs that are outside the scheduled hot window. Primary use case: historical
+ * cup matches that went to ET/penalties (2022 WC knockouts, etc.) whose
+ * `detail.events` only has shootout kicks because the scheduled enrichment
+ * function never revisits finished matches older than 2 hours.
+ *
+ * Input: `{ matchIds: string[], adminToken: string }` — max 20 IDs per call
+ * (each requires a separate SportMonks API call + H2H call).
+ */
+exports.backfillEnrichmentByMatchIds = (0, https_1.onCall)({
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    secrets: [config_1.SPORTMONKS_TOKEN, BACKFILL_TOKEN],
+    invoker: 'public',
+}, async (req) => {
+    const tokenHeader = req.data?.adminToken ?? '';
+    const expectedToken = BACKFILL_TOKEN.value();
+    if (!expectedToken || tokenHeader !== expectedToken) {
+        throw new https_1.HttpsError('permission-denied', 'Requires matching adminToken.');
+    }
+    const matchIds = req.data?.matchIds;
+    if (!Array.isArray(matchIds) || matchIds.length === 0 ||
+        !matchIds.every(id => typeof id === 'string' || typeof id === 'number')) {
+        throw new https_1.HttpsError('invalid-argument', 'Expected `matchIds: (string|number)[]`.');
+    }
+    if (matchIds.length > 20) {
+        throw new https_1.HttpsError('invalid-argument', 'At most 20 match IDs per call.');
+    }
+    const ids = matchIds.map(String);
+    const result = await (0, sync_match_enrichment_1.enrichMatchesByIds)(ids);
+    return { ok: true, ...result, matchIds: ids };
+});
 exports.sendTestPush = (0, https_1.onCall)({
     timeoutSeconds: 60,
     memory: '256MiB',
@@ -227,19 +261,23 @@ exports.sendTestPush = (0, https_1.onCall)({
         throw new https_1.HttpsError('permission-denied', 'sendTestPush requires a matching adminToken.');
     }
     const topic = req.data?.topic;
+    const token = req.data?.token;
     const title = req.data?.title ?? 'Analistas';
     const body = req.data?.body ?? 'Test push';
-    if (!topic || typeof topic !== 'string') {
-        throw new https_1.HttpsError('invalid-argument', 'Expected `topic: string`.');
+    if (!topic && !token) {
+        throw new https_1.HttpsError('invalid-argument', 'Expected `topic` OR `token` string.');
     }
+    const target = token
+        ? { token }
+        : { topic: topic };
     const messageId = await admin_init_1.admin.messaging().send({
-        topic,
+        ...target,
         notification: { title, body },
         data: { type: 'test', ts: String(Date.now()) },
         apns: { payload: { aps: { sound: 'default' } } },
         android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
     });
-    return { ok: true, messageId, topic };
+    return { ok: true, messageId, target };
 });
 /**
  * Sync league standings for all configured leagues.

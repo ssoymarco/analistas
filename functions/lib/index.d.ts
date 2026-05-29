@@ -72,10 +72,32 @@ export declare const backfillFixturesByDates: import("firebase-functions/v2/http
 export declare const reportFcmToken: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     ok: boolean;
 }>, unknown>;
+/**
+ * Backfill enrichment (events, lineups, h2h, statistics) for arbitrary match
+ * IDs that are outside the scheduled hot window. Primary use case: historical
+ * cup matches that went to ET/penalties (2022 WC knockouts, etc.) whose
+ * `detail.events` only has shootout kicks because the scheduled enrichment
+ * function never revisits finished matches older than 2 hours.
+ *
+ * Input: `{ matchIds: string[], adminToken: string }` — max 20 IDs per call
+ * (each requires a separate SportMonks API call + H2H call).
+ */
+export declare const backfillEnrichmentByMatchIds: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    matchIds: string[];
+    enriched: number;
+    errors: number;
+    ok: boolean;
+}>, unknown>;
 export declare const sendTestPush: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     ok: boolean;
     messageId: string;
-    topic: string;
+    target: {
+        token: string;
+        topic?: undefined;
+    } | {
+        topic: string;
+        token?: undefined;
+    };
 }>, unknown>;
 /**
  * Sync league standings for all configured leagues.
