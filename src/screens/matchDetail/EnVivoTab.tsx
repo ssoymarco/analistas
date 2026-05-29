@@ -23,8 +23,10 @@ import type {
 } from '../../data/types';
 import { isImageUri } from '../../utils/imageUri';
 import {
-  MATCH_PHASES, matchHadExtraTime, maxRegulationMinute,
+  MATCH_PHASES, maxRegulationMinute,
+  runningScoreAt, cumulativeScoreAtMinute,
 } from '../../utils/matchPhases';
+import { translateNationalTeam } from '../../utils/nationalTeams';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH   = SCREEN_WIDTH - 72; // prediction card width
@@ -151,24 +153,31 @@ const qs = StyleSheet.create({
 });
 
 // ── Event row (live/finished) ────────────────────────────────────────────────
-const EventRow: React.FC<{ event: MatchEvent; match: Match }> = ({ event, match }) => {
+// `runningScore` is the cumulative score AT this event, passed in by the
+// parent (TimelineBlock) for goal events only. Renders as a bold "2-1" under
+// the scorer — the single biggest clarity win, present in every competitor.
+const EventRow: React.FC<{
+  event: MatchEvent;
+  match: Match;
+  runningScore?: { home: number; away: number } | null;
+}> = ({ event, match, runningScore }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const isHome = event.team === 'home';
   const isGoal = isGoalEvent(event.type);
+  const isPenaltyGoal = event.type === 'penalty-goal';
+  const isOwnGoal = event.type === 'own-goal';
   const isDelay = event.type === 'delay-start' || event.type === 'delay-end';
   const isShootout = event.type === 'shootout-goal' || event.type === 'shootout-miss';
   // Shootout kicks happen after the 90/120-minute mark, but SM reports them
   // all stamped at the period start (e.g. minute=120). Showing "120'" for
-  // ten consecutive kicks reads poorly — instead surface the running tally
-  // ("4-2") when SM provides it, falling back to "Pen 5" when only the
-  // sort order is known.
+  // ten consecutive kicks reads poorly — instead surface the kick number
+  // ("Pen 5") and the running tally is shown separately by the parent.
   const minuteStr = isShootout
-    ? (event.shootoutResult ?? (event.shootoutOrder != null ? `Pen ${event.shootoutOrder}` : 'Pen'))
+    ? (event.shootoutOrder != null ? `${t('timeline.penaltyKick')} ${event.shootoutOrder}` : t('timeline.penaltyKick'))
     : `${event.minute}${event.addedTime ? `+${event.addedTime}` : ''}'`;
 
   // Delays render as a single centered row — they don't belong to one team.
-  // Injury delays do carry a player_name so we show it; cooling breaks /
-  // weather pauses don't, so we use a generic "Pausa" / "Reanudación" label.
   if (isDelay) {
     const label =
       event.type === 'delay-end'
@@ -194,15 +203,51 @@ const EventRow: React.FC<{ event: MatchEvent; match: Match }> = ({ event, match 
     );
   }
 
+  // Subtitle under the player name for NON-sub events: assist (for goals)
+  // and/or "(en propia)" for own goals. Subs render their own ▲/▼ block
+  // inline below (handled in the JSX).
+  const renderSubtitle = (align: 'flex-end' | 'flex-start') => {
+    const bits: string[] = [];
+    if (isOwnGoal) bits.push(t('timeline.ownGoal'));
+    if (isGoal && event.relatedPlayer) bits.push(`${t('timeline.assist')}: ${event.relatedPlayer}`);
+    if (bits.length === 0) return null;
+    return (
+      <Text style={[ev.sub, { color: c.textSecondary, textAlign: align === 'flex-end' ? 'right' : 'left' }]} numberOfLines={2}>
+        {bits.join(' · ')}
+      </Text>
+    );
+  };
+
+  // The main name line. For subs we render the in/out arrows in the subtitle,
+  // so the name line shows the incoming player. Penalty goals get a small "P"
+  // badge after the name.
+  const renderName = (align: 'flex-end' | 'flex-start') => (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1 }}>
+      {align === 'flex-start' && isPenaltyGoal && <PenaltyBadge />}
+      <Text
+        style={[ev.player, { color: c.textPrimary }, isGoal && ev.playerGoal]}
+        numberOfLines={1}
+      >
+        {event.player}
+      </Text>
+      {align === 'flex-end' && isPenaltyGoal && <PenaltyBadge />}
+    </View>
+  );
+
   return (
     <View style={[ev.row, { borderBottomColor: c.border }]}>
       <View style={ev.side}>
         {isHome && (
           <View style={ev.infoHome}>
-            <Text style={[ev.player, { color: c.textPrimary }, isGoal && ev.playerGoal]}>{event.player}</Text>
-            {event.relatedPlayer && (
-              <Text style={[ev.sub, { color: c.textSecondary }]}>
-                {event.type === 'sub' ? `↓ ${event.relatedPlayer}` : `Asistencia: ${event.relatedPlayer}`}
+            {renderName('flex-end')}
+            {isGoal && runningScore && (
+              <Text style={[ev.runScore, { color: c.accent }]}>{runningScore.home}-{runningScore.away}</Text>
+            )}
+            {event.type !== 'sub' && renderSubtitle('flex-end')}
+            {event.type === 'sub' && (
+              <Text style={[ev.sub, { color: c.textSecondary, textAlign: 'right' }]} numberOfLines={2}>
+                <Text style={{ color: '#22c55e' }}>▲ </Text>{event.player}{'\n'}
+                <Text style={{ color: '#ef4444' }}>▼ </Text>{event.relatedPlayer}
               </Text>
             )}
           </View>
@@ -217,15 +262,31 @@ const EventRow: React.FC<{ event: MatchEvent; match: Match }> = ({ event, match 
       <View style={ev.side}>
         {!isHome && (
           <View style={ev.infoAway}>
-            <Text style={[ev.player, { color: c.textPrimary }, isGoal && ev.playerGoal]}>{event.player}</Text>
-            {event.relatedPlayer && (
-              <Text style={[ev.sub, { color: c.textSecondary }]}>
-                {event.type === 'sub' ? `↓ ${event.relatedPlayer}` : `Asistencia: ${event.relatedPlayer}`}
+            {renderName('flex-start')}
+            {isGoal && runningScore && (
+              <Text style={[ev.runScore, { color: c.accent }]}>{runningScore.home}-{runningScore.away}</Text>
+            )}
+            {event.type !== 'sub' && renderSubtitle('flex-start')}
+            {event.type === 'sub' && (
+              <Text style={[ev.sub, { color: c.textSecondary, textAlign: 'left' }]} numberOfLines={2}>
+                <Text style={{ color: '#22c55e' }}>▲ </Text>{event.player}{'\n'}
+                <Text style={{ color: '#ef4444' }}>▼ </Text>{event.relatedPlayer}
               </Text>
             )}
           </View>
         )}
       </View>
+    </View>
+  );
+};
+
+// Small "P" badge appended to penalty goals — language-agnostic (P reads as
+// Penal/Penalty/Pênalti/etc. across our locales) and visually distinct.
+const PenaltyBadge: React.FC = () => {
+  const c = useThemeColors();
+  return (
+    <View style={ev.penBadge}>
+      <Text style={[ev.penBadgeText, { color: c.textSecondary }]}>P</Text>
     </View>
   );
 };
@@ -237,11 +298,17 @@ const ev = StyleSheet.create({
   infoAway: { alignItems: 'flex-start', paddingLeft: 4 },
   player: { fontSize: 13, fontWeight: '500' },
   playerGoal: { fontWeight: '700' },
-  sub: { fontSize: 11, marginTop: 1 },
+  sub: { fontSize: 11, marginTop: 1, lineHeight: 15 },
+  runScore: { fontSize: 13, fontWeight: '900', marginTop: 1, letterSpacing: -0.3 },
   center: { alignItems: 'center', gap: 3, width: 54 },
   iconWrap: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   icon: { fontSize: 15 },
   minute: { fontSize: 10, fontWeight: '700' },
+  penBadge: {
+    borderWidth: 1, borderColor: 'rgba(127,127,127,0.5)', borderRadius: 4,
+    paddingHorizontal: 3, paddingVertical: 0,
+  },
+  penBadgeText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.3 },
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2202,23 +2269,37 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
   }));
   const visiblePhaseBuckets = phaseBuckets.filter(b => b.events.length > 0);
   const hasEvents = detail.events.length > 0;
-  // Show "FIN DEL PARTIDO" terminator only when the match has actually ended
-  // (regulation OR after-ET) AND we've rendered at least one phase section.
-  // Penalty matches put the terminator BEFORE the shootout block so the
-  // reading order is "1ER → 2DO → ET → FIN → Tanda".
-  const showMatchEndMarker = isFinished && visiblePhaseBuckets.length > 0;
   const hasMissing = (detail.missingPlayers?.home?.length ?? 0) > 0 || (detail.missingPlayers?.away?.length ?? 0) > 0;
+
+  // ── Boundary marker (phase divider with cumulative score) ──────────────────
+  // "Medio tiempo · 2-0" style. `bold` is used for the final closing marker.
+  const BoundaryMarker = ({ label, score, bold }: {
+    label: string; score?: { home: number; away: number } | null; bold?: boolean;
+  }) => (
+    <View style={[tl.boundary, { backgroundColor: c.surface }]}>
+      <Text style={[tl.boundaryText, { color: bold ? c.textPrimary : c.textTertiary }, bold && { fontWeight: '800' }]}>
+        {label}{score ? `  ·  ${score.home}-${score.away}` : ''}
+      </Text>
+    </View>
+  );
 
   // ── Timeline block — reused in two positions (finished: top, live: below stats)
   const TimelineBlock = () => (
     <View style={[tl.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      {/* Teams header */}
-      <View style={[tl.teamsHeader, { borderBottomColor: c.border }]}>
-        <Text style={[tl.teamLabel, { color: '#3b82f6' }]}>{match.homeTeam.shortName}</Text>
-        <Text style={[tl.cronLabel, { color: c.textTertiary }]}>{t('timeline.title')}</Text>
-        <Text style={[tl.teamLabel, { color: '#f97316', textAlign: 'right' }]}>{match.awayTeam.shortName}</Text>
+      {/* Title */}
+      <View style={[tl.titleRow, { borderBottomColor: c.border }]}>
+        <Text style={[tl.titleText, { color: c.textTertiary }]}>{t('timeline.title')}</Text>
       </View>
-      {/* Filter toggle */}
+      {/* Full team names — left (home, blue) / right (away, orange) */}
+      <View style={tl.teamsHeader}>
+        <Text style={[tl.teamName, { color: '#3b82f6' }]} numberOfLines={1}>
+          {translateNationalTeam(match.homeTeam.name)}
+        </Text>
+        <Text style={[tl.teamName, { color: '#f97316', textAlign: 'right' }]} numberOfLines={1}>
+          {translateNationalTeam(match.awayTeam.name)}
+        </Text>
+      </View>
+      {/* Filter toggle — "Destacados" (no emoji) / "Todo" */}
       <View style={[tl.filterRow, { borderBottomColor: c.border }]}>
         <TouchableOpacity
           style={[tl.filterBtn, { borderColor: !showAllEvents ? c.accent : c.border },
@@ -2227,7 +2308,7 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
           activeOpacity={0.7}
         >
           <Text style={[tl.filterBtnText, { color: !showAllEvents ? c.accent : c.textTertiary }]}>
-            ⭐ {t('timeline.highlights')}
+            {t('timeline.highlights')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -2250,52 +2331,71 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
         </View>
       ) : (
         <>
-          {/* Render every non-empty phase in chronological order. Headers
-              only emit when a phase has events, so a regulation FT match
-              never shows an empty "1ER TIEMPO EXTRA" label. */}
-          {visiblePhaseBuckets.map(({ phase, events }) => (
-            <React.Fragment key={phase.key}>
-              <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
-                <Text style={[tl.halfSepText, { color: c.textTertiary }]}>{t(phase.i18nKey)}</Text>
-              </View>
-              {events.map(e => <EventRow key={e.id} event={e} match={match} />)}
-            </React.Fragment>
-          ))}
+          {/* Each phase: a START header, its events (goals carry a running
+              score), then a CLOSING boundary marker with the cumulative score
+              at that boundary. The closing marker only renders once the match
+              has actually crossed that boundary (a later phase has events, OR
+              the match is finished) — so a live 1st half shows no premature
+              "Medio tiempo" badge. */}
+          {visiblePhaseBuckets.map(({ phase, events }, idx) => {
+            const isLast = idx === visiblePhaseBuckets.length - 1;
+            // Decide the closing boundary for this phase.
+            let boundary: { label: string; score: { home: number; away: number } | null; bold: boolean } | null = null;
+            if (!isLast) {
+              // We've clearly passed this boundary — show it with cumulative score.
+              boundary = {
+                label: t(phase.boundaryKey ?? 'timeline.matchEnd'),
+                score: cumulativeScoreAtMinute(regulationEvents, phase.boundaryMinute),
+                bold: false,
+              };
+            } else if (shootoutEvents.length > 0) {
+              // Last regulation/ET phase before penalties — close it with its
+              // own boundary (e.g. "Final de la prórroga · 3-3").
+              boundary = {
+                label: t(phase.boundaryKey ?? 'timeline.matchEnd'),
+                score: cumulativeScoreAtMinute(regulationEvents, phase.boundaryMinute),
+                bold: true,
+              };
+            } else if (isFinished) {
+              // Match truly ended here (no shootout) — "Final del partido".
+              // SportMonks only reports finished state (5/7/8) at the real end,
+              // so this never fires prematurely for a knockout awaiting ET/pens.
+              boundary = {
+                label: t('timeline.matchEnd'),
+                score: { home: match.homeScore, away: match.awayScore },
+                bold: true,
+              };
+            }
+            return (
+              <React.Fragment key={phase.key}>
+                <View style={[tl.phaseHeader, { backgroundColor: c.surface }]}>
+                  <Text style={[tl.phaseHeaderText, { color: c.textTertiary }]}>{t(phase.i18nKey)}</Text>
+                </View>
+                {events.map(e => (
+                  <EventRow
+                    key={e.id}
+                    event={e}
+                    match={match}
+                    runningScore={isGoalEvent(e.type) ? runningScoreAt(regulationEvents, e) : null}
+                  />
+                ))}
+                {boundary && <BoundaryMarker label={boundary.label} score={boundary.score} bold={boundary.bold} />}
+              </React.Fragment>
+            );
+          })}
 
-          {/* "FIN DEL PARTIDO" terminator — closes off the regulation/ET
-              run before the penalty shootout (if any). Mirrors the
-              "1ER TIEMPO" / "2DO TIEMPO" separator style but with a bold
-              text treatment so it reads as the end of the match clock,
-              not just another phase. */}
-          {showMatchEndMarker && (
-            <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
-              <Text style={[tl.halfSepText, { color: c.textPrimary, fontWeight: '700' }]}>
-                {t('timeline.matchEnd')}
-              </Text>
-            </View>
-          )}
-
-          {/* Penalty shootout section — only renders when SM provided shootout
-              kicks (type_ids 22/23). Ordered by `shootoutOrder` so kicks read
-              top-to-bottom in firing order (1, 2, 3 …). Each row reuses the
-              existing EventRow component, which already knows how to render
-              'shootout-goal' / 'shootout-miss' via the type→emoji map. */}
+          {/* Penalty shootout — kick-by-kick, numbered, ✅/❌. Header carries
+              the final shootout tally so the reader sees the result first. */}
           {shootoutEvents.length > 0 && (
             <>
-              <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
-                <Text style={[tl.halfSepText, { color: c.textTertiary }]}>
+              <View style={[tl.boundary, { backgroundColor: c.surface }]}>
+                <Text style={[tl.boundaryText, { color: c.textPrimary, fontWeight: '800' }]}>
                   {t('timeline.penaltyShootout')}
+                  {typeof match.homePenScore === 'number' && typeof match.awayPenScore === 'number'
+                    ? `  ·  ${match.homePenScore}-${match.awayPenScore}`
+                    : ''}
                 </Text>
               </View>
-              {/* Final shootout tally banner — gives the reader the resolved
-                  score immediately, before scrolling each kick. */}
-              {typeof match.homePenScore === 'number' && typeof match.awayPenScore === 'number' && (
-                <View style={[tl.halfSep, { backgroundColor: c.surface, paddingTop: 0 }]}>
-                  <Text style={[tl.halfSepText, { color: c.textPrimary, fontWeight: '700' }]}>
-                    {match.homePenScore} – {match.awayPenScore}
-                  </Text>
-                </View>
-              )}
               {shootoutEvents.map(e => <EventRow key={e.id} event={e} match={match} />)}
             </>
           )}
@@ -2393,14 +2493,21 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
 
 const tl = StyleSheet.create({
   card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
-  teamsHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
-  teamLabel: { flex: 1, fontSize: 12, fontWeight: '800' },
-  cronLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
-  halfSep: { paddingVertical: 7, alignItems: 'center' },
-  halfSepText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  // Title row ("Minuto a minuto"), centered
+  titleRow: { alignItems: 'center', paddingVertical: 9, borderBottomWidth: 1 },
+  titleText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
+  // Full team names row (home left / away right)
+  teamsHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingTop: 10, paddingBottom: 4 },
+  teamName: { flex: 1, fontSize: 14, fontWeight: '800' },
+  // Phase START header ("Primer tiempo")
+  phaseHeader: { paddingVertical: 7, alignItems: 'center' },
+  phaseHeaderText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  // Boundary marker with cumulative score ("Medio tiempo · 2-0")
+  boundary: { paddingVertical: 8, alignItems: 'center' },
+  boundaryText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
   resultText: { flex: 1, fontSize: 13, fontWeight: '500', lineHeight: 18 },
   // Filter toggle
-  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1 },
+  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderTopWidth: 1 },
   filterBtn: { flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
   filterBtnText: { fontSize: 12, fontWeight: '700', letterSpacing: 0.2 },
   // Empty highlights state

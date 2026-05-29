@@ -1099,15 +1099,22 @@ const es = {
 
   // ── Events timeline ────────────────────────────────────────────────────────
   timeline: {
-    title: 'Cronología',
+    title: 'Minuto a minuto',
     highlights: 'Destacados',
-    showAll: 'Ver todo',
-    firstHalf: '1er Tiempo',
-    secondHalf: '2do Tiempo',
-    firstHalfET: '1er Tiempo Extra',
-    secondHalfET: '2do Tiempo Extra',
-    matchEnd: 'Fin del partido',
+    showAll: 'Todo',
+    firstHalf: 'Primer tiempo',
+    secondHalf: 'Segundo tiempo',
+    extraTime: 'Prórroga',
+    // Boundary markers (shown with cumulative score, e.g. "Medio tiempo · 2-0")
+    boundaryHalfTime: 'Medio tiempo',
+    boundaryFullTime: 'Final del tiempo reglamentario',
+    boundaryAET: 'Final de la prórroga',
+    matchEnd: 'Final del partido',
     penaltyShootout: 'Tanda de penales',
+    penaltyKick: 'Penal',
+    winsOnPenalties: 'Gana {{team}}',
+    assist: 'Asistencia',
+    ownGoal: 'En propia',
     noHighlights: 'Sin eventos destacados',
   },
 
