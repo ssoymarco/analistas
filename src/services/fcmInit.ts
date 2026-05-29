@@ -166,14 +166,6 @@ async function doInitializeFCM(): Promise<string | null> {
       fcm_token_first12:   fcmToken?.substring(0, 12) ?? null,
     });
 
-    // Step 4 — Diagnostic POST to the reportFcmToken endpoint. Lets the
-    // operator read this device's tokens from Cloud Logging and send a
-    // direct token-targeted push to isolate topic vs APNs problems.
-    // Best-effort — failure here doesn't block FCM init.
-    if (fcmToken) {
-      reportTokenToServer(fcmToken, apnsHadToken).catch(() => {});
-    }
-
     // Final guaranteed Sentry event — captureMessage always sends a payload
     // (unlike setContext which only attaches to other events). Tags carry
     // the booleans so dashboard filters can find broken devices instantly.
@@ -193,34 +185,6 @@ async function doInitializeFCM(): Promise<string | null> {
   } catch (err) {
     captureError(err, { component: 'fcm-init' });
     return null;
-  }
-}
-
-/**
- * Best-effort POST of the device's FCM + APNs token state to the
- * reportFcmToken Cloud Function. Logs to Cloud Logging so the operator
- * can extract the token via `firebase functions:log --only reportFcmToken`
- * and use it for a token-targeted diagnostic push.
- */
-async function reportTokenToServer(fcmToken: string, hasApns: boolean): Promise<void> {
-  try {
-    await fetch(
-      'https://us-central1-analistas-8ba26.cloudfunctions.net/reportFcmToken',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          data: {
-            fcmToken,
-            apnsToken: hasApns ? 'present' : '',
-            platform: Platform.OS,
-            buildNum: '17',  // bump per build to find the right device
-          },
-        }),
-      },
-    );
-  } catch {
-    // network blocked / offline — irrelevant for FCM init success
   }
 }
 
