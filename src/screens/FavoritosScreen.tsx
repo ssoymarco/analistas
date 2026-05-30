@@ -61,6 +61,9 @@ interface FavItem {
   teamLogo?: string;
   jerseyNumber?: number;
   position?: string;
+  /** Hidden search keywords — never displayed, only matched against queries.
+   *  e.g. Guadalajara → ['chivas'] so fans searching "chivas" find it. */
+  searchAliases?: string[];
 }
 
 type Tab = 'equipos' | 'ligas' | 'jugadores';
@@ -71,7 +74,7 @@ type Tab = 'equipos' | 'ligas' | 'jugadores';
 const POPULAR_TEAMS: FavItem[] = [
   // Liga MX
   { id: '2687',  name: 'América',             subtitle: 'Liga MX · México',             emoji: 'AM', smId: 2687,   image: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png' },
-  { id: '427',   name: 'Guadalajara',         subtitle: 'Liga MX · México',             emoji: 'GU', smId: 427,    image: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png' },
+  { id: '427',   name: 'Guadalajara',         subtitle: 'Liga MX · México',             emoji: 'GU', smId: 427,    image: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png', searchAliases: ['chivas', 'chivas de guadalajara'] },
   { id: '609',   name: 'Tigres UANL',         subtitle: 'Liga MX · México',             emoji: 'TI', smId: 609,    image: 'https://cdn.sportmonks.com/images/soccer/teams/1/609.png' },
   { id: '2626',  name: 'Cruz Azul',           subtitle: 'Liga MX · México',             emoji: 'CA', smId: 2626,   image: 'https://cdn.sportmonks.com/images/soccer/teams/2/2626.png' },
   { id: '2662',  name: 'Monterrey',           subtitle: 'Liga MX · México',             emoji: 'MO', smId: 2662,   image: 'https://cdn.sportmonks.com/images/soccer/teams/6/2662.png' },
@@ -560,10 +563,11 @@ export const FavoritosScreen: React.FC = () => {
   //     30 teams we maintain locally, falling back to leagueName for the
   //     other entries.
   const popularTeamMeta = useMemo(() => {
-    const m = new Map<string, { subtitle: string; emoji: string }>();
+    const m = new Map<string, { subtitle: string; emoji: string; searchAliases?: string[] }>();
     for (const t of POPULAR_TEAMS) {
-      if (t.smId) m.set(String(t.smId), { subtitle: t.subtitle, emoji: t.emoji });
-      m.set(t.id, { subtitle: t.subtitle, emoji: t.emoji });
+      const meta = { subtitle: t.subtitle, emoji: t.emoji, searchAliases: t.searchAliases };
+      if (t.smId) m.set(String(t.smId), meta);
+      m.set(t.id, meta);
     }
     return m;
   }, []);
@@ -584,6 +588,7 @@ export const FavoritosScreen: React.FC = () => {
         smId: st.id,
         image: isImageUri(st.logo) ? st.logo : undefined,
         seasonId: st.seasonId,
+        searchAliases: pretty?.searchAliases,
       };
     });
 
@@ -811,7 +816,9 @@ export const FavoritosScreen: React.FC = () => {
     if (!searchQuery.trim()) return null;
     const q = normalize(searchQuery);
     return config.searchItems.filter(i =>
-      normalize(i.name).includes(q) || normalize(i.subtitle).includes(q)
+      normalize(i.name).includes(q) ||
+      normalize(i.subtitle).includes(q) ||
+      (i.searchAliases?.some(a => normalize(a).includes(q)) ?? false)
     );
   }, [config.searchItems, searchQuery]);
 
