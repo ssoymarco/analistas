@@ -31,6 +31,7 @@ import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useTranslation } from 'react-i18next';
 import i18n, { LANGUAGE_STORAGE_KEY } from '../i18n';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
+import { PREMIUM_ENABLED } from '../config/features';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getInitials(name: string) {
@@ -653,7 +654,7 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 16, fontWeight: '700', color: c.textPrimary }}>{displayName}</Text>
               {isAuthenticated && <Text style={{ fontSize: 14, fontWeight: '500', color: '#60a5fa', marginTop: 1 }}>{displayUsername}</Text>}
               {!isAuthenticated && <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 2 }}>{t('profile.loginPrompt')}</Text>}
-              {isAuthenticated && (
+              {isAuthenticated && PREMIUM_ENABLED && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
                   <TouchableOpacity
                     onPress={() => { haptics.light(); setLevelSheetVisible(true); }}
@@ -850,17 +851,20 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#06b6d4' }}>{timeFormat}</Text>
             </TouchableOpacity>
           } />
-          <MenuRow c={c} emoji="📱" label={t('profile.appIcon')} sublabel={t('profile.appIconSub')} iconBg="rgba(168,85,247,0.15)" onPress={() => navigation.navigate('HazteTitular', { source: 'icon' })} />
+          {PREMIUM_ENABLED && (
+            <MenuRow c={c} emoji="📱" label={t('profile.appIcon')} sublabel={t('profile.appIconSub')} iconBg="rgba(168,85,247,0.15)" onPress={() => navigation.navigate('HazteTitular', { source: 'icon' })} />
+          )}
           <MenuRow c={c} emoji="🎁" label={t('profile.redeemCode')} iconBg="rgba(236,72,153,0.15)" onPress={() => setCodeModalVisible(true)} />
           <MenuRow c={c} emoji="👥" label={t('profile.inviteFriends')} sublabel={t('profile.shareApp')} iconBg="rgba(99,102,241,0.15)" onPress={handleShare} />
           <MenuRow c={c} emoji="📊" label={t('profile.odds')} sublabel={momiosEnabled ? t('profile.oddsVisible') : t('profile.oddsHidden')} iconBg="rgba(16,185,129,0.15)" rightElement={<CustomToggle value={momiosEnabled} onToggle={() => {
-            if (momiosEnabled) {
-              // Trying to turn OFF → requires premium
+            // v1.0: odds are a free toggle. When premium ships, turning them OFF
+            // becomes a premium perk again (gated by PREMIUM_ENABLED).
+            if (PREMIUM_ENABLED && momiosEnabled) {
               navigation.navigate('HazteTitular', { source: 'momios' });
             } else {
-              setMomiosEnabled(true);
+              setMomiosEnabled(!momiosEnabled);
             }
-          }} activeColor="#10b981" icon={momiosEnabled ? '📊' : '🔒'} />} />
+          }} activeColor="#10b981" icon={momiosEnabled ? '📊' : (PREMIUM_ENABLED ? '🔒' : '📊')} />} />
           <MenuRow
             c={c}
             emoji="🌍"
@@ -874,7 +878,9 @@ export const PerfilScreen: React.FC = () => {
 
         <ModoEstadioCard c={c} isDark={isDark} />
 
-        <PromoBanner onPress={() => navigation.navigate('HazteTitular', { source: 'promo' })} />
+        {PREMIUM_ENABLED && (
+          <PromoBanner onPress={() => navigation.navigate('HazteTitular', { source: 'promo' })} />
+        )}
 
         {/* Información */}
         <SectionHeader label={t('profile.information')} />
