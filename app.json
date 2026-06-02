@@ -23,12 +23,6 @@
       "expo-localization",
       "expo-apple-authentication",
       [
-        "expo-tracking-transparency",
-        {
-          "userTrackingPermission": "Los anuncios nos permiten mantener Analistas gratis. Tu información nunca se vende a terceros."
-        }
-      ],
-      [
         "@react-native-google-signin/google-signin",
         {
           "iosUrlScheme": "com.googleusercontent.apps.562270448336-7telon5j0pjscfbet7pqo3faq6mu3pc4"

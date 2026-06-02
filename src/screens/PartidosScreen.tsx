@@ -27,10 +27,8 @@ import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { getLeaguePopularity } from '../config/leagues';
 import { useUserCountry } from '../hooks/useUserCountry';
-import ATTModal from '../components/ATTModal';
 import { WorldCupBanner } from '../components/WorldCupBanner';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as TrackingTransparency from 'expo-tracking-transparency';
 
 function todayISO(): string {
   const d = new Date();
@@ -47,32 +45,13 @@ export const PartidosScreen: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [activeTab, setActiveTab] = useState<FilterTab>('todos');
   const [showCalendar, setShowCalendar] = useState(false);
-  const [showATT, setShowATT] = useState(false);
 
-  // Show ATT modal 7s after first mount — only once ever
-  useEffect(() => {
-    const ATT_KEY = 'analistas_att_shown';
-    let timer: ReturnType<typeof setTimeout>;
-    AsyncStorage.getItem(ATT_KEY).then(shown => {
-      if (!shown) {
-        timer = setTimeout(() => setShowATT(true), 7000);
-      }
-    });
-    return () => clearTimeout(timer);
-  }, []);
-
-  const handleATTContinue = async () => {
-    setShowATT(false);
-    await AsyncStorage.setItem('analistas_att_shown', '1');
-    if (Platform.OS === 'ios') {
-      await TrackingTransparency.requestTrackingPermissionsAsync().catch(() => {});
-    }
-  };
-
-  const handleATTSkip = async () => {
-    setShowATT(false);
-    await AsyncStorage.setItem('analistas_att_shown', '1');
-  };
+  // NOTE: App Tracking Transparency (ATT) was removed for v1.0 — the app does
+  // not actually track users yet (AdMob is deferred; the Caliente banner is a
+  // static image, not a tracking SDK). Apple rejected v1.0 under Guideline 2.1
+  // because the ATT prompt couldn't be located, so we dropped the framework
+  // entirely and declare "no tracking" in App Privacy. Re-introduce ATT in a
+  // future version ONLY when a real tracking SDK (AdMob) ships.
 
   // ── Real data via hook ──────────────────────────────────────────────────────
   const { matches: allMatches, leagues: allLeagues, loading, refreshing, refresh, isPolling } = useFixtures(selectedDate);
@@ -578,7 +557,6 @@ export const PartidosScreen: React.FC = () => {
 
       <CalendarPicker visible={showCalendar} selectedDate={selectedDate} onSelectDate={handleCalendarSelect} onClose={() => setShowCalendar(false)} onGoToday={() => { handleGoToday(); setShowCalendar(false); }} />
 
-      <ATTModal visible={showATT} onContinue={handleATTContinue} onSkip={handleATTSkip} />
 
       {/* World Cup 2026 floating countdown — auto-hides after July 19, 2026 */}
       <WorldCupBanner />
