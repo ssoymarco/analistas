@@ -1105,7 +1105,7 @@ const en: TranslationKeys = {
 
   // ── World Cup 2026 hero header ────────────────────────────────────────────
   worldcup: {
-    heroTitle: 'NATIONAL TEAMS {{year}}',
+    heroTitle: 'FOOTBALL {{year}}',
     teams: 'NATIONS',
     groups: 'GROUPS',
     matches: 'MATCHES',

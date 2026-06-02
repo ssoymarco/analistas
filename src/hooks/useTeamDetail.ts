@@ -81,7 +81,7 @@ const NATIONAL_TEAM_PRIMARY_LEAGUE: ReadonlyMap<
     t.id,
     {
       leagueId:   732,           // National-team tournament (de-branded for Apple 5.2.1)
-      leagueName: 'Torneo de Selecciones 2026',
+      leagueName: 'Fútbol 2026',
       seasonId:   t.seasonId ?? 26618,
     },
   ]),

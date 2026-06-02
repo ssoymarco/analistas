@@ -340,7 +340,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
   { id: 1108, name: 'CAF Confederation Cup', country: 'Africa',      flag: '🏆', currentSeasonId: 26264, isCup: true },
 
   // ── Otros ─────────────────────────────────────────────────────────────────
-  { id: 732,  name: 'Torneo de Selecciones 2026', country: 'World',    flag: '🌍', currentSeasonId: 26618, isCup: true, hasPlayoffs: true, playoffsLabel: 'Eliminatoria',
+  { id: 732,  name: 'Fútbol 2026', country: 'World',    flag: '🌍', currentSeasonId: 26618, isCup: true, hasPlayoffs: true, playoffsLabel: 'Eliminatoria',
     // Hidden search aliases — let users find the tournament with common
     // queries without displaying any FIFA-trademarked term in the UI.
     searchAliases: [
