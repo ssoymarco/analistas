@@ -1512,18 +1512,9 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
         scrollEventThrottle={16}
         stickyHeaderIndices={[1]}
       >
-        {/* ── Hero Header ── */}
-        {leagueId === 732 ? (
-          <WorldCupHeroHeader
-            isFollowing={isFollowing}
-            onToggleFollow={() => toggleFollowLeague(String(leagueId))}
-            t={t}
-            seasons={availableSeasons}
-            selectedSeasonId={selectedSeasonId ?? seasonId ?? null}
-            onSelectSeason={setSelectedSeasonId}
-            isCurrentSeason={isCurrentSeason}
-          />
-        ) : (
+        {/* ── Hero Header (standard for all leagues — the World Cup-specific
+             promotional hero with trophy/host-flags/countdown was removed for
+             Apple Guideline 5.2.1, FIFA IP) ── */}
           <View style={[s.hero, { backgroundColor: headerBg }]}>
             {/* League logo */}
             <View style={[s.leagueLogoWrap, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)' }]}>
@@ -1596,7 +1587,6 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
               </Text>
             </TouchableOpacity>
           </View>
-        )}
 
         {/* ── Tab bar (sticky, scrollable) ── */}
         <View style={[s.tabBar, { backgroundColor: c.bg, borderBottomColor: c.border }]}>

@@ -80,8 +80,8 @@ const NATIONAL_TEAM_PRIMARY_LEAGUE: ReadonlyMap<
   POPULAR_NATIONAL_TEAMS.map(t => [
     t.id,
     {
-      leagueId:   732,           // FIFA World Cup
-      leagueName: 'Mundial 2026',
+      leagueId:   732,           // National-team tournament (de-branded for Apple 5.2.1)
+      leagueName: 'Torneo de Selecciones 2026',
       seasonId:   t.seasonId ?? 26618,
     },
   ]),

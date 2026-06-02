@@ -977,7 +977,7 @@ const pt: TranslationKeys = {
     uruguay: 'Uruguai', paraguay: 'Paraguai', peru: 'Peru', ecuador: 'Equador',
     honduras: 'Honduras', saudiArabia: 'Arábia Saudita', japan: 'Japão', southKorea: 'Coreia do Sul',
     iran: 'Irã', europe: 'Europa', southAmerica: 'América do Sul', northAmerica: 'América do Norte',
-    africa: 'África', world: 'Mundial',
+    africa: 'África', world: 'Internacional',
   },
 
   // ── Events timeline ────────────────────────────────────────────────────────

@@ -27,7 +27,6 @@ import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { getLeaguePopularity } from '../config/leagues';
 import { useUserCountry } from '../hooks/useUserCountry';
-import { WorldCupBanner } from '../components/WorldCupBanner';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 function todayISO(): string {
@@ -556,10 +555,6 @@ export const PartidosScreen: React.FC = () => {
       )}
 
       <CalendarPicker visible={showCalendar} selectedDate={selectedDate} onSelectDate={handleCalendarSelect} onClose={() => setShowCalendar(false)} onGoToday={() => { handleGoToday(); setShowCalendar(false); }} />
-
-
-      {/* World Cup 2026 floating countdown — auto-hides after July 19, 2026 */}
-      <WorldCupBanner />
 
     </SafeAreaView>
   );

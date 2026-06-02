@@ -574,7 +574,7 @@ const en: TranslationKeys = {
     friendlyFilter: 'Friendlies',
     groupHeader: 'GROUP {{letter}}',
     friendly: 'Friendly',
-    worldCupLabel: 'World Cup',
+    worldCupLabel: 'National Teams',
     age: 'Age',
     coachAge: 'Age: {{age}} yrs',
   },
@@ -1105,7 +1105,7 @@ const en: TranslationKeys = {
 
   // ── World Cup 2026 hero header ────────────────────────────────────────────
   worldcup: {
-    heroTitle: 'WORLD CUP {{year}}',
+    heroTitle: 'NATIONAL TEAMS {{year}}',
     teams: 'NATIONS',
     groups: 'GROUPS',
     matches: 'MATCHES',

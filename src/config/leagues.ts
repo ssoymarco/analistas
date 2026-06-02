@@ -340,7 +340,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
   { id: 1108, name: 'CAF Confederation Cup', country: 'Africa',      flag: '🏆', currentSeasonId: 26264, isCup: true },
 
   // ── Otros ─────────────────────────────────────────────────────────────────
-  { id: 732,  name: 'Mundial 2026',              country: 'World',    flag: '🌍', currentSeasonId: 26618, isCup: true, hasPlayoffs: true, playoffsLabel: 'Eliminatoria',
+  { id: 732,  name: 'Torneo de Selecciones 2026', country: 'World',    flag: '🌍', currentSeasonId: 26618, isCup: true, hasPlayoffs: true, playoffsLabel: 'Eliminatoria',
     // Hidden search aliases — let users find the tournament with common
     // queries without displaying any FIFA-trademarked term in the UI.
     searchAliases: [
@@ -370,7 +370,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
   // verified live against SportMonks /football/leagues/{id}.
   { id: 3211, name: 'Leagues Cup',              country: 'North America', flag: '🏆', currentSeasonId: 27500, isCup: true },
   { id: 1328, name: 'UEFA Super Cup',           country: 'Europe',        flag: '⭐', currentSeasonId: 25488, isCup: true },
-  { id: 1452, name: 'FIFA Intercontinental Cup', country: 'World',        flag: '🌍', currentSeasonId: 27741, isCup: true },
+  { id: 1452, name: 'Copa Intercontinental',    country: 'World',        flag: '🌍', currentSeasonId: 27741, isCup: true },
   { id: 1085, name: 'AFC Champions League Elite', country: 'Asia',        flag: '🏆', currentSeasonId: 25585, isCup: true },
   { id: 642,  name: 'Copa Argentina',           country: 'Argentina',     flag: '🇦🇷', currentSeasonId: 26830, isCup: true },
   { id: 1798, name: 'Supercopa do Brasil',      country: 'Brazil',        flag: '🇧🇷', currentSeasonId: 27800, isCup: true },

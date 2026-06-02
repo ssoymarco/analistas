@@ -589,7 +589,7 @@ const es = {
     friendlyFilter: 'Amistosos',
     groupHeader: 'GRUPO {{letter}}',
     friendly: 'Amistoso',
-    worldCupLabel: 'Copa del Mundo',
+    worldCupLabel: 'Selecciones',
     age: 'Años',
     coachAge: 'Edad: {{age}} años',
   },
@@ -1094,7 +1094,7 @@ const es = {
     southAmerica: 'Sudamérica',
     northAmerica: 'Norteamérica',
     africa: 'África',
-    world: 'Mundial',
+    world: 'Internacional',
   },
 
   // ── Events timeline ────────────────────────────────────────────────────────
@@ -1126,7 +1126,7 @@ const es = {
 
   // ── Mundial 2026 hero header ──────────────────────────────────────────────
   worldcup: {
-    heroTitle: 'MUNDIAL {{year}}',
+    heroTitle: 'SELECCIONES {{year}}',
     teams: 'SELECCIONES',
     groups: 'GRUPOS',
     matches: 'PARTIDOS',
