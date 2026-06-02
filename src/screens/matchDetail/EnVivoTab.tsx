@@ -27,6 +27,7 @@ import {
   runningScoreAt, cumulativeScoreAtMinute,
 } from '../../utils/matchPhases';
 import { translateNationalTeam } from '../../utils/nationalTeams';
+import { BETTING_CONTENT_ENABLED } from '../../config/features';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH   = SCREEN_WIDTH - 72; // prediction card width
@@ -2410,16 +2411,14 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
       {/* ── SCHEDULED: Previa layout ── */}
       {isScheduled && (
         <>
-          {/* Predictions carousel (community) */}
+          {/* Predictions carousel (community poll — free, not gambling) */}
           <PredictionsCarousel match={match} />
 
-          {/* AI Predictions (SportMonks) */}
-          {detail.predictions && detail.predictions.length > 0 && (
+          {/* AI Predictions + Momios — betting content, gated off for v1.0 (Apple 2.3.6) */}
+          {BETTING_CONTENT_ENABLED && detail.predictions && detail.predictions.length > 0 && (
             <AIPredictionsSection predictions={detail.predictions} match={match} />
           )}
-
-          {/* Momios */}
-          {detail.odds && detail.odds.length > 0 && (
+          {BETTING_CONTENT_ENABLED && detail.odds && detail.odds.length > 0 && (
             <MomiosSection odds={detail.odds} match={match} />
           )}
 
@@ -2458,8 +2457,8 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
           {/* Poll results (locked after match) */}
           <PollResultsSection match={match} />
 
-          {/* Odds */}
-          {detail.odds && detail.odds.length > 0 && (
+          {/* Odds — betting content, gated off for v1.0 (Apple 2.3.6) */}
+          {BETTING_CONTENT_ENABLED && detail.odds && detail.odds.length > 0 && (
             <MomiosSection odds={detail.odds} match={match} />
           )}
 

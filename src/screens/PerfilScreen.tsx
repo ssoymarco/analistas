@@ -31,7 +31,7 @@ import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useTranslation } from 'react-i18next';
 import i18n, { LANGUAGE_STORAGE_KEY } from '../i18n';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
-import { PREMIUM_ENABLED } from '../config/features';
+import { PREMIUM_ENABLED, BETTING_CONTENT_ENABLED } from '../config/features';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getInitials(name: string) {
@@ -842,6 +842,8 @@ export const PerfilScreen: React.FC = () => {
           )}
           <MenuRow c={c} emoji="🎁" label={t('profile.redeemCode')} iconBg="rgba(236,72,153,0.15)" onPress={() => setCodeModalVisible(true)} />
           <MenuRow c={c} emoji="👥" label={t('profile.inviteFriends')} sublabel={t('profile.shareApp')} iconBg="rgba(99,102,241,0.15)" onPress={handleShare} />
+          {/* Odds toggle — only meaningful when betting content is enabled (off for v1.0, Apple 2.3.6) */}
+          {BETTING_CONTENT_ENABLED && (
           <MenuRow c={c} emoji="📊" label={t('profile.odds')} sublabel={momiosEnabled ? t('profile.oddsVisible') : t('profile.oddsHidden')} iconBg="rgba(16,185,129,0.15)" rightElement={<CustomToggle value={momiosEnabled} onToggle={() => {
             // v1.0: odds are a free toggle. When premium ships, turning them OFF
             // becomes a premium perk again (gated by PREMIUM_ENABLED).
@@ -851,6 +853,7 @@ export const PerfilScreen: React.FC = () => {
               setMomiosEnabled(!momiosEnabled);
             }
           }} activeColor="#10b981" icon={momiosEnabled ? '📊' : (PREMIUM_ENABLED ? '🔒' : '📊')} />} />
+          )}
           <MenuRow c={c} emoji="🗑️" label={t('profile.clearCache')} sublabel={t('profile.freeSpace')} iconBg="rgba(239,68,68,0.1)" isLast onPress={handleClearCache} />
         </View>
 

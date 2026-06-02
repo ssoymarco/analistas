@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated, Platform } from 'react-native';
 import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
+import { BETTING_CONTENT_ENABLED } from '../config/features';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPartidos } from '../components/Skeleton';
 import { ScreenHeader } from '../components/ScreenHeader';
@@ -481,7 +482,8 @@ export const PartidosScreen: React.FC = () => {
                    ───────────────────────────────────────────────────────── */}
                 {hasPersonalContent ? (
                   <>
-                    <PlaceholderBannerAd variant="caliente-banner" />
+                    {/* Caliente banner — gated off for v1.0 (no agreement + Apple 2.3.6) */}
+                    {BETTING_CONTENT_ENABLED && <PlaceholderBannerAd variant="caliente-banner" />}
                     {visibleGlobalLeagues.map((lg, idx) => renderGlobalLeague(lg, idx))}
                   </>
                 ) : (
@@ -492,8 +494,8 @@ export const PartidosScreen: React.FC = () => {
                     )}
 
                     {/* Banner only when there's at least one league above — keeps
-                       the rule "banner never alone, never first". */}
-                    {visibleGlobalLeagues.length > 0 && (
+                       the rule "banner never alone, never first". Gated off for v1.0. */}
+                    {BETTING_CONTENT_ENABLED && visibleGlobalLeagues.length > 0 && (
                       <PlaceholderBannerAd variant="caliente-banner" />
                     )}
 

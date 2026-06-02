@@ -22,3 +22,22 @@
  * (odds become a free toggle). HazteTitular becomes unreachable from the UI.
  */
 export const PREMIUM_ENABLED = false;
+
+/**
+ * Master switch for betting / gambling content: the Caliente.mx banner ads, the
+ * betting odds ("momios") display, and the AI predictions (which include betting
+ * markets like "Doble Oportunidad" 1X/X2/12).
+ *
+ * ⚠️  Kept FALSE for the v1.0 launch. Apple rejected v1.0 under Guideline 2.3.6
+ * because betting-odds + prediction content "related to real money gambling"
+ * forces a "Yes" Gambling age rating (17+). We also have no signed Caliente
+ * agreement yet. So for v1.0 we ship a clean scores+news app with NO betting
+ * content → stays 13+, no gambling declaration.
+ *
+ * Flip to TRUE in v1.1 ONCE the Caliente agreement is signed — and at that point
+ * ALSO set Gambling = Yes in the App Store Connect age rating (→ 17+) and declare
+ * it on Google Play. When false: no Caliente banners, no momios/odds, no AI
+ * predictions. Free community predictions (PredictionsCarousel) stay — they're a
+ * poll, not real-money gambling.
+ */
+export const BETTING_CONTENT_ENABLED = false;
