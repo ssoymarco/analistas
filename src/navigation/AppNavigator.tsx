@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { navigationRef } from '../utils/navigationRef';
+import { logScreenView } from '../services/analytics';
 import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -438,9 +439,33 @@ export const AppNavigator: React.FC = () => {
     return <OnboardingScreen />;
   }
 
+  // Track screen views centrally: capture the active route name on first
+  // render (onReady) and on every navigation change (onStateChange), then
+  // forward to Firebase Analytics. Doing it here means individual screens
+  // never have to log screen_view themselves.
+  const routeNameRef = useRef<string | undefined>(undefined);
+  const handleNavReady = () => {
+    const current = navigationRef.getCurrentRoute()?.name;
+    routeNameRef.current = current;
+    if (current) logScreenView(current);
+  };
+  const handleNavStateChange = () => {
+    const previous = routeNameRef.current;
+    const current = navigationRef.getCurrentRoute()?.name;
+    if (current && previous !== current) {
+      routeNameRef.current = current;
+      logScreenView(current);
+    }
+  };
+
   return (
     <Animated.View style={{ flex: 1, opacity: mainFade }}>
-      <NavigationContainer ref={navigationRef} theme={navTheme}>
+      <NavigationContainer
+        ref={navigationRef}
+        theme={navTheme}
+        onReady={handleNavReady}
+        onStateChange={handleNavStateChange}
+      >
         <MainTabs />
       </NavigationContainer>
     </Animated.View>

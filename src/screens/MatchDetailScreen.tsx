@@ -22,6 +22,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useUserStats } from '../contexts/UserStatsContext';
+import { logEvent, ANALYTICS_EVENTS } from '../services/analytics';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFixtureDetail } from '../hooks/useFixtureDetail';
 import { useCountdown } from '../hooks/useCountdown';
@@ -282,7 +283,10 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const liveClock = liveDisplay ? formatLiveClock(liveDisplay) : null;
 
   // Track match view (once per unique match)
-  useEffect(() => { incrementMatchesViewed(match.id); }, [match.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    incrementMatchesViewed(match.id);
+    logEvent(ANALYTICS_EVENTS.OPEN_MATCH, { match_id: match.id, league: match.league ?? '', status: match.status ?? '' });
+  }, [match.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
   // Determine immediately (without waiting for TablaTab to render) whether this

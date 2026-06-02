@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
+import { logEvent, ANALYTICS_EVENTS } from '../services/analytics';
 import {
   subscribeTeamTopics, unsubscribeTeamTopics,
   subscribeLeagueTopics, unsubscribeLeagueTopics,
@@ -222,8 +223,10 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       // notification reliability shouldn't ever block UI state updates.
       if (isFollowing) {
         unsubscribeTeamTopics(teamId).catch(() => {});
+        logEvent(ANALYTICS_EVENTS.UNFOLLOW_TEAM, { team_id: teamId });
       } else {
         subscribeTeamTopics(teamId).catch(() => {});
+        logEvent(ANALYTICS_EVENTS.FOLLOW_TEAM, { team_id: teamId });
       }
       return next;
     });

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logEvent, ANALYTICS_EVENTS } from '../services/analytics';
 
 const KEYS = {
   onboarding:    'analistas_onboarding_done',
@@ -79,6 +80,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const completeOnboarding = useCallback(() => {
     setHasCompleted(true);
     AsyncStorage.setItem(KEYS.onboarding, 'true');
+    logEvent(ANALYTICS_EVENTS.ONBOARDING_COMPLETE);
   }, []);
 
   const resetOnboarding = useCallback(() => {
