@@ -408,6 +408,12 @@ export const AppNavigator: React.FC = () => {
   // Fade-in the main app after onboarding completes (Feature 9)
   const mainFade     = useRef(new Animated.Value(0)).current;
   const wasOnboarding = useRef(false);
+  // Last-seen route name for analytics screen-view dedup. MUST live here with
+  // the other hooks — above the `if (!ready)` / `if (!hasCompletedOnboarding)`
+  // early returns below. Declaring it after those returns made the hook count
+  // change between renders (3 → 4) and crashed with "Rendered more hooks than
+  // during the previous render" (Sentry REACT-NATIVE-9, Build 23). Never move it down.
+  const routeNameRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!ready) return;
@@ -441,9 +447,9 @@ export const AppNavigator: React.FC = () => {
 
   // Track screen views centrally: capture the active route name on first
   // render (onReady) and on every navigation change (onStateChange), then
-  // forward to Firebase Analytics. Doing it here means individual screens
-  // never have to log screen_view themselves.
-  const routeNameRef = useRef<string | undefined>(undefined);
+  // forward to Firebase Analytics. `routeNameRef` is declared at the top with
+  // the other hooks (Rules of Hooks); these are plain functions, not hooks, so
+  // they're safe to define here after the early returns.
   const handleNavReady = () => {
     const current = navigationRef.getCurrentRoute()?.name;
     routeNameRef.current = current;
