@@ -41,3 +41,19 @@ export const PREMIUM_ENABLED = false;
  * poll, not real-money gambling.
  */
 export const BETTING_CONTENT_ENABLED = false;
+
+/**
+ * Master switch for the "Redeem a code" / "Canjea un código" promo-code feature
+ * in Perfil (the gift row + the code-entry modal).
+ *
+ * ⚠️  Kept FALSE for the v1.0 launch. Apple rejected v1.0 (Build 28) under
+ * Guideline 3.1.1 because the app "uses promo codes to unlock digital content",
+ * which must go through In-App Purchase. Since premium is off (PREMIUM_ENABLED),
+ * there is nothing legitimate to unlock anyway.
+ *
+ * Flip to TRUE only if/when the unlocked content is delivered via a compliant
+ * mechanism (e.g. an Offer Code tied to an IAP subscription), NOT a free-form
+ * promo code that grants digital content. When false: the gift row and the
+ * redeem modal are hidden entirely.
+ */
+export const REDEEM_CODE_ENABLED = false;

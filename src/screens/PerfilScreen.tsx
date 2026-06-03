@@ -31,7 +31,7 @@ import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useTranslation } from 'react-i18next';
 import i18n, { LANGUAGE_STORAGE_KEY } from '../i18n';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
-import { PREMIUM_ENABLED, BETTING_CONTENT_ENABLED } from '../config/features';
+import { PREMIUM_ENABLED, BETTING_CONTENT_ENABLED, REDEEM_CODE_ENABLED } from '../config/features';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getInitials(name: string) {
@@ -840,7 +840,10 @@ export const PerfilScreen: React.FC = () => {
           {PREMIUM_ENABLED && (
             <MenuRow c={c} emoji="📱" label={t('profile.appIcon')} sublabel={t('profile.appIconSub')} iconBg="rgba(168,85,247,0.15)" onPress={() => navigation.navigate('HazteTitular', { source: 'icon' })} />
           )}
-          <MenuRow c={c} emoji="🎁" label={t('profile.redeemCode')} iconBg="rgba(236,72,153,0.15)" onPress={() => setCodeModalVisible(true)} />
+          {/* Redeem a code — gated off for v1.0 (Apple 3.1.1: promo codes can't unlock digital content) */}
+          {REDEEM_CODE_ENABLED && (
+            <MenuRow c={c} emoji="🎁" label={t('profile.redeemCode')} iconBg="rgba(236,72,153,0.15)" onPress={() => setCodeModalVisible(true)} />
+          )}
           <MenuRow c={c} emoji="👥" label={t('profile.inviteFriends')} sublabel={t('profile.shareApp')} iconBg="rgba(99,102,241,0.15)" onPress={handleShare} />
           {/* Odds toggle — only meaningful when betting content is enabled (off for v1.0, Apple 2.3.6) */}
           {BETTING_CONTENT_ENABLED && (
@@ -1018,7 +1021,8 @@ export const PerfilScreen: React.FC = () => {
         </View>
       </Modal>
 
-      {/* Canjea un código */}
+      {/* Canjea un código — gated off for v1.0 (Apple 3.1.1) */}
+      {REDEEM_CODE_ENABLED && (
       <CenterModal visible={codeModalVisible} onClose={() => { setCodeModalVisible(false); setRedeemCode(''); }} c={c}>
         <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 6 }}>{t('profile.codeTitle')}</Text>
         <Text style={{ fontSize: 12, color: c.textTertiary, marginBottom: 20, lineHeight: 18 }}>{t('profile.codeSubtitle')}</Text>
@@ -1030,6 +1034,7 @@ export const PerfilScreen: React.FC = () => {
           <Text style={{ fontSize: 14, fontWeight: '700', color: redeemCode.trim() ? '#fff' : c.textTertiary }}>{t('profile.codeRedeem')}</Text>
         </TouchableOpacity>
       </CenterModal>
+      )}
 
       {/* Sobre Analistas */}
       <BottomSheet visible={aboutModalVisible} onClose={() => setAboutModalVisible(false)} c={c}>
