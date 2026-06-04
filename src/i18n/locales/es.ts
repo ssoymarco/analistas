@@ -960,10 +960,12 @@ const es = {
     disabled: 'Desactivado',
     preMatchNote: 'Las alertas de alineaciones y próximos partidos nunca se retrasan.',
     sheetTitle: 'Modo Estadio',
-    sheetSubtitle: 'Retraso de notificaciones para este partido',
+    sheetSubtitle: 'Retraso para toda la app',
     deactivate: 'Desactivar Modo Estadio',
-    toastActivated: 'Notificaciones retrasadas {{delay}} min · Ajústalo en Perfil',
-    toastDeactivated: 'Modo Estadio desactivado',
+    toastActivated: '🏟️ Modo Estadio activado · toda la app · {{delay}} min',
+    toastDeactivated: 'Modo Estadio desactivado · toda la app',
+    /** Shown at the bottom of the mini-sheet to clarify global scope */
+    globalNote: 'Aplica a todos tus partidos, no solo a este.',
   },
 
   // ── Predictions (community polls & AI) ────────────────────────────────────

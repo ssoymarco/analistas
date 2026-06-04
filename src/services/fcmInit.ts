@@ -52,7 +52,14 @@ const FCM_TOKEN_KEY = 'analistas_fcm_token';
  *  legacy "subscribed" record so the next reconcile re-subscribes the
  *  user's teams through the now-properly-bound FCM token. */
 const FCM_INIT_VERSION_KEY = 'analistas_fcm_init_version';
-const FCM_INIT_VERSION     = '1';
+// Bump this version to force a wipe + re-subscribe of all FCM topics on
+// the next app launch. Required when the topic taxonomy changes.
+//
+// v1 → v2 (2026-06-03): Moved to delay-bucket topics (Modo Estadio).
+//   Old topics: team_X_goals / _cards / _start / league_X_start / _finals
+//   New topics: team_X_goals_d{0|2|5|10} / _cards_d{...} / _live_d{...} / _kickoff
+//   Leagues are display-only — no FCM subscriptions.
+const FCM_INIT_VERSION     = '2';
 const SUBSCRIBED_TOPICS_KEY = 'analistas_fcm_subscribed_topics';
 
 // Singleton promise so callers can `await fcmReady()` instead of racing

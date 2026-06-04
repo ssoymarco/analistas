@@ -11,6 +11,9 @@ import {
   Animated,
   Dimensions,
   ScrollView,
+  Switch,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { haptics } from '../utils/haptics';
@@ -255,21 +258,20 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const { incrementMatchesViewed } = useUserStats();
   const {
     prefs,
-    toggleMatchEstadio, isMatchEstadio,
+    togglePref, setEstadioDelay,
     isMatchMuted, hasMatchCustomization,
   } = useNotificationPrefs();
   // Per-match notifications bottom sheet (opened from the bell in the header).
   const [notifSheetVisible, setNotifSheetVisible] = useState(false);
+  // Modo Estadio global mini-sheet (opened from 🏟️ in the header).
+  const [estadioSheetVisible, setEstadioSheetVisible] = useState(false);
   const matchMuted = isMatchMuted(match.id);
   // 'muted' wins; if not muted but the user has any override → 'custom';
   // otherwise plain default.
   const bellState: 'default' | 'custom' | 'muted' =
     matchMuted ? 'muted' : (hasMatchCustomization(match.id) ? 'custom' : 'default');
-  // When global is ON: being in the set means "excluded for this match" (off)
-  // When global is OFF: being in the set means "enabled for this match" (on)
-  const matchEstadioActive = prefs.estadioMode
-    ? !isMatchEstadio(match.id)
-    : isMatchEstadio(match.id);
+  // Modo Estadio is now GLOBAL — the 🏟️ button reflects the global state.
+  const estadioGlobalActive = prefs.estadioMode;
   const countdown = useCountdown(isScheduled ? match.startingAtUtc : undefined);
 
   // ── Centralized live clock ─────────────────────────────────────────────────
@@ -397,11 +399,25 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     toastTimer.current = setTimeout(() => {}, 3600);
   }, [toastOpacity]);
 
-  const handleToggleEstadio = useCallback(() => {
+  // 🏟️ button: open the global Modo Estadio mini-sheet.
+  // The mini-sheet lets the user toggle global estadioMode + choose delay (2/5/10).
+  const handleOpenEstadioSheet = useCallback(() => {
     haptics.medium();
-    toggleMatchEstadio(match.id);          // always flip set membership
-    showEstadioToast(!matchEstadioActive); // toast = what the NEW state will be
-  }, [match.id, toggleMatchEstadio, matchEstadioActive, showEstadioToast]);
+    setEstadioSheetVisible(true);
+  }, []);
+
+  // Called from the mini-sheet toggle switch: toggle global Modo Estadio.
+  const handleToggleEstadioGlobal = useCallback(() => {
+    haptics.medium();
+    togglePref('estadioMode');
+    showEstadioToast(!prefs.estadioMode); // toast = NEW state
+  }, [togglePref, prefs.estadioMode, showEstadioToast]);
+
+  // Called from the mini-sheet delay selector.
+  const handleSetEstadioDelay = useCallback((minutes: number) => {
+    haptics.light();
+    setEstadioDelay(minutes);
+  }, [setEstadioDelay]);
 
   // ── "Volver arriba" FAB ────────────────────────────────────────────────────
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -543,16 +559,17 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           >
             <BellIcon size={18} state={bellState} />
           </TouchableOpacity>
+          {/* 🏟️ Modo Estadio — opens global mini-sheet. Active = estadioMode ON globally. */}
           <TouchableOpacity
             style={[
               scr.navBtn,
-              matchEstadioActive && { backgroundColor: 'rgba(0,224,150,0.18)', borderWidth: 1, borderColor: 'rgba(0,224,150,0.35)' },
-              !matchEstadioActive && { backgroundColor: hBtnBg },
+              estadioGlobalActive && { backgroundColor: 'rgba(0,224,150,0.18)', borderWidth: 1, borderColor: 'rgba(0,224,150,0.35)' },
+              !estadioGlobalActive && { backgroundColor: hBtnBg },
             ]}
-            onPress={handleToggleEstadio}
+            onPress={handleOpenEstadioSheet}
             activeOpacity={0.7}
           >
-            <Text style={{ fontSize: 15, opacity: matchEstadioActive ? 1 : 0.5 }}>🏟️</Text>
+            <Text style={{ fontSize: 15, opacity: estadioGlobalActive ? 1 : 0.5 }}>🏟️</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[scr.navBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7}>
             <ShareIcon color={hText} size={16} />
@@ -989,6 +1006,86 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
         matchId={match.id}
         matchLabel={`${translateNationalTeam(match.homeTeam.name)} · ${translateNationalTeam(match.awayTeam.name)}`}
       />
+
+      {/* ── Modo Estadio global mini-sheet ── */}
+      <Modal
+        visible={estadioSheetVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEstadioSheetVisible(false)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }}
+          onPress={() => setEstadioSheetVisible(false)}
+        />
+        <View style={{
+          backgroundColor: c.card,
+          borderTopLeftRadius: 24, borderTopRightRadius: 24,
+          paddingHorizontal: 24, paddingTop: 16, paddingBottom: 36,
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+        }}>
+          {/* Handle */}
+          <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 20 }} />
+
+          {/* Title row */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ fontSize: 20 }}>🏟️</Text>
+              <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary }}>
+                {t('estadioMode.title')}
+              </Text>
+            </View>
+            <Switch
+              value={prefs.estadioMode}
+              onValueChange={handleToggleEstadioGlobal}
+              trackColor={{ false: c.border, true: 'rgba(0,224,150,0.5)' }}
+              thumbColor={prefs.estadioMode ? '#00E096' : c.textSecondary}
+            />
+          </View>
+
+          {/* Description */}
+          <Text style={{ fontSize: 13, color: c.textSecondary, marginBottom: 20, lineHeight: 18 }}>
+            {t('estadioMode.description')}
+          </Text>
+
+          {/* Delay selector — only shown when ON */}
+          {prefs.estadioMode && (
+            <>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: c.textSecondary, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10 }}>
+                {t('estadioMode.delay')}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {[2, 5, 10].map(min => (
+                  <TouchableOpacity
+                    key={min}
+                    onPress={() => handleSetEstadioDelay(min)}
+                    style={{
+                      flex: 1, alignItems: 'center', paddingVertical: 12,
+                      borderRadius: 14,
+                      backgroundColor: prefs.estadioDelay === min ? '#00E096' : c.surface,
+                      borderWidth: 1,
+                      borderColor: prefs.estadioDelay === min ? '#00E096' : c.border,
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{
+                      fontSize: 15, fontWeight: '700',
+                      color: prefs.estadioDelay === min ? '#000' : c.textPrimary,
+                    }}>
+                      {t('estadioMode.delayMinutes', { count: min })}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* Global note */}
+          <Text style={{ fontSize: 11, color: c.textSecondary, marginTop: 16, opacity: 0.7, textAlign: 'center' }}>
+            {t('estadioMode.globalNote')}
+          </Text>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };

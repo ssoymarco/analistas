@@ -28,6 +28,9 @@ import { syncMatchEnrichmentHandler, enrichMatchesByIds } from './sync-match-enr
 import { syncCoachesHandler } from './sync-coaches';
 import { syncPlayersHandler } from './sync-players';
 
+// ── Modo Estadio — delayed push via Cloud Tasks ─────────────────────────────
+export { deliverDelayedPush } from './deliver-delayed-push';
+
 // ── Scheduled Functions ─────────────────────────────────────────────────────
 
 /**

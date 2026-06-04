@@ -941,10 +941,11 @@ const en: TranslationKeys = {
     disabled: 'Disabled',
     preMatchNote: 'Line-up and upcoming match alerts are never delayed.',
     sheetTitle: 'Stadium Mode',
-    sheetSubtitle: 'Notification delay for this match',
+    sheetSubtitle: 'Delay for the whole app',
     deactivate: 'Deactivate Stadium Mode',
-    toastActivated: 'Notifications delayed {{delay}} min · Adjust in Profile',
-    toastDeactivated: 'Stadium Mode off',
+    toastActivated: '🏟️ Stadium Mode on · whole app · {{delay}} min',
+    toastDeactivated: 'Stadium Mode off · whole app',
+    globalNote: 'Applies to all your matches, not just this one.',
   },
 
   // ── Predictions (community polls & AI) ────────────────────────────────────

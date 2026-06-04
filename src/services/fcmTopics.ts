@@ -3,40 +3,34 @@
  *
  * Manages Firebase Cloud Messaging topic subscriptions for push notifications.
  *
- * Architecture (Camino B — FCM topics direct):
- *   Cloud Function detects event (goal, red card, etc.)
- *        ↓
- *   Firebase Admin SDK: messaging.send({ topic, notification, data })
- *        ↓
- *   FCM fans out the push to every device subscribed to that topic
- *        ↓
- *   Client (this file): app received subscribed via subscribeToTopic()
- *        ↓
- *   expo-notifications (foreground handler) displays the notification
+ * ── Modo Estadio delay-bucket taxonomy (2026-06-03) ─────────────────────────
  *
- * Topic naming convention (server + client must agree):
- *   team_{id}_goals         — goals scored by/against the team
- *   team_{id}_cards         — red/yellow cards (yellow gated client-side by prefs)
- *   team_{id}_start         — kickoff + halftime + final
- *   team_{id}_lineups       — lineups published
- *   team_{id}_reminders     — 15 min before kickoff
- *   league_{id}_start       — every match start in the league
- *   league_{id}_finals      — every match final
- *   player_{id}_goals       — goals scored by the player
- *   player_{id}_cards       — red cards received by the player
+ * Live (retrasable) event classes each have 4 topics, one per delay bucket.
+ * The device subscribes to EXACTLY ONE bucket per (team, event-class):
+ *   _d0  → Modo Estadio OFF (immediate)
+ *   _d2  → 2 min delay
+ *   _d5  → 5 min delay
+ *   _d10 → 10 min delay
  *
- * The CLIENT subscribes to one topic per (entity, event-class) pair when the
- * user follows the entity, and unsubscribes when they unfollow. The user's
- * per-event-type preferences (e.g. "I don't want yellow card alerts") are
- * enforced ON THE CLIENT at display time — every FCM push reaches the device
- * but expo-notifications' foreground handler decides whether to show it.
+ * Live event topics (with bucket):
+ *   team_{id}_goals_d{0|2|5|10}  — goals (both teams' followers)
+ *   team_{id}_cards_d{0|2|5|10}  — red cards
+ *   team_{id}_live_d{0|2|5|10}   — halftime + matchEnd
  *
- * Why client-side filtering instead of server-side topic granularity?
- *   1. Tens of thousands of topics (one per team × event type) is fine,
- *      but hundreds of thousands (per-user filtering) is not.
+ * Immediate-only topics (NO bucket — never delayed):
+ *   team_{id}_kickoff   — matchStart (NEW; replaces _start for this event)
+ *   team_{id}_lineups   — lineups published
+ *   team_{id}_reminders — pre-match reminder
+ *
+ * League topics REMOVED: following a league is display-only.
+ * Notifications are dispatched ONLY for followed teams.
+ *
+ * ── Why client-side filtering instead of server-side topic granularity? ──────
+ *   1. Tens of thousands of topics (one per team × event type × bucket) is fine,
+ *      but per-user filtering would require millions of topics.
  *   2. The user can toggle prefs offline; we don't want to round-trip to
  *      Firestore on every toggle just to re-subscribe.
- *   3. Battery / bandwidth cost is negligible — the push is tiny.
+ *   3. Battery / bandwidth cost is negligible — the push payload is tiny.
  */
 
 import messaging from '@react-native-firebase/messaging';
@@ -88,37 +82,68 @@ async function safeUnsubscribe(topic: string): Promise<boolean> {
 // but they DO go through the network — skipping a no-op saves battery.
 const SUBSCRIBED_TOPICS_KEY = 'analistas_fcm_subscribed_topics';
 
-/** Topic name builders — keep server (functions/src/notifications.ts) in sync. */
+/** Delay bucket type for Modo Estadio. */
+export type DelayBucket = 'd0' | 'd2' | 'd5' | 'd10';
+
+/** Topic name builders — must stay in sync with functions/src/detect-changes.ts. */
 export const TopicNames = {
-  teamGoals:      (teamId: string)   => `team_${teamId}_goals`,
-  teamCards:      (teamId: string)   => `team_${teamId}_cards`,
-  teamStart:      (teamId: string)   => `team_${teamId}_start`,
-  teamLineups:    (teamId: string)   => `team_${teamId}_lineups`,
-  teamReminders:  (teamId: string)   => `team_${teamId}_reminders`,
-  leagueStart:    (leagueId: string) => `league_${leagueId}_start`,
-  leagueFinals:   (leagueId: string) => `league_${leagueId}_finals`,
-  playerGoals:    (playerId: string) => `player_${playerId}_goals`,
-  playerCards:    (playerId: string) => `player_${playerId}_cards`,
+  // ── Live event topics (with delay bucket) ──────────────────────────────────
+  teamGoals:    (teamId: string, bucket: DelayBucket) => `team_${teamId}_goals_${bucket}`,
+  teamCards:    (teamId: string, bucket: DelayBucket) => `team_${teamId}_cards_${bucket}`,
+  teamLive:     (teamId: string, bucket: DelayBucket) => `team_${teamId}_live_${bucket}`,
+
+  // ── Immediate-only topics (no bucket — never delayed) ──────────────────────
+  teamKickoff:   (teamId: string)   => `team_${teamId}_kickoff`,
+  teamLineups:   (teamId: string)   => `team_${teamId}_lineups`,
+  teamReminders: (teamId: string)   => `team_${teamId}_reminders`,
+
+  // ── Player topics (server currently dispatches nothing here — future use) ──
+  playerGoals:  (playerId: string)  => `player_${playerId}_goals`,
+  playerCards:  (playerId: string)  => `player_${playerId}_cards`,
+
+  // ── Legacy topic builders (for reference / dual-send awareness) ────────────
+  // NOTE: do NOT subscribe to these on new builds. The server dual-sends to them
+  // during the migration window so old builds keep working. These are kept here
+  // only as documentation and to support the FCM_INIT_VERSION wipe.
+  _legacyTeamGoals:  (teamId: string)   => `team_${teamId}_goals`,
+  _legacyTeamCards:  (teamId: string)   => `team_${teamId}_cards`,
+  _legacyTeamStart:  (teamId: string)   => `team_${teamId}_start`,
+  _legacyLeagueStart:(leagueId: string) => `league_${leagueId}_start`,
+  _legacyLeagueFinals:(leagueId: string)=> `league_${leagueId}_finals`,
 };
 
-/** The complete list of topics a single team / league / player generates. */
-function topicsForTeam(teamId: string): string[] {
+/** Sibling buckets for a given (teamId, event class). Used to defensively
+ *  unsubscribe BEFORE subscribing to the new bucket to prevent a brief window
+ *  where the device is in two buckets simultaneously. */
+const ALL_BUCKETS: DelayBucket[] = ['d0', 'd2', 'd5', 'd10'];
+
+/** All topics for a team in a given delay bucket. */
+function topicsForTeam(teamId: string, bucket: DelayBucket): string[] {
   return [
-    TopicNames.teamGoals(teamId),
-    TopicNames.teamCards(teamId),
-    TopicNames.teamStart(teamId),
+    TopicNames.teamGoals(teamId, bucket),
+    TopicNames.teamCards(teamId, bucket),
+    TopicNames.teamLive(teamId, bucket),
+    TopicNames.teamKickoff(teamId),
     TopicNames.teamLineups(teamId),
     TopicNames.teamReminders(teamId),
   ];
 }
 
-function topicsForLeague(leagueId: string): string[] {
-  return [
-    TopicNames.leagueStart(leagueId),
-    TopicNames.leagueFinals(leagueId),
-  ];
+/** All topics for ALL buckets of a team (used during reconcile to unsubscribe
+ *  from the buckets we're NOT targeting before subscribing to the right one). */
+function allBucketTopicsForTeam(teamId: string): string[] {
+  const topics: string[] = [];
+  for (const b of ALL_BUCKETS) {
+    topics.push(
+      TopicNames.teamGoals(teamId, b),
+      TopicNames.teamCards(teamId, b),
+      TopicNames.teamLive(teamId, b),
+    );
+  }
+  return topics;
 }
 
+/** Topics for a player (no bucket — server doesn't dispatch here yet). */
 function topicsForPlayer(playerId: string): string[] {
   return [
     TopicNames.playerGoals(playerId),
@@ -153,59 +178,65 @@ async function writeSubscribedTopics(topics: Set<string>): Promise<void> {
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Subscribe to every topic associated with a team. No-op if already subscribed.
- * Errors are swallowed — push notifications are a best-effort feature.
+ * Subscribe to topics for a team in the given delay bucket.
+ * Defensively unsubscribes from sibling buckets first to guarantee exclusion
+ * mutua — prevents a device from being in two buckets simultaneously.
  */
-export async function subscribeTeamTopics(teamId: string): Promise<void> {
+export async function subscribeTeamTopics(teamId: string, bucket: DelayBucket = 'd0'): Promise<void> {
   const subscribed = await readSubscribedTopics();
-  const wanted = topicsForTeam(teamId);
-  const toAdd = wanted.filter(t => !subscribed.has(t));
-  if (toAdd.length === 0) return;
+  const wanted     = new Set(topicsForTeam(teamId, bucket));
 
-  await Promise.all(
-    toAdd.map(t => safeSubscribe(t)),
-  );
-  toAdd.forEach(t => subscribed.add(t));
+  // Sibling live-event topics across ALL buckets (includes the target bucket).
+  // Unsubscribe from any bucket we're not targeting before subscribing.
+  const allBucketTopics = allBucketTopicsForTeam(teamId);
+  const toUnsubFirst = allBucketTopics.filter(t => !wanted.has(t) && subscribed.has(t));
+  if (toUnsubFirst.length > 0) {
+    await Promise.all(toUnsubFirst.map(t => safeUnsubscribe(t)));
+    toUnsubFirst.forEach(t => subscribed.delete(t));
+  }
+
+  const toAdd = [...wanted].filter(t => !subscribed.has(t));
+  if (toAdd.length === 0) {
+    if (toUnsubFirst.length > 0) await writeSubscribedTopics(subscribed);
+    return;
+  }
+  const results = await Promise.all(toAdd.map(t => safeSubscribe(t)));
+  // Persist ONLY the topics where subscribe actually succeeded
+  toAdd.forEach((t, i) => { if (results[i]) subscribed.add(t); });
   await writeSubscribedTopics(subscribed);
 }
 
 export async function unsubscribeTeamTopics(teamId: string): Promise<void> {
   const subscribed = await readSubscribedTopics();
-  const wanted = topicsForTeam(teamId);
-  const toRemove = wanted.filter(t => subscribed.has(t));
+  // Unsubscribe from ALL buckets of this team's live events + immediate topics
+  const allTopics = [
+    ...allBucketTopicsForTeam(teamId),
+    TopicNames.teamKickoff(teamId),
+    TopicNames.teamLineups(teamId),
+    TopicNames.teamReminders(teamId),
+  ];
+  const toRemove = allTopics.filter(t => subscribed.has(t));
   if (toRemove.length === 0) return;
 
-  await Promise.all(
-    toRemove.map(t => safeUnsubscribe(t)),
-  );
+  await Promise.all(toRemove.map(t => safeUnsubscribe(t)));
   toRemove.forEach(t => subscribed.delete(t));
   await writeSubscribedTopics(subscribed);
 }
 
-export async function subscribeLeagueTopics(leagueId: string): Promise<void> {
-  const subscribed = await readSubscribedTopics();
-  const wanted = topicsForLeague(leagueId);
-  const toAdd = wanted.filter(t => !subscribed.has(t));
-  if (toAdd.length === 0) return;
-
-  await Promise.all(
-    toAdd.map(t => safeSubscribe(t)),
-  );
-  toAdd.forEach(t => subscribed.add(t));
-  await writeSubscribedTopics(subscribed);
+/**
+ * League following is DISPLAY-ONLY (2026-06-03 decision).
+ * Following/unfollowing a league only affects which matches are shown on screen —
+ * no FCM topic subscriptions. These stubs exist so call-sites in FavoritesContext
+ * compile without changes; they intentionally do nothing.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function subscribeLeagueTopics(_leagueId: string): Promise<void> {
+  // No-op: leagues are display-only, notifications come from followed teams.
 }
 
-export async function unsubscribeLeagueTopics(leagueId: string): Promise<void> {
-  const subscribed = await readSubscribedTopics();
-  const wanted = topicsForLeague(leagueId);
-  const toRemove = wanted.filter(t => subscribed.has(t));
-  if (toRemove.length === 0) return;
-
-  await Promise.all(
-    toRemove.map(t => safeUnsubscribe(t)),
-  );
-  toRemove.forEach(t => subscribed.delete(t));
-  await writeSubscribedTopics(subscribed);
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function unsubscribeLeagueTopics(_leagueId: string): Promise<void> {
+  // No-op: leagues are display-only.
 }
 
 export async function subscribePlayerTopics(playerId: string): Promise<void> {
@@ -214,10 +245,8 @@ export async function subscribePlayerTopics(playerId: string): Promise<void> {
   const toAdd = wanted.filter(t => !subscribed.has(t));
   if (toAdd.length === 0) return;
 
-  await Promise.all(
-    toAdd.map(t => safeSubscribe(t)),
-  );
-  toAdd.forEach(t => subscribed.add(t));
+  const results = await Promise.all(toAdd.map(t => safeSubscribe(t)));
+  toAdd.forEach((t, i) => { if (results[i]) subscribed.add(t); });
   await writeSubscribedTopics(subscribed);
 }
 
@@ -227,49 +256,71 @@ export async function unsubscribePlayerTopics(playerId: string): Promise<void> {
   const toRemove = wanted.filter(t => subscribed.has(t));
   if (toRemove.length === 0) return;
 
-  await Promise.all(
-    toRemove.map(t => safeUnsubscribe(t)),
-  );
+  await Promise.all(toRemove.map(t => safeUnsubscribe(t)));
   toRemove.forEach(t => subscribed.delete(t));
   await writeSubscribedTopics(subscribed);
 }
 
 /**
- * Reconcile FCM subscriptions against the user's current follow list.
- * Called on app launch and whenever the favorites list changes substantially
- * (e.g. after a Firestore sync from another device).
+ * Reconcile FCM subscriptions against the user's current follow list and
+ * current Modo Estadio delay bucket.
+ *
+ * Called on:
+ *   - App cold start (AsyncStorage load)
+ *   - Auth state change (Firestore sync of favorites)
+ *   - estadioMode or estadioDelay change (via FavoritesContext useEffect)
+ *   - App foreground (AppState 'active' — heals any mid-flip desync)
  *
  * Logic:
- *   wantedTopics  = union of all teams/leagues/players the user follows
+ *   wantedTopics  = union of all teams (in the correct bucket) + players
  *   currentTopics = what we believe we're subscribed to (AsyncStorage)
- *   subscribe   to (wanted - current)
- *   unsubscribe from (current - wanted)
+ *   unsubscribe from (current - wanted)  ← BEFORE subscribing (avoids dual-bucket)
+ *   subscribe   to   (wanted - current)
+ *
+ * Leagues are intentionally excluded — display-only, no FCM subscriptions.
  */
 export async function reconcileSubscriptions(args: {
-  teamIds:   string[];
-  leagueIds: string[];
-  playerIds: string[];
+  teamIds:    string[];
+  leagueIds:  string[];  // kept in signature for call-site compatibility; ignored
+  playerIds:  string[];
+  delayBucket?: DelayBucket;  // defaults to 'd0' (Modo Estadio OFF)
 }): Promise<void> {
+  const bucket: DelayBucket = args.delayBucket ?? 'd0';
+
   const wanted = new Set<string>();
-  for (const id of args.teamIds)   topicsForTeam(id).forEach(t => wanted.add(t));
-  for (const id of args.leagueIds) topicsForLeague(id).forEach(t => wanted.add(t));
-  for (const id of args.playerIds) topicsForPlayer(id).forEach(t => wanted.add(t));
+  for (const id of args.teamIds) {
+    topicsForTeam(id, bucket).forEach(t => wanted.add(t));
+  }
+  // Note: leagueIds intentionally skipped — display-only
+  for (const id of args.playerIds) {
+    topicsForPlayer(id).forEach(t => wanted.add(t));
+  }
 
   const current = await readSubscribedTopics();
-  const toAdd:    string[] = [];
   const toRemove: string[] = [];
-  for (const t of wanted)   if (!current.has(t)) toAdd.push(t);
-  for (const t of current)  if (!wanted.has(t))  toRemove.push(t);
+  const toAdd:    string[] = [];
+
+  for (const t of current) if (!wanted.has(t)) toRemove.push(t);
+  for (const t of wanted)  if (!current.has(t)) toAdd.push(t);
 
   if (toAdd.length === 0 && toRemove.length === 0) return;
 
-  await Promise.all([
-    ...toAdd.map(t    => safeSubscribe(t)),
-    ...toRemove.map(t => safeUnsubscribe(t)),
-  ]);
+  // Unsubscribe first to ensure no brief window with two active buckets
+  if (toRemove.length > 0) {
+    await Promise.all(toRemove.map(t => safeUnsubscribe(t)));
+    toRemove.forEach(t => current.delete(t));
+  }
 
-  // Replace the persisted set entirely so it matches the new reality
-  await writeSubscribedTopics(wanted);
+  if (toAdd.length > 0) {
+    const results = await Promise.all(toAdd.map(t => safeSubscribe(t)));
+    // Persist only successfully subscribed topics (not the full wanted set)
+    // so a transient network failure doesn't pollute the persisted record.
+    const successSet = new Set(current);
+    toAdd.forEach((t, i) => { if (results[i]) successSet.add(t); });
+    await writeSubscribedTopics(successSet);
+  } else {
+    await writeSubscribedTopics(current);
+  }
 }
 
 /**
