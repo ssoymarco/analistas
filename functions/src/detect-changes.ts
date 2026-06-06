@@ -55,7 +55,7 @@ export async function loadSnapshot(): Promise<LivescoresSnapshot['matches']> {
   return (snap.data() as LivescoresSnapshot)?.matches ?? {};
 }
 
-/** Count red cards for a given side in the events array. */
+/** Count red cards (red + second yellow) for a given side. */
 function countRedCards(events: SMFixtureEvent[] | undefined, participantId: number | undefined): number {
   if (!events || !participantId) return 0;
   let count = 0;
@@ -68,8 +68,79 @@ function countRedCards(events: SMFixtureEvent[] | undefined, participantId: numb
   return count;
 }
 
+/** Count first yellow cards (NOT second yellows — those are counted as red cards). */
+function countYellowCards(events: SMFixtureEvent[] | undefined, participantId: number | undefined): number {
+  if (!events || !participantId) return 0;
+  let count = 0;
+  for (const ev of events) {
+    if (ev.participant_id !== participantId) continue;
+    if (ev.type_id === SM_EVENT_TYPES.YELLOW_CARD) count++;
+  }
+  return count;
+}
+
+/** Count substitutions for a given side. */
+function countSubstitutions(events: SMFixtureEvent[] | undefined, participantId: number | undefined): number {
+  if (!events || !participantId) return 0;
+  let count = 0;
+  for (const ev of events) {
+    if (ev.participant_id !== participantId) continue;
+    if (ev.type_id === SM_EVENT_TYPES.SUBSTITUTION) count++;
+  }
+  return count;
+}
+
+/** Find the most recent yellow card for a given side. */
+function findRecentYellowCard(
+  fixture: SMFixture | undefined,
+  side: 'home' | 'away',
+): { playerName?: string; minute?: number | null } | null {
+  if (!fixture?.events?.length) return null;
+  const home = fixture.participants?.find(p => p.meta?.location === 'home');
+  const away = fixture.participants?.find(p => p.meta?.location === 'away');
+  const teamId = side === 'home' ? home?.id : away?.id;
+  if (!teamId) return null;
+  for (let i = fixture.events.length - 1; i >= 0; i--) {
+    const ev = fixture.events[i];
+    if (ev.participant_id !== teamId) continue;
+    if (ev.type_id === SM_EVENT_TYPES.YELLOW_CARD) {
+      return { playerName: ev.player_name ?? undefined, minute: ev.minute ?? null };
+    }
+  }
+  return null;
+}
+
+/** Find the most recent substitution for a given side.
+ *  player_name = player going OFF, related_player_name = player coming ON. */
+function findRecentSubstitution(
+  fixture: SMFixture | undefined,
+  side: 'home' | 'away',
+): { playerName?: string; relatedPlayerName?: string; minute?: number | null } | null {
+  if (!fixture?.events?.length) return null;
+  const home = fixture.participants?.find(p => p.meta?.location === 'home');
+  const away = fixture.participants?.find(p => p.meta?.location === 'away');
+  const teamId = side === 'home' ? home?.id : away?.id;
+  if (!teamId) return null;
+  for (let i = fixture.events.length - 1; i >= 0; i--) {
+    const ev = fixture.events[i];
+    if (ev.participant_id !== teamId) continue;
+    if (ev.type_id === SM_EVENT_TYPES.SUBSTITUTION) {
+      return {
+        playerName:        ev.player_name         ?? undefined,
+        relatedPlayerName: ev.related_player_name ?? undefined,
+        minute:            ev.minute              ?? null,
+      };
+    }
+  }
+  return null;
+}
+
 /** Snapshot the relevant per-match state for next-poll diff detection. */
-export async function saveSnapshot(matches: MatchDoc[], fixtures: SMFixture[]): Promise<void> {
+export async function saveSnapshot(
+  matches: MatchDoc[],
+  fixtures: SMFixture[],
+  previousSnapshot?: LivescoresSnapshot['matches'],
+): Promise<void> {
   const snapshot: LivescoresSnapshot['matches'] = {};
 
   // Build a quick lookup of fixture by id so we can pull the events array
@@ -82,15 +153,21 @@ export async function saveSnapshot(matches: MatchDoc[], fixtures: SMFixture[]): 
     const fixture = fixtureById.get(Number(m.id));
     const home = fixture?.participants?.find(p => p.meta?.location === 'home');
     const away = fixture?.participants?.find(p => p.meta?.location === 'away');
-    const redHome = countRedCards(fixture?.events, home?.id);
-    const redAway = countRedCards(fixture?.events, away?.id);
+    const prev = previousSnapshot?.[m.id];
     snapshot[m.id] = {
-      homeScore: m.homeScore,
-      awayScore: m.awayScore,
-      status:    m.status,
-      stateId:   m.stateId,
-      redCardsHome: redHome,
-      redCardsAway: redAway,
+      homeScore:         m.homeScore,
+      awayScore:         m.awayScore,
+      status:            m.status,
+      stateId:           m.stateId,
+      redCardsHome:      countRedCards(fixture?.events, home?.id),
+      redCardsAway:      countRedCards(fixture?.events, away?.id),
+      yellowCardsHome:   countYellowCards(fixture?.events, home?.id),
+      yellowCardsAway:   countYellowCards(fixture?.events, away?.id),
+      substitutionsHome: countSubstitutions(fixture?.events, home?.id),
+      substitutionsAway: countSubstitutions(fixture?.events, away?.id),
+      // Preserve flags that track whether one-time pushes have already been sent.
+      reminderSent:  prev?.reminderSent  ?? false,
+      lineupsSent:   prev?.lineupsSent   ?? false,
     };
   }
   await db.doc('_meta/livescoresSnapshot').set({
@@ -260,11 +337,51 @@ export function detectChanges(
       changes.push({ ...baseEvent, type: 'matchEnd' });
     }
 
-    // ── Red card detection ────────────────────────────────────────────────
-    const home = fixture?.participants?.find(p => p.meta?.location === 'home');
-    const away = fixture?.participants?.find(p => p.meta?.location === 'away');
-    const redHome = countRedCards(fixture?.events, home?.id);
-    const redAway = countRedCards(fixture?.events, away?.id);
+    // ── Event-count detection (cards, substitutions) ──────────────────────
+    const home     = fixture?.participants?.find(p => p.meta?.location === 'home');
+    const away     = fixture?.participants?.find(p => p.meta?.location === 'away');
+    const redHome  = countRedCards(fixture?.events, home?.id);
+    const redAway  = countRedCards(fixture?.events, away?.id);
+    const yelHome  = countYellowCards(fixture?.events, home?.id);
+    const yelAway  = countYellowCards(fixture?.events, away?.id);
+    const subHome  = countSubstitutions(fixture?.events, home?.id);
+    const subAway  = countSubstitutions(fixture?.events, away?.id);
+
+    // ── Extra time start ──────────────────────────────────────────────────
+    if (prev.stateId !== SM_STATE_IDS.EXTRA_TIME &&
+        match.stateId === SM_STATE_IDS.EXTRA_TIME) {
+      changes.push({ ...baseEvent, type: 'extraTimeStart' });
+    }
+
+    // ── Penalties start ───────────────────────────────────────────────────
+    if (prev.stateId !== SM_STATE_IDS.PENALTIES &&
+        match.stateId === SM_STATE_IDS.PENALTIES) {
+      changes.push({ ...baseEvent, type: 'penaltiesStart' });
+    }
+
+    // ── Match suspended / postponed mid-game ──────────────────────────────
+    const suspendedStateIds = [
+      SM_STATE_IDS.SUSPENDED, SM_STATE_IDS.POSTPONED,
+      SM_STATE_IDS.INTERRUPTED, SM_STATE_IDS.ABANDONED,
+    ] as readonly number[];
+    if (prev.status === 'live' && suspendedStateIds.includes(match.stateId)) {
+      changes.push({ ...baseEvent, type: 'matchSuspended' });
+    }
+
+    // ── Pre-match reminder (one-time, ~15 min before kickoff) ────────────
+    // Fired when a scheduled match is within 16 minutes of kickoff and the
+    // reminder hasn't been sent yet. The 16-min window covers the 15-second
+    // polling gap + 1 min buffer so we don't miss the window.
+    if (match.status === 'scheduled' && !prev.reminderSent) {
+      const kickoffMs  = new Date(match.startingAtUtc ?? '').getTime();
+      const nowMs      = Date.now();
+      const minsToKick = (kickoffMs - nowMs) / 60_000;
+      if (minsToKick > 0 && minsToKick <= 16) {
+        changes.push({ ...baseEvent, type: 'matchReminder' });
+        // Mark as sent so we don't fire again on the next poll
+        if (prev) prev.reminderSent = true;
+      }
+    }
 
     if (redHome > prev.redCardsHome) {
       const ev = findRecentRedCard(fixture, 'home');
@@ -283,6 +400,56 @@ export function detectChanges(
         type: 'redCard',
         scoringTeamSide: 'away',
         playerName: ev?.playerName,
+        minute: ev?.minute ?? match.minute,
+      });
+    }
+
+    // ── Yellow card detection ─────────────────────────────────────────────
+    const prevYelHome = prev.yellowCardsHome ?? 0;
+    const prevYelAway = prev.yellowCardsAway ?? 0;
+    if (yelHome > prevYelHome) {
+      const ev = findRecentYellowCard(fixture, 'home');
+      changes.push({
+        ...baseEvent,
+        type: 'yellowCard',
+        scoringTeamSide: 'home',
+        playerName: ev?.playerName,
+        minute: ev?.minute ?? match.minute,
+      });
+    }
+    if (yelAway > prevYelAway) {
+      const ev = findRecentYellowCard(fixture, 'away');
+      changes.push({
+        ...baseEvent,
+        type: 'yellowCard',
+        scoringTeamSide: 'away',
+        playerName: ev?.playerName,
+        minute: ev?.minute ?? match.minute,
+      });
+    }
+
+    // ── Substitution detection ────────────────────────────────────────────
+    const prevSubHome = prev.substitutionsHome ?? 0;
+    const prevSubAway = prev.substitutionsAway ?? 0;
+    if (subHome > prevSubHome) {
+      const ev = findRecentSubstitution(fixture, 'home');
+      changes.push({
+        ...baseEvent,
+        type: 'substitution',
+        scoringTeamSide: 'home',
+        playerName:        ev?.playerName,
+        relatedPlayerName: ev?.relatedPlayerName,
+        minute: ev?.minute ?? match.minute,
+      });
+    }
+    if (subAway > prevSubAway) {
+      const ev = findRecentSubstitution(fixture, 'away');
+      changes.push({
+        ...baseEvent,
+        type: 'substitution',
+        scoringTeamSide: 'away',
+        playerName:        ev?.playerName,
+        relatedPlayerName: ev?.relatedPlayerName,
         minute: ev?.minute ?? match.minute,
       });
     }
@@ -386,6 +553,64 @@ function copyForRedCard(c: DetectedChange): FcmCopy {
   };
 }
 
+function copyForYellowCard(c: DetectedChange): FcmCopy {
+  const team = c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name;
+  const minute = c.minute != null ? `${c.minute}' ` : '';
+  const player = c.playerName ? `${c.playerName} ` : '';
+  const score = `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`;
+  return {
+    title: `🟨 Tarjeta amarilla`,
+    body:  `${minute}${player}(${team}) · ${score}`.trim(),
+  };
+}
+
+function copyForSubstitution(c: DetectedChange): FcmCopy {
+  const team = c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name;
+  const minute = c.minute != null ? `${c.minute}' ` : '';
+  const playerOut = c.playerName        ? `↓ ${c.playerName}`        : '';
+  const playerIn  = c.relatedPlayerName ? ` ↑ ${c.relatedPlayerName}` : '';
+  return {
+    title: `🔄 Cambio · ${team}`,
+    body:  `${minute}${playerOut}${playerIn}`.trim() ||
+           `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`,
+  };
+}
+
+function copyForExtraTimeStart(c: DetectedChange): FcmCopy {
+  return {
+    title: `⏱️ ¡Prórroga!`,
+    body:  `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name} · ${c.league}`,
+  };
+}
+
+function copyForPenaltiesStart(c: DetectedChange): FcmCopy {
+  return {
+    title: `🥅 ¡Tanda de penaltis!`,
+    body:  `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name} · ${c.league}`,
+  };
+}
+
+function copyForMatchSuspended(c: DetectedChange): FcmCopy {
+  return {
+    title: `⚠️ Partido suspendido`,
+    body:  `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`,
+  };
+}
+
+function copyForMatchReminder(c: DetectedChange): FcmCopy {
+  return {
+    title: `⏰ ¡El partido comienza pronto!`,
+    body:  `${c.homeTeam.name} vs ${c.awayTeam.name} · ${c.league} · en ~15 min`,
+  };
+}
+
+function copyForLineups(c: DetectedChange): FcmCopy {
+  return {
+    title: `📋 Alineaciones confirmadas`,
+    body:  `${c.homeTeam.name} vs ${c.awayTeam.name} · ${c.league}`,
+  };
+}
+
 // ── FCM topic taxonomy (Modo Estadio) ─────────────────────────────────────────
 
 /** Delay buckets used for Modo Estadio (minutes). 0 = immediate. */
@@ -460,6 +685,57 @@ function routeChange(c: DetectedChange): TopicRouting {
         legacyTopics:    [`team_${side}_cards`],
       };
     }
+    case 'yellowCard': {
+      // Yellow cards share the _cards bucket — client filters by data.type
+      const side = c.scoringTeamSide === 'home' ? homeId : awayId;
+      return {
+        retrasableBases: [`team_${side}_cards`],
+        immediateTopic:  null,
+        legacyTopics:    [`team_${side}_cards`],
+      };
+    }
+    case 'substitution': {
+      // Substitutions share the _live bucket — client filters by data.type
+      const side = c.scoringTeamSide === 'home' ? homeId : awayId;
+      return {
+        retrasableBases: [`team_${side}_live`],
+        immediateTopic:  null,
+        legacyTopics:    [`team_${side}_start`],
+      };
+    }
+    case 'extraTimeStart':
+      return {
+        retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
+        immediateTopic:  null,
+        legacyTopics:    [`team_${homeId}_start`, `team_${awayId}_start`],
+      };
+    case 'penaltiesStart':
+      return {
+        retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
+        immediateTopic:  null,
+        legacyTopics:    [`team_${homeId}_start`, `team_${awayId}_start`],
+      };
+    case 'matchSuspended':
+      // Suspended/postponed are immediate — no spoiler concern
+      return {
+        retrasableBases: [],
+        immediateTopic:  null,
+        legacyTopics:    [`team_${homeId}_start`, `team_${awayId}_start`],
+      };
+    case 'matchReminder':
+      // Reminders are always immediate (pre-match)
+      return {
+        retrasableBases: [],
+        immediateTopic:  null,
+        legacyTopics:    [`team_${homeId}_reminders`, `team_${awayId}_reminders`],
+      };
+    case 'lineups':
+      // Lineups are always immediate (pre-match info)
+      return {
+        retrasableBases: [],
+        immediateTopic:  null,
+        legacyTopics:    [`team_${homeId}_lineups`, `team_${awayId}_lineups`],
+      };
     default:
       return { retrasableBases: [], immediateTopic: null, legacyTopics: [] };
   }
@@ -469,13 +745,20 @@ function routeChange(c: DetectedChange): TopicRouting {
 
 function buildFcmCopy(c: DetectedChange): FcmCopy {
   switch (c.type) {
-    case 'goal':          return copyForGoal(c);
-    case 'goalCancelled': return copyForGoalCancelled(c);
-    case 'matchStart':    return copyForMatchStart(c);
-    case 'halftime':      return copyForHalftime(c);
-    case 'matchEnd':      return copyForMatchEnd(c);
-    case 'redCard':       return copyForRedCard(c);
-    default:              return { title: 'Analistas', body: 'Nueva actualización del partido' };
+    case 'goal':            return copyForGoal(c);
+    case 'goalCancelled':   return copyForGoalCancelled(c);
+    case 'matchStart':      return copyForMatchStart(c);
+    case 'halftime':        return copyForHalftime(c);
+    case 'matchEnd':        return copyForMatchEnd(c);
+    case 'redCard':         return copyForRedCard(c);
+    case 'yellowCard':      return copyForYellowCard(c);
+    case 'substitution':    return copyForSubstitution(c);
+    case 'extraTimeStart':  return copyForExtraTimeStart(c);
+    case 'penaltiesStart':  return copyForPenaltiesStart(c);
+    case 'matchSuspended':  return copyForMatchSuspended(c);
+    case 'matchReminder':   return copyForMatchReminder(c);
+    case 'lineups':         return copyForLineups(c);
+    default:                return { title: 'Analistas', body: 'Nueva actualización del partido' };
   }
 }
 
@@ -573,6 +856,21 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
       continue;
     }
 
+    // ── Immediate-only events (reminder, lineups, suspended) ──────────────
+    // These use only legacyTopics (which map to _reminders, _lineups, _kickoff, _start)
+    // and have no bucket variants. Send immediately to all legacy topics.
+    if (
+      change.type === 'matchReminder' ||
+      change.type === 'lineups' ||
+      change.type === 'matchSuspended'
+    ) {
+      for (const topic of legacyTopics) {
+        sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
+      }
+      logger.info(`📣 ${change.type.toUpperCase()} — ${title}`, { matchId: change.matchId });
+      continue;
+    }
+
     // ── goalCancelled: only _d0 bucket + legacy (no delayed tasks) ─────────
     // Devices on _dN buckets haven't seen the goal yet; the VAR guard in
     // deliverDelayedPush will suppress the pending goal task at delivery time.
@@ -650,6 +948,13 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
     halftimes:       changes.filter(c => c.type === 'halftime').length,
     ends:            changes.filter(c => c.type === 'matchEnd').length,
     redCards:        changes.filter(c => c.type === 'redCard').length,
+    yellowCards:     changes.filter(c => c.type === 'yellowCard').length,
+    substitutions:   changes.filter(c => c.type === 'substitution').length,
+    extraTime:       changes.filter(c => c.type === 'extraTimeStart').length,
+    penalties:       changes.filter(c => c.type === 'penaltiesStart').length,
+    suspended:       changes.filter(c => c.type === 'matchSuspended').length,
+    reminders:       changes.filter(c => c.type === 'matchReminder').length,
+    lineups:         changes.filter(c => c.type === 'lineups').length,
   });
 
   // Event-driven sync: refresh standings/topscorers for affected leagues so

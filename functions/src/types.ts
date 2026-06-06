@@ -178,16 +178,22 @@ export interface SquadDoc {
 }
 
 /** Snapshot for diff detection — stored in _meta/livescoresSnapshot.
- *  redCardsHome / redCardsAway track the running count of red cards per side
- *  so the detector can fire a 'redCard' DetectedChange when the count goes up. */
+ *  Counts track running totals per side so the detector can fire a change
+ *  event when any count goes up since the last poll. */
 export interface LivescoresSnapshot {
   matches: Record<string, {
-    homeScore: number;
-    awayScore: number;
-    status: string;
-    stateId: number;
-    redCardsHome: number;
-    redCardsAway: number;
+    homeScore:          number;
+    awayScore:          number;
+    status:             string;
+    stateId:            number;
+    redCardsHome:       number;
+    redCardsAway:       number;
+    yellowCardsHome:    number;
+    yellowCardsAway:    number;
+    substitutionsHome:  number;
+    substitutionsAway:  number;
+    reminderSent?:      boolean;  // true once the pre-match reminder push has fired
+    lineupsSent?:       boolean;  // true once the lineup-confirmed push has fired
   }>;
   updatedAt: Timestamp;
 }
@@ -195,13 +201,20 @@ export interface LivescoresSnapshot {
 // ── Change Detection Types ──────────────────────────────────────────────────
 
 export type ChangeType =
-  | 'goal'         // Regular goal (subtype carries 'normal' | 'penalty' | 'own')
-  | 'goalCancelled'// Goal scored then disallowed (VAR overturned)
-  | 'matchStart'   // Kickoff (transition: scheduled → live, state 1)
-  | 'halftime'     // First-half ended (state 12)
-  | 'matchEnd'     // Final whistle (transition: live → finished)
-  | 'redCard'      // Red card shown (count went up since last poll)
-  | 'statusChange';// Catch-all for any other state transition (paused, suspended, etc.)
+  | 'goal'            // Regular goal (subtype: 'normal' | 'penalty' | 'own')
+  | 'goalCancelled'   // Goal disallowed by VAR
+  | 'matchStart'      // Kickoff (scheduled → live, FIRST_HALF)
+  | 'halftime'        // Half-time whistle
+  | 'matchEnd'        // Full-time whistle
+  | 'extraTimeStart'  // Start of extra time
+  | 'penaltiesStart'  // Start of penalty shootout
+  | 'redCard'         // Red card or second yellow (sent-off)
+  | 'yellowCard'      // First yellow card shown
+  | 'substitution'    // Player substituted
+  | 'matchSuspended'  // Match suspended or postponed mid-game
+  | 'matchReminder'   // Pre-match reminder (~15 min before kickoff)
+  | 'lineups'         // Confirmed starting lineups published
+  | 'statusChange';   // Catch-all for other state transitions
 
 export interface DetectedChange {
   type: ChangeType;
@@ -212,16 +225,16 @@ export interface DetectedChange {
   awayScore: number;
   league: string;
   leagueId: string;
-  /** Which side caused the event (for goal/redCard) */
+  /** Which side caused the event (goal / card / substitution) */
   scoringTeamSide?: 'home' | 'away';
   /** Subtype for goals: 'normal' | 'penalty' | 'own'. Default = 'normal'. */
   goalKind?: 'normal' | 'penalty' | 'own';
-  /** Goal scorer name + minute (best-effort — may be missing if SportMonks
-   *  hasn't published the event payload yet, in which case the notification
-   *  goes out without the name). */
+  /** Goal scorer / card recipient (best-effort, may be missing). */
   scorerName?: string;
-  /** For red cards: the player who was sent off (best-effort, may be missing). */
+  /** Player involved in the event (red cards, yellow cards). */
   playerName?: string;
+  /** For substitutions: the player coming ON (replacing playerName). */
+  relatedPlayerName?: string;
   /** Match minute when the event occurred. */
   minute?: number | null;
 }
