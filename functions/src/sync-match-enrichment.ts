@@ -47,10 +47,14 @@ interface HotMatch {
   id: string;
   homeTeamId: number;
   awayTeamId: number;
+  homeTeamName: string;
+  awayTeamName: string;
+  league: string;
   status: 'live' | 'finished' | 'scheduled';
   startingAtUtc: string;
   lastDetailUpdate: Date | null;
   lastH2hUpdate: Date | null;
+  lineupsSent: boolean;
 }
 
 /**
@@ -105,10 +109,14 @@ async function queryHotMatches(): Promise<HotMatch[]> {
         id: d.id,
         homeTeamId: homeId,
         awayTeamId: awayId,
+        homeTeamName: data?.homeTeam?.name ?? '',
+        awayTeamName: data?.awayTeam?.name ?? '',
+        league:       data?.league ?? '',
         status: data.status,
         startingAtUtc: data.startingAtUtc,
         lastDetailUpdate: lastDetail,
         lastH2hUpdate: lastH2h,
+        lineupsSent: data?.lineupsSent ?? false,
       });
     }
   }
@@ -177,10 +185,14 @@ export async function enrichMatchesByIds(matchIds: string[]): Promise<{ enriched
         id: doc.id,
         homeTeamId: home,
         awayTeamId: away,
+        homeTeamName: d?.homeTeam?.name ?? '',
+        awayTeamName: d?.awayTeam?.name ?? '',
+        league:       d?.league ?? '',
         status: d.status ?? 'finished',
         startingAtUtc: d.startingAtUtc ?? '',
         lastDetailUpdate: null,
         lastH2hUpdate: null,
+        lineupsSent: d?.lineupsSent ?? false,
       });
     });
   }
@@ -259,6 +271,56 @@ async function writeEnrichment(
 
   // ── Detail (events, lineups, statistics, venue, predictions, …) ──
   const enrichment = extractStaticEnrichment(fixture);
+
+  // ── Lineup notification (one-time, fires when official lineups arrive) ──
+  // Condition: match is scheduled/upcoming, lineups not yet notified, and
+  // the fixture now has ≥ 11 confirmed lineup entries (at least one full XI).
+  const newLineups = Array.isArray((enrichment as any).lineups)
+    ? ((enrichment as any).lineups as unknown[])
+    : [];
+  const hasRealLineups = newLineups.length >= 11;
+
+  if (!m.lineupsSent && hasRealLineups && m.status === 'scheduled') {
+    try {
+      const messaging = admin.messaging();
+      const homeId = m.homeTeamId;
+      const awayId = m.awayTeamId;
+      const title  = '📋 Alineaciones confirmadas';
+      const body   = `${m.homeTeamName} vs ${m.awayTeamName} · ${m.league}`;
+      const data   = {
+        type:    'lineups',
+        matchId: m.id,
+        homeTeam: m.homeTeamName,
+        awayTeam: m.awayTeamName,
+      };
+      // Send to both teams' lineup topics (no delay — lineups are pre-match info)
+      await Promise.allSettled([
+        messaging.send({
+          topic: `team_${homeId}_lineups`,
+          notification: { title, body }, data,
+          android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
+          apns: { payload: { aps: { sound: 'default', badge: 0 } } },
+        }),
+        messaging.send({
+          topic: `team_${awayId}_lineups`,
+          notification: { title, body }, data,
+          android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
+          apns: { payload: { aps: { sound: 'default', badge: 0 } } },
+        }),
+      ]);
+      // Persist the flag so future enrichment runs don't re-notify
+      await db.collection('matches').doc(m.id).set(
+        { lineupsSent: true },
+        { merge: true },
+      );
+      m.lineupsSent = true;
+      logger.info(`📋 Lineup notification sent for match ${m.id}: ${m.homeTeamName} vs ${m.awayTeamName}`);
+    } catch (err) {
+      logger.warn(`📋 Lineup notification failed for match ${m.id}:`, err);
+      // Non-fatal — enrichment continues normally
+    }
+  }
+
   await db.collection('matches').doc(m.id).set(
     { detail: enrichment, detailUpdatedAt: admin.firestore.Timestamp.now() },
     { merge: true },
