@@ -45,7 +45,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.sendTestPush = exports.backfillEnrichmentByMatchIds = exports.reportFcmToken = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = void 0;
+exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.sendTestPush = exports.backfillEnrichmentByMatchIds = exports.reportFcmToken = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = exports.deliverDelayedPush = void 0;
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
 // before any other module touches admin.firestore().
 require("./admin-init");
@@ -61,6 +61,9 @@ const sync_squads_1 = require("./sync-squads");
 const sync_match_enrichment_1 = require("./sync-match-enrichment");
 const sync_coaches_1 = require("./sync-coaches");
 const sync_players_1 = require("./sync-players");
+// ── Modo Estadio — delayed push via Cloud Tasks ─────────────────────────────
+var deliver_delayed_push_1 = require("./deliver-delayed-push");
+Object.defineProperty(exports, "deliverDelayedPush", { enumerable: true, get: function () { return deliver_delayed_push_1.deliverDelayedPush; } });
 // ── Scheduled Functions ─────────────────────────────────────────────────────
 /**
  * Poll livescores every 1 minute.

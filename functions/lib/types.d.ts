@@ -150,8 +150,8 @@ export interface SquadDoc {
     updatedAt: Timestamp;
 }
 /** Snapshot for diff detection — stored in _meta/livescoresSnapshot.
- *  redCardsHome / redCardsAway track the running count of red cards per side
- *  so the detector can fire a 'redCard' DetectedChange when the count goes up. */
+ *  Counts track running totals per side so the detector can fire a change
+ *  event when any count goes up since the last poll. */
 export interface LivescoresSnapshot {
     matches: Record<string, {
         homeScore: number;
@@ -160,10 +160,16 @@ export interface LivescoresSnapshot {
         stateId: number;
         redCardsHome: number;
         redCardsAway: number;
+        yellowCardsHome: number;
+        yellowCardsAway: number;
+        substitutionsHome: number;
+        substitutionsAway: number;
+        reminderSent?: boolean;
+        lineupsSent?: boolean;
     }>;
     updatedAt: Timestamp;
 }
-export type ChangeType = 'goal' | 'goalCancelled' | 'matchStart' | 'halftime' | 'matchEnd' | 'redCard' | 'statusChange';
+export type ChangeType = 'goal' | 'goalCancelled' | 'matchStart' | 'halftime' | 'matchEnd' | 'extraTimeStart' | 'penaltiesStart' | 'redCard' | 'yellowCard' | 'substitution' | 'matchSuspended' | 'matchReminder' | 'lineups' | 'statusChange';
 export interface DetectedChange {
     type: ChangeType;
     matchId: string;
@@ -173,16 +179,16 @@ export interface DetectedChange {
     awayScore: number;
     league: string;
     leagueId: string;
-    /** Which side caused the event (for goal/redCard) */
+    /** Which side caused the event (goal / card / substitution) */
     scoringTeamSide?: 'home' | 'away';
     /** Subtype for goals: 'normal' | 'penalty' | 'own'. Default = 'normal'. */
     goalKind?: 'normal' | 'penalty' | 'own';
-    /** Goal scorer name + minute (best-effort — may be missing if SportMonks
-     *  hasn't published the event payload yet, in which case the notification
-     *  goes out without the name). */
+    /** Goal scorer / card recipient (best-effort, may be missing). */
     scorerName?: string;
-    /** For red cards: the player who was sent off (best-effort, may be missing). */
+    /** Player involved in the event (red cards, yellow cards). */
     playerName?: string;
+    /** For substitutions: the player coming ON (replacing playerName). */
+    relatedPlayerName?: string;
     /** Match minute when the event occurred. */
     minute?: number | null;
 }

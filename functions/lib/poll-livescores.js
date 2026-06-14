@@ -99,9 +99,10 @@ async function executeSinglePoll(pollIndex) {
     if (opCount > 0)
         batches.push(currentBatch);
     await Promise.all(batches.map(b => b.commit()));
-    // 5. Save snapshot for next poll. The detector reads red-card counts off
-    //    the fixtures' events array, so we pass the raw fixtures here too.
-    await (0, detect_changes_1.saveSnapshot)(matchDocs, smFixtures);
+    // 5. Save snapshot for next poll. The detector reads event counts off
+    //    the fixtures' events array; we also pass the previous snapshot so
+    //    one-time flags (reminderSent, lineupsSent) are preserved across polls.
+    await (0, detect_changes_1.saveSnapshot)(matchDocs, smFixtures, prevSnapshot);
     // 6. Dispatch notifications for detected changes
     if (changes.length > 0) {
         await (0, detect_changes_1.dispatchNotifications)(changes);

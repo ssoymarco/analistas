@@ -11,6 +11,7 @@
  * - syncTopScorers:   Every 12 hours → top scorers for all configured leagues
  */
 import './admin-init';
+export { deliverDelayedPush } from './deliver-delayed-push';
 /**
  * Poll livescores every 1 minute.
  * Internally runs 4 polls with 15-second delays for near-real-time updates.

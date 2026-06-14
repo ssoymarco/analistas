@@ -6,12 +6,26 @@
  * Detects goals (regular/penalty/own), goal cancellations (VAR), match starts,
  * halftime, full time, and red cards. Sends FCM topic pushes for each event.
  *
- * Topic naming convention — must stay aligned with src/services/fcmTopics.ts:
- *   team_{id}_goals    · cards · start · lineups · reminders
- *   league_{id}_start  · finals
- *   player_{id}_goals  · cards
+ * ── Modo Estadio: delay-bucket topic taxonomy ────────────────────────────────
+ * Live (retrasable) events fan out to 4 topics per base, one per delay bucket:
+ *   team_{id}_goals_d{0|2|5|10}   — goals (both teams' followers)
+ *   team_{id}_cards_d{0|2|5|10}   — red cards
+ *   team_{id}_live_d{0|2|5|10}    — halftime + matchEnd
  *
- * Strategy C (hybrid) for goal+scorer:
+ * Pre-match events are always immediate (no bucket suffix):
+ *   team_{id}_kickoff              — NEW: replaces _start for matchStart
+ *   team_{id}_lineups              — (unchanged)
+ *   team_{id}_reminders            — (unchanged)
+ *
+ * League topics REMOVED: following a league is display-only (spam fix, 2026-06-03).
+ * No notifications are dispatched to league_{id}_* topics.
+ *
+ * DUAL-SEND (migration window): we also send to the legacy topics
+ * (team_{id}_goals, team_{id}_start, etc.) so devices on old builds keep
+ * receiving notifications. Stop dual-send once adoption of the new build
+ * reaches ~90-95% (see rollout plan in docs/MODO_ESTADIO_ARQUITECTURA.md).
+ *
+ * ── Strategy C (hybrid) for goal+scorer:
  *   - When a score change is detected, we ALSO look at the events array on the
  *     same SMFixture payload for a matching goal event (same minute, same
  *     team). If we find it, the notification includes the scorer name.
@@ -61,6 +75,7 @@ exports.saveSnapshot = saveSnapshot;
 exports.detectChanges = detectChanges;
 exports.dispatchNotifications = dispatchNotifications;
 const admin_init_1 = require("./admin-init");
+const functions_1 = require("firebase-admin/functions");
 const logger = __importStar(require("firebase-functions/logger"));
 const sync_league_data_1 = require("./sync-league-data");
 const types_1 = require("./types");
@@ -73,7 +88,7 @@ async function loadSnapshot() {
         return {};
     return snap.data()?.matches ?? {};
 }
-/** Count red cards for a given side in the events array. */
+/** Count red cards (red + second yellow) for a given side. */
 function countRedCards(events, participantId) {
     if (!events || !participantId)
         return 0;
@@ -87,8 +102,77 @@ function countRedCards(events, participantId) {
     }
     return count;
 }
+/** Count first yellow cards (NOT second yellows — those are counted as red cards). */
+function countYellowCards(events, participantId) {
+    if (!events || !participantId)
+        return 0;
+    let count = 0;
+    for (const ev of events) {
+        if (ev.participant_id !== participantId)
+            continue;
+        if (ev.type_id === types_1.SM_EVENT_TYPES.YELLOW_CARD)
+            count++;
+    }
+    return count;
+}
+/** Count substitutions for a given side. */
+function countSubstitutions(events, participantId) {
+    if (!events || !participantId)
+        return 0;
+    let count = 0;
+    for (const ev of events) {
+        if (ev.participant_id !== participantId)
+            continue;
+        if (ev.type_id === types_1.SM_EVENT_TYPES.SUBSTITUTION)
+            count++;
+    }
+    return count;
+}
+/** Find the most recent yellow card for a given side. */
+function findRecentYellowCard(fixture, side) {
+    if (!fixture?.events?.length)
+        return null;
+    const home = fixture.participants?.find(p => p.meta?.location === 'home');
+    const away = fixture.participants?.find(p => p.meta?.location === 'away');
+    const teamId = side === 'home' ? home?.id : away?.id;
+    if (!teamId)
+        return null;
+    for (let i = fixture.events.length - 1; i >= 0; i--) {
+        const ev = fixture.events[i];
+        if (ev.participant_id !== teamId)
+            continue;
+        if (ev.type_id === types_1.SM_EVENT_TYPES.YELLOW_CARD) {
+            return { playerName: ev.player_name ?? undefined, minute: ev.minute ?? null };
+        }
+    }
+    return null;
+}
+/** Find the most recent substitution for a given side.
+ *  player_name = player going OFF, related_player_name = player coming ON. */
+function findRecentSubstitution(fixture, side) {
+    if (!fixture?.events?.length)
+        return null;
+    const home = fixture.participants?.find(p => p.meta?.location === 'home');
+    const away = fixture.participants?.find(p => p.meta?.location === 'away');
+    const teamId = side === 'home' ? home?.id : away?.id;
+    if (!teamId)
+        return null;
+    for (let i = fixture.events.length - 1; i >= 0; i--) {
+        const ev = fixture.events[i];
+        if (ev.participant_id !== teamId)
+            continue;
+        if (ev.type_id === types_1.SM_EVENT_TYPES.SUBSTITUTION) {
+            return {
+                playerName: ev.player_name ?? undefined,
+                relatedPlayerName: ev.related_player_name ?? undefined,
+                minute: ev.minute ?? null,
+            };
+        }
+    }
+    return null;
+}
 /** Snapshot the relevant per-match state for next-poll diff detection. */
-async function saveSnapshot(matches, fixtures) {
+async function saveSnapshot(matches, fixtures, previousSnapshot) {
     const snapshot = {};
     // Build a quick lookup of fixture by id so we can pull the events array
     // (red card count) for each MatchDoc without iterating the fixtures list
@@ -100,15 +184,21 @@ async function saveSnapshot(matches, fixtures) {
         const fixture = fixtureById.get(Number(m.id));
         const home = fixture?.participants?.find(p => p.meta?.location === 'home');
         const away = fixture?.participants?.find(p => p.meta?.location === 'away');
-        const redHome = countRedCards(fixture?.events, home?.id);
-        const redAway = countRedCards(fixture?.events, away?.id);
+        const prev = previousSnapshot?.[m.id];
         snapshot[m.id] = {
             homeScore: m.homeScore,
             awayScore: m.awayScore,
             status: m.status,
             stateId: m.stateId,
-            redCardsHome: redHome,
-            redCardsAway: redAway,
+            redCardsHome: countRedCards(fixture?.events, home?.id),
+            redCardsAway: countRedCards(fixture?.events, away?.id),
+            yellowCardsHome: countYellowCards(fixture?.events, home?.id),
+            yellowCardsAway: countYellowCards(fixture?.events, away?.id),
+            substitutionsHome: countSubstitutions(fixture?.events, home?.id),
+            substitutionsAway: countSubstitutions(fixture?.events, away?.id),
+            // Preserve flags that track whether one-time pushes have already been sent.
+            reminderSent: prev?.reminderSent ?? false,
+            lineupsSent: prev?.lineupsSent ?? false,
         };
     }
     await admin_init_1.db.doc('_meta/livescoresSnapshot').set({
@@ -256,11 +346,48 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
         if (prev.status === 'live' && match.status === 'finished') {
             changes.push({ ...baseEvent, type: 'matchEnd' });
         }
-        // ── Red card detection ────────────────────────────────────────────────
+        // ── Event-count detection (cards, substitutions) ──────────────────────
         const home = fixture?.participants?.find(p => p.meta?.location === 'home');
         const away = fixture?.participants?.find(p => p.meta?.location === 'away');
         const redHome = countRedCards(fixture?.events, home?.id);
         const redAway = countRedCards(fixture?.events, away?.id);
+        const yelHome = countYellowCards(fixture?.events, home?.id);
+        const yelAway = countYellowCards(fixture?.events, away?.id);
+        const subHome = countSubstitutions(fixture?.events, home?.id);
+        const subAway = countSubstitutions(fixture?.events, away?.id);
+        // ── Extra time start ──────────────────────────────────────────────────
+        if (prev.stateId !== types_1.SM_STATE_IDS.EXTRA_TIME &&
+            match.stateId === types_1.SM_STATE_IDS.EXTRA_TIME) {
+            changes.push({ ...baseEvent, type: 'extraTimeStart' });
+        }
+        // ── Penalties start ───────────────────────────────────────────────────
+        if (prev.stateId !== types_1.SM_STATE_IDS.PENALTIES &&
+            match.stateId === types_1.SM_STATE_IDS.PENALTIES) {
+            changes.push({ ...baseEvent, type: 'penaltiesStart' });
+        }
+        // ── Match suspended / postponed mid-game ──────────────────────────────
+        const suspendedStateIds = [
+            types_1.SM_STATE_IDS.SUSPENDED, types_1.SM_STATE_IDS.POSTPONED,
+            types_1.SM_STATE_IDS.INTERRUPTED, types_1.SM_STATE_IDS.ABANDONED,
+        ];
+        if (prev.status === 'live' && suspendedStateIds.includes(match.stateId)) {
+            changes.push({ ...baseEvent, type: 'matchSuspended' });
+        }
+        // ── Pre-match reminder (one-time, ~15 min before kickoff) ────────────
+        // Fired when a scheduled match is within 16 minutes of kickoff and the
+        // reminder hasn't been sent yet. The 16-min window covers the 15-second
+        // polling gap + 1 min buffer so we don't miss the window.
+        if (match.status === 'scheduled' && !prev.reminderSent) {
+            const kickoffMs = new Date(match.startingAtUtc ?? '').getTime();
+            const nowMs = Date.now();
+            const minsToKick = (kickoffMs - nowMs) / 60_000;
+            if (minsToKick > 0 && minsToKick <= 16) {
+                changes.push({ ...baseEvent, type: 'matchReminder' });
+                // Mark as sent so we don't fire again on the next poll
+                if (prev)
+                    prev.reminderSent = true;
+            }
+        }
         if (redHome > prev.redCardsHome) {
             const ev = findRecentRedCard(fixture, 'home');
             changes.push({
@@ -278,6 +405,54 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
                 type: 'redCard',
                 scoringTeamSide: 'away',
                 playerName: ev?.playerName,
+                minute: ev?.minute ?? match.minute,
+            });
+        }
+        // ── Yellow card detection ─────────────────────────────────────────────
+        const prevYelHome = prev.yellowCardsHome ?? 0;
+        const prevYelAway = prev.yellowCardsAway ?? 0;
+        if (yelHome > prevYelHome) {
+            const ev = findRecentYellowCard(fixture, 'home');
+            changes.push({
+                ...baseEvent,
+                type: 'yellowCard',
+                scoringTeamSide: 'home',
+                playerName: ev?.playerName,
+                minute: ev?.minute ?? match.minute,
+            });
+        }
+        if (yelAway > prevYelAway) {
+            const ev = findRecentYellowCard(fixture, 'away');
+            changes.push({
+                ...baseEvent,
+                type: 'yellowCard',
+                scoringTeamSide: 'away',
+                playerName: ev?.playerName,
+                minute: ev?.minute ?? match.minute,
+            });
+        }
+        // ── Substitution detection ────────────────────────────────────────────
+        const prevSubHome = prev.substitutionsHome ?? 0;
+        const prevSubAway = prev.substitutionsAway ?? 0;
+        if (subHome > prevSubHome) {
+            const ev = findRecentSubstitution(fixture, 'home');
+            changes.push({
+                ...baseEvent,
+                type: 'substitution',
+                scoringTeamSide: 'home',
+                playerName: ev?.playerName,
+                relatedPlayerName: ev?.relatedPlayerName,
+                minute: ev?.minute ?? match.minute,
+            });
+        }
+        if (subAway > prevSubAway) {
+            const ev = findRecentSubstitution(fixture, 'away');
+            changes.push({
+                ...baseEvent,
+                type: 'substitution',
+                scoringTeamSide: 'away',
+                playerName: ev?.playerName,
+                relatedPlayerName: ev?.relatedPlayerName,
                 minute: ev?.minute ?? match.minute,
             });
         }
@@ -345,49 +520,162 @@ function copyForRedCard(c) {
         body: `${minute}${player}(${team}) · ${score}`.trim(),
     };
 }
-// ── FCM topic routing ───────────────────────────────────────────────────────
-/** Returns the list of FCM topics that should receive a given change.
- *  A single change can fan out to multiple topics (home team, away team,
- *  league), so callers should send the same payload to each. */
-function topicsForChange(c) {
+function copyForYellowCard(c) {
+    const team = c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name;
+    const minute = c.minute != null ? `${c.minute}' ` : '';
+    const player = c.playerName ? `${c.playerName} ` : '';
+    const score = `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`;
+    return {
+        title: `🟨 Tarjeta amarilla`,
+        body: `${minute}${player}(${team}) · ${score}`.trim(),
+    };
+}
+function copyForSubstitution(c) {
+    const team = c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name;
+    const minute = c.minute != null ? `${c.minute}' ` : '';
+    const playerOut = c.playerName ? `↓ ${c.playerName}` : '';
+    const playerIn = c.relatedPlayerName ? ` ↑ ${c.relatedPlayerName}` : '';
+    return {
+        title: `🔄 Cambio · ${team}`,
+        body: `${minute}${playerOut}${playerIn}`.trim() ||
+            `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`,
+    };
+}
+function copyForExtraTimeStart(c) {
+    return {
+        title: `⏱️ ¡Prórroga!`,
+        body: `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name} · ${c.league}`,
+    };
+}
+function copyForPenaltiesStart(c) {
+    return {
+        title: `🥅 ¡Tanda de penaltis!`,
+        body: `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name} · ${c.league}`,
+    };
+}
+function copyForMatchSuspended(c) {
+    return {
+        title: `⚠️ Partido suspendido`,
+        body: `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`,
+    };
+}
+function copyForMatchReminder(c) {
+    return {
+        title: `⏰ ¡El partido comienza pronto!`,
+        body: `${c.homeTeam.name} vs ${c.awayTeam.name} · ${c.league} · en ~15 min`,
+    };
+}
+function copyForLineups(c) {
+    return {
+        title: `📋 Alineaciones confirmadas`,
+        body: `${c.homeTeam.name} vs ${c.awayTeam.name} · ${c.league}`,
+    };
+}
+// ── FCM topic taxonomy (Modo Estadio) ─────────────────────────────────────────
+/** Delay buckets used for Modo Estadio (minutes). 0 = immediate. */
+const DELAY_BUCKETS = [0, 2, 5, 10];
+function routeChange(c) {
     const homeId = c.homeTeam.id;
     const awayId = c.awayTeam.id;
     const leagueId = c.leagueId;
     switch (c.type) {
         case 'goal':
+            return {
+                retrasableBases: [`team_${homeId}_goals`, `team_${awayId}_goals`],
+                immediateTopic: null,
+                // DUAL-SEND legacy: goals + league start (old builds expect league topic)
+                legacyTopics: [`team_${homeId}_goals`, `team_${awayId}_goals`, `league_${leagueId}_start`],
+            };
         case 'goalCancelled':
-            // Both teams' followers want goal news (yours + the rival's).
-            // The league_*_start topic covers users following the league.
-            return [
-                `team_${homeId}_goals`,
-                `team_${awayId}_goals`,
-                `league_${leagueId}_start`,
-            ];
+            // VAR: only send to _d0 (immediate). Devices on _d2/_d5/_d10 haven't seen
+            // the goal yet → the VAR guard in deliverDelayedPush will suppress it.
+            // No need to notify them that a goal they don't know about was cancelled.
+            return {
+                retrasableBases: [], // no delayed tasks for VAR
+                immediateTopic: null,
+                // Still notify _d0 devices (they saw the goal, now see the correction)
+                // by putting the bases in legacyTopics + _d0 handling below.
+                legacyTopics: [`team_${homeId}_goals`, `team_${awayId}_goals`, `league_${leagueId}_start`],
+            };
         case 'matchStart':
-            return [
-                `team_${homeId}_start`,
-                `team_${awayId}_start`,
-                `league_${leagueId}_start`,
-            ];
+            return {
+                retrasableBases: [],
+                immediateTopic: null, // kickoff fan-out handled specially below
+                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`, `league_${leagueId}_start`],
+            };
         case 'halftime':
-            // Only sent to team start subscribers — league-wide halftime is too noisy.
-            return [
-                `team_${homeId}_start`,
-                `team_${awayId}_start`,
-            ];
+            return {
+                retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
+                immediateTopic: null,
+                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`],
+            };
         case 'matchEnd':
-            return [
-                `team_${homeId}_start`,
-                `team_${awayId}_start`,
-                `league_${leagueId}_finals`,
-            ];
+            return {
+                retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
+                immediateTopic: null,
+                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`, `league_${leagueId}_finals`],
+            };
         case 'redCard': {
-            // Only the team that received the card; rivals don't usually care.
             const side = c.scoringTeamSide === 'home' ? homeId : awayId;
-            return [`team_${side}_cards`];
+            return {
+                retrasableBases: [`team_${side}_cards`],
+                immediateTopic: null,
+                legacyTopics: [`team_${side}_cards`],
+            };
         }
+        case 'yellowCard': {
+            // Yellow cards share the _cards bucket — client filters by data.type
+            const side = c.scoringTeamSide === 'home' ? homeId : awayId;
+            return {
+                retrasableBases: [`team_${side}_cards`],
+                immediateTopic: null,
+                legacyTopics: [`team_${side}_cards`],
+            };
+        }
+        case 'substitution': {
+            // Substitutions share the _live bucket — client filters by data.type
+            const side = c.scoringTeamSide === 'home' ? homeId : awayId;
+            return {
+                retrasableBases: [`team_${side}_live`],
+                immediateTopic: null,
+                legacyTopics: [`team_${side}_start`],
+            };
+        }
+        case 'extraTimeStart':
+            return {
+                retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
+                immediateTopic: null,
+                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`],
+            };
+        case 'penaltiesStart':
+            return {
+                retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
+                immediateTopic: null,
+                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`],
+            };
+        case 'matchSuspended':
+            // Suspended/postponed are immediate — no spoiler concern
+            return {
+                retrasableBases: [],
+                immediateTopic: null,
+                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`],
+            };
+        case 'matchReminder':
+            // Reminders are always immediate (pre-match)
+            return {
+                retrasableBases: [],
+                immediateTopic: null,
+                legacyTopics: [`team_${homeId}_reminders`, `team_${awayId}_reminders`],
+            };
+        case 'lineups':
+            // Lineups are always immediate (pre-match info)
+            return {
+                retrasableBases: [],
+                immediateTopic: null,
+                legacyTopics: [`team_${homeId}_lineups`, `team_${awayId}_lineups`],
+            };
         default:
-            return [];
+            return { retrasableBases: [], immediateTopic: null, legacyTopics: [] };
     }
 }
 // ── Notification payload builder ────────────────────────────────────────────
@@ -399,10 +687,49 @@ function buildFcmCopy(c) {
         case 'halftime': return copyForHalftime(c);
         case 'matchEnd': return copyForMatchEnd(c);
         case 'redCard': return copyForRedCard(c);
+        case 'yellowCard': return copyForYellowCard(c);
+        case 'substitution': return copyForSubstitution(c);
+        case 'extraTimeStart': return copyForExtraTimeStart(c);
+        case 'penaltiesStart': return copyForPenaltiesStart(c);
+        case 'matchSuspended': return copyForMatchSuspended(c);
+        case 'matchReminder': return copyForMatchReminder(c);
+        case 'lineups': return copyForLineups(c);
         default: return { title: 'Analistas', body: 'Nueva actualización del partido' };
     }
 }
 // ── Dispatch ────────────────────────────────────────────────────────────────
+/**
+ * Whether to enqueue Cloud Tasks for Modo Estadio delayed delivery.
+ * Set ESTADIO_DELAY_ENABLED=false in Cloud Functions env to disable without
+ * a redeploy. Default: enabled.
+ */
+const ESTADIO_DELAY_ENABLED = process.env.ESTADIO_DELAY_ENABLED !== 'false';
+/** Sanitise a string to be a valid Cloud Tasks task ID ([a-zA-Z0-9_-]). */
+function toTaskId(raw) {
+    return raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 499);
+}
+/** Send one FCM alert push to a specific topic — shared helper. */
+function sendToTopic(messaging, topic, title, body, data, dedupId) {
+    return messaging.send({
+        topic,
+        notification: { title, body },
+        data,
+        android: {
+            priority: 'high',
+            collapseKey: dedupId,
+            notification: { channelId: 'analistas-live', sound: 'default', tag: dedupId },
+        },
+        apns: {
+            headers: { 'apns-collapse-id': dedupId },
+            payload: { aps: { sound: 'default', badge: 0 } },
+        },
+    }).catch(err => {
+        const code = err.code;
+        if (code !== 'messaging/invalid-argument' && code !== 'messaging/registration-token-not-registered') {
+            logger.warn(`FCM send failed for topic ${topic}`, { err, code });
+        }
+    });
+}
 /** Send FCM topic pushes for each detected change. */
 async function dispatchNotifications(changes) {
     if (changes.length === 0)
@@ -411,10 +738,8 @@ async function dispatchNotifications(changes) {
     const sendPromises = [];
     for (const change of changes) {
         const { title, body } = buildFcmCopy(change);
-        const topics = topicsForChange(change);
-        // Common payload — included on every message so the client can route the
-        // tap into the right MatchDetail screen and apply per-user filtering
-        // (e.g. Modo Estadio delay).
+        const { retrasableBases, legacyTopics } = routeChange(change);
+        // ── Common data payload ────────────────────────────────────────────────
         const data = {
             type: change.type,
             matchId: change.matchId,
@@ -435,62 +760,98 @@ async function dispatchNotifications(changes) {
         if (change.minute != null)
             data.minute = String(change.minute);
         // ── Deduplication key ──────────────────────────────────────────────────
-        // A single event (e.g. a Boca goal) is dispatched to MULTIPLE topics:
-        //   team_<home>_goals · team_<away>_goals · league_<id>_start
-        // A user who follows BOTH a team AND its league is subscribed to two of
-        // those topics, so FCM delivers the SAME event twice → duplicate banner.
-        // The same happens if a device has more than one live FCM token (e.g.
-        // mid app-reinstall, before FCM expires the stale token).
-        //
-        // We attach a stable id to every send for the same logical event:
-        //   • iOS  → `apns-collapse-id` header. APNs collapses notifications
-        //            sharing this id into a SINGLE banner on the device, even
-        //            across separate topic deliveries. This is the primary fix
-        //            because most pushes are received while the app is
-        //            backgrounded/killed (where no JS runs to dedup).
-        //   • Android → notification `tag`. A new notification with the same tag
-        //            REPLACES the prior one instead of stacking.
-        //
-        // Key = matchId + type + score. For goals/VAR the score uniquely
-        // identifies the moment; for matchStart/halftime/matchEnd the type alone
-        // is unique per match. Capped to 64 bytes (APNs limit).
+        // Same dedupId is reused for _d0 and _dN pushes. iOS APNs uses it as
+        // apns-collapse-id (collapses duplicates within the notification centre);
+        // Android uses it as `tag` (replaces rather than stacks). Capped at 64 B.
         const dedupId = `${change.matchId}_${change.type}_${change.homeScore}-${change.awayScore}`.slice(0, 64);
-        for (const topic of topics) {
-            sendPromises.push(messaging.send({
-                topic,
-                notification: { title, body },
-                data,
-                android: {
-                    priority: 'high',
-                    collapseKey: dedupId,
-                    notification: {
-                        channelId: 'analistas-live',
-                        sound: 'default',
-                        tag: dedupId,
-                    },
-                },
-                apns: {
-                    headers: {
-                        'apns-collapse-id': dedupId,
-                    },
-                    payload: {
-                        aps: { sound: 'default', badge: 0 },
-                    },
-                },
-            }).catch(err => {
-                // One failed topic shouldn't stop the others. SportMonks can
-                // occasionally push events for teams that nobody is subscribed
-                // to → FCM rejects with 'not-found', which is fine.
-                const code = err.code;
-                if (code !== 'messaging/invalid-argument' && code !== 'messaging/registration-token-not-registered') {
-                    logger.warn(`FCM send failed for topic ${topic}`, { err, code });
-                }
-            }));
+        // ── Special handling for matchStart (kickoff) ──────────────────────────
+        // matchStart goes to the new _kickoff topics (immediate only, no bucket).
+        // Also dual-sent to legacy _start topics for old builds.
+        if (change.type === 'matchStart') {
+            const homeId = change.homeTeam.id;
+            const awayId = change.awayTeam.id;
+            for (const topic of [`team_${homeId}_kickoff`, `team_${awayId}_kickoff`]) {
+                sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
+            }
+            // Dual-send legacy (old builds subscribed to _start / league_start)
+            for (const topic of legacyTopics) {
+                sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
+            }
+            logger.info(`📣 MATCHSTART — ${title}`, { matchId: change.matchId });
+            continue;
         }
-        // Also log to Cloud Logging for monitoring + post-mortem
+        // ── Immediate-only events (reminder, lineups, suspended) ──────────────
+        // These use only legacyTopics (which map to _reminders, _lineups, _kickoff, _start)
+        // and have no bucket variants. Send immediately to all legacy topics.
+        if (change.type === 'matchReminder' ||
+            change.type === 'lineups' ||
+            change.type === 'matchSuspended') {
+            for (const topic of legacyTopics) {
+                sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
+            }
+            logger.info(`📣 ${change.type.toUpperCase()} — ${title}`, { matchId: change.matchId });
+            continue;
+        }
+        // ── goalCancelled: only _d0 bucket + legacy (no delayed tasks) ─────────
+        // Devices on _dN buckets haven't seen the goal yet; the VAR guard in
+        // deliverDelayedPush will suppress the pending goal task at delivery time.
+        // We don't notify them about a cancellation they never knew happened.
+        if (change.type === 'goalCancelled') {
+            // Send to _d0 bases (new devices on the immediate bucket)
+            for (const base of [`team_${change.homeTeam.id}_goals`, `team_${change.awayTeam.id}_goals`]) {
+                sendPromises.push(sendToTopic(messaging, `${base}_d0`, title, body, data, dedupId));
+            }
+            // Dual-send legacy
+            for (const topic of legacyTopics) {
+                sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
+            }
+            logger.info(`📣 GOALCANCELLED (VAR) — ${title}`, { matchId: change.matchId });
+            continue;
+        }
+        // ── Live retrasable events (goal, halftime, matchEnd, redCard) ─────────
+        // 1. Send _d0 immediately.
+        // 2. Enqueue Cloud Tasks for d2/d5/d10.
+        // 3. Dual-send legacy topics for old-build compatibility.
+        // 1. Immediate send to _d0 bucket
+        for (const base of retrasableBases) {
+            sendPromises.push(sendToTopic(messaging, `${base}_d0`, title, body, data, dedupId));
+        }
+        // 2. Cloud Tasks for delayed buckets
+        if (ESTADIO_DELAY_ENABLED && retrasableBases.length > 0) {
+            const queue = (0, functions_1.getFunctions)().taskQueue('deliverDelayedPush');
+            for (const base of retrasableBases) {
+                for (const delayMin of [2, 5, 10]) {
+                    const taskId = toTaskId(`estadio_${base}_${dedupId}_d${delayMin}`);
+                    const payload = {
+                        topic: `${base}_d${delayMin}`,
+                        title, body, data, dedupId,
+                        changeType: change.type,
+                        matchId: change.matchId,
+                        homeScore: change.homeScore,
+                        awayScore: change.awayScore,
+                    };
+                    // Fire-and-forget; swallow ALREADY_EXISTS (idempotent re-enqueue)
+                    queue.enqueue(payload, {
+                        scheduleDelaySeconds: delayMin * 60,
+                        id: taskId,
+                    }).catch((err) => {
+                        const msg = String(err);
+                        if (!msg.includes('ALREADY_EXISTS') && !msg.includes('already exists')) {
+                            logger.warn(`Cloud Task enqueue failed: ${taskId}`, { err: msg });
+                        }
+                    });
+                }
+            }
+        }
+        // 3. Dual-send legacy topics (migration window)
+        for (const topic of legacyTopics) {
+            sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
+        }
         logger.info(`📣 ${change.type.toUpperCase()} — ${title} · ${body}`, {
             matchId: change.matchId,
-            topics,
+            retrasableBases,
+            legacyTopics,
+            estadioEnabled: ESTADIO_DELAY_ENABLED,
         });
     }
     await Promise.allSettled(sendPromises);
@@ -501,10 +862,16 @@ async function dispatchNotifications(changes) {
         halftimes: changes.filter(c => c.type === 'halftime').length,
         ends: changes.filter(c => c.type === 'matchEnd').length,
         redCards: changes.filter(c => c.type === 'redCard').length,
+        yellowCards: changes.filter(c => c.type === 'yellowCard').length,
+        substitutions: changes.filter(c => c.type === 'substitution').length,
+        extraTime: changes.filter(c => c.type === 'extraTimeStart').length,
+        penalties: changes.filter(c => c.type === 'penaltiesStart').length,
+        suspended: changes.filter(c => c.type === 'matchSuspended').length,
+        reminders: changes.filter(c => c.type === 'matchReminder').length,
+        lineups: changes.filter(c => c.type === 'lineups').length,
     });
     // Event-driven sync: refresh standings/topscorers for affected leagues so
-    // table-position swaps and Messi-vs-Ronaldo races show up in seconds
-    // instead of waiting for the hourly cron.
+    // table-position swaps show up in seconds instead of waiting for the hourly cron.
     await (0, sync_league_data_1.triggerLeagueSyncForChanges)(changes);
 }
 //# sourceMappingURL=detect-changes.js.map
