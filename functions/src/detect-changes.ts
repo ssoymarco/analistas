@@ -82,7 +82,7 @@ const TEAMS_ES: Record<string, string> = {
   'South Africa': 'Sudáfrica', 'South Korea': 'Corea del Sur',
   'Spain': 'España', 'Sweden': 'Suecia', 'Switzerland': 'Suiza',
   'Thailand': 'Tailandia', 'Tunisia': 'Túnez',
-  'Turkey': 'Türkiye', 'Türkiye': 'Türkiye',
+  'Turkey': 'Turquía', 'Türkiye': 'Turquía',
   'Ukraine': 'Ucrania', 'United Arab Emirates': 'Emiratos Árabes',
   'United States': 'Estados Unidos', 'USA': 'Estados Unidos',
   'Uruguay': 'Uruguay', 'Venezuela': 'Venezuela',
