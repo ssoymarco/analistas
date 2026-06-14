@@ -386,7 +386,7 @@ export const syncSquads = onSchedule(
 export const syncMatchEnrichment = onSchedule(
   {
     schedule: 'every 5 minutes',
-    timeoutSeconds: 300,
+    timeoutSeconds: 540,
     memory: '512MiB',
     region: 'us-central1',
     retryCount: 0, // next invocation is in 5 min anyway

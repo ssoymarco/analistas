@@ -373,7 +373,7 @@ exports.syncSquads = (0, scheduler_1.onSchedule)({
  */
 exports.syncMatchEnrichment = (0, scheduler_1.onSchedule)({
     schedule: 'every 5 minutes',
-    timeoutSeconds: 300,
+    timeoutSeconds: 540,
     memory: '512MiB',
     region: 'us-central1',
     retryCount: 0, // next invocation is in 5 min anyway
