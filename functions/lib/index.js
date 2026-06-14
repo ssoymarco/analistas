@@ -372,11 +372,12 @@ exports.syncSquads = (0, scheduler_1.onSchedule)({
  * `fixtures` entity. Well below the 3,000/hour cap.
  */
 exports.syncMatchEnrichment = (0, scheduler_1.onSchedule)({
-    schedule: 'every 5 minutes',
-    timeoutSeconds: 540,
+    schedule: 'every 10 minutes',
+    timeoutSeconds: 720,
     memory: '512MiB',
     region: 'us-central1',
-    retryCount: 0, // next invocation is in 5 min anyway
+    maxInstances: 1,
+    retryCount: 0,
     secrets: [config_1.SPORTMONKS_TOKEN],
 }, async () => {
     await (0, sync_match_enrichment_1.syncMatchEnrichmentHandler)();
