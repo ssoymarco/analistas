@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated, Platform } from 'react-native';
 import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
+import { BETTING_CONTENT_ENABLED } from '../config/features';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPartidos } from '../components/Skeleton';
 import { ScreenHeader } from '../components/ScreenHeader';
@@ -25,11 +26,9 @@ import { useFixtures } from '../hooks/useFixtures';
 import type { LeagueWithMatches } from '../services/sportsApi';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { useFavorites } from '../contexts/FavoritesContext';
-import { LEAGUE_TIER_1, LEAGUE_TIER_2 } from '../config/leagueTiers';
-import ATTModal from '../components/ATTModal';
-import { WorldCupBanner } from '../components/WorldCupBanner';
+import { getLeaguePopularity } from '../config/leagues';
+import { useUserCountry } from '../hooks/useUserCountry';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as TrackingTransparency from 'expo-tracking-transparency';
 
 function todayISO(): string {
   const d = new Date();
@@ -46,36 +45,18 @@ export const PartidosScreen: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [activeTab, setActiveTab] = useState<FilterTab>('todos');
   const [showCalendar, setShowCalendar] = useState(false);
-  const [showATT, setShowATT] = useState(false);
 
-  // Show ATT modal 7s after first mount — only once ever
-  useEffect(() => {
-    const ATT_KEY = 'analistas_att_shown';
-    let timer: ReturnType<typeof setTimeout>;
-    AsyncStorage.getItem(ATT_KEY).then(shown => {
-      if (!shown) {
-        timer = setTimeout(() => setShowATT(true), 7000);
-      }
-    });
-    return () => clearTimeout(timer);
-  }, []);
-
-  const handleATTContinue = async () => {
-    setShowATT(false);
-    await AsyncStorage.setItem('analistas_att_shown', '1');
-    if (Platform.OS === 'ios') {
-      await TrackingTransparency.requestTrackingPermissionsAsync().catch(() => {});
-    }
-  };
-
-  const handleATTSkip = async () => {
-    setShowATT(false);
-    await AsyncStorage.setItem('analistas_att_shown', '1');
-  };
+  // NOTE: App Tracking Transparency (ATT) was removed for v1.0 — the app does
+  // not actually track users yet (AdMob is deferred; the Caliente banner is a
+  // static image, not a tracking SDK). Apple rejected v1.0 under Guideline 2.1
+  // because the ATT prompt couldn't be located, so we dropped the framework
+  // entirely and declare "no tracking" in App Privacy. Re-introduce ATT in a
+  // future version ONLY when a real tracking SDK (AdMob) ships.
 
   // ── Real data via hook ──────────────────────────────────────────────────────
   const { matches: allMatches, leagues: allLeagues, loading, refreshing, refresh, isPolling } = useFixtures(selectedDate);
   const { followedTeamIds, followedLeagueIds } = useFavorites();
+  const { country } = useUserCountry();
 
   // ── Live polling dot animation ─────────────────────────────────────────────
   const liveDotOpacity = useRef(new Animated.Value(1)).current;
@@ -132,15 +113,20 @@ export const PartidosScreen: React.FC = () => {
   //
   // Strategy:
   //   1. "Mis equipos"  — matches where the user follows homeTeam or awayTeam (cross-league)
-  //   2. "Mis ligas"    — full league sections for leagues the user follows
-  //   3. Tier 1         — top global leagues (Premier, Champions, La Liga, etc.)
-  //   4. Tier 2         — important regional leagues (Championship, Bundesliga 2, etc.)
-  //   5. Tier 3         — niche/women's/lower divisions (K-League, Liga Honduras, etc.)
+  //   2. "Mis ligas"    — full league sections for leagues the user follows (or are
+  //                       inferred because the user follows a team in them)
+  //   3. Tier 1         — popularity ≥ 75 (top global + country-boosted)
+  //   4. Tier 2         — popularity 50-74 (important regional + national cups)
+  //   5. Tier 3         — popularity < 50 (niche/women's/lower divisions)
   //
-  // If the user has personalization (follows ≥1 team or league), only groups 1-2 are
-  // shown immediately; tiers 1-3 appear behind progressive "Ver más" buttons.
-  // If the user has NO personalization, tier 1 shows immediately; tiers 2-3 are behind
-  // "Ver más" buttons. This avoids loading obscure leagues on the first paint.
+  // Tier definition uses LEAGUE_POPULARITY + LEAGUE_POPULARITY_BY_COUNTRY from
+  // config/leagues.ts. The user's country (from expo-localization + Cloudflare
+  // /geo) biases the ranking so a Mexican sees Liga MX above Bundesliga, an
+  // Argentine sees Liga Profesional above Brasileirão, etc.
+  //
+  // Within each tier, leagues are sorted by:
+  //   1. Live matches first (always — competitive UX)
+  //   2. Popularity DESC (country-aware) when no live matches differentiate them
 
   const {
     myTeamMatches,
@@ -174,13 +160,7 @@ export const PartidosScreen: React.FC = () => {
     myTeamMatches.sort((a, b) => (statusOrder[a.status] ?? 1) - (statusOrder[b.status] ?? 1));
 
     // ── Priority leagues = inferred (from teams) ∪ explicitly followed ────────
-    // This gives full league context without duplicates.
-    // Example: follows América → Liga MX inferred → all Liga MX matches shown
-    // even if the user never explicitly followed the league.
     const priorityIds = new Set([...inferredLeagueIds, ...leagueSet]);
-
-    // Deduplicate: strip matches already shown in "Mis equipos" from league sections
-    // so the same fixture never appears twice on screen.
     const myTeamMatchIds = new Set(myTeamMatches.map(m => m.id));
     const priorityLeagueGroups = filteredLeagues
       .filter(lg => priorityIds.has(lg.id))
@@ -190,75 +170,95 @@ export const PartidosScreen: React.FC = () => {
       }))
       .filter(lg => lg.matches.length > 0);
 
-    // ── Remaining leagues — not in priority — split by tier ───────────────────
+    // ── Remaining leagues — partition by popularity (country-aware) ──────────
     const remaining = filteredLeagues.filter(lg => !priorityIds.has(lg.id));
-    const tier1Groups = remaining.filter(lg => LEAGUE_TIER_1.has(Number(lg.id)));
-    const tier2Groups = remaining.filter(lg => LEAGUE_TIER_2.has(Number(lg.id)));
-    const tier3Groups = remaining.filter(
-      lg => !LEAGUE_TIER_1.has(Number(lg.id)) && !LEAGUE_TIER_2.has(Number(lg.id))
-    );
+    const tier1Groups: LeagueWithMatches[] = [];
+    const tier2Groups: LeagueWithMatches[] = [];
+    const tier3Groups: LeagueWithMatches[] = [];
+    for (const lg of remaining) {
+      const pop = getLeaguePopularity(Number(lg.id), country);
+      if (pop >= 75)      tier1Groups.push(lg);
+      else if (pop >= 50) tier2Groups.push(lg);
+      else                tier3Groups.push(lg);
+    }
 
-    // ── Sort each tier: leagues with live matches first, then finished, then scheduled-only
-    const byLiveFirst = (a: LeagueWithMatches, b: LeagueWithMatches) => {
-      const priority = (lg: LeagueWithMatches) => {
+    // ── Sort each tier: leagues with live matches first, then by popularity ──
+    // DESC. Within same live-status they're ordered by the user-biased ranking
+    // so Champions League appears above Bundesliga, Liga MX above Brasileirão
+    // for a Mexican, etc.
+    const compareLeagues = (a: LeagueWithMatches, b: LeagueWithMatches) => {
+      const livePriority = (lg: LeagueWithMatches) => {
         if (lg.matches.some(m => m.status === 'live'))     return 0;
         if (lg.matches.some(m => m.status === 'finished')) return 1;
         return 2;
       };
-      return priority(a) - priority(b);
+      const pa = livePriority(a);
+      const pb = livePriority(b);
+      if (pa !== pb) return pa - pb;
+      // Tiebreaker: popularity DESC (country-biased)
+      return getLeaguePopularity(Number(b.id), country) - getLeaguePopularity(Number(a.id), country);
     };
 
     return {
       myTeamMatches,
-      priorityLeagueGroups: [...priorityLeagueGroups].sort(byLiveFirst),
-      tier1Groups:          [...tier1Groups].sort(byLiveFirst),
-      tier2Groups:          [...tier2Groups].sort(byLiveFirst),
-      tier3Groups:          [...tier3Groups].sort(byLiveFirst),
+      priorityLeagueGroups: [...priorityLeagueGroups].sort(compareLeagues),
+      tier1Groups:          tier1Groups.sort(compareLeagues),
+      tier2Groups:          tier2Groups.sort(compareLeagues),
+      tier3Groups:          tier3Groups.sort(compareLeagues),
     };
-  }, [filteredLeagues, followedTeamIds, followedLeagueIds]);
+  }, [filteredLeagues, followedTeamIds, followedLeagueIds, country]);
 
   // Does the user have at least some personalization set up?
   const hasPersonalization = followedTeamIds.length > 0 || followedLeagueIds.length > 0;
 
   // True when the user has favorites configured but none of their teams/leagues
-  // play on the selected date → fall back to showing global top leagues automatically.
+  // play on the selected date → we still show the global queue below, but with
+  // a "Tus favoritos no juegan hoy, pero tenemos:" notice that frames it.
   const nothingPersonalToday =
     hasPersonalization &&
     myTeamMatches.length === 0 &&
     priorityLeagueGroups.length === 0;
 
-  // When no personal content is available, show tier 1 immediately (same as
-  // no-personalization), so the screen never looks empty.
-  const showTier1Immediately = !hasPersonalization || nothingPersonalToday;
+  // ── Global league queue + progressive reveal ─────────────────────────────
+  //
+  // We flatten all non-priority leagues (tier1 → tier2 → tier3, already
+  // sorted by country-weighted popularity inside each tier) into ONE ordered
+  // queue and reveal them in chunks of `LEAGUES_PER_BLOCK` per tap on
+  // "Cargar más partidos".
+  //
+  // The data is already in memory (fetched by `subscribeFixturesByDate`),
+  // so revealing more leagues is a pure UI operation — no extra Firestore
+  // reads. We chunk to keep the rendered list manageable and to let the
+  // user stop scrolling when leagues stop being interesting (popularity
+  // decreases as we go down the queue).
+  const LEAGUES_PER_BLOCK = 4;
 
-  // Progressive reveal queue:
-  //   showTier1Immediately → tier1 visible right away; queue = [tier2, tier3]
-  //   personalised + has content → queue = [tier1, tier2, tier3]
-  const revealQueue = useMemo<LeagueWithMatches[][]>(
-    () => showTier1Immediately
-      ? [tier2Groups, tier3Groups].filter(g => g.length > 0)
-      : [tier1Groups, tier2Groups, tier3Groups].filter(g => g.length > 0),
-    [showTier1Immediately, tier1Groups, tier2Groups, tier3Groups]
+  const globalQueue = useMemo<LeagueWithMatches[]>(
+    () => [...tier1Groups, ...tier2Groups, ...tier3Groups],
+    [tier1Groups, tier2Groups, tier3Groups]
   );
 
-  // How many tiers of `revealQueue` are currently expanded
-  const [revealed, setRevealed] = useState(0);
+  // Number of times the user has tapped "Cargar más partidos" (0 = only the
+  // first block of LEAGUES_PER_BLOCK is visible).
+  const [loadMoreClicks, setLoadMoreClicks] = useState(0);
 
   // Reset reveal when the date or active filter tab changes.
   // Also reset the active tab to 'todos' when navigating away from today —
   // filters like "En vivo" or "Finalizados" make no sense for other days.
   useEffect(() => {
-    setRevealed(0);
+    setLoadMoreClicks(0);
     if (!isToday(selectedDate)) setActiveTab('todos');
   }, [selectedDate, activeTab]);
 
-  // Groups currently visible from the queue
-  const revealedGroups  = revealQueue.slice(0, revealed);
-  const nextGroup       = revealQueue[revealed];         // next tier to show (undefined = all shown)
-  const hiddenAfterNext = revealQueue.slice(revealed + 1);
+  const visibleGlobalCount  = LEAGUES_PER_BLOCK * (loadMoreClicks + 1);
+  const visibleGlobalLeagues = globalQueue.slice(0, visibleGlobalCount);
+  const hiddenGlobalCount    = Math.max(0, globalQueue.length - visibleGlobalCount);
 
-  const nextMatchCount   = nextGroup?.reduce((s, lg) => s + lg.matches.length, 0) ?? 0;
-  const hiddenMatchCount = hiddenAfterNext.reduce((s, g) => s + g.reduce((ss, lg) => ss + lg.matches.length, 0), 0);
+  // Has the user got personal content (followed teams or leagues playing today)?
+  // When true, the Caliente banner sits between the personal block and the
+  // global block. When false, the banner sits AFTER the first
+  // `LEAGUES_PER_BLOCK` global leagues so it's never the first element shown.
+  const hasPersonalContent = myTeamMatches.length > 0 || priorityLeagueGroups.length > 0;
 
   const showDateLabel = !isToday(selectedDate);
 
@@ -390,29 +390,18 @@ export const PartidosScreen: React.FC = () => {
             </Text>
           </View>
         ) : (
-          <>
-            {/* ── Mis equipos (cross-league highlight) ─────────────────────── */}
-            {hasPersonalization && myTeamMatches.length > 0 && (
-              <LeagueSection
-                league={{
-                  id: '__my_teams__',
-                  name: t('matches.myTeams'),
-                  logo: '⭐',
-                  country: '',
-                  matches: myTeamMatches,
-                }}
-                index={0}
-                onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
-                onLeaguePress={() => {/* synthetic — no league detail */ }}
-              />
-            )}
-
-            {/* ── Ligas prioritarias (seguidas + inferidas de equipos) ──────── */}
-            {priorityLeagueGroups.map((league, idx) => (
+          (() => {
+            // ── Helper: render one global league section. Inlined to capture
+            //   `navigation` cleanly without prop drilling. Previously this
+            //   helper also intercalated rotating secondary banner ads
+            //   (amazon/corona) every 2nd league, but those mock ads were
+            //   removed in the v1.0 ad-cleanup — Caliente is the only paid
+            //   sponsor for v1.0 and it has its own fixed slot (see below).
+            const renderGlobalLeague = (league: LeagueWithMatches, idx: number) => (
               <LeagueSection
                 key={league.id}
                 league={league}
-                index={(myTeamMatches.length > 0 ? 1 : 0) + idx}
+                index={idx}
                 onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
                 onLeaguePress={lg => {
                   const seasonId = lg.matches[0]?.seasonId;
@@ -424,114 +413,135 @@ export const PartidosScreen: React.FC = () => {
                   });
                 }}
               />
-            ))}
+            );
 
-            {/* ── Aviso: favoritos sin partidos hoy → introduce la lista global ── */}
-            {nothingPersonalToday && (
-              <View style={{
-                marginHorizontal: 16, marginTop: 4, marginBottom: 2,
-                flexDirection: 'row', alignItems: 'center', gap: 6,
-              }}>
-                <Text style={{ fontSize: 11 }}>⭐</Text>
-                <Text style={{ fontSize: 13, color: c.textSecondary, flexShrink: 1 }}>
-                  {t('matches.noPersonalizedToday')}
-                </Text>
-              </View>
-            )}
-
-            {/* ── Caliente banner — below favorites notice / below priority leagues ── */}
-            <PlaceholderBannerAd variant="caliente-banner" />
-
-            {/* ── Tier 1 visible inmediatamente cuando no hay contenido personal ── */}
-            {showTier1Immediately && tier1Groups.map((league, idx) => (
-              <React.Fragment key={league.id}>
-                <LeagueSection
-                  league={league}
-                  index={idx}
-                  onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
-                  onLeaguePress={lg => {
-                    const seasonId = lg.matches[0]?.seasonId;
-                    navigation.navigate('LeagueDetail', {
-                      leagueId: Number(lg.id),
-                      leagueName: lg.name,
-                      leagueLogo: lg.logo,
-                      ...(seasonId ? { seasonId } : {}),
-                    });
-                  }}
-                />
-                {/* Ad after every 2nd league block */}
-                {(idx + 1) % 2 === 0 && (
-                  <PlaceholderBannerAd
-                    variant={Math.floor((idx + 1) / 2) % 2 === 1 ? 'amazon-banner' : 'corona-banner'}
+            return (
+              <>
+                {/* ── A. Mis equipos (cross-league highlight) ─────────────── */}
+                {hasPersonalization && myTeamMatches.length > 0 && (
+                  <LeagueSection
+                    league={{
+                      id: '__my_teams__',
+                      name: t('matches.myTeams'),
+                      logo: '⭐',
+                      country: '',
+                      matches: myTeamMatches,
+                    }}
+                    index={0}
+                    onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
+                    onLeaguePress={() => {/* synthetic — no league detail */ }}
                   />
                 )}
-              </React.Fragment>
-            ))}
 
-            {/* ── Tiers ya revelados (tras clicks en "Ver más") ────────────── */}
-            {revealedGroups.flatMap((group, gi) =>
-              group.map((league, idx) => (
-                <LeagueSection
-                  key={league.id}
-                  league={league}
-                  index={gi * 20 + idx}
-                  onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
-                  onLeaguePress={lg => {
-                    const seasonId = lg.matches[0]?.seasonId;
-                    navigation.navigate('LeagueDetail', {
-                      leagueId: Number(lg.id),
-                      leagueName: lg.name,
-                      leagueLogo: lg.logo,
-                      ...(seasonId ? { seasonId } : {}),
-                    });
-                  }}
-                />
-              ))
-            )}
+                {/* ── B. Ligas prioritarias (seguidas + inferidas) ────────── */}
+                {priorityLeagueGroups.map((league, idx) => (
+                  <LeagueSection
+                    key={league.id}
+                    league={league}
+                    index={(myTeamMatches.length > 0 ? 1 : 0) + idx}
+                    onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
+                    onLeaguePress={lg => {
+                      const seasonId = lg.matches[0]?.seasonId;
+                      navigation.navigate('LeagueDetail', {
+                        leagueId: Number(lg.id),
+                        leagueName: lg.name,
+                        leagueLogo: lg.logo,
+                        ...(seasonId ? { seasonId } : {}),
+                      });
+                    }}
+                  />
+                ))}
 
-            {/* ── "Ver más" button ─────────────────────────────────────────── */}
-            {nextGroup && nextMatchCount > 0 && (
-              <View style={{ marginHorizontal: 16, marginBottom: 8 }}>
-                <Text style={{
-                  fontSize: 12, color: c.textTertiary, textAlign: 'center',
-                  marginBottom: 10, lineHeight: 18,
-                }}>
-                  {t(isToday(selectedDate) ? 'matches.moreToday' : 'matches.moreOnDay')}
-                </Text>
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  onPress={() => setRevealed(r => r + 1)}
-                  style={{
-                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                    backgroundColor: c.surface, borderWidth: 1, borderColor: c.border,
-                    borderRadius: 14, paddingVertical: 14, paddingHorizontal: 20, gap: 8,
-                  }}
-                >
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: c.textPrimary }}>
-                    {t('matches.showMoreMatches', { count: nextMatchCount })}
-                  </Text>
-                  {hiddenMatchCount > 0 && (
-                    <Text style={{
-                      fontSize: 12, fontWeight: '500',
-                      color: c.textTertiary,
-                      backgroundColor: c.bg,
-                      paddingHorizontal: 8, paddingVertical: 3,
-                      borderRadius: 20,
-                    }}>
-                      {t('matches.showMoreRemaining', { remaining: hiddenMatchCount })}
+                {/* ── C. Aviso "favoritos no juegan hoy" → introduce lista global ─ */}
+                {nothingPersonalToday && (
+                  <View style={{
+                    marginHorizontal: 16, marginTop: 4, marginBottom: 2,
+                    flexDirection: 'row', alignItems: 'center', gap: 6,
+                  }}>
+                    <Text style={{ fontSize: 11 }}>⭐</Text>
+                    <Text style={{ fontSize: 13, color: c.textSecondary, flexShrink: 1 }}>
+                      {t('matches.noPersonalizedToday')}
                     </Text>
-                  )}
-                  {/* Chevron › */}
-                  <View style={{ marginLeft: 2 }}>
-                    <View style={{ width: 6, height: 1.5, backgroundColor: c.textTertiary, borderRadius: 1,
-                      transform: [{ rotate: '45deg' }, { translateY: -2 }] }} />
-                    <View style={{ width: 6, height: 1.5, backgroundColor: c.textTertiary, borderRadius: 1,
-                      transform: [{ rotate: '-45deg' }, { translateY: 2 }] }} />
                   </View>
-                </TouchableOpacity>
-              </View>
-            )}
-          </>
+                )}
+
+                {/* ── D. Global leagues + Caliente banner ──────────────────────
+                   Banner placement depends on whether there's personal content
+                   above. The rule is: the Caliente banner is NEVER the first
+                   element on screen — it always sits below at least one block
+                   of league sections.
+
+                     • hasPersonalContent → banner anchors between the personal
+                       section (mis equipos + ligas prioritarias) and the
+                       global queue. All visible globals follow below.
+
+                     • !hasPersonalContent → banner anchors after the first
+                       `LEAGUES_PER_BLOCK` global leagues. Each tap on
+                       "Cargar más partidos" reveals 4 more leagues BELOW the
+                       banner. The banner stays put as a fixed visual divider.
+                   ───────────────────────────────────────────────────────── */}
+                {hasPersonalContent ? (
+                  <>
+                    {/* Caliente banner — gated off for v1.0 (no agreement + Apple 2.3.6) */}
+                    {BETTING_CONTENT_ENABLED && <PlaceholderBannerAd variant="caliente-banner" />}
+                    {visibleGlobalLeagues.map((lg, idx) => renderGlobalLeague(lg, idx))}
+                  </>
+                ) : (
+                  <>
+                    {/* First chunk: up to LEAGUES_PER_BLOCK leagues above the banner. */}
+                    {visibleGlobalLeagues.slice(0, LEAGUES_PER_BLOCK).map((lg, idx) =>
+                      renderGlobalLeague(lg, idx)
+                    )}
+
+                    {/* Banner only when there's at least one league above — keeps
+                       the rule "banner never alone, never first". Gated off for v1.0. */}
+                    {BETTING_CONTENT_ENABLED && visibleGlobalLeagues.length > 0 && (
+                      <PlaceholderBannerAd variant="caliente-banner" />
+                    )}
+
+                    {/* Remaining visible leagues (revealed by "Cargar más"). */}
+                    {visibleGlobalLeagues.slice(LEAGUES_PER_BLOCK).map((lg, relIdx) =>
+                      renderGlobalLeague(lg, relIdx + LEAGUES_PER_BLOCK)
+                    )}
+                  </>
+                )}
+
+                {/* ── E. "Cargar más partidos" — reveals next 4 leagues ───── */}
+                {hiddenGlobalCount > 0 && (
+                  <View style={{ marginHorizontal: 16, marginBottom: 8, marginTop: 4 }}>
+                    <Text style={{
+                      fontSize: 12, color: c.textTertiary, textAlign: 'center',
+                      marginBottom: 10, lineHeight: 18,
+                    }}>
+                      {t(isToday(selectedDate) ? 'matches.moreToday' : 'matches.moreOnDay')}
+                    </Text>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => setLoadMoreClicks(n => n + 1)}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('matches.loadMore')}
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                        backgroundColor: c.surface, borderWidth: 1, borderColor: c.border,
+                        borderRadius: 14, paddingVertical: 14, paddingHorizontal: 20, gap: 10,
+                      }}
+                    >
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: c.textPrimary }}>
+                        {t('matches.loadMore')}
+                      </Text>
+                      {/* Chevron › */}
+                      <View>
+                        <View style={{ width: 6, height: 1.5, backgroundColor: c.textTertiary, borderRadius: 1,
+                          transform: [{ rotate: '45deg' }, { translateY: -2 }] }} />
+                        <View style={{ width: 6, height: 1.5, backgroundColor: c.textTertiary, borderRadius: 1,
+                          transform: [{ rotate: '-45deg' }, { translateY: 2 }] }} />
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </>
+            );
+          })()
         )}
         <View style={{ height: 80 }} />
       </ScrollView>
@@ -547,11 +557,6 @@ export const PartidosScreen: React.FC = () => {
       )}
 
       <CalendarPicker visible={showCalendar} selectedDate={selectedDate} onSelectDate={handleCalendarSelect} onClose={() => setShowCalendar(false)} onGoToday={() => { handleGoToday(); setShowCalendar(false); }} />
-
-      <ATTModal visible={showATT} onContinue={handleATTContinue} onSkip={handleATTSkip} />
-
-      {/* World Cup 2026 floating countdown — auto-hides after July 19, 2026 */}
-      <WorldCupBanner />
 
     </SafeAreaView>
   );

@@ -48,6 +48,7 @@ interface RecentSearch {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 import { normalize } from '../utils/normalize';
+import { isImageUri } from '../utils/imageUri';
 
 /** Drop later occurrences of any id we've already seen.
  *  Defensive against SportMonks data where multiple records can share a
@@ -243,7 +244,7 @@ export const GlobalSearchScreen: React.FC = () => {
           type: 'team',
           name: team.name,
           subtitle: team.leagueName,
-          image: team.logo.startsWith('http') ? team.logo : undefined,
+          image: isImageUri(team.logo) ? team.logo : undefined,
           data: team,
         });
       }
@@ -257,7 +258,7 @@ export const GlobalSearchScreen: React.FC = () => {
           type: 'player',
           name: p.name,
           subtitle: p.teamName ?? '',
-          image: p.image?.startsWith('http') ? p.image : undefined,
+          image: isImageUri(p.image) ? p.image : undefined,
           data: p,
         });
       }
@@ -311,7 +312,7 @@ export const GlobalSearchScreen: React.FC = () => {
             type: 'team',
             name: team.name,
             subtitle: team.leagueName,
-            image: team.logo.startsWith('http') ? team.logo : undefined,
+            image: isImageUri(team.logo) ? team.logo : undefined,
             data: team,
           });
         }
@@ -324,7 +325,7 @@ export const GlobalSearchScreen: React.FC = () => {
           type: 'player',
           name: player.name,
           subtitle: player.teamName || t('search.labelPlayer'),
-          image: player.image?.startsWith('http') ? player.image : undefined,
+          image: isImageUri(player.image) ? player.image : undefined,
           data: player,
         });
       }

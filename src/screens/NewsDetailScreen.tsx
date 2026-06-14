@@ -4,6 +4,7 @@ import {
   Animated, Dimensions, Share, Platform, Image,
 } from 'react-native';
 import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
+import { BETTING_CONTENT_ENABLED } from '../config/features';
 import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -351,7 +352,7 @@ export const NewsDetailScreen: React.FC = () => {
           {/* Article body — text paragraphs and inline images interleaved.
                MREC ad is injected after the first content block. */}
           {blocks.slice(0, 1).map((b, i) => renderBlock(b, i, c.textSecondary))}
-          <PlaceholderBannerAd variant="caliente-mrec" />
+          {BETTING_CONTENT_ENABLED && <PlaceholderBannerAd variant="caliente-mrec" />}
           {blocks.slice(1).map((b, i) => renderBlock(b, i + 1, c.textSecondary))}
 
           {/* Tags row */}
@@ -436,8 +437,6 @@ export const NewsDetailScreen: React.FC = () => {
             )}
           </View>
 
-          {/* Small rectangular banner at bottom of every article */}
-          <PlaceholderBannerAd variant="telcel-banner" />
         </View>
       </Animated.ScrollView>
     </View>

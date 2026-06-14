@@ -16,8 +16,16 @@ import React, {
 import {
   View, Text, StyleSheet, Animated, TouchableOpacity, FlatList, ScrollView,
   TextInput, Image, ImageBackground, Dimensions, Platform, ActivityIndicator,
-  Easing, KeyboardAvoidingView, Alert,
+  Easing, KeyboardAvoidingView, Alert, PanResponder,
 } from 'react-native';
+import {
+  getRecentFixturesByTeam,
+  getStandingsFromFirestore,
+  getTopScorersFromFirestore,
+  type FirestoreTopScorer,
+} from '../../services/firestoreApi';
+import { getStandings as getStandingsFromApi } from '../../services/sportsApi';
+import type { Match, LeagueStanding } from '../../data/types';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,14 +35,29 @@ import { useDarkMode } from '../../contexts/DarkModeContext';
 import { useFavorites } from '../../contexts/FavoritesContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotificationPrefs } from '../../contexts/NotificationPrefsContext';
-import { getSearchableTeams, getSearchableLeagues, getSearchablePlayers } from '../../services/sportsApi';
+import {
+  getSearchableTeams,
+  getSearchableLeagues,
+  getSearchablePlayers,
+  getAllSearchableTeams,
+  getAllSearchablePlayers,
+} from '../../services/sportsApi';
+import {
+  buildOnboardingTeamGrid,
+  buildOnboardingPlayerNames,
+} from '../../services/onboardingGrid';
+import { getCountryPreset } from '../../config/countryPresets';
+import { getLeaguePopularity } from '../../config/leagues';
+import { useUserCountry } from '../../hooks/useUserCountry';
 import { normalize } from '../../utils/normalize';
 import { requestPermissionsAndGetToken } from '../../services/notifications';
+import { initializeFCM } from '../../services/fcmInit';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useGoogleAuth } from '../../services/authGoogle';
 import { signInWithApple, isAppleAuthAvailable } from '../../services/authApple';
 import type { SearchableTeam, SearchableLeague, SearchablePlayer } from '../../services/sportsApi';
 import type { AuthMethod } from '../../contexts/AuthContext';
+import { isImageUri } from '../../utils/imageUri';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -128,7 +151,7 @@ const MX_TEAM_IDS = new Set([2687, 427, 2626, 609, 2662, 2989, 2844, 967, 10036,
 const EU_TEAM_IDS = new Set([53, 83, 1044, 42, 496]);
 
 // ── State shape ───────────────────────────────────────────────────────────────
-type FanLevel = 'casual' | 'fan' | 'analista';
+type FanLevel = 'espectador' | 'casual' | 'fan' | 'analista';
 
 type NotifKey = 'goals' | 'kickoff' | 'results' | 'lineups' | 'transfers' | 'news';
 
@@ -138,14 +161,21 @@ type OnboardingState = {
   playerIds: number[];
   leagueIds: number[];
   notifications: Record<NotifKey, boolean>;
+  /**
+   * 🏟️ Modo Estadio: when ON, the app delays match notifications by N minutes
+   * to avoid spoiling live action while the user is at the stadium watching
+   * the match in person. Hooks into NotificationPrefsContext.estadioMode.
+   */
+  stadiumMode: boolean;
   name: string;
   authMethod: AuthMethod | null;
 };
 
 const DEFAULT_NOTIFS_BY_LEVEL: Record<FanLevel, Record<NotifKey, boolean>> = {
-  casual:   { goals: false, kickoff: false, results: true,  lineups: true,  transfers: false, news: false },
-  fan:      { goals: true,  kickoff: true,  results: true,  lineups: true,  transfers: false, news: false },
-  analista: { goals: true,  kickoff: true,  results: true,  lineups: true,  transfers: true,  news: true  },
+  espectador: { goals: false, kickoff: false, results: false, lineups: false, transfers: false, news: false },
+  casual:     { goals: false, kickoff: false, results: true,  lineups: false, transfers: false, news: false },
+  fan:        { goals: true,  kickoff: true,  results: true,  lineups: true,  transfers: false, news: false },
+  analista:   { goals: true,  kickoff: true,  results: true,  lineups: true,  transfers: true,  news: true  },
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -283,7 +313,7 @@ const toCountryKey = (country: string) =>
 // SmartLogo
 const SmartLogo: React.FC<{ uri: string; size?: number; round?: boolean; fallback?: string }> = ({ uri, size = 40, round, fallback }) => {
   const [failed, setFailed] = useState(false);
-  if (uri && uri.startsWith('http') && !failed) {
+  if (uri && isImageUri(uri) && !failed) {
     return (
       <Image
         source={{ uri }}
@@ -322,8 +352,8 @@ const Screen1Welcome: React.FC<{ onNext: () => void }> = ({ onNext }) => {
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
   const bgImage = th.isDark
-    ? require('../../../assets/DarkModeAnalistas.png')
-    : require('../../../assets/LightModeAnalistas.png');
+    ? require('../../../assets/Medida_night.png')
+    : require('../../../assets/Medida_light.png');
 
   const logoOpacity  = useRef(new Animated.Value(0)).current;
   const logoY        = useRef(new Animated.Value(-10)).current;
@@ -477,8 +507,16 @@ const s1 = StyleSheet.create({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 2 — Fan Level
+// SCREEN 2 — Fan Level (slider)
 // ─────────────────────────────────────────────────────────────────────────────
+
+const LEVELS_DATA: { key: FanLevel; emoji: string; title: string; desc: string; color: string; glow: string }[] = [
+  { key: 'espectador', emoji: '👀', title: 'Espectador', desc: 'Solo los clásicos y grandes finales', color: '#6B7280', glow: 'rgba(107,114,128,0.30)' },
+  { key: 'casual',     emoji: '🙂', title: 'Casual',     desc: 'Sigo mi equipo cuando puedo',        color: '#38bdf8', glow: 'rgba(56,189,248,0.35)' },
+  { key: 'fan',        emoji: '⚽', title: 'Fan',         desc: 'Cada partido, cada resultado',        color: '#2E7CF6', glow: 'rgba(46,124,246,0.42)' },
+  { key: 'analista',   emoji: '🔥', title: 'Analista',   desc: 'El fútbol es mi segundo idioma',      color: '#F5B800', glow: 'rgba(245,184,0,0.42)' },
+];
+
 const Screen2FanLevel: React.FC<{
   selected: FanLevel | null;
   onSelect: (l: FanLevel) => void;
@@ -490,47 +528,197 @@ const Screen2FanLevel: React.FC<{
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
 
-  const options: { key: FanLevel; icon: string; title: string; sub: string }[] = [
-    { key: 'casual',   icon: '🙂', title: t('onboarding.casual'),   sub: t('onboarding.casualSub') },
-    { key: 'fan',      icon: '⚽', title: t('onboarding.fan'),      sub: t('onboarding.fanSub') },
-    { key: 'analista', icon: '🔥', title: t('onboarding.analista'), sub: t('onboarding.analistaSub') },
-  ];
+  // Start on 'fan' (index 2) by default; sync to `selected` on mount
+  const initIdx = Math.max(0, LEVELS_DATA.findIndex(l => l.key === selected));
+  const [levelIdx, setLevelIdx] = useState(initIdx >= 0 && selected ? initIdx : 2);
+  const level = LEVELS_DATA[levelIdx];
+
+  // Slider geometry — computed after layout
+  const trackRef     = useRef<View>(null);
+  const trackPageX   = useRef(0);
+  const trackW       = useRef(SCREEN_W - SIDE_PAD * 2); // updated on layout
+  const thumbAnim    = useRef(new Animated.Value(0)).current;
+  const levelIdxRef  = useRef(levelIdx);
+  levelIdxRef.current = levelIdx;
+
+  // Compute snap x-positions (thumb left, 0 = leftmost snap)
+  // thumb is 48px wide; we use the full track width so the thumb overflows edges
+  const snapX = (idx: number) => (idx / 3) * Math.max(trackW.current - 48, 1);
+
+  // Snap thumb to index + call onSelect if changed
+  const snapToRef = useRef((idx: number) => {
+    const x = snapX(idx);
+    Animated.spring(thumbAnim, { toValue: x, useNativeDriver: false, tension: 180, friction: 12 }).start();
+    if (levelIdxRef.current !== idx) {
+      levelIdxRef.current = idx;
+      setLevelIdx(idx);
+      onSelect(LEVELS_DATA[idx].key);
+      Haptics.selectionAsync();
+    }
+  });
+
+  // Always keep snapToRef current (avoids stale closure in PanResponder)
+  useEffect(() => {
+    snapToRef.current = (idx: number) => {
+      const x = snapX(idx);
+      Animated.spring(thumbAnim, { toValue: x, useNativeDriver: false, tension: 180, friction: 12 }).start();
+      if (levelIdxRef.current !== idx) {
+        levelIdxRef.current = idx;
+        setLevelIdx(idx);
+        onSelect(LEVELS_DATA[idx].key);
+        Haptics.selectionAsync();
+      }
+    };
+  });
+
+  // Initialize thumb + trigger first selection
+  useEffect(() => {
+    const idx = selected ? Math.max(0, LEVELS_DATA.findIndex(l => l.key === selected)) : 2;
+    const finalIdx = idx >= 0 ? idx : 2;
+    thumbAnim.setValue(snapX(finalIdx));
+    if (!selected) onSelect(LEVELS_DATA[finalIdx].key);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Convert pageX → nearest level index
+  const pageXToIdx = (pageX: number) => {
+    const relX = pageX - trackPageX.current;
+    const pct  = Math.max(0, Math.min(1, relX / (trackW.current - 48 || 1)));
+    return Math.round(pct * 3);
+  };
+
+  const panResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder:  () => true,
+    onPanResponderGrant:   (e) => snapToRef.current(pageXToIdx(e.nativeEvent.pageX)),
+    onPanResponderMove:    (e) => snapToRef.current(pageXToIdx(e.nativeEvent.pageX)),
+    onPanResponderRelease: (e) => snapToRef.current(pageXToIdx(e.nativeEvent.pageX)),
+  })).current;
+
+  const fillWidth = thumbAnim.interpolate({
+    inputRange: [0, Math.max(trackW.current - 48, 1)],
+    outputRange: ['0%', '100%'],
+    extrapolate: 'clamp',
+  });
 
   return (
-    <View style={[base.screen, { paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
+    <View style={[base.screen, { backgroundColor: th.BG, paddingBottom: insets.bottom + 16 }]}>
       <TopBar dotIndex={0} onBack={onBack} onSkip={onSkip} skipLabel={t('onboarding.skip')} />
 
-      <ScrollView contentContainerStyle={base.scrollContent} showsVerticalScrollIndicator={false}>
+      <View style={{ flex: 1, paddingHorizontal: SIDE_PAD }}>
         <Text style={[base.headline, { color: th.TEXT_PRIMARY }]}>{t('onboarding.fanLevelTitle')}</Text>
         <Text style={[base.sub, { color: th.TEXT_DIM }]}>{t('onboarding.fanLevelSub')}</Text>
 
-        <View style={{ gap: 12, marginTop: 24 }}>
-          {options.map(opt => {
-            const isSelected = selected === opt.key;
-            return (
-              <TouchableOpacity
-                key={opt.key}
-                onPress={() => { Haptics.selectionAsync(); onSelect(opt.key); }}
-                activeOpacity={0.85}
-              >
-                <View style={[s2.card, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#222' : '#E5E7EB' }, isSelected && { backgroundColor: th.BLUE_DIM, borderColor: BLUE }]}>
-                  <View style={[s2.iconBox, { backgroundColor: th.isDark ? '#1E1E1E' : '#F3F4F6' }, isSelected && { backgroundColor: th.BLUE_DIM }]}>
-                    <Text style={{ fontSize: 24 }}>{opt.icon}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[s2.cardTitle, { color: th.TEXT_PRIMARY }, isSelected && { color: BLUE }]}>{opt.title}</Text>
-                    <Text style={[s2.cardSub, { color: th.TEXT_DIM }]}>{opt.sub}</Text>
-                  </View>
-                  {/* Radio */}
-                  <View style={[s2.radio, { borderColor: th.isDark ? '#444' : '#D1D5DB' }, isSelected && { borderColor: BLUE }]}>
-                    {isSelected && <View style={s2.radioDot} />}
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+        {/* ── Hero card ── */}
+        <View style={{ flex: 1, justifyContent: 'center', paddingVertical: 8 }}>
+          <LinearGradient
+            colors={[`${level.color}18`, th.isDark ? '#111' : '#F8F8F8']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={[s2.heroCard, { borderColor: `${level.color}30` }]}
+          >
+            {/* Decorative blob */}
+            <View style={[s2.heroBlob, { backgroundColor: `${level.color}12` }]} />
+            {/* Emoji */}
+            <Text style={s2.heroEmoji}>{level.emoji}</Text>
+            {/* Level name */}
+            <Text
+              style={[s2.heroTitle, { color: th.TEXT_PRIMARY }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.6}
+            >
+              {level.title.toUpperCase()}
+            </Text>
+            {/* Description */}
+            <Text style={[s2.heroDesc, { color: th.TEXT_DIM }]}>{level.desc}</Text>
+            {/* Intensity bars: 1 bar per level filled up to current */}
+            <View style={s2.barsRow}>
+              {LEVELS_DATA.map((_, i) => (
+                <View
+                  key={i}
+                  style={[s2.intensityBar, { backgroundColor: i <= levelIdx ? level.color : th.isDark ? '#262626' : '#E5E7EB' }]}
+                />
+              ))}
+            </View>
+          </LinearGradient>
         </View>
-      </ScrollView>
+
+        {/* ── Slider ── */}
+        <View style={s2.sliderSection}>
+          <Text style={[s2.sliderHint, { color: th.isDark ? '#3A3A3A' : '#BBBBBB' }]}>
+            {t('onboarding.sliderHint').toUpperCase()}
+          </Text>
+
+          {/* Track area — PanResponder target */}
+          <View
+            ref={trackRef}
+            style={s2.trackContainer}
+            onLayout={() => {
+              trackRef.current?.measure((_fx, _fy, width, _height, px, _py) => {
+                trackPageX.current = px;
+                trackW.current = width;
+                // re-snap to current level with new width
+                const x = snapX(levelIdxRef.current);
+                thumbAnim.setValue(x);
+              });
+            }}
+            {...panResponder.panHandlers}
+          >
+            {/* Track bar */}
+            <View style={[s2.track, { backgroundColor: th.isDark ? '#1E1E1E' : '#E5E7EB' }]}>
+              <Animated.View style={[s2.trackFill, { width: fillWidth, backgroundColor: level.color }]} />
+            </View>
+
+            {/* Snap dots */}
+            {LEVELS_DATA.map((_, i) => (
+              <View
+                key={i}
+                style={[
+                  s2.snapDot,
+                  {
+                    left: `${(i / 3) * 100}%`,
+                    backgroundColor:
+                      i < levelIdx  ? level.color :
+                      i === levelIdx ? 'transparent' :
+                                       (th.isDark ? '#2D2D2D' : '#D1D5DB'),
+                  },
+                ]}
+              />
+            ))}
+
+            {/* Thumb */}
+            <Animated.View
+              style={[
+                s2.thumb,
+                {
+                  backgroundColor: level.color,
+                  left: thumbAnim,
+                  shadowColor: level.color,
+                  shadowOpacity: 0.6,
+                  shadowRadius: 12,
+                  elevation: 8,
+                },
+              ]}
+            >
+              <Text style={{ fontSize: 22 }}>{level.emoji}</Text>
+            </Animated.View>
+          </View>
+
+          {/* Level labels — also tappable */}
+          <View style={s2.labelsRow}>
+            {LEVELS_DATA.map((lv, i) => (
+              <TouchableOpacity
+                key={lv.key}
+                onPress={() => snapToRef.current(i)}
+                style={{ flex: 1, alignItems: 'center', paddingVertical: 4 }}
+              >
+                <Text style={[s2.labelText, { color: i === levelIdx ? level.color : (th.isDark ? '#444' : '#AAAAAA') }]}>
+                  {lv.title.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </View>
 
       <CTAButton label={t('onboarding.continue')} onPress={onNext} disabled={!selected} />
     </View>
@@ -538,22 +726,49 @@ const Screen2FanLevel: React.FC<{
 };
 
 const s2 = StyleSheet.create({
-  card: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    borderRadius: 16, borderWidth: 1.5,
-    padding: 16,
+  heroCard: {
+    borderRadius: 24, borderWidth: 1.5, padding: 28,
+    overflow: 'hidden', alignItems: 'center', position: 'relative',
   },
-  iconBox: {
-    width: 48, height: 48, borderRadius: 12,
+  heroBlob: {
+    position: 'absolute', top: -40, right: -40,
+    width: 220, height: 220, borderRadius: 110,
+  },
+  heroEmoji: { fontSize: 64 },
+  heroTitle: {
+    fontSize: 46, fontWeight: '900', textTransform: 'uppercase',
+    lineHeight: 50, marginTop: 10, letterSpacing: -0.5,
+  },
+  heroDesc: { fontSize: 15, marginTop: 8, textAlign: 'center', lineHeight: 21 },
+  barsRow: { flexDirection: 'row', gap: 6, marginTop: 20, width: '100%' },
+  intensityBar: { flex: 1, height: 4, borderRadius: 2 },
+  sliderSection: { paddingBottom: 8 },
+  sliderHint: {
+    fontSize: 10, fontWeight: '600', letterSpacing: 1.0,
+    textAlign: 'center', marginBottom: 18,
+  },
+  trackContainer: {
+    height: 56, justifyContent: 'center', position: 'relative',
+    overflow: 'visible',
+  },
+  track: {
+    height: 6, borderRadius: 3, marginHorizontal: 24,
+    overflow: 'hidden', position: 'relative',
+  },
+  trackFill: {
+    position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 3,
+  },
+  snapDot: {
+    position: 'absolute', width: 8, height: 8, borderRadius: 4,
+    top: '50%', marginTop: -4, marginLeft: 20, // 24 track margin - 4 half dot
+  },
+  thumb: {
+    position: 'absolute', top: 4,  // center in 56px container: (56-48)/2
+    width: 48, height: 48, borderRadius: 24,
     alignItems: 'center', justifyContent: 'center',
   },
-  cardTitle: { fontSize: 22, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
-  cardSub: { fontSize: 13, marginTop: 2 },
-  radio: {
-    width: 22, height: 22, borderRadius: 11, borderWidth: 2,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: BLUE },
+  labelsRow: { flexDirection: 'row', marginTop: 6 },
+  labelText: { fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -578,11 +793,32 @@ const TeamCard: React.FC<{
     <TouchableOpacity onPress={handlePress} activeOpacity={0.85} style={{ width: CARD_W, marginBottom: CARD_GAP }}>
       <Animated.View style={[s3.card, { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#222' : '#E5E7EB' }, selected && { backgroundColor: th.BLUE_DIM, borderColor: BLUE }, { transform: [{ scale }] }]}>
         <SmartLogo uri={team.logo} size={38} />
-        <Text style={[s3.name, { color: th.TEXT_PRIMARY }, selected && { color: BLUE }]} numberOfLines={1}>{team.shortName}</Text>
+        <Text
+          style={[s3.name, { color: th.TEXT_PRIMARY }, selected && { color: BLUE }]}
+          numberOfLines={2}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+        >
+          {team.name}
+        </Text>
         {selected && <View style={s3.check}><CheckIcon size={10} /></View>}
       </Animated.View>
     </TouchableOpacity>
   );
+});
+
+// Shared "Mostrar más" button styles — reused by teams + players screens
+const showMoreS = StyleSheet.create({
+  btn: {
+    marginTop: 12,
+    marginHorizontal: 4,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnText: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3 },
 });
 
 const s3 = StyleSheet.create({
@@ -598,8 +834,14 @@ const s3 = StyleSheet.create({
   },
 });
 
+const INITIAL_TEAM_GRID = 18;
+const TEAM_GRID_STEP    = 9;
+
 const Screen3Teams: React.FC<{
+  /** Curated, country-ordered list shown in the grid (~50-100 items). */
   teams: SearchableTeam[];
+  /** Full searchable catalog (~1,300 items). Used ONLY when query is non-empty. */
+  allTeams: SearchableTeam[];
   loading: boolean;
   selectedIds: number[];
   onToggle: (id: number) => void;
@@ -607,17 +849,35 @@ const Screen3Teams: React.FC<{
   onNext: () => void;
   onBack: () => void;
   onSkip: () => void;
-}> = ({ teams, loading, selectedIds, onToggle, fanLevel, onNext, onBack, onSkip }) => {
+}> = ({ teams, allTeams, loading, selectedIds, onToggle, fanLevel, onNext, onBack, onSkip }) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
-  const [query, setQuery] = useState('');
+  const [query, setQuery]                 = useState('');
+  const [visibleCount, setVisibleCount]   = useState(INITIAL_TEAM_GRID);
 
+  // Search hits the FULL catalog so niche clubs (e.g. Atlante in Liga Expansión,
+  // Cruzeiro in Brasileirão) are findable. Without a query, show the curated
+  // grid — but PREPEND any team the user has already selected that isn't in
+  // the curated slice. Without this, a user who searched for Cruzeiro and
+  // tapped to follow had no way to see / un-follow it from the main grid
+  // (they'd have to re-search by name). Selected non-grid picks now stay
+  // visible at the top alongside the default suggestions, with the existing
+  // selected-state styling.
   const filtered = useMemo(() => {
-    if (!query.trim()) return teams;
-    const q = normalize(query);
-    return teams.filter(t2 => normalize(t2.name).includes(q) || normalize(t2.shortName).includes(q));
-  }, [teams, query]);
+    if (query.trim()) {
+      const q = normalize(query);
+      return allTeams.filter(t2 =>
+        normalize(t2.name).includes(q) || normalize(t2.shortName).includes(q),
+      );
+    }
+    const curated = teams.slice(0, visibleCount);
+    const curatedIds = new Set(curated.map(t => t.id));
+    const extras = allTeams.filter(t => selectedIds.includes(t.id) && !curatedIds.has(t.id));
+    return [...extras, ...curated];
+  }, [teams, allTeams, query, visibleCount, selectedIds]);
+
+  const canShowMore = !query.trim() && visibleCount < teams.length;
 
   const renderItem = useCallback(({ item }: { item: SearchableTeam }) => (
     <TeamCard
@@ -627,7 +887,7 @@ const Screen3Teams: React.FC<{
     />
   ), [selectedIds, onToggle]);
 
-  const headline = fanLevel === 'casual' ? t('onboarding.teamsTitleCasual') : t('onboarding.teamsTitle');
+  const headline = (fanLevel === 'casual' || fanLevel === 'espectador') ? t('onboarding.teamsTitleCasual') : t('onboarding.teamsTitle');
   const countLabel = t('onboarding.teamsSelected', { count: selectedIds.length });
 
   return (
@@ -675,6 +935,25 @@ const Screen3Teams: React.FC<{
             contentContainerStyle={{ paddingBottom: 12 }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            ListFooterComponent={
+              canShowMore ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setVisibleCount(v => v + TEAM_GRID_STEP);
+                  }}
+                  activeOpacity={0.85}
+                  style={[
+                    showMoreS.btn,
+                    { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#333' : '#E5E7EB' },
+                  ]}
+                >
+                  <Text style={[showMoreS.btnText, { color: BLUE }]}>
+                    {t('onboarding.showMore', { defaultValue: 'Mostrar más' })}
+                  </Text>
+                </TouchableOpacity>
+              ) : null
+            }
           />
         )}
       </View>
@@ -775,8 +1054,14 @@ const s4 = StyleSheet.create({
   },
 });
 
+const INITIAL_PLAYER_GRID = 15;
+const PLAYER_GRID_STEP    = 9;
+
 const Screen4Players: React.FC<{
+  /** Curated, country-ordered list shown by default (~50 items). */
   players: SearchablePlayer[];
+  /** Full searchable catalog (~750 items). Used ONLY when query is non-empty. */
+  allPlayers: SearchablePlayer[];
   loading: boolean;
   selectedTeamIds: number[];
   selectedIds: number[];
@@ -785,27 +1070,42 @@ const Screen4Players: React.FC<{
   onBack: () => void;
   onSkip: () => void;
   teamNames: string[];
-}> = ({ players, loading, selectedTeamIds, selectedIds, onToggle, onNext, onBack, onSkip, teamNames }) => {
+}> = ({ players, allPlayers, loading, selectedTeamIds, selectedIds, onToggle, onNext, onBack, onSkip, teamNames }) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
-  const [query, setQuery] = useState('');
+  const [query, setQuery]               = useState('');
+  const [visibleCount, setVisibleCount] = useState(INITIAL_PLAYER_GRID);
 
   const filtered = useMemo(() => {
     // Filter out players with invalid/duplicate IDs first
-    const seen = new Set<number>();
-    const validPlayers = players.filter(p => {
-      if (!p.id || p.id <= 0 || seen.has(p.id)) return false;
-      seen.add(p.id);
-      return true;
-    });
-    if (!query.trim()) return validPlayers;
-    const q = normalize(query);
-    return validPlayers.filter(p =>
-      normalize(p.name).includes(q) ||
-      (p.teamName && normalize(p.teamName).includes(q)),
-    );
-  }, [players, query]);
+    const dedupe = (list: SearchablePlayer[]) => {
+      const seen = new Set<number>();
+      return list.filter(p => {
+        if (!p.id || p.id <= 0 || seen.has(p.id)) return false;
+        seen.add(p.id);
+        return true;
+      });
+    };
+    if (query.trim()) {
+      const q = normalize(query);
+      const valid = dedupe(allPlayers);
+      return valid.filter(p =>
+        normalize(p.name).includes(q) ||
+        (p.teamName && normalize(p.teamName).includes(q)),
+      );
+    }
+    // No query: curated suggestions + selected-but-not-in-curated picks.
+    // Same rationale as Screen3Teams — a user who searched and tapped a
+    // niche player needs to be able to see that selection in the default
+    // view, otherwise the only way to deselect is to re-search by name.
+    const curated = dedupe(players).slice(0, visibleCount);
+    const curatedIds = new Set(curated.map(p => p.id));
+    const extras = dedupe(allPlayers).filter(p => selectedIds.includes(p.id) && !curatedIds.has(p.id));
+    return [...extras, ...curated];
+  }, [players, allPlayers, query, visibleCount, selectedIds]);
+
+  const canShowMore = !query.trim() && visibleCount < players.length;
 
   const countLabel = t('onboarding.playersSelected', { count: selectedIds.length });
 
@@ -862,6 +1162,25 @@ const Screen4Players: React.FC<{
             contentContainerStyle={{ paddingBottom: 12 }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            ListFooterComponent={
+              canShowMore ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setVisibleCount(v => v + PLAYER_GRID_STEP);
+                  }}
+                  activeOpacity={0.85}
+                  style={[
+                    showMoreS.btn,
+                    { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#333' : '#E5E7EB' },
+                  ]}
+                >
+                  <Text style={[showMoreS.btnText, { color: GOLD }]}>
+                    {t('onboarding.showMore', { defaultValue: 'Mostrar más' })}
+                  </Text>
+                </TouchableOpacity>
+              ) : null
+            }
           />
         )}
       </View>
@@ -903,12 +1222,16 @@ const LeagueRow: React.FC<{
           <SmartLogo uri={league.image} size={30} fallback={league.flag} />
         </View>
 
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={s5.flag}>{league.flag}</Text>
-            <Text style={[s5.name, { color: th.TEXT_PRIMARY }, selected && { color: BLUE }]} numberOfLines={1}>{league.name}</Text>
-          </View>
-          <Text style={[s5.country, { color: th.TEXT_DIM }]}>{t(`countries.${toCountryKey(league.country)}` as any, { defaultValue: league.country })}</Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            style={[s5.name, { color: th.TEXT_PRIMARY }, selected && { color: BLUE }]}
+            numberOfLines={1}
+          >
+            {league.name}
+          </Text>
+          <Text style={[s5.country, { color: th.TEXT_DIM }]} numberOfLines={1}>
+            {t(`countries.${toCountryKey(league.country)}` as any, { defaultValue: league.country })}
+          </Text>
         </View>
 
         {isSuggested && (
@@ -1007,142 +1330,391 @@ const Screen6Feed: React.FC<{
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
 
-  const cardAnims = [0, 150, 300, 450].map(delay => {
-    const opacity = useRef(new Animated.Value(0)).current;
-    const translateY = useRef(new Animated.Value(30)).current;
-    return { opacity, translateY, delay };
-  });
+  // ── Real Firestore data ────────────────────────────────────────────────────
+  const [nextMatch, setNextMatch] = useState<Match | null>(null);
+  /**
+   * Whether the displayed match is in the future ('upcoming'), happening now
+   * ('live'), or already finished ('finished'). Drives the badge label on
+   * the match card ("PRÓXIMO" / "EN VIVO" / "ÚLTIMO").
+   */
+  const [matchState, setMatchState] = useState<'upcoming' | 'live' | 'finished'>('upcoming');
+  const [standings, setStandings] = useState<LeagueStanding[]>([]);
+  const [topScorers, setTopScorers] = useState<FirestoreTopScorer[]>([]);
+
+  const firstTeam   = teams.find(t2 => state.teamIds.includes(t2.id));
+  const firstPlayer = players.find(p => state.playerIds.includes(p.id));
+  // Prefer the league that matches the user's first team (so the table reflects
+  // where their team actually plays). Fall back to the first selected league.
+  const teamLeague   = firstTeam ? leagues.find(l => l.id === firstTeam.leagueId) : undefined;
+  const firstLeague  = teamLeague ?? leagues.find(l => state.leagueIds.includes(l.id));
 
   useEffect(() => {
-    cardAnims.forEach(({ opacity, translateY, delay }) => {
-      setTimeout(() => {
-        Animated.parallel([
-          Animated.timing(opacity, { toValue: 1, duration: 400, useNativeDriver: true }),
-          Animated.timing(translateY, { toValue: 0, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        ]).start();
-      }, delay);
-    });
+    // Fetch best-match-to-show for the user's first team. Priority order:
+    //   1. LIVE — match happening right now (rare during onboarding but cool)
+    //   2. UPCOMING — nearest future kickoff (most common case)
+    //   3. FINISHED — last played match (fallback for end-of-season / pre-season
+    //      gap when the next-season calendar isn't published yet)
+    //
+    // getRecentFixturesByTeam returns fixtures ORDERED BY kickoff DESC, so we
+    // re-sort upcomings ASC (nearest first) and keep finisheds DESC (most
+    // recent first).
+    if (firstTeam) {
+      getRecentFixturesByTeam(firstTeam.id, 25).then(fixtures => {
+        if (!fixtures.length) return;
+        const now = Date.now();
+
+        const live = fixtures.find(f => f.status === 'live');
+        if (live) {
+          setNextMatch(live);
+          setMatchState('live');
+          return;
+        }
+
+        const upcomings = fixtures
+          .filter(f => f.status === 'scheduled' || new Date(f.startingAtUtc ?? f.date).getTime() > now)
+          .sort((a, b) => {
+            const ta = new Date(a.startingAtUtc ?? a.date).getTime();
+            const tb = new Date(b.startingAtUtc ?? b.date).getTime();
+            return ta - tb;
+          });
+        if (upcomings.length > 0) {
+          setNextMatch(upcomings[0]);
+          setMatchState('upcoming');
+          return;
+        }
+
+        // Fallback: no upcoming → show the most recently FINISHED match so
+        // the card never feels empty. fixtures is already DESC by kickoff.
+        const finished = fixtures.find(f => f.status === 'finished') ?? fixtures[0];
+        setNextMatch(finished);
+        setMatchState('finished');
+      }).catch(() => {});
+    }
+    // Fetch standings for the user's first league (preferring the team's league)
+    // Firestore-first with API fallback so the table shows something even when
+    // the league hasn't been synced yet.
+    const seasonId = firstLeague?.seasonId;
+    if (seasonId) {
+      (async () => {
+        try {
+          const fsRows = await getStandingsFromFirestore(seasonId);
+          if (fsRows.length > 0) {
+            setStandings(fsRows.slice(0, 5));
+            return;
+          }
+          // Fallback to direct API call when Firestore is empty
+          const apiRows = await getStandingsFromApi(seasonId);
+          if (apiRows.length > 0) setStandings(apiRows.slice(0, 5));
+        } catch {/* show skeleton */}
+      })();
+
+      // Fetch top 3 scorers of the same league (no API fallback — server
+      // populates this; if missing we just hide the card).
+      getTopScorersFromFirestore(seasonId).then(scorers => {
+        if (scorers.length > 0) setTopScorers(scorers.slice(0, 3));
+      }).catch(() => {});
+    }
+  }, [firstTeam?.id, firstLeague?.seasonId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Entrance animations ────────────────────────────────────────────────────
+  const matchAnim    = useRef(new Animated.Value(0)).current;
+  const matchY       = useRef(new Animated.Value(16)).current;
+  const tableAnim    = useRef(new Animated.Value(0)).current;
+  const tableY       = useRef(new Animated.Value(16)).current;
+  const scorersAnim  = useRef(new Animated.Value(0)).current;
+  const scorersY     = useRef(new Animated.Value(16)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(matchAnim,  { toValue: 1, duration: 420, useNativeDriver: true }),
+      Animated.timing(matchY,     { toValue: 0, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(tableAnim, { toValue: 1, duration: 420, useNativeDriver: true }),
+        Animated.timing(tableY,    { toValue: 0, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start();
+    }, 130);
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(scorersAnim, { toValue: 1, duration: 420, useNativeDriver: true }),
+        Animated.timing(scorersY,    { toValue: 0, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start();
+    }, 260);
   }, []);
 
-  const firstTeam = teams.find(t2 => state.teamIds.includes(t2.id));
-  const firstPlayer = players.find(p => state.playerIds.includes(p.id));
-  const firstLeague = leagues.find(l => state.leagueIds.includes(l.id));
+  // ── Derived display values ─────────────────────────────────────────────────
+  // homeTeam.id is string, firstTeam.id is number → convert for comparison
+  const isHome    = nextMatch && firstTeam && nextMatch.homeTeam.id === String(firstTeam.id);
+  const opponent  = nextMatch ? (isHome ? nextMatch.awayTeam : nextMatch.homeTeam) : null;
+  // Show only the day-of-week, never the kickoff time.
+  // Kickoff times require accurate timezone handling that's fragile during
+  // onboarding (expo-localization sometimes resolves to UTC on first run).
+  // The day alone is enough to give the user a sense of when the match is;
+  // exact time lives in the main app where useUserCountry is fully resolved.
+  const matchDay  = nextMatch?.startingAtUtc
+    ? new Date(nextMatch.startingAtUtc).toLocaleDateString('es-MX', { weekday: 'long' })
+    : null;
+
+  // Find user's team in standings (LeagueStanding.team.id is string, firstTeam.id is number)
+  const userStandingIdx = firstTeam
+    ? standings.findIndex(r => r.team.id === String(firstTeam.id))
+    : -1;
+
+  // Build table rows: show 5 rows centered around the user's team when possible
+  const tableRows = useMemo(() => {
+    if (!standings.length) return [];
+    if (userStandingIdx < 0) return standings.slice(0, 5);
+    const start = Math.max(0, Math.min(userStandingIdx - 1, standings.length - 5));
+    return standings.slice(start, start + 5);
+  }, [standings, userStandingIdx]);
+
+  const teamName = firstTeam?.name ?? firstTeam?.shortName ?? 'tu equipo';
 
   return (
-    <View style={[base.screen, { paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
+    <View style={[base.screen, { backgroundColor: th.BG, paddingBottom: insets.bottom + 8 }]}>
       <TopBar dotIndex={4} onBack={onBack} />
 
-      <ScrollView
-        contentContainerStyle={[base.scrollContent, { paddingHorizontal: SIDE_PAD }]}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={[base.headline, { color: th.TEXT_PRIMARY }]}>{t('onboarding.feedTitle')}</Text>
+      {/* ── Headline ── */}
+      <View style={{ paddingHorizontal: SIDE_PAD, paddingTop: 4, paddingBottom: 12 }}>
+        <Text style={[base.headline, { color: th.TEXT_PRIMARY, lineHeight: 34 }]}>
+          {t('onboarding.feedTitlePrefix')}{' '}
+          <Text style={{ color: BLUE }}>{teamName}</Text>
+        </Text>
         <Text style={[base.sub, { color: th.TEXT_DIM }]}>{t('onboarding.feedSub')}</Text>
+      </View>
 
-        <View style={{ gap: 12, marginTop: 20 }}>
-          {/* Card 1 — Next Match */}
-          <Animated.View style={[{ opacity: cardAnims[0].opacity, transform: [{ translateY: cardAnims[0].translateY }] }, th.SHADOW]}>
-            <LinearGradient colors={[th.isDark ? '#1A2A4A' : '#EFF6FF', th.isDark ? '#0D1520' : '#DBEAFE']} style={s6.card} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-              <View style={[s6.badge, { backgroundColor: th.BLUE_DIM }]}>
-                <Text style={[s6.badgeText, { color: BLUE }]}>{t('onboarding.nextMatchLabel')}</Text>
-              </View>
-              <View style={s6.matchRow}>
-                <View style={s6.teamBox}>
-                  {firstTeam ? <SmartLogo uri={firstTeam.logo} size={40} /> : <Text style={{ fontSize: 40 }}>⚽</Text>}
-                  <Text style={[s6.teamName, { color: th.TEXT_PRIMARY }]} numberOfLines={1}>{firstTeam?.shortName ?? 'EQP'}</Text>
-                </View>
-                <Text style={[s6.vs, { color: th.TEXT_DIM }]}>VS</Text>
-                <View style={s6.teamBox}>
-                  <Text style={{ fontSize: 40 }}>🆚</Text>
-                  <Text style={[s6.teamName, { color: th.TEXT_PRIMARY }]}>OPP</Text>
-                </View>
-              </View>
-              <Text style={[s6.matchTime, { color: th.SUB_TEXT }]}>Sábado · 21:00</Text>
-              {firstLeague && <Text style={[s6.leagueName, { color: th.TEXT_DIM }]}>{firstLeague.name}</Text>}
-            </LinearGradient>
-          </Animated.View>
+      {/* ── Two-section feed (no scroll) ── */}
+      <View style={{ flex: 1, paddingHorizontal: SIDE_PAD, gap: 10 }}>
 
-          {/* Card 2 — News */}
-          <Animated.View style={[{ opacity: cardAnims[1].opacity, transform: [{ translateY: cardAnims[1].translateY }] }, th.SHADOW]}>
-            <View style={[s6.card, { backgroundColor: th.SURFACE }]}>
-              <View style={s6.newsRow}>
-                <LinearGradient colors={[GOLD, '#E68A00']} style={s6.newsAvatar} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-                  <Text style={{ fontSize: 22 }}>⚽</Text>
-                </LinearGradient>
-                <View style={{ flex: 1 }}>
-                  <View style={[s6.badge, { backgroundColor: th.GOLD_DIM, alignSelf: 'flex-start', marginBottom: 4 }]}>
-                    <Text style={[s6.badgeText, { color: GOLD }]}>{t('onboarding.newsLabel')}</Text>
-                  </View>
-                  <Text style={[s6.newsTitle, { color: th.TEXT_PRIMARY }]} numberOfLines={2}>
-                    {firstPlayer ? `${firstPlayer.name} anotó doblete anoche` : 'Tu jugador favorito anotó anoche'}
-                  </Text>
-                </View>
+        {/* MatchCardPro */}
+        <Animated.View style={{ opacity: matchAnim, transform: [{ translateY: matchY }] }}>
+          <LinearGradient
+            colors={[th.isDark ? '#0E1520' : '#EFF6FF', th.isDark ? '#0F1008' : '#F0FDF4']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={[s6.matchCard, { borderColor: th.isDark ? 'rgba(255,255,255,0.06)' : '#E2E8F0' }]}
+          >
+            {/* Subtle team-color glow on each side */}
+            <View style={[StyleSheet.absoluteFill, { borderRadius: 18, overflow: 'hidden' }]}>
+              <LinearGradient
+                colors={['rgba(46,124,246,0.12)', 'transparent']}
+                start={{ x: 0, y: 0.5 }} end={{ x: 0.42, y: 0.5 }}
+                style={StyleSheet.absoluteFill}
+              />
+              <LinearGradient
+                colors={['transparent', 'rgba(56,189,248,0.10)']}
+                start={{ x: 0.58, y: 0.5 }} end={{ x: 1, y: 0.5 }}
+                style={StyleSheet.absoluteFill}
+              />
+            </View>
+
+            {/* Body */}
+            <View style={s6.matchBody}>
+              {/* Home */}
+              <View style={s6.teamBlock}>
+                {firstTeam
+                  ? <SmartLogo uri={firstTeam.logo} size={52} />
+                  : <Text style={{ fontSize: 46 }}>⚽</Text>}
+                <Text style={[s6.teamLabel, { color: th.TEXT_PRIMARY }]} numberOfLines={1}>
+                  {firstTeam?.shortName ?? 'EQP'}
+                </Text>
+              </View>
+
+              {/* Center VS — label adapts to match state */}
+              <View style={s6.vsBlock}>
+                <Text style={[
+                  s6.vsLabel,
+                  {
+                    color: matchState === 'live'     ? '#FF453A' :   // brand red
+                           matchState === 'finished' ? th.TEXT_DIM : // muted
+                                                       BLUE,         // upcoming
+                  },
+                ]}>
+                  {matchState === 'live'     ? t('onboarding.matchStateLive',     { defaultValue: 'EN VIVO' })  :
+                   matchState === 'finished' ? t('onboarding.matchStateFinished', { defaultValue: 'ÚLTIMO' })   :
+                                               t('onboarding.matchStateUpcoming', { defaultValue: 'PRÓXIMO' })}
+                </Text>
+                <Text style={[s6.vsText, { color: th.TEXT_DIM }]}>
+                  {matchState === 'finished' && nextMatch
+                    ? `${nextMatch.homeScore ?? 0} - ${nextMatch.awayScore ?? 0}`
+                    : 'VS'}
+                </Text>
+                {/* Time pill removed — kickoff times were rendering in UTC
+                    instead of the user's local time during onboarding (the
+                    expo-localization timezone is sometimes unreliable on
+                    first run before the user's region resolves). The day
+                    label in the footer is enough context. */}
+              </View>
+
+              {/* Away */}
+              <View style={s6.teamBlock}>
+                {opponent
+                  ? <SmartLogo uri={opponent.logo} size={52} />
+                  : <Text style={{ fontSize: 46 }}>🆚</Text>}
+                <Text style={[s6.teamLabel, { color: th.TEXT_DIM }]} numberOfLines={1}>
+                  {opponent?.name ?? 'Rival'}
+                </Text>
               </View>
             </View>
-          </Animated.View>
 
-          {/* Card 3 — Table */}
-          <Animated.View style={[{ opacity: cardAnims[2].opacity, transform: [{ translateY: cardAnims[2].translateY }] }, th.SHADOW]}>
-            <View style={[s6.card, { backgroundColor: th.SURFACE }]}>
-              <View style={[s6.badge, { backgroundColor: th.BLUE_DIM, marginBottom: 10 }]}>
-                <Text style={[s6.badgeText, { color: BLUE }]}>{t('onboarding.tableLabel')}</Text>
-              </View>
-              {[1, 2, 3].map(pos => (
-                <View key={pos} style={[s6.tableRow, pos === 1 && firstTeam && { backgroundColor: th.BLUE_DIM, borderRadius: 8 }]}>
-                  <Text style={[s6.tablePos, { color: th.TEXT_DIM }]}>{pos}</Text>
-                  <Text style={[s6.tableName, { color: th.TEXT_PRIMARY }]} numberOfLines={1}>
-                    {pos === 1 && firstTeam ? firstTeam.name : pos === 2 ? 'Equipo B' : 'Equipo C'}
-                  </Text>
-                  <Text style={[s6.tablePoints, { color: th.TEXT_PRIMARY }]}>{36 - pos * 3} pts</Text>
-                </View>
-              ))}
-            </View>
-          </Animated.View>
-
-          {/* Card 4 — Stat */}
-          <Animated.View style={[{ opacity: cardAnims[3].opacity, transform: [{ translateY: cardAnims[3].translateY }] }, th.SHADOW]}>
-            <LinearGradient colors={[th.isDark ? '#1A1A1D' : '#FFFBEB', th.isDark ? '#2a1f00' : '#FEF3C7']} style={s6.card} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-              <View style={[s6.badge, { backgroundColor: th.GOLD_DIM, marginBottom: 10 }]}>
-                <Text style={[s6.badgeText, { color: GOLD }]}>{t('onboarding.statLabel')}</Text>
-              </View>
-              <Text style={s6.statNumber}>15</Text>
-              <View style={[s6.barContainer, { backgroundColor: th.isDark ? 'rgba(255,255,255,0.1)' : '#E5E7EB' }]}>
-                <LinearGradient colors={[GOLD, '#E68A00']} style={[s6.bar, { width: '75%' }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
-              </View>
-              <Text style={[s6.statSub, { color: th.TEXT_DIM }]}>
-                {firstPlayer ? `${firstPlayer.name} · Delantero` : 'Tu jugador · Delantero'}
+            {/* Footer */}
+            <View style={[s6.matchFooter, { borderTopColor: th.isDark ? 'rgba(255,255,255,0.05)' : '#E2E8F0', backgroundColor: th.isDark ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.03)' }]}>
+              <Text style={[s6.footerLeft, { color: th.TEXT_PRIMARY }]}>
+                {matchDay ? matchDay.charAt(0).toUpperCase() + matchDay.slice(1) : 'Próximo partido'}
               </Text>
-            </LinearGradient>
-          </Animated.View>
-        </View>
-      </ScrollView>
+              <Text style={[s6.footerRight, { color: th.TEXT_DIM }]} numberOfLines={1}>
+                {nextMatch?.league ?? firstLeague?.name ?? ''}
+              </Text>
+            </View>
+          </LinearGradient>
+        </Animated.View>
 
-      <CTAButton label={t('onboarding.likeWhatISee')} onPress={onNext} glow />
+        {/* TableCardPro */}
+        <Animated.View style={[{ opacity: tableAnim, transform: [{ translateY: tableY }] }, th.SHADOW]}>
+          <View style={[s6.tableCard, { backgroundColor: th.SURFACE }]}>
+            {/* Table header */}
+            <View style={[s6.tableHeader, { borderBottomColor: th.isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9' }]}>
+              <View style={[s6.tableBadge, { backgroundColor: th.BLUE_DIM }]}>
+                <Text style={[s6.tableBadgeText, { color: BLUE }]}>TABLA</Text>
+              </View>
+              <Text style={[s6.tableLeagueName, { color: th.TEXT_DIM }]}>
+                {firstLeague?.name ?? 'Liga'}
+              </Text>
+            </View>
+
+            {/* Rows */}
+            {tableRows.length > 0
+              ? tableRows.map((row, idx) => {
+                  const isUser = row.team.id === String(firstTeam?.id ?? -1);
+                  return (
+                    <View
+                      key={`${row.team.id}-${idx}`}
+                      style={[
+                        s6.tableRowItem,
+                        isUser && { backgroundColor: th.isDark ? 'rgba(46,124,246,0.08)' : 'rgba(46,124,246,0.06)', borderLeftColor: BLUE },
+                        !isUser && { borderLeftColor: 'transparent' },
+                      ]}
+                    >
+                      <Text style={[s6.tableRowPos, { color: isUser ? BLUE : th.TEXT_DIM }]}>
+                        {row.position}
+                      </Text>
+                      <SmartLogo uri={row.team.logo ?? ''} size={20} />
+                      <Text style={[s6.tableRowName, { color: isUser ? th.TEXT_PRIMARY : th.TEXT_DIM, fontWeight: isUser ? '700' : '500' }]} numberOfLines={1}>
+                        {row.team.name}
+                      </Text>
+                      <Text style={[s6.tableRowPts, { color: isUser ? '#fff' : th.TEXT_DIM }]}>
+                        {row.points} pts
+                      </Text>
+                    </View>
+                  );
+                })
+              : /* Skeleton rows while loading */
+                [1, 2, 3, 4, 5].map(i => (
+                  <View key={i} style={[s6.tableRowItem, { borderLeftColor: 'transparent' }]}>
+                    <Text style={[s6.tableRowPos, { color: th.TEXT_DIM }]}>{i}</Text>
+                    <View style={[s6.skeletonLogo, { backgroundColor: th.isDark ? '#2A2A2A' : '#E5E7EB' }]} />
+                    <View style={[s6.skeletonText, { backgroundColor: th.isDark ? '#2A2A2A' : '#E5E7EB', width: `${55 + Math.random() * 25}%` as any }]} />
+                    <View style={[s6.skeletonPts, { backgroundColor: th.isDark ? '#2A2A2A' : '#E5E7EB' }]} />
+                  </View>
+                ))
+            }
+          </View>
+        </Animated.View>
+
+        {/* ScorersCard — top 3 of the same league */}
+        {topScorers.length > 0 && (
+          <Animated.View style={[{ opacity: scorersAnim, transform: [{ translateY: scorersY }] }, th.SHADOW]}>
+            <View style={[s6.tableCard, { backgroundColor: th.SURFACE }]}>
+              <View style={[s6.tableHeader, { borderBottomColor: th.isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9' }]}>
+                <View style={[s6.tableBadge, { backgroundColor: th.GOLD_DIM }]}>
+                  <Text style={[s6.tableBadgeText, { color: GOLD }]}>GOLEADORES</Text>
+                </View>
+                <Text style={[s6.tableLeagueName, { color: th.TEXT_DIM }]}>
+                  {firstLeague?.name ?? 'Liga'}
+                </Text>
+              </View>
+              {topScorers.map((s, idx) => {
+                const isUserPlayer = firstPlayer && s.playerId === String(firstPlayer.id);
+                return (
+                  <View
+                    key={`${s.playerId}-${idx}`}
+                    style={[
+                      s6.tableRowItem,
+                      isUserPlayer
+                        ? { backgroundColor: th.isDark ? 'rgba(245,184,0,0.10)' : 'rgba(245,184,0,0.08)', borderLeftColor: GOLD }
+                        : { borderLeftColor: 'transparent' },
+                    ]}
+                  >
+                    <Text style={[s6.tableRowPos, { color: isUserPlayer ? GOLD : th.TEXT_DIM }]}>
+                      {s.position}
+                    </Text>
+                    <SmartLogo uri={s.teamLogo} size={20} />
+                    <Text
+                      style={[s6.tableRowName, { color: isUserPlayer ? th.TEXT_PRIMARY : th.TEXT_DIM, fontWeight: isUserPlayer ? '700' : '500' }]}
+                      numberOfLines={1}
+                    >
+                      {s.playerName}
+                    </Text>
+                    <Text style={[s6.tableRowPts, { color: isUserPlayer ? '#fff' : th.TEXT_DIM }]}>
+                      {s.goals} gol{s.goals === 1 ? '' : 'es'}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          </Animated.View>
+        )}
+      </View>
+
+      <CTAButton label={t('onboarding.likeWhatISee')} onPress={onNext} glow style={{ marginTop: 10 }} />
     </View>
   );
 };
 
 const s6 = StyleSheet.create({
-  card: { borderRadius: 16, padding: 16, overflow: 'hidden' },
-  badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start' },
-  badgeText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
-  matchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', marginVertical: 12 },
-  teamBox: { alignItems: 'center', gap: 6, width: 80 },
-  teamName: { fontSize: 12, fontWeight: '800' },
-  vs: { fontSize: 18, fontWeight: '900' },
-  matchTime: { fontSize: 13, textAlign: 'center', marginTop: 4 },
-  leagueName: { fontSize: 11, textAlign: 'center', marginTop: 2 },
-  newsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  newsAvatar: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  newsTitle: { fontSize: 14, fontWeight: '700', lineHeight: 20 },
-  tableRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 4 },
-  tablePos: { fontSize: 14, fontWeight: '800', width: 20 },
-  tableName: { flex: 1, fontSize: 14, fontWeight: '600' },
-  tablePoints: { fontSize: 13, fontWeight: '700' },
-  statNumber: { fontSize: 84, fontWeight: '900', color: GOLD, lineHeight: 90 },
-  barContainer: { height: 6, borderRadius: 3, overflow: 'hidden', marginVertical: 8 },
-  bar: { height: 6, borderRadius: 3 },
-  statSub: { fontSize: 13 },
+  // Match card
+  matchCard: {
+    borderRadius: 18, borderWidth: 1, overflow: 'hidden',
+  },
+  matchBody: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 18, paddingTop: 18, paddingBottom: 14,
+  },
+  teamBlock: { alignItems: 'center', gap: 6, flex: 1 },
+  teamLabel: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
+  vsBlock: { alignItems: 'center', gap: 4, paddingHorizontal: 8 },
+  vsLabel: { fontSize: 9, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase' },
+  vsText: { fontSize: 24, fontWeight: '900', letterSpacing: 0.8 },
+  timePill: {
+    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3,
+  },
+  timePillText: { fontSize: 12, fontWeight: '700' },
+  matchFooter: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 18, paddingVertical: 9, borderTopWidth: 1,
+  },
+  footerLeft: { fontSize: 12, fontWeight: '600' },
+  footerRight: { fontSize: 11, fontWeight: '500', maxWidth: '50%' },
+  // Table card
+  tableCard: { borderRadius: 18, overflow: 'hidden' },
+  tableHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1,
+  },
+  tableBadge: { borderRadius: 5, paddingHorizontal: 8, paddingVertical: 3 },
+  tableBadgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 1.0 },
+  tableLeagueName: { flex: 1, fontSize: 11, fontWeight: '500' },
+  tableRowItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 12, paddingVertical: 7, borderLeftWidth: 3,
+  },
+  tableRowPos: { fontSize: 13, fontWeight: '800', width: 18 },
+  tableRowName: { flex: 1, fontSize: 13, lineHeight: 16 },
+  tableRowPts: { fontSize: 13, fontWeight: '700' },
+  // Skeleton placeholders
+  skeletonLogo: { width: 20, height: 20, borderRadius: 10 },
+  skeletonText: { flex: 1, height: 12, borderRadius: 6 },
+  skeletonPts: { width: 36, height: 12, borderRadius: 6 },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1167,18 +1739,21 @@ const NOTIF_ROWS: NotifRowItem[] = [
 const Screen7Notifs: React.FC<{
   notifs: Record<NotifKey, boolean>;
   onToggle: (key: NotifKey) => void;
+  stadiumMode: boolean;
+  onToggleStadiumMode: () => void;
   fanLevel: FanLevel | null;
   onNext: () => void;
   onBack: () => void;
   onSkip: () => void;
-}> = ({ notifs, onToggle, fanLevel, onNext, onBack, onSkip }) => {
+}> = ({ notifs, onToggle, stadiumMode, onToggleStadiumMode, fanLevel, onNext, onBack, onSkip }) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
 
   const subCopy =
-    fanLevel === 'analista' ? t('onboarding.notifsSubAnalista') :
-    fanLevel === 'fan'      ? t('onboarding.notifsSubFan') :
+    fanLevel === 'analista'   ? t('onboarding.notifsSubAnalista') :
+    fanLevel === 'fan'        ? t('onboarding.notifsSubFan') :
+    fanLevel === 'espectador' ? t('onboarding.notifsSubCasual') :
     t('onboarding.notifsSubCasual');
 
   return (
@@ -1207,6 +1782,35 @@ const Screen7Notifs: React.FC<{
               <CustomToggle value={notifs[row.key]} onToggle={() => onToggle(row.key)} />
             </View>
           ))}
+
+          {/* ── Modo Estadio (special "pro feature" — gold accent) ──────── */}
+          <View style={[
+            s7.row,
+            s7.stadiumRow,
+            stadiumMode
+              ? { backgroundColor: th.GOLD_DIM, borderColor: GOLD }
+              : { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#332E1F' : '#FCE9A1' },
+          ]}>
+            <View style={[s7.iconBox, { backgroundColor: th.isDark ? '#332E1F' : '#FCE9A1' }]}>
+              <Text style={{ fontSize: 22 }}>🏟️</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={[s7.rowTitle, { color: th.TEXT_PRIMARY }]}>
+                  {t('onboarding.stadiumModeTitle', { defaultValue: 'Modo Estadio' })}
+                </Text>
+                <View style={[s7.proPill, { backgroundColor: GOLD }]}>
+                  <Text style={s7.proPillText}>NUEVO</Text>
+                </View>
+              </View>
+              <Text style={[s7.rowSub, { color: th.TEXT_DIM }]}>
+                {t('onboarding.stadiumModeSub', {
+                  defaultValue: 'Cuando vayas al estadio, retrasa las notificaciones para no spoilearte la jugada.',
+                })}
+              </Text>
+            </View>
+            <CustomToggle value={stadiumMode} onToggle={onToggleStadiumMode} />
+          </View>
         </View>
       </ScrollView>
 
@@ -1232,6 +1836,13 @@ const s7 = StyleSheet.create({
   },
   rowTitle: { fontSize: 15, fontWeight: '700' },
   rowSub: { fontSize: 12, marginTop: 2 },
+  // Modo Estadio — visually distinct row to highlight the "pro" feature
+  stadiumRow: { marginTop: 6 },
+  proPill: {
+    paddingHorizontal: 6, paddingVertical: 1,
+    borderRadius: 4,
+  },
+  proPillText: { fontSize: 9, fontWeight: '900', color: '#000', letterSpacing: 0.5 },
 });
 
 // ── Google G logo (official PNG asset) ───────────────────────────────────────
@@ -1414,7 +2025,9 @@ const Screen9Personalizing: React.FC<{
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
   const { setFanLevel } = useOnboarding();
-  const { isFollowingTeam, toggleFollowTeam, isFollowingLeague, toggleFollowLeague, isFollowingPlayer, toggleFollowPlayer } = useFavorites();
+  const {
+    replaceFollowedTeams, replaceFollowedPlayers, replaceFollowedLeagues,
+  } = useFavorites();
   const { login } = useAuth();
   const { togglePref, prefs } = useNotificationPrefs();
 
@@ -1490,20 +2103,16 @@ const Screen9Personalizing: React.FC<{
       // Apply fan level
       if (state.fanLevel) setFanLevel(state.fanLevel);
 
-      // Apply teams
-      state.teamIds.forEach(id => {
-        if (!isFollowingTeam(String(id))) toggleFollowTeam(String(id));
-      });
-
-      // Apply players
-      state.playerIds.forEach(id => {
-        if (!isFollowingPlayer(String(id))) toggleFollowPlayer(String(id));
-      });
-
-      // Apply leagues
-      state.leagueIds.forEach(id => {
-        if (!isFollowingLeague(String(id))) toggleFollowLeague(String(id));
-      });
+      // Apply selections — REPLACE the followed lists rather than toggling
+      // each id individually. Toggling accumulated picks across sessions
+      // (re-onboarding in dev / test builds would leave previous selections
+      // in AsyncStorage and the new run would merge on top), so a user who
+      // picked just "México" today would still see the 10 teams from a
+      // previous session listed as followed. Replace makes the onboarding
+      // selection the source of truth.
+      replaceFollowedTeams(state.teamIds.map(String));
+      replaceFollowedPlayers(state.playerIds.map(String));
+      replaceFollowedLeagues(state.leagueIds.map(String));
 
       // Apply notifications (map design keys → NotificationPrefsContext keys)
       const notifMap: Partial<Record<NotifKey, keyof typeof prefs>> = {
@@ -1519,6 +2128,11 @@ const Screen9Personalizing: React.FC<{
           togglePref(prefKey as Parameters<typeof togglePref>[0]);
         }
       });
+
+      // Apply Modo Estadio (maps to prefs.estadioMode in NotificationPrefsContext)
+      if (state.stadiumMode !== prefs.estadioMode) {
+        togglePref('estadioMode');
+      }
 
       // Auth
       if (state.authMethod) {
@@ -1551,10 +2165,16 @@ const Screen9Personalizing: React.FC<{
       {/* Radial glow rings */}
       <Animated.View style={[s9.glowRing2, { opacity: glowOpacity, transform: [{ scale: circleScale }] }]} />
       <Animated.View style={[s9.glowOuter, { opacity: glowOpacity }]} />
-      {/* Pulsing A circle */}
+      {/* Pulsing logo circle — Analistas shield in white inside a blue gradient.
+          Previously rendered a generic "A" letter; the brand mark gives more
+          recognition and consistency with Screen 1 and Screen 10. */}
       <Animated.View style={[s9.circleWrap, { transform: [{ scale: circleScale }] }]}>
         <LinearGradient colors={[BLUE, '#1A4DB0']} style={s9.circle} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-          <Text style={s9.aLetter}>A</Text>
+          <Image
+            source={require('../../../assets/logo-white.png')}
+            style={s9.logoInside}
+            resizeMode="contain"
+          />
         </LinearGradient>
       </Animated.View>
 
@@ -1602,8 +2222,9 @@ const s9 = StyleSheet.create({
     width: 96, height: 96, borderRadius: 48,
     alignItems: 'center', justifyContent: 'center',
   },
-  aLetter: { fontSize: 48, fontWeight: '900', color: '#FFFFFF' },
-  title: { fontSize: 20, fontWeight: '700' },
+  aLetter: { fontSize: 54, fontWeight: '900', color: '#FFFFFF' },
+  logoInside: { width: 64, height: 64, tintColor: '#FFFFFF' },
+  title: { fontSize: 36, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
   pct: { fontSize: 84, fontWeight: '900', color: BLUE, lineHeight: 90 },
   pctSymbol: { fontSize: 40, fontWeight: '700' },
   barTrack: {
@@ -1615,10 +2236,12 @@ const s9 = StyleSheet.create({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 10 — Welcome Final (confetti)
+// SCREEN 10 — Welcome Final (themed illustration)
 // ─────────────────────────────────────────────────────────────────────────────
-const CONFETTI_COUNT = 36;
-const CONFETTI_COLORS = [BLUE, GOLD, '#FF6B6B', '#51CF66', '#845EF7', '#FF922B', '#FFFFFF'];
+// Prior version generated 36 hand-drawn confetti pieces with edge-biased x
+// positions and a 2.5-5s drop animation each. Replaced by the themed
+// Bienvenida illustration that already contains paper confetti baked into
+// the artwork — see the heroImage selection inside Screen10Final.
 
 const Screen10Final: React.FC<{
   name: string;
@@ -1630,71 +2253,53 @@ const Screen10Final: React.FC<{
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
 
-  // Confetti anims
-  const confettiAnims = useRef(
-    Array.from({ length: CONFETTI_COUNT }).map(() => ({
-      y: new Animated.Value(-80),
-      x: new Animated.Value(Math.random() * SCREEN_W),
-      rotate: new Animated.Value(0),
-      opacity: new Animated.Value(1),
-    })),
-  ).current;
-
+  // Animated content fade-in. The previously hand-rolled confetti layer was
+  // removed when the themed hero illustration (Bienvenida_Dia/Noche) landed —
+  // the artwork already has paper confetti baked in around the footballer, so
+  // the extra animated layer was duplicating motion and adding GPU load with
+  // no visible gain.
   const contentOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Start confetti
-    confettiAnims.forEach((anim, i) => {
-      const startDelay = (i % 6) * 120;
-      const duration   = 2500 + Math.random() * 2000;
-      anim.x.setValue(Math.random() * SCREEN_W);
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(startDelay),
-          Animated.parallel([
-            Animated.timing(anim.y, { toValue: 900, duration, useNativeDriver: true, easing: Easing.linear }),
-            Animated.timing(anim.rotate, { toValue: Math.random() * 360, duration, useNativeDriver: true }),
-            Animated.sequence([
-              Animated.timing(anim.opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-              Animated.delay(duration - 400),
-              Animated.timing(anim.opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-            ]),
-          ]),
-        ]),
-      ).start();
-    });
-
     Animated.timing(contentOpacity, { toValue: 1, duration: 600, useNativeDriver: true }).start();
   }, []);
 
   const firstTeam = teams.find(t2 => selectedTeamIds.includes(t2.id));
   const displayName = name.trim() || t('onboarding.defaultName');
 
-  return (
-    <View style={[s10.container, { paddingTop: insets.top, paddingBottom: insets.bottom + 16, backgroundColor: th.BG }]}>
-      {/* Confetti layer */}
-      {confettiAnims.map((anim, i) => (
-        <Animated.View
-          key={i}
-          style={[
-            s10.confetti,
-            {
-              transform: [
-                { translateX: anim.x },
-                { translateY: anim.y },
-                { rotate: anim.rotate.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] }) },
-              ],
-              opacity: anim.opacity,
-              backgroundColor: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-            },
-          ]}
-        />
-      ))}
+  // Themed full-bleed illustration — Bienvenida_Dia (light) / Bienvenida_Noche
+  // (dark). The artwork already includes a footballer walking out of the
+  // tunnel + confetti, so the animated confetti below is suppressed when the
+  // hero image is present to avoid visual doubling.
+  const heroImage = th.isDark
+    ? require('../../../assets/Bienvenida_Noche.png')
+    : require('../../../assets/Bienvenida_Dia.png');
 
-      {/* Content */}
+  // Top-to-bottom gradient overlay — keeps the upper half of the illustration
+  // visible while building enough opacity below the midpoint for the text and
+  // CTA to remain readable on either theme.
+  const overlayColors: readonly [string, string, string, string] = th.isDark
+    ? ['rgba(0,0,0,0)', 'rgba(0,0,0,0.35)', 'rgba(8,12,24,0.92)', 'rgba(8,12,24,1)']
+    : ['rgba(255,255,255,0)', 'rgba(255,255,255,0.35)', 'rgba(255,255,255,0.92)', 'rgba(255,255,255,1)'];
+
+  return (
+    <ImageBackground
+      source={heroImage}
+      resizeMode="cover"
+      style={[s10.container, { paddingTop: insets.top, paddingBottom: insets.bottom + 16 }]}
+    >
+      {/* Legibility gradient over the artwork */}
+      <LinearGradient
+        colors={overlayColors}
+        locations={[0, 0.35, 0.68, 1]}
+        style={StyleSheet.absoluteFillObject}
+        pointerEvents="none"
+      />
+
+      {/* Content sits in the lower half so the illustration breathes above it */}
       <Animated.View style={[s10.content, { opacity: contentOpacity }]}>
         {/* Big logo */}
-        <AnalistasLogo size={80} tint={th.isDark ? '#FFFFFF' : '#2E7CF6'} />
+        <AnalistasLogo size={72} tint={th.isDark ? '#FFFFFF' : '#2E7CF6'} />
 
         {/* Name */}
         <Text style={[s10.nameText, { fontSize: Math.max(28, Math.min(56, Math.floor(220 / Math.max(displayName.length, 4)))) }]}>
@@ -1724,19 +2329,15 @@ const Screen10Final: React.FC<{
 
         <CTAButton label={t('onboarding.start_btn')} onPress={onStart} glow style={s10.ctaFull} />
       </Animated.View>
-    </View>
+    </ImageBackground>
   );
 };
 
 const s10 = StyleSheet.create({
   container: { flex: 1, overflow: 'hidden' },
-  confetti: {
-    position: 'absolute', top: 0,
-    width: 8, height: 14, borderRadius: 3,
-  },
   content: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: SIDE_PAD, gap: 12,
+    flex: 1, alignItems: 'center', justifyContent: 'flex-end',
+    paddingHorizontal: SIDE_PAD, gap: 12, paddingBottom: 16,
   },
   nameText: { fontWeight: '900', color: BLUE, letterSpacing: -1, textAlign: 'center' },
   finalHeadline: {
@@ -1791,31 +2392,81 @@ export function OnboardingScreen() {
   const { completeOnboarding } = useOnboarding();
   const { t } = useTranslation();
 
+  // ── User country (drives the personalized grid ordering) ────────────────────
+  // Reads expo-localization regionCode instantly + verifies via Cloudflare /geo
+  // in the background. See hooks/useUserCountry.ts
+  const { country, language } = useUserCountry();
+
   // ── Data loading ────────────────────────────────────────────────────────────
-  const [teams, setTeams]     = useState<SearchableTeam[]>(FALLBACK_TEAMS);
-  const [leagues, setLeagues] = useState<SearchableLeague[]>(FALLBACK_LEAGUES);
-  const [players, setPlayers] = useState<SearchablePlayer[]>(FALLBACK_PLAYERS);
-  const [teamsLoading, setTeamsLoading]   = useState(true);
+  // `teams` is the curated grid (country-aware ordering) — used for display.
+  // `allTeams` is the complete catalog (~1,300) — used ONLY for search so niche
+  // clubs like Atlante (Liga Expansión MX) are findable.
+  // Same pattern for players.
+  const [teams, setTeams]         = useState<SearchableTeam[]>(FALLBACK_TEAMS);
+  const [allTeams, setAllTeams]   = useState<SearchableTeam[]>(FALLBACK_TEAMS);
+  const [leagues, setLeagues]     = useState<SearchableLeague[]>(FALLBACK_LEAGUES);
+  const [players, setPlayers]     = useState<SearchablePlayer[]>(FALLBACK_PLAYERS);
+  const [allPlayers, setAllPlayers] = useState<SearchablePlayer[]>(FALLBACK_PLAYERS);
+  const [teamsLoading, setTeamsLoading]     = useState(true);
   const [playersLoading, setPlayersLoading] = useState(true);
 
   useEffect(() => {
     const timeout3s = (promise: Promise<unknown>) =>
       Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))]);
 
-    timeout3s(getSearchableTeams())
-      .then(data => { if (Array.isArray(data) && data.length > 0) setTeams(data as SearchableTeam[]); })
+    // ── Curated grid (instant — all hardcoded data) ───────────────────────────
+    // Order depends on user's country. Re-runs when country resolves from
+    // worker (the locale-based default is used until then).
+    const curatedTeams = buildOnboardingTeamGrid(country, language);
+    setTeams(curatedTeams);
+    setAllTeams(curatedTeams); // initial value; will be replaced when full catalog loads
+    setTeamsLoading(false);
+
+    // Players curated list — names are resolved by sportsApi to enriched objects
+    timeout3s(getSearchablePlayers())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          // Reorder by country preset: local players first, then globals
+          const orderedNames = buildOnboardingPlayerNames(country, language);
+          const byNameLower = new Map<string, SearchablePlayer>();
+          (data as SearchablePlayer[]).forEach(p => byNameLower.set(p.name.toLowerCase(), p));
+          const ordered: SearchablePlayer[] = [];
+          const seen = new Set<number>();
+          for (const name of orderedNames) {
+            const p = byNameLower.get(name.toLowerCase());
+            if (p && !seen.has(p.id)) { seen.add(p.id); ordered.push(p); }
+          }
+          // Append any players that weren't in the ordering (safety)
+          for (const p of data as SearchablePlayer[]) {
+            if (!seen.has(p.id)) { seen.add(p.id); ordered.push(p); }
+          }
+          setPlayers(ordered);
+          setAllPlayers(ordered);
+        }
+      })
       .catch(() => {})
-      .finally(() => setTeamsLoading(false));
+      .finally(() => setPlayersLoading(false));
 
     // Leagues are synchronous
     const ls = getSearchableLeagues();
     if (ls.length > 0) setLeagues(ls);
 
-    timeout3s(getSearchablePlayers())
-      .then(data => { if (Array.isArray(data) && data.length > 0) setPlayers(data as SearchablePlayer[]); })
-      .catch(() => {})
-      .finally(() => setPlayersLoading(false));
-  }, []);
+    // ── Background: full catalog for search (cached 7 days) ──────────────────
+    // Doesn't block the UI — the grid is already showing the curated 18.
+    // When the catalog arrives, search will start finding ~1,300 teams instead
+    // of ~50.
+    getAllSearchableTeams()
+      .then(full => {
+        if (full.length > 0) setAllTeams(full);
+      })
+      .catch(() => {});
+
+    getAllSearchablePlayers()
+      .then(full => {
+        if (full.length > 0) setAllPlayers(full);
+      })
+      .catch(() => {});
+  }, [country, language]); // re-order when country resolves from Worker
 
   // ── Onboarding state ────────────────────────────────────────────────────────
   const [screen, setScreen] = useState(1);
@@ -1826,6 +2477,7 @@ export function OnboardingScreen() {
     playerIds: [],
     leagueIds: [],
     notifications: DEFAULT_NOTIFS_BY_LEVEL.fan,
+    stadiumMode: false,
     name: '',
     authMethod: null,
   });
@@ -1833,10 +2485,18 @@ export function OnboardingScreen() {
   const goTo  = (n: number) => setScreen(n);
   const goNext = () => setScreen(s => s + 1);
 
-  // Screen 7 → 8: request push permissions FIRST (user just configured notification prefs,
-  // so the system dialog has perfect context), then advance.
+  // Screen 7 → 8: request push permissions AFTER the user has configured
+  // their notification preferences, then advance.
+  // We call BOTH:
+  //   1. requestPermissionsAndGetToken() — asks expo-notifications permission
+  //      (shows the iOS system dialog "Analistas quiere enviarte notificaciones")
+  //   2. initializeFCM() — binds APNs ↔ FCM so topic subscriptions actually
+  //      deliver. For first-time iOS users this is where the real FCM
+  //      registration token gets materialised; App.tsx startup only registered
+  //      the delegate and skipped this step for new users.
   const goNextFromNotifs = useCallback(() => {
     requestPermissionsAndGetToken().catch(() => {});
+    initializeFCM().catch(() => {});
     setScreen(s => s + 1);
   }, []);
   const goBack = () => setScreen(s => Math.max(1, s - 1));
@@ -1847,18 +2507,50 @@ export function OnboardingScreen() {
     [teams, obState.teamIds],
   );
 
-  // League suggestion logic
+  // League suggestion logic — driven by the country preset.
+  // The preset already encodes "Mundial 2026 first this season + local league
+  // + most-watched European leagues from that country's perspective".
+  // PRODUCT RULE: league selection is for FEED ORDERING ONLY — it does NOT
+  // trigger notifications. Only TEAM selection drives notifications.
+  // See countryPresets.ts for the full mapping.
   const suggestedLeagueIds = useMemo(() => {
-    const ids = new Set<number>();
-    const hasMX = obState.teamIds.some(id => MX_TEAM_IDS.has(id));
-    const hasEU = obState.teamIds.some(id => EU_TEAM_IDS.has(id));
-    if (hasMX) { ids.add(743); ids.add(2); } // Liga MX + Champions
-    if (hasEU) { ids.add(564); ids.add(8); ids.add(2); } // La Liga, Premier, Champions
-    if (!hasMX && !hasEU) { ids.add(743); ids.add(564); ids.add(8); }
-    return ids;
-  }, [obState.teamIds]);
+    const preset = getCountryPreset(country, language);
+    return new Set(preset.suggestedLeagueIds);
+  }, [country, language]);
 
-  // Auto-suggest leagues when entering screen 5
+  // Reorder the leagues list — 3 tiers:
+  //   1. preset.suggestedLeagueIds (top, with "Sugerida" badge)
+  //   2. preset.secondaryLeagueIds (next, no badge — Europa League, Copa
+  //      Libertadores, MLS for European users, etc.)
+  //   3. Everything else, ordered by popularity DESC (country-biased).
+  //      See config/leagues.ts LEAGUE_POPULARITY + LEAGUE_POPULARITY_BY_COUNTRY.
+  //      Result: an MX user sees CONCACAF Champions Cup above Bundesliga, an
+  //      AR user sees Copa Libertadores above Bundesliga, a US user sees MLS
+  //      as the second league after Mundial 2026, etc. Niche leagues (Russia,
+  //      Iran, China) always sink to the bottom regardless of country.
+  // Mundial 2026 (id 732) is always position 1 this season (preset top).
+  const orderedLeagues = useMemo(() => {
+    const preset = getCountryPreset(country, language);
+    const tierOrder = new Map<number, number>();
+    let pos = 0;
+    preset.suggestedLeagueIds.forEach(id => tierOrder.set(id, pos++));
+    preset.secondaryLeagueIds.forEach(id => {
+      if (!tierOrder.has(id)) tierOrder.set(id, pos++);
+    });
+    return [...leagues].sort((a, b) => {
+      const ai = tierOrder.has(a.id) ? tierOrder.get(a.id)! : null;
+      const bi = tierOrder.has(b.id) ? tierOrder.get(b.id)! : null;
+      // Both in preset → preset order wins
+      if (ai !== null && bi !== null) return ai - bi;
+      // Only one in preset → preset entry first
+      if (ai !== null) return -1;
+      if (bi !== null) return 1;
+      // Neither in preset → sort by popularity DESC (country-aware)
+      return getLeaguePopularity(b.id, country) - getLeaguePopularity(a.id, country);
+    });
+  }, [leagues, country, language]);
+
+  // Auto-suggest the top-3 from the country preset when entering screen 5
   const leagues5Initialized = useRef(false);
   useEffect(() => {
     if (screen === 5 && !leagues5Initialized.current) {
@@ -1898,6 +2590,10 @@ export function OnboardingScreen() {
       ...prev,
       notifications: { ...prev.notifications, [key]: !prev.notifications[key] },
     }));
+  }, []);
+
+  const toggleStadiumMode = useCallback(() => {
+    setObState(prev => ({ ...prev, stadiumMode: !prev.stadiumMode }));
   }, []);
 
   // Fan level selection updates notification defaults
@@ -1948,7 +2644,14 @@ export function OnboardingScreen() {
         const e = err as { message?: string };
         // 'cancelled' = user dismissed the Google sheet — silent
         if (e.message !== 'cancelled') {
-          Alert.alert(t('common.error'), t('onboarding.googleSignInError'));
+          // Diagnostic alert: surface the actual underlying error so we can
+          // figure out why Google Sign-In is failing on real devices. Strip
+          // this back to the generic translated message once auth is stable.
+          const realMsg = e.message ?? 'unknown error';
+          Alert.alert(
+            t('common.error'),
+            `${t('onboarding.googleSignInError')}\n\n[debug] ${realMsg}`,
+          );
         }
       } finally {
         setAuthLoading(false);
@@ -1981,6 +2684,7 @@ export function OnboardingScreen() {
       return (
         <Screen3Teams
           teams={teams}
+          allTeams={allTeams}
           loading={teamsLoading}
           selectedIds={obState.teamIds}
           onToggle={toggleTeamId}
@@ -1995,6 +2699,7 @@ export function OnboardingScreen() {
       return (
         <Screen4Players
           players={players}
+          allPlayers={allPlayers}
           loading={playersLoading}
           selectedTeamIds={obState.teamIds}
           selectedIds={obState.playerIds}
@@ -2009,7 +2714,7 @@ export function OnboardingScreen() {
     case 5:
       return (
         <Screen5Leagues
-          leagues={leagues}
+          leagues={orderedLeagues}
           selectedIds={obState.leagueIds}
           suggestedIds={suggestedLeagueIds}
           onToggle={toggleLeagueId}
@@ -2036,6 +2741,8 @@ export function OnboardingScreen() {
         <Screen7Notifs
           notifs={obState.notifications}
           onToggle={toggleNotif}
+          stadiumMode={obState.stadiumMode}
+          onToggleStadiumMode={toggleStadiumMode}
           fanLevel={obState.fanLevel}
           onNext={goNextFromNotifs}
           onBack={goBack}

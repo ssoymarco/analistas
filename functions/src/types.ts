@@ -24,6 +24,15 @@ export interface MatchDoc {
   awayScore: number;
   homeScoreHT: number | null;
   awayScoreHT: number | null;
+  /** Penalty shootout final score. Populated ONLY when the fixture's
+   *  state_id reaches FT_PEN (8) — extracted from `scores[]` entries with
+   *  `description: 'PENALTIES'` in `extractScores()`. UI surfaces these as
+   *  the FotMob-style `"3-3 (4-2 pen)"` suffix and the 365scores-style
+   *  "Argentina ganó en penales" caption. Absent / null on every other
+   *  fixture, including ones still in regulation, ET, or that ended in
+   *  a regular FT / AET decision. */
+  homePenScore: number | null;
+  awayPenScore: number | null;
   status: 'live' | 'finished' | 'scheduled';
   stateId: number;
   stateLabel: string | null;
@@ -36,6 +45,17 @@ export interface MatchDoc {
   startingAtUtc: string;      // raw SM starting_at
   seasonId: number | null;
   updatedAt: Timestamp;
+
+  // ── Live clock anchor (populated by pollLivescores during in-play) ──
+  // Lets the client smoothly tick the displayed minute between server polls.
+  // periodStartedAt = unix seconds when the current period kicked off.
+  // periodMinuteOffset = base minute for the period (0 for 1H, 45 for 2H, etc.).
+  // Absent for scheduled, halftime, and finished matches (the client falls back
+  // to `minute` in those cases).
+  liveClock?: {
+    periodStartedAt: number;
+    periodMinuteOffset: number;
+  };
 
   // ── Enrichment (populated by syncMatchEnrichment + pollLivescores) ──
   // Raw SM fixture payload with all includes. Stored as opaque JSON because
@@ -157,20 +177,44 @@ export interface SquadDoc {
   updatedAt: Timestamp;
 }
 
-/** Snapshot for diff detection — stored in _meta/livescoresSnapshot */
+/** Snapshot for diff detection — stored in _meta/livescoresSnapshot.
+ *  Counts track running totals per side so the detector can fire a change
+ *  event when any count goes up since the last poll. */
 export interface LivescoresSnapshot {
   matches: Record<string, {
-    homeScore: number;
-    awayScore: number;
-    status: string;
-    stateId: number;
+    homeScore:          number;
+    awayScore:          number;
+    status:             string;
+    stateId:            number;
+    redCardsHome:       number;
+    redCardsAway:       number;
+    yellowCardsHome:    number;
+    yellowCardsAway:    number;
+    substitutionsHome:  number;
+    substitutionsAway:  number;
+    reminderSent?:      boolean;  // true once the pre-match reminder push has fired
+    lineupsSent?:       boolean;  // true once the lineup-confirmed push has fired
   }>;
   updatedAt: Timestamp;
 }
 
 // ── Change Detection Types ──────────────────────────────────────────────────
 
-export type ChangeType = 'goal' | 'matchStart' | 'matchEnd' | 'statusChange';
+export type ChangeType =
+  | 'goal'            // Regular goal (subtype: 'normal' | 'penalty' | 'own')
+  | 'goalCancelled'   // Goal disallowed by VAR
+  | 'matchStart'      // Kickoff (scheduled → live, FIRST_HALF)
+  | 'halftime'        // Half-time whistle
+  | 'matchEnd'        // Full-time whistle
+  | 'extraTimeStart'  // Start of extra time
+  | 'penaltiesStart'  // Start of penalty shootout
+  | 'redCard'         // Red card or second yellow (sent-off)
+  | 'yellowCard'      // First yellow card shown
+  | 'substitution'    // Player substituted
+  | 'matchSuspended'  // Match suspended or postponed mid-game
+  | 'matchReminder'   // Pre-match reminder (~15 min before kickoff)
+  | 'lineups'         // Confirmed starting lineups published
+  | 'statusChange';   // Catch-all for other state transitions
 
 export interface DetectedChange {
   type: ChangeType;
@@ -181,8 +225,17 @@ export interface DetectedChange {
   awayScore: number;
   league: string;
   leagueId: string;
-  /** Which side scored (for goal events) */
+  /** Which side caused the event (goal / card / substitution) */
   scoringTeamSide?: 'home' | 'away';
+  /** Subtype for goals: 'normal' | 'penalty' | 'own'. Default = 'normal'. */
+  goalKind?: 'normal' | 'penalty' | 'own';
+  /** Goal scorer / card recipient (best-effort, may be missing). */
+  scorerName?: string;
+  /** Player involved in the event (red cards, yellow cards). */
+  playerName?: string;
+  /** For substitutions: the player coming ON (replacing playerName). */
+  relatedPlayerName?: string;
+  /** Match minute when the event occurred. */
   minute?: number | null;
 }
 
@@ -246,6 +299,24 @@ export interface SMLeague {
   category: number;
 }
 
+/** SportMonks period — one phase of the match (1H, HT, 2H, ET, PEN). */
+export interface SMPeriod {
+  id: number;
+  fixture_id: number;
+  type_id: number;          // 1=1H, 2=HT, 3=2H, 4=ET, 5=PEN
+  started: number | null;   // epoch seconds — when this period kicked off
+  ended: number | null;
+  counts_from: number;      // 0, 45, 60, 75, 90 — base minute for this period
+  ticking: boolean;         // true if this period is currently running
+  sort_order: number;
+  description?: string;
+  time_added?: number | null;
+  period_length?: number;
+  minutes?: number;
+  seconds?: number | null;
+  has_timer?: boolean;
+}
+
 export interface SMFixture {
   id: number;
   sport_id: number;
@@ -268,6 +339,10 @@ export interface SMFixture {
   scores?: SMScore[];
   state?: SMState;
   league?: SMLeague;
+  /** include=periods — required for live clock extrapolation. */
+  periods?: SMPeriod[];
+  /** include=events — required for red card / scorer detection. */
+  events?: SMFixtureEvent[];
 }
 
 export interface SMStandingDetail {
@@ -333,39 +408,97 @@ export interface SMTopScorer {
 
 // ── SM State & Event Constants ──────────────────────────────────────────────
 
+/**
+ * SportMonks v3 Football API state IDs.
+ *
+ * Verified 2026-05-28 against docs.sportmonks.com/v3/tutorials-and-guides/
+ * tutorials/includes/states — the OFFICIAL state developer_name table.
+ *
+ * ⚠️ HISTORICAL NOTE — the previous map was scrambled (BREAK=8, SECOND_HALF=4,
+ * FINISHED_PENALTIES=10, etc.) which caused a critical production bug: live
+ * 2nd-half matches were misclassified as `scheduled` because SportMonks
+ * reports `state_id: 22` for INPLAY_2ND_HALF, but our LIVE_STATE_IDS set only
+ * had {2, 3, 4, 6, 7, 8}. Every match silently reverted to the "Previa"
+ * screen ~2-3 min into the second half (when SM finalized the transition).
+ * Source of the wrong map: appears to have come from an unrelated reference,
+ * not SportMonks docs.
+ */
 export const SM_STATE_IDS = {
+  // ── Pre-match ──────────────────────────────────────────────────────────
   NOT_STARTED: 1,
-  FIRST_HALF: 2,
-  HALF_TIME: 3,
-  SECOND_HALF: 4,
-  FULL_TIME: 5,
-  EXTRA_TIME: 6,
-  PENALTIES: 7,
-  BREAK: 8,
-  FINISHED_AET: 9,
-  FINISHED_PENALTIES: 10,
-  POSTPONED: 13,
-  CANCELLED: 14,
-  SUSPENDED: 15,
-  INTERRUPTED: 16,
-  ABANDONED: 17,
-  DELETED: 22,
-  TBD: 25,
+
+  // ── Live, regulation ───────────────────────────────────────────────────
+  FIRST_HALF: 2,                  // INPLAY_1ST_HALF
+  HALF_TIME: 3,                   // HT
+  SECOND_HALF: 22,                // INPLAY_2ND_HALF — was wrongly 4
+
+  // ── Live, beyond regulation ────────────────────────────────────────────
+  ET_BREAK: 4,                    // BREAK: regulation over, awaiting ET start (was wrongly 8)
+  EXTRA_TIME: 6,                  // INPLAY_ET
+  EXTRA_TIME_BREAK: 21,           // Between ET halves
+  PENALTIES: 9,                   // INPLAY_PENALTIES — was wrongly 7
+  PEN_BREAK: 25,                  // Between penalty rounds — was wrongly TBD
+
+  // ── Finished ───────────────────────────────────────────────────────────
+  FULL_TIME: 5,                   // FT
+  FINISHED_AET: 7,                // AET — was wrongly 9
+  FINISHED_PENALTIES: 8,          // FT_PEN — was wrongly 10
+  AWARDED: 17,                    // Winner decided administratively (was wrongly ABANDONED)
+
+  // ── Dead / not-played ──────────────────────────────────────────────────
+  POSTPONED: 10,                  // was wrongly 13
+  SUSPENDED: 11,                  // will continue later (was wrongly 15)
+  CANCELLED: 12,                  // was wrongly 14
+  TBA: 13,                        // To Be Announced (was wrongly TBD=25)
+  WALK_OVER: 14,                  // WO
+  ABANDONED: 15,                  // was wrongly 17
+  DELAYED: 16,                    // kick-off pushed (new)
+  INTERRUPTED: 18,                // was wrongly 16
+  AWAITING_UPDATES: 19,           // SM has no recent data (new)
+  DELETED: 20,                    // was wrongly 22
+  PENDING: 26,                    // awaiting data/verification (new)
+
+  // ── Aliases kept for backwards-compatible imports ──────────────────────
+  /** @deprecated use SECOND_HALF — kept as alias so existing imports compile. */
+  BREAK: 4,
+  /** @deprecated use FINISHED_PENALTIES — kept as alias. */
+  FINISHED_PEN: 8,
+  /** @deprecated use TBA — kept as alias. */
+  TBD: 13,
 } as const;
 
-export const LIVE_STATE_IDS = new Set([
-  SM_STATE_IDS.FIRST_HALF,
-  SM_STATE_IDS.HALF_TIME,
-  SM_STATE_IDS.SECOND_HALF,
-  SM_STATE_IDS.EXTRA_TIME,
-  SM_STATE_IDS.PENALTIES,
-  SM_STATE_IDS.BREAK,
+/** State IDs where the match is actively being played — UI shows live tab. */
+export const LIVE_STATE_IDS = new Set<number>([
+  SM_STATE_IDS.FIRST_HALF,        // 2
+  SM_STATE_IDS.HALF_TIME,         // 3
+  SM_STATE_IDS.SECOND_HALF,       // 22 ← the fix
+  SM_STATE_IDS.ET_BREAK,          // 4
+  SM_STATE_IDS.EXTRA_TIME,        // 6
+  SM_STATE_IDS.EXTRA_TIME_BREAK,  // 21
+  SM_STATE_IDS.PENALTIES,         // 9
+  SM_STATE_IDS.PEN_BREAK,         // 25
 ]);
 
-export const FINISHED_STATE_IDS = new Set([
-  SM_STATE_IDS.FULL_TIME,
-  SM_STATE_IDS.FINISHED_AET,
-  SM_STATE_IDS.FINISHED_PENALTIES,
+/** State IDs where the match has concluded normally — UI shows summary tab. */
+export const FINISHED_STATE_IDS = new Set<number>([
+  SM_STATE_IDS.FULL_TIME,         // 5
+  SM_STATE_IDS.FINISHED_AET,      // 7
+  SM_STATE_IDS.FINISHED_PENALTIES,// 8
+  SM_STATE_IDS.AWARDED,           // 17
+]);
+
+/** State IDs where the match will NOT proceed normally — never infer "live"
+ *  from time even if kickoff was hours ago. Keeps the time-based fallback in
+ *  `getMatchStatus` from second-guessing a definitive "won't happen" signal. */
+export const DEAD_STATE_IDS = new Set<number>([
+  SM_STATE_IDS.POSTPONED,         // 10
+  SM_STATE_IDS.SUSPENDED,         // 11
+  SM_STATE_IDS.CANCELLED,         // 12
+  SM_STATE_IDS.WALK_OVER,         // 14
+  SM_STATE_IDS.ABANDONED,         // 15
+  SM_STATE_IDS.DELAYED,           // 16
+  SM_STATE_IDS.INTERRUPTED,       // 18
+  SM_STATE_IDS.DELETED,           // 20
 ]);
 
 /** Standing detail type_id → meaning */
@@ -378,3 +511,50 @@ export const STANDING_DETAIL_TYPES = {
   GA: 134,   // Goals Against
   GD: 179,   // Goal Difference
 } as const;
+
+/** SportMonks event type_id → semantic meaning. Mirrors the client-side
+ *  SM_EVENT_TYPES in src/services/sportmonks.ts — keep both in sync.
+ *
+ *  ⚠️ Verified 2026-05-29 against docs.sportmonks.com/v3/definitions/types/events.
+ *  PENALTY_GOAL↔OWN_GOAL (15/16) and RED_CARD↔SECOND_YELLOW (20/21) were
+ *  previously swapped. Red-card DETECTION here was unaffected (countRedCards
+ *  matches the {RED_CARD, SECOND_YELLOW} set, identical either way), but the
+ *  goalKind label and timeline icons were wrong. */
+export const SM_EVENT_TYPES = {
+  GOAL: 14,
+  PENALTY_GOAL: 16,     // was wrongly 15 (15 is Own Goal)
+  OWN_GOAL: 15,         // was wrongly 16 (16 is Penalty)
+  PENALTY_MISS: 17,
+  SUBSTITUTION: 18,
+  YELLOW_CARD: 19,
+  SECOND_YELLOW: 21,    // was wrongly 20 (20 is Red Card)
+  RED_CARD: 20,         // was wrongly 21 (21 is Yellowred / second yellow)
+  /** Penalty shootout kick — missed (type_id 22). Distinct from in-play
+   *  PENALTY_MISS (17). Only appears on fixtures that go to a shootout. */
+  PENALTY_SHOOTOUT_MISS: 22,
+  /** Penalty shootout kick — scored (type_id 23). Distinct from in-play
+   *  PENALTY_GOAL (16). Pair with PENALTY_SHOOTOUT_MISS to render the
+   *  full kick-by-kick shootout timeline. */
+  PENALTY_SHOOTOUT_GOAL: 23,
+  VAR: 24,
+} as const;
+
+/** Subset of a SportMonks event payload we care about for change detection.
+ *  The full payload has more fields; we only type what we read. */
+export interface SMFixtureEvent {
+  id: number;
+  fixture_id: number;
+  type_id: number;
+  participant_id?: number;
+  minute?: number | null;
+  extra_minute?: number | null;
+  player_id?: number | null;
+  player_name?: string | null;
+  related_player_id?: number | null;
+  related_player_name?: string | null;
+  result?: string | null;
+  /** SportMonks sometimes marks goals as cancelled by VAR. */
+  cancelled?: boolean;
+  /** Some VAR events have an `info` string explaining the call. */
+  info?: string | null;
+}

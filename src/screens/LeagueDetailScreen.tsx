@@ -48,6 +48,7 @@ import { BackArrow, ShareIcon } from '../components/NavIcons';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatUtcTime } from '../utils/formatMatchTime';
 import { translateNationalTeam, translateLeagueCountry } from '../utils/nationalTeams';
+import { isImageUri } from '../utils/imageUri';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'LeagueDetail'>;
 type Tab = 'clasificacion' | 'grupos' | 'partidos' | 'goleadores' | 'asistencias' | 'equipos';
@@ -81,7 +82,7 @@ function getZoneColor(position: number, totalTeams: number, zones?: LeagueZone[]
 
 // ── Team Logo ──────────────────────────────────────────────────────────────
 const TeamLogo: React.FC<{ logo: string; size?: number }> = ({ logo, size = 22 }) => {
-  if (logo?.startsWith('http')) {
+  if (isImageUri(logo)) {
     return <Image source={{ uri: logo }} style={{ width: size, height: size, borderRadius: 2 }} resizeMode="contain" />;
   }
   return <Text style={{ fontSize: size - 4 }}>⚽</Text>;
@@ -487,7 +488,7 @@ const GoleadoresTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
                 {scorer.position}
               </Text>
               <View style={gs.avatarWrap}>
-                {scorer.playerImage?.startsWith('http') ? (
+                {isImageUri(scorer.playerImage) ? (
                   <Image source={{ uri: scorer.playerImage }} style={gs.avatar} resizeMode="cover" />
                 ) : (
                   <View style={[gs.avatar, { backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }]}>
@@ -499,7 +500,7 @@ const GoleadoresTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
                 <Text style={[gs.name, { color: c.textPrimary }]} numberOfLines={1}>{scorer.playerName}</Text>
                 {scorer.teamName ? (
                   <View style={gs.teamRow}>
-                    {scorer.teamLogo?.startsWith('http') && (
+                    {isImageUri(scorer.teamLogo) && (
                       <Image source={{ uri: scorer.teamLogo }} style={gs.teamMiniLogo} resizeMode="contain" />
                     )}
                     <Text style={[gs.teamName, { color: c.textTertiary }]} numberOfLines={1}>{scorer.teamName}</Text>
@@ -606,7 +607,7 @@ const StatListTab: React.FC<{ data: LeagueDetailData; type: 'assists' | 'cards' 
                 {row.position}
               </Text>
               <View style={gs.avatarWrap}>
-                {row.playerImage?.startsWith('http') ? (
+                {isImageUri(row.playerImage) ? (
                   <Image source={{ uri: row.playerImage }} style={gs.avatar} resizeMode="cover" />
                 ) : (
                   <View style={[gs.avatar, { backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }]}>
@@ -618,7 +619,7 @@ const StatListTab: React.FC<{ data: LeagueDetailData; type: 'assists' | 'cards' 
                 <Text style={[gs.name, { color: c.textPrimary }]} numberOfLines={1}>{row.playerName}</Text>
                 {row.teamName ? (
                   <View style={gs.teamRow}>
-                    {row.teamLogo?.startsWith('http') && (
+                    {isImageUri(row.teamLogo) && (
                       <Image source={{ uri: row.teamLogo }} style={gs.teamMiniLogo} resizeMode="contain" />
                     )}
                     <Text style={[gs.teamName, { color: c.textTertiary }]} numberOfLines={1}>{row.teamName}</Text>
@@ -679,7 +680,7 @@ const EquiposTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
                 })}
               >
                 <View style={eq.logoWrap}>
-                  {team.logo?.startsWith('http') ? (
+                  {isImageUri(team.logo) ? (
                     <Image source={{ uri: team.logo }} style={eq.logo} resizeMode="contain" />
                   ) : (
                     <Text style={{ fontSize: 28 }}>⚽</Text>
@@ -1036,10 +1037,10 @@ const wch = StyleSheet.create({
 // ── Converter: LeagueFixture → Match (for MatchDetail navigation) ────────────
 function fixtureToMatch(f: LeagueFixture, leagueName: string, leagueLogo: string): Match {
   const s = f.stateShort;
-  const status: MatchStatus =
-    ['FT', 'AET', 'FT_PEN'].includes(s) ? 'finished' :
-    ['1H', '2H', 'HT', 'ET', 'PEN'].includes(s) ? 'live' :
-    'scheduled';
+  // Use the robust numeric-state-id status (set by useLeagueDetail) so cup
+  // matches decided on penalties navigate into MatchDetail as 'finished'
+  // instead of 'scheduled'. stateShort is only used for the live label below.
+  const status: MatchStatus = f.status;
 
   // Display time: "HH:MM" for upcoming, state label for live, "FT" for finished
   const d = new Date(f.date);
@@ -1168,11 +1169,30 @@ const CalendarioTab: React.FC<{
   const sortedStages = Array.from(stageMap.entries())
     .sort(([, a], [, b]) => a.sortOrder - b.sortOrder);
 
+  // Today-first date ordering: today's date appears first, then past dates in
+  // descending order (most recent first), then future dates ascending. Matches
+  // the sort applied by useLeagueDetail at the fixtures level — needed here too
+  // because the byDate map groups by date and we have to choose the date order
+  // when rendering. Pure ascending here would land the user on the August
+  // opening jornada (season start) regardless of where in the season we are.
+  const todayUTC = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
+  const compareDates = (a: string, b: string): number => {
+    const isTodayA = a === todayUTC;
+    const isTodayB = b === todayUTC;
+    const isPastA  = a < todayUTC;
+    const isPastB  = b < todayUTC;
+    const groupA = isTodayA ? 0 : isPastA ? 1 : 2;
+    const groupB = isTodayB ? 0 : isPastB ? 1 : 2;
+    if (groupA !== groupB) return groupA - groupB;
+    if (isPastA) return b.localeCompare(a); // past: most recent first
+    return a.localeCompare(b);              // today + future: ascending
+  };
+
   return (
     <View style={ca.outer}>
       {sortedStages.map(([stageName, { byDate }]) => {
         const stageLabel = translateStage(stageName);
-        const sortedDates = Array.from(byDate.entries()).sort(([a], [b]) => a.localeCompare(b));
+        const sortedDates = Array.from(byDate.entries()).sort(([a], [b]) => compareDates(a, b));
         const totalInStage = sortedDates.reduce((sum, [, fs]) => sum + fs.length, 0);
         return (
           <View key={stageName} style={[ca.card, { backgroundColor: c.card, borderColor: c.border }]}>
@@ -1219,8 +1239,16 @@ const FixtureRow: React.FC<{ fixture: LeagueFixture; onPress?: () => void; showD
   const c = useThemeColors();
   const { t } = useTranslation();
   const { timeFormat } = useTimeFormat();
-  const isFinished = f.stateShort === 'FT';
-  const isLive = ['1H', '2H', 'HT', 'ET', 'PEN'].includes(f.stateShort);
+  // Drive off the robust numeric-state-id status (useLeagueDetail.deriveFixtureStatus)
+  // rather than the string `stateShort`. The Firestore shim doesn't populate
+  // `state.short_name` (it was undefined → 'NS'), which made every cup match
+  // that went to penalties — 2022 World Cup final, NED-ARG QF, etc. — render
+  // as "upcoming" with the kick-off time and "-" placeholders instead of the
+  // final score. `status` is computed from the verified FINISHED/LIVE state-id
+  // sets + a time fallback, so it's correct on BOTH the Firestore and proxy
+  // paths regardless of how the match was decided (FT / AET / penalties).
+  const isFinished = f.status === 'finished';
+  const isLive = f.status === 'live';
 
   return (
     <TouchableOpacity
@@ -1484,22 +1512,13 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
         scrollEventThrottle={16}
         stickyHeaderIndices={[1]}
       >
-        {/* ── Hero Header ── */}
-        {leagueId === 732 ? (
-          <WorldCupHeroHeader
-            isFollowing={isFollowing}
-            onToggleFollow={() => toggleFollowLeague(String(leagueId))}
-            t={t}
-            seasons={availableSeasons}
-            selectedSeasonId={selectedSeasonId ?? seasonId ?? null}
-            onSelectSeason={setSelectedSeasonId}
-            isCurrentSeason={isCurrentSeason}
-          />
-        ) : (
+        {/* ── Hero Header (standard for all leagues — the World Cup-specific
+             promotional hero with trophy/host-flags/countdown was removed for
+             Apple Guideline 5.2.1, FIFA IP) ── */}
           <View style={[s.hero, { backgroundColor: headerBg }]}>
             {/* League logo */}
             <View style={[s.leagueLogoWrap, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)' }]}>
-              {displayLogo?.startsWith('http') ? (
+              {isImageUri(displayLogo) ? (
                 <Image source={{ uri: displayLogo }} style={s.leagueLogo} resizeMode="contain" />
               ) : (
                 <Text style={{ fontSize: 56 }}>{fallbackEmoji}</Text>
@@ -1568,7 +1587,6 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
               </Text>
             </TouchableOpacity>
           </View>
-        )}
 
         {/* ── Tab bar (sticky, scrollable) ── */}
         <View style={[s.tabBar, { backgroundColor: c.bg, borderBottomColor: c.border }]}>

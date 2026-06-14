@@ -5,7 +5,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image,
-  ScrollView, Dimensions, Modal, Pressable,
+  ScrollView, Dimensions, Modal, Pressable, Animated, Easing,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTranslation } from 'react-i18next';
@@ -18,9 +18,16 @@ import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupV
 import { getLeagueDisplayName } from '../../config/leagues';
 import type {
   Match, MatchDetail, MatchEvent, H2HResult, TeamFormEntry,
-  OddsMarket, MatchPrediction, MissingPlayer, PressureIndex,
+  OddsMarket, MatchPrediction, MissingPlayer, PressureIndex, MatchStatCategory,
   MatchVenue, MatchReferee, RefereeStats,
 } from '../../data/types';
+import { isImageUri } from '../../utils/imageUri';
+import {
+  MATCH_PHASES, maxRegulationMinute,
+  runningScoreAt, cumulativeScoreAtMinute,
+} from '../../utils/matchPhases';
+import { translateNationalTeam } from '../../utils/nationalTeams';
+import { BETTING_CONTENT_ENABLED } from '../../config/features';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH   = SCREEN_WIDTH - 72; // prediction card width
@@ -63,17 +70,23 @@ function translateWeatherDesc(desc: string, t: (key: string) => string): string 
 // SHARED SUB-COMPONENTS
 // ══════════════════════════════════════════════════════════════════════════════
 
-function eventEmoji(type: string): string {
+function eventEmoji(type: string, injured?: boolean): string {
   switch (type) {
     case 'goal':          return '⚽';
     case 'own-goal':      return '⚽';
     case 'penalty-goal':  return '⚽';
     case 'penalty-miss':  return '❌';
+    // Shootout kicks live in their own timeline section. Green check for a
+    // scored kick, red cross for a miss — matches the 365scores treatment.
+    case 'shootout-goal': return '✅';
+    case 'shootout-miss': return '❌';
     case 'yellow':        return '🟨';
     case 'second-yellow': return '🟨🟥';
     case 'red':           return '🟥';
     case 'sub':           return '🔄';
     case 'var':           return '📺';
+    case 'delay-start':   return injured ? '🚨' : '⏸️'; // injury vs generic pause
+    case 'delay-end':     return '▶️';
     default:              return '●';
   }
 }
@@ -141,21 +154,101 @@ const qs = StyleSheet.create({
 });
 
 // ── Event row (live/finished) ────────────────────────────────────────────────
-const EventRow: React.FC<{ event: MatchEvent; match: Match }> = ({ event, match }) => {
+// `runningScore` is the cumulative score AT this event, passed in by the
+// parent (TimelineBlock) for goal events only. Renders as a bold "2-1" under
+// the scorer — the single biggest clarity win, present in every competitor.
+const EventRow: React.FC<{
+  event: MatchEvent;
+  match: Match;
+  runningScore?: { home: number; away: number } | null;
+}> = ({ event, match, runningScore }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const isHome = event.team === 'home';
   const isGoal = isGoalEvent(event.type);
-  const minuteStr = `${event.minute}${event.addedTime ? `+${event.addedTime}` : ''}'`;
+  const isPenaltyGoal = event.type === 'penalty-goal';
+  const isOwnGoal = event.type === 'own-goal';
+  const isDelay = event.type === 'delay-start' || event.type === 'delay-end';
+  const isShootout = event.type === 'shootout-goal' || event.type === 'shootout-miss';
+  // Shootout kicks happen after the 90/120-minute mark, but SM reports them
+  // all stamped at the period start (e.g. minute=120). Showing "120'" for
+  // ten consecutive kicks reads poorly — instead surface the kick number
+  // ("Pen 5") and the running tally is shown separately by the parent.
+  const minuteStr = isShootout
+    ? (event.shootoutOrder != null ? `${t('timeline.penaltyKick')} ${event.shootoutOrder}` : t('timeline.penaltyKick'))
+    : `${event.minute}${event.addedTime ? `+${event.addedTime}` : ''}'`;
+
+  // Delays render as a single centered row — they don't belong to one team.
+  if (isDelay) {
+    const label =
+      event.type === 'delay-end'
+        ? 'Reanudación'
+        : event.injured && event.player
+          ? `Pausa por lesión · ${event.player}`
+          : 'Pausa';
+    return (
+      <View style={[ev.row, { borderBottomColor: c.border }]}>
+        <View style={ev.side} />
+        <View style={ev.center}>
+          <View style={[ev.iconWrap, { backgroundColor: c.surface }]}>
+            <Text style={ev.icon}>{eventEmoji(event.type, event.injured)}</Text>
+          </View>
+          <Text style={[ev.minute, { color: c.textTertiary }]}>{minuteStr}</Text>
+        </View>
+        <View style={[ev.side, { alignItems: 'flex-start' }]}>
+          <Text style={[ev.player, { color: c.textSecondary, flexShrink: 1 }]} numberOfLines={1}>
+            {label}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Subtitle under the player name for NON-sub events: assist (for goals)
+  // and/or "(en propia)" for own goals. Subs render their own ▲/▼ block
+  // inline below (handled in the JSX).
+  const renderSubtitle = (align: 'flex-end' | 'flex-start') => {
+    const bits: string[] = [];
+    if (isOwnGoal) bits.push(t('timeline.ownGoal'));
+    if (isGoal && event.relatedPlayer) bits.push(`${t('timeline.assist')}: ${event.relatedPlayer}`);
+    if (bits.length === 0) return null;
+    return (
+      <Text style={[ev.sub, { color: c.textSecondary, textAlign: align === 'flex-end' ? 'right' : 'left' }]} numberOfLines={2}>
+        {bits.join(' · ')}
+      </Text>
+    );
+  };
+
+  // The main name line. For subs we render the in/out arrows in the subtitle,
+  // so the name line shows the incoming player. Penalty goals get a small "P"
+  // badge after the name.
+  const renderName = (align: 'flex-end' | 'flex-start') => (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1 }}>
+      {align === 'flex-start' && isPenaltyGoal && <PenaltyBadge />}
+      <Text
+        style={[ev.player, { color: c.textPrimary }, isGoal && ev.playerGoal]}
+        numberOfLines={1}
+      >
+        {event.player}
+      </Text>
+      {align === 'flex-end' && isPenaltyGoal && <PenaltyBadge />}
+    </View>
+  );
 
   return (
     <View style={[ev.row, { borderBottomColor: c.border }]}>
       <View style={ev.side}>
         {isHome && (
           <View style={ev.infoHome}>
-            <Text style={[ev.player, { color: c.textPrimary }, isGoal && ev.playerGoal]}>{event.player}</Text>
-            {event.relatedPlayer && (
-              <Text style={[ev.sub, { color: c.textSecondary }]}>
-                {event.type === 'sub' ? `↓ ${event.relatedPlayer}` : `Asistencia: ${event.relatedPlayer}`}
+            {renderName('flex-end')}
+            {isGoal && runningScore && (
+              <Text style={[ev.runScore, { color: c.accent }]}>{runningScore.home}-{runningScore.away}</Text>
+            )}
+            {event.type !== 'sub' && renderSubtitle('flex-end')}
+            {event.type === 'sub' && (
+              <Text style={[ev.sub, { color: c.textSecondary, textAlign: 'right' }]} numberOfLines={2}>
+                <Text style={{ color: '#22c55e' }}>▲ </Text>{event.player}{'\n'}
+                <Text style={{ color: '#ef4444' }}>▼ </Text>{event.relatedPlayer}
               </Text>
             )}
           </View>
@@ -163,22 +256,38 @@ const EventRow: React.FC<{ event: MatchEvent; match: Match }> = ({ event, match 
       </View>
       <View style={ev.center}>
         <View style={[ev.iconWrap, { backgroundColor: c.surface }]}>
-          <Text style={ev.icon}>{eventEmoji(event.type)}</Text>
+          <Text style={ev.icon}>{eventEmoji(event.type, event.injured)}</Text>
         </View>
         <Text style={[ev.minute, { color: c.textTertiary }]}>{minuteStr}</Text>
       </View>
       <View style={ev.side}>
         {!isHome && (
           <View style={ev.infoAway}>
-            <Text style={[ev.player, { color: c.textPrimary }, isGoal && ev.playerGoal]}>{event.player}</Text>
-            {event.relatedPlayer && (
-              <Text style={[ev.sub, { color: c.textSecondary }]}>
-                {event.type === 'sub' ? `↓ ${event.relatedPlayer}` : `Asistencia: ${event.relatedPlayer}`}
+            {renderName('flex-start')}
+            {isGoal && runningScore && (
+              <Text style={[ev.runScore, { color: c.accent }]}>{runningScore.home}-{runningScore.away}</Text>
+            )}
+            {event.type !== 'sub' && renderSubtitle('flex-start')}
+            {event.type === 'sub' && (
+              <Text style={[ev.sub, { color: c.textSecondary, textAlign: 'left' }]} numberOfLines={2}>
+                <Text style={{ color: '#22c55e' }}>▲ </Text>{event.player}{'\n'}
+                <Text style={{ color: '#ef4444' }}>▼ </Text>{event.relatedPlayer}
               </Text>
             )}
           </View>
         )}
       </View>
+    </View>
+  );
+};
+
+// Small "P" badge appended to penalty goals — language-agnostic (P reads as
+// Penal/Penalty/Pênalti/etc. across our locales) and visually distinct.
+const PenaltyBadge: React.FC = () => {
+  const c = useThemeColors();
+  return (
+    <View style={ev.penBadge}>
+      <Text style={[ev.penBadgeText, { color: c.textSecondary }]}>P</Text>
     </View>
   );
 };
@@ -190,11 +299,17 @@ const ev = StyleSheet.create({
   infoAway: { alignItems: 'flex-start', paddingLeft: 4 },
   player: { fontSize: 13, fontWeight: '500' },
   playerGoal: { fontWeight: '700' },
-  sub: { fontSize: 11, marginTop: 1 },
+  sub: { fontSize: 11, marginTop: 1, lineHeight: 15 },
+  runScore: { fontSize: 13, fontWeight: '900', marginTop: 1, letterSpacing: -0.3 },
   center: { alignItems: 'center', gap: 3, width: 54 },
   iconWrap: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   icon: { fontSize: 15 },
   minute: { fontSize: 10, fontWeight: '700' },
+  penBadge: {
+    borderWidth: 1, borderColor: 'rgba(127,127,127,0.5)', borderRadius: 4,
+    paddingHorizontal: 3, paddingVertical: 0,
+  },
+  penBadgeText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.3 },
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -497,7 +612,7 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
 // Mini team badge for prediction cards
 function TeamBadgeMini({ name, logo, color }: { name: string; logo: string; color: string }) {
   const c = useThemeColors();
-  const isUrl = logo.startsWith('http');
+  const isUrl = isImageUri(logo);
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       {isUrl ? (
@@ -1055,7 +1170,7 @@ const FormSection: React.FC<{ homeForm?: TeamFormEntry[]; awayForm?: TeamFormEnt
   const renderTeamForm = (form: TeamFormEntry[], team: { shortName: string; logo: string }) => (
     <View style={fm.teamRow}>
       <View style={fm.teamInfo}>
-        {team.logo.startsWith('http') ? (
+        {isImageUri(team.logo) ? (
           <Image source={{ uri: team.logo }} style={fm.teamLogo} />
         ) : (
           <View style={[fm.teamLogo, { backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }]}>
@@ -1149,7 +1264,7 @@ const VenueDetailModal: React.FC<{
         <View style={[vdm.handle, { backgroundColor: c.border }]} />
 
         {/* Venue image */}
-        {!!venue.image && venue.image.startsWith('http') && (
+        {!!venue.image && isImageUri(venue.image) && (
           <Image source={{ uri: venue.image }} style={vdm.heroImage} resizeMode="cover" />
         )}
 
@@ -1250,7 +1365,7 @@ const RefereeDetailModal: React.FC<{
         {/* Photo + name */}
         <View style={rdm.heroRow}>
           <View style={[rdm.photoWrap, { borderColor: '#f59e0b60', backgroundColor: c.surface }]}>
-            {referee.imageUrl && referee.imageUrl.startsWith('http') ? (
+            {referee.imageUrl && isImageUri(referee.imageUrl) ? (
               <Image source={{ uri: referee.imageUrl }} style={rdm.photo} resizeMode="cover" />
             ) : (
               <Text style={{ fontSize: 40 }}>👤</Text>
@@ -1579,13 +1694,28 @@ function buildPressureCurve(
   events: MatchEvent[],
   homePressure: number,
   matchMinutes: number,
+  totalMin: number = 90,
 ): number[] {
-  const total   = Math.max(matchMinutes, 90);
-  const points  = new Array<number>(total + 1).fill(50);
-  const impulse = new Array<number>(total + 1).fill(0);
+  // The X-axis of the chart always shows 0–`totalMin` so the labels and the
+  // half-time marker stay anchored. The CURVE itself, however, must only
+  // contain real data up to the current match minute — otherwise a match at
+  // minute 4 would render a noisy "history" through to minute 90 that the
+  // user reads as if it actually happened (reported on AC Milan 1-0 Cagliari
+  // at 4:48' on 2026-05-24). For finished matches we still extend to the
+  // full `totalMin` (90 for regulation, 120 for ET matches) so the full-
+  // match shape renders.
+  const total      = totalMin;
+  const elapsed    = Math.max(0, Math.min(matchMinutes, total)); // 0..total cap
+  const points     = new Array<number>(total + 1).fill(50);
+  const impulse    = new Array<number>(total + 1).fill(0);
 
+  // Only ingest events that have actually happened — defensively skip any
+  // event minute beyond the current elapsed time (SportMonks occasionally
+  // backfills events with the next-period minute number while the period is
+  // still going).
   for (const ev of events) {
-    const min    = Math.min(ev.minute, total);
+    if (ev.minute > elapsed) continue;
+    const min    = Math.min(ev.minute, elapsed);
     const isHome = ev.team === 'home';
     if (ev.type === 'goal' || ev.type === 'penalty-goal' || ev.type === 'own-goal') {
       impulse[min] += isHome ? 15 : -15;
@@ -1596,15 +1726,20 @@ function buildPressureCurve(
     }
   }
 
+  // Walk momentum + bias + jitter ONLY through the elapsed window.
+  // Beyond `elapsed` we keep the neutral 50 fill — the chart will visually
+  // show an empty flat line for time the match hasn't reached yet.
   let momentum = 0;
-  for (let i = 0; i <= total; i++) {
+  const bias   = homePressure - 50;
+  for (let i = 0; i <= elapsed; i++) {
     momentum  = momentum * 0.91 + impulse[i];
     points[i] = 50 + momentum;
   }
-
-  const bias = homePressure - 50;
-  for (let i = 0; i <= total; i++) {
-    const t     = i / total;
+  for (let i = 0; i <= elapsed; i++) {
+    // Normalize t against the elapsed window so the sine wave shape feels
+    // proportional to how much of the match has played out so far. Guard
+    // against divide-by-zero when elapsed is 0.
+    const t     = elapsed > 0 ? i / elapsed : 0;
     const blend = 50 + bias * (0.5 + 0.5 * Math.sin(t * Math.PI * 3 + bias * 0.05));
     points[i]   = points[i] * 0.6 + blend * 0.4;
     points[i]  += Math.sin(i * 0.31) * 3.5 + Math.cos(i * 0.68) * 2.5;
@@ -1658,14 +1793,43 @@ const PressureSection: React.FC<{
   pressure: PressureIndex;
   match: Match;
   events?: MatchEvent[];
-}> = ({ pressure, match, events = [] }) => {
+  /**
+   * Pass `detail.statistics` so the section can render a compact 4-stat strip
+   * below the chart (corners / fouls / saves / big chances). Optional — the
+   * strip is hidden entirely when stats are missing.
+   */
+  statistics?: MatchStatCategory[];
+}> = ({ pressure, match, events = [], statistics = [] }) => {
   const c           = useThemeColors();
   const { isDark }  = useDarkMode();
-  const matchMinutes = match.minute ?? 90;
+  // The X-axis maxes out at 90 for a regulation match and 120 when extra
+  // time happened — see matchPhases.maxRegulationMinute. This is what lets
+  // FotMob-style ET goals (Mbappé 108', Messi 118', Petković 117') sit on
+  // the chart instead of being silently dropped past the 90-minute mark.
+  const totalMin = maxRegulationMinute(match, events);
+
+  // How many minutes of the match have actually been played. Drives how far
+  // along the 0–`totalMin` X-axis the curve is filled with real momentum
+  // data; beyond this minute the chart stays neutral (50). The X-axis
+  // itself is always 0–`totalMin` so the half-time line and tick labels
+  // stay anchored.
+  //   • finished → totalMin (full match shape)
+  //   • live     → current minute (curve grows over time)
+  //   • scheduled → 0 (curve stays flat — shouldn't render here at all, but
+  //                     the fallback is graceful)
+  // Previously `match.minute ?? 90` was used, which during a brief data revert
+  // (syncFixtures stomping the live state with stale scheduled state, observed
+  // on MEX 2-0 GHA on 2026-05-23) caused the FULL 90-min curve to render as if
+  // the match had ended — explicit status mapping prevents that.
+  const matchMinutes = match.status === 'finished'
+    ? totalMin
+    : match.status === 'live' && typeof match.minute === 'number' && match.minute > 0
+      ? match.minute
+      : 0;
 
   const rawCurve = React.useMemo(
-    () => buildPressureCurve(events, pressure.home, matchMinutes),
-    [events, pressure.home, matchMinutes],
+    () => buildPressureCurve(events, pressure.home, matchMinutes, totalMin),
+    [events, pressure.home, matchMinutes, totalMin],
   );
 
   // Catmull-Rom upsample → Gaussian smooth → final smooth wave
@@ -1674,7 +1838,8 @@ const PressureSection: React.FC<{
     return gaussianSmooth(up, 6);
   }, [rawCurve]);
 
-  const totalMin    = rawCurve.length - 1; // original minute count for marker x-pos
+  // `totalMin` declared above (~line 1741) — drives both buildPressureCurve
+  // and the x-axis labels. rawCurve.length === totalMin + 1 by construction.
   const numBars     = smoothCurve.length;
 
   // Measure actual chart pixel width via onLayout
@@ -1693,6 +1858,60 @@ const PressureSection: React.FC<{
 
   const borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)';
   const gridColor   = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+
+  // ── Live playhead ──────────────────────────────────────────────────────────
+  // The pressure chart used to have no "you are here" indicator during live
+  // play — users couldn't tell which slice of the chart corresponded to the
+  // moment they were watching. Now we render a vertical accent line at the
+  // current minute (capped to the chart's 0–90 domain) plus a soft pulsing dot
+  // at the top of the line to draw the eye. Only visible during live; the
+  // chart stays clean for scheduled/finished matches.
+  const playheadMin: number | null =
+    match.status === 'live' &&
+    typeof match.minute === 'number' &&
+    match.minute > 0
+      ? Math.min(match.minute, totalMin)
+      : null;
+
+  const pulseAnim = React.useRef(new Animated.Value(0.45)).current;
+  React.useEffect(() => {
+    if (playheadMin === null) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0.45,
+          duration: 850,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playheadMin === null]);
+
+  // ── Extra stats strip ──────────────────────────────────────────────────────
+  // Compact 4-row block beneath the summary bar. Picks stats that AREN'T
+  // already in the top-level QuickStats card (possession/shots/xG) so the
+  // section adds genuinely new info instead of repeating numbers. Each entry
+  // is filtered out if the stat is missing from SportMonks for this match.
+  const extraStats = React.useMemo(() => {
+    const all = statistics.flatMap(c => c.stats);
+    const pick = (label: string) => all.find(s => s.label === label);
+    return [
+      { key: 'corners', label: 'Saques de esquina',  stat: pick('Saques de esquina') },
+      { key: 'fouls',   label: 'Faltas',             stat: pick('Faltas') },
+      { key: 'saves',   label: 'Salvadas de portero',stat: pick('Salvadas de portero') },
+      { key: 'chances', label: 'Grandes chances',    stat: pick('Grandes chances') },
+    ].filter(row => row.stat !== undefined);
+  }, [statistics]);
 
   return (
     <View style={[pi.card, { backgroundColor: c.card, borderColor: c.border }]}>
@@ -1749,6 +1968,46 @@ const PressureSection: React.FC<{
               left: (45 / totalMin) * chartW,
               borderColor: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)',
             }]} />
+            {/* Full-time dotted line — only when the chart extends into ET,
+                so the user can read where regulation ended (90') vs. where
+                extra time began. For 0-90 charts this is the right edge of
+                the chart, where a dashed line would be invisible. */}
+            {totalMin === 120 && (
+              <View style={[pi.htLine, {
+                left: (90 / totalMin) * chartW,
+                borderColor: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)',
+              }]} />
+            )}
+
+            {/* Live playhead — only when the match is actually live. */}
+            {playheadMin !== null && (
+              <>
+                {/* Vertical line at the current minute */}
+                <View style={{
+                  position: 'absolute',
+                  left: (playheadMin / totalMin) * chartW,
+                  top: 0,
+                  bottom: 0,
+                  width: 1.5,
+                  backgroundColor: c.accent,
+                  opacity: 0.55,
+                }} />
+                {/* Pulsing dot anchored to the top of the line. Pokes a few
+                    pixels above the chart container so it sits between the
+                    chart and the row of home event markers above, drawing
+                    the eye without overlapping the curve. */}
+                <Animated.View style={{
+                  position: 'absolute',
+                  left: (playheadMin / totalMin) * chartW - 5,
+                  top: -3,
+                  width: 10,
+                  height: 10,
+                  borderRadius: 5,
+                  backgroundColor: c.accent,
+                  opacity: pulseAnim,
+                }} />
+              </>
+            )}
 
             {/* Red-card vertical lines */}
             {[...homeMarkers, ...awayMarkers]
@@ -1807,13 +2066,31 @@ const PressureSection: React.FC<{
 
       {/* ── X-axis labels ── */}
       <View style={pi.xAxis}>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>0'</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>15'</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>30'</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>MT</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>60'</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>75'</Text>
-        <Text style={[pi.xLabel, { color: c.textTertiary }]}>90'</Text>
+        {/* X-axis labels adapt to whether the chart extends into extra time.
+            Regulation matches: 7 anchors evenly spaced 0'..90' with "MT"
+            (medio tiempo) at the halftime position. ET matches: collapse
+            to 4 anchors (0', MT=45', TC=90', AET=120') — mirrors the FotMob
+            "Inercia" pattern so users get a clear visual cue that the chart
+            covers ET. We use the same flexbox container so spacing stays
+            even regardless of label count. */}
+        {totalMin === 120 ? (
+          <>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>0'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>MT</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>TC</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>AET</Text>
+          </>
+        ) : (
+          <>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>0'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>15'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>30'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>MT</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>60'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>75'</Text>
+            <Text style={[pi.xLabel, { color: c.textTertiary }]}>90'</Text>
+          </>
+        )}
       </View>
 
       {/* ── Summary bar ── */}
@@ -1826,6 +2103,33 @@ const PressureSection: React.FC<{
         </View>
         <Text style={[pi.summaryValue, { color: PI_AWAY, textAlign: 'right' }]}>{pressure.away}%</Text>
       </View>
+
+      {/* ── Extra stats strip (corners / fouls / saves / big chances) ── */}
+      {extraStats.length > 0 && (
+        <View style={[pi.extraStats, { borderTopColor: borderColor }]}>
+          {extraStats.map((row, idx) => {
+            const stat = row.stat!;
+            return (
+              <View
+                key={row.key}
+                style={[
+                  pi.extraStatRow,
+                  idx > 0 && {
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderTopColor: borderColor,
+                  },
+                ]}
+              >
+                <Text style={[pi.extraStatVal, { color: PI_HOME }]}>{stat.home}</Text>
+                <Text style={[pi.extraStatLabel, { color: c.textSecondary }]} numberOfLines={1}>
+                  {row.label}
+                </Text>
+                <Text style={[pi.extraStatVal, { color: PI_AWAY, textAlign: 'right' }]}>{stat.away}</Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 };
@@ -1851,7 +2155,13 @@ const pi = StyleSheet.create({
     borderStyle: 'dashed' as const,
   },
 
-  xAxis:  { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 32, paddingVertical: 6 },
+  // Padding here MUST mirror the chart container's effective margins so the
+  // X-axis labels align with the bars and the half-time dashed line:
+  //   • Left: chartWrap.paddingLeft (4) + yAxis.width (Y_AXIS_W = 28) = 32
+  //   • Right: CHART_PAD_R = 14 (was previously 32, which pushed the "90'"
+  //     label 18 px inward and threw the MT label out of line with the
+  //     dashed half-time marker by 9 px).
+  xAxis:  { flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 32, paddingRight: CHART_PAD_R, paddingVertical: 6 },
   xLabel: { fontSize: 8, fontWeight: '500' },
 
   summary:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, gap: 10, borderTopWidth: 1 },
@@ -1859,6 +2169,14 @@ const pi = StyleSheet.create({
   summaryBarWrap: { flex: 1 },
   summaryBarBg:   { height: 6, borderRadius: 3, overflow: 'hidden' },
   summaryBarHome: { height: 6, backgroundColor: PI_HOME, borderRadius: 3 },
+
+  // Compact stats strip below the summary bar. Same visual rhythm as the
+  // miniStatRow used by QuickStats so the two cards feel related, just
+  // narrower vertical padding to keep the section dense.
+  extraStats:     { borderTopWidth: 1 },
+  extraStatRow:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 7 },
+  extraStatVal:   { width: 36, fontSize: 13, fontWeight: '700', textAlign: 'center' },
+  extraStatLabel: { flex: 1, fontSize: 11, fontWeight: '500', textAlign: 'center' },
 });
 
 // ── Injuries section ─────────────────────────────────────────────────────────
@@ -1912,7 +2230,13 @@ const injS = StyleSheet.create({
 // MAIN TAB COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
 
-const IMPORTANT_TYPES = new Set(['goal', 'own-goal', 'penalty-goal', 'red', 'second-yellow', 'var']);
+// Events that always show in "Destacados" mode. Shootout kicks are added here
+// so a saved penalty or a missed kick is never hidden under the "Mostrar todo"
+// toggle — every kick is consequential when a final goes to penalties.
+const IMPORTANT_TYPES = new Set([
+  'goal', 'own-goal', 'penalty-goal', 'red', 'second-yellow', 'var',
+  'shootout-goal', 'shootout-miss',
+]);
 
 export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ match, detail }) => {
   const c = useThemeColors();
@@ -1921,25 +2245,62 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
   const isFinished  = match.status === 'finished';
   const [showAllEvents, setShowAllEvents] = useState(false);
 
-  // Filter + split events into halves
+  // Split shootout kicks out of the regulation timeline before the half
+  // split — otherwise SM tends to report them at minute 120 which would
+  // bunch all 10+ kicks at the bottom of "Segundo tiempo" and break the
+  // chronological reading flow. They get their own section instead.
+  const isShootoutEvent = (e: typeof detail.events[number]) =>
+    e.type === 'shootout-goal' || e.type === 'shootout-miss';
+  const shootoutEvents = detail.events
+    .filter(isShootoutEvent)
+    .sort((a, b) => (a.shootoutOrder ?? 0) - (b.shootoutOrder ?? 0));
+
+  // Filter + bucket regulation/ET events into phase sections. The MATCH_PHASES
+  // array (utils/matchPhases.ts) drives this — adding a new phase later means
+  // changing one constant, not patching every consumer.
+  const regulationEvents = detail.events.filter(e => !isShootoutEvent(e));
   const filteredEvents = showAllEvents
-    ? detail.events
-    : detail.events.filter(e => IMPORTANT_TYPES.has(e.type));
-  const firstFiltered  = filteredEvents.filter(e => e.minute <= 45).sort((a, b) => a.minute - b.minute);
-  const secondFiltered = filteredEvents.filter(e => e.minute > 45).sort((a, b) => a.minute - b.minute);
+    ? regulationEvents
+    : regulationEvents.filter(e => IMPORTANT_TYPES.has(e.type));
+  const phaseBuckets = MATCH_PHASES.map(phase => ({
+    phase,
+    events: filteredEvents
+      .filter(e => e.minute >= phase.minRange[0] && e.minute <= phase.minRange[1])
+      .sort((a, b) => a.minute - b.minute),
+  }));
+  const visiblePhaseBuckets = phaseBuckets.filter(b => b.events.length > 0);
   const hasEvents = detail.events.length > 0;
   const hasMissing = (detail.missingPlayers?.home?.length ?? 0) > 0 || (detail.missingPlayers?.away?.length ?? 0) > 0;
+
+  // ── Boundary marker (phase divider with cumulative score) ──────────────────
+  // "Medio tiempo · 2-0" style. `bold` is used for the final closing marker.
+  const BoundaryMarker = ({ label, score, bold }: {
+    label: string; score?: { home: number; away: number } | null; bold?: boolean;
+  }) => (
+    <View style={[tl.boundary, { backgroundColor: c.surface }]}>
+      <Text style={[tl.boundaryText, { color: bold ? c.textPrimary : c.textTertiary }, bold && { fontWeight: '800' }]}>
+        {label}{score ? `  ·  ${score.home}-${score.away}` : ''}
+      </Text>
+    </View>
+  );
 
   // ── Timeline block — reused in two positions (finished: top, live: below stats)
   const TimelineBlock = () => (
     <View style={[tl.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      {/* Teams header */}
-      <View style={[tl.teamsHeader, { borderBottomColor: c.border }]}>
-        <Text style={[tl.teamLabel, { color: '#3b82f6' }]}>{match.homeTeam.shortName}</Text>
-        <Text style={[tl.cronLabel, { color: c.textTertiary }]}>{t('timeline.title')}</Text>
-        <Text style={[tl.teamLabel, { color: '#f97316', textAlign: 'right' }]}>{match.awayTeam.shortName}</Text>
+      {/* Title */}
+      <View style={[tl.titleRow, { borderBottomColor: c.border }]}>
+        <Text style={[tl.titleText, { color: c.textTertiary }]}>{t('timeline.title')}</Text>
       </View>
-      {/* Filter toggle */}
+      {/* Full team names — left (home, blue) / right (away, orange) */}
+      <View style={tl.teamsHeader}>
+        <Text style={[tl.teamName, { color: '#3b82f6' }]} numberOfLines={1}>
+          {translateNationalTeam(match.homeTeam.name)}
+        </Text>
+        <Text style={[tl.teamName, { color: '#f97316', textAlign: 'right' }]} numberOfLines={1}>
+          {translateNationalTeam(match.awayTeam.name)}
+        </Text>
+      </View>
+      {/* Filter toggle — "Destacados" (no emoji) / "Todo" */}
       <View style={[tl.filterRow, { borderBottomColor: c.border }]}>
         <TouchableOpacity
           style={[tl.filterBtn, { borderColor: !showAllEvents ? c.accent : c.border },
@@ -1948,7 +2309,7 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
           activeOpacity={0.7}
         >
           <Text style={[tl.filterBtnText, { color: !showAllEvents ? c.accent : c.textTertiary }]}>
-            ⭐ {t('timeline.highlights')}
+            {t('timeline.highlights')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -1963,7 +2324,7 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
         </TouchableOpacity>
       </View>
       {/* Event rows or empty state */}
-      {firstFiltered.length === 0 && secondFiltered.length === 0 ? (
+      {visiblePhaseBuckets.length === 0 && shootoutEvents.length === 0 ? (
         <View style={tl.emptyHighlights}>
           <Text style={[tl.emptyHighlightsText, { color: c.textTertiary }]}>
             {t('timeline.noHighlights')}
@@ -1971,20 +2332,74 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
         </View>
       ) : (
         <>
-          {firstFiltered.length > 0 && (
+          {/* Each phase: a START header, its events (goals carry a running
+              score), then a CLOSING boundary marker with the cumulative score
+              at that boundary. The closing marker only renders once the match
+              has actually crossed that boundary (a later phase has events, OR
+              the match is finished) — so a live 1st half shows no premature
+              "Medio tiempo" badge. */}
+          {visiblePhaseBuckets.map(({ phase, events }, idx) => {
+            const isLast = idx === visiblePhaseBuckets.length - 1;
+            // Decide the closing boundary for this phase.
+            let boundary: { label: string; score: { home: number; away: number } | null; bold: boolean } | null = null;
+            if (!isLast) {
+              // We've clearly passed this boundary — show it with cumulative score.
+              boundary = {
+                label: t(phase.boundaryKey ?? 'timeline.matchEnd'),
+                score: cumulativeScoreAtMinute(regulationEvents, phase.boundaryMinute),
+                bold: false,
+              };
+            } else if (shootoutEvents.length > 0) {
+              // Last regulation/ET phase before penalties — close it with its
+              // own boundary (e.g. "Final de la prórroga · 3-3").
+              boundary = {
+                label: t(phase.boundaryKey ?? 'timeline.matchEnd'),
+                score: cumulativeScoreAtMinute(regulationEvents, phase.boundaryMinute),
+                bold: true,
+              };
+            } else if (isFinished) {
+              // Match truly ended here (no shootout) — "Final del partido".
+              // SportMonks only reports finished state (5/7/8) at the real end,
+              // so this never fires prematurely for a knockout awaiting ET/pens.
+              boundary = {
+                label: t('timeline.matchEnd'),
+                score: { home: match.homeScore, away: match.awayScore },
+                bold: true,
+              };
+            }
+            return (
+              <React.Fragment key={phase.key}>
+                <View style={[tl.phaseHeader, { backgroundColor: c.surface }]}>
+                  <Text style={[tl.phaseHeaderText, { color: c.textTertiary }]}>{t(phase.i18nKey)}</Text>
+                </View>
+                {events.map(e => (
+                  <EventRow
+                    key={e.id}
+                    event={e}
+                    match={match}
+                    runningScore={isGoalEvent(e.type) ? runningScoreAt(regulationEvents, e) : null}
+                  />
+                ))}
+                {boundary && <BoundaryMarker label={boundary.label} score={boundary.score} bold={boundary.bold} />}
+              </React.Fragment>
+            );
+          })}
+
+          {/* Penalty shootout — kick-by-kick, numbered, ✅/❌. Header carries
+              the final shootout tally so the reader sees the result first. */}
+          {shootoutEvents.length > 0 && (
             <>
-              <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
-                <Text style={[tl.halfSepText, { color: c.textTertiary }]}>{t('timeline.firstHalf')}</Text>
+              <View style={[tl.boundary, { backgroundColor: c.surface }]}>
+                <Text style={[tl.boundaryText, { color: c.textPrimary, fontWeight: '800' }]}>
+                  {t('timeline.penaltyShootout')}
+                  {typeof match.homePenScore === 'number' && typeof match.awayPenScore === 'number'
+                    ? `  ·  ${match.homePenScore}-${match.awayPenScore}`
+                    : ''}
+                </Text>
               </View>
-              {firstFiltered.map(e => <EventRow key={e.id} event={e} match={match} />)}
+              {shootoutEvents.map(e => <EventRow key={e.id} event={e} match={match} />)}
             </>
           )}
-          {firstFiltered.length > 0 && secondFiltered.length > 0 && (
-            <View style={[tl.halfSep, { backgroundColor: c.surface }]}>
-              <Text style={[tl.halfSepText, { color: c.textTertiary }]}>{t('timeline.secondHalf')}</Text>
-            </View>
-          )}
-          {secondFiltered.map(e => <EventRow key={e.id} event={e} match={match} />)}
         </>
       )}
     </View>
@@ -1996,16 +2411,14 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
       {/* ── SCHEDULED: Previa layout ── */}
       {isScheduled && (
         <>
-          {/* Predictions carousel (community) */}
+          {/* Predictions carousel (community poll — free, not gambling) */}
           <PredictionsCarousel match={match} />
 
-          {/* AI Predictions (SportMonks) */}
-          {detail.predictions && detail.predictions.length > 0 && (
+          {/* AI Predictions + Momios — betting content, gated off for v1.0 (Apple 2.3.6) */}
+          {BETTING_CONTENT_ENABLED && detail.predictions && detail.predictions.length > 0 && (
             <AIPredictionsSection predictions={detail.predictions} match={match} />
           )}
-
-          {/* Momios */}
-          {detail.odds && detail.odds.length > 0 && (
+          {BETTING_CONTENT_ENABLED && detail.odds && detail.odds.length > 0 && (
             <MomiosSection odds={detail.odds} match={match} />
           )}
 
@@ -2039,13 +2452,13 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
           <QuickStats match={match} detail={detail} />
 
           {/* Pressure index */}
-          {detail.pressureIndex && <PressureSection pressure={detail.pressureIndex} match={match} events={detail.events} />}
+          {detail.pressureIndex && <PressureSection pressure={detail.pressureIndex} match={match} events={detail.events} statistics={detail.statistics} />}
 
           {/* Poll results (locked after match) */}
           <PollResultsSection match={match} />
 
-          {/* Odds */}
-          {detail.odds && detail.odds.length > 0 && (
+          {/* Odds — betting content, gated off for v1.0 (Apple 2.3.6) */}
+          {BETTING_CONTENT_ENABLED && detail.odds && detail.odds.length > 0 && (
             <MomiosSection odds={detail.odds} match={match} />
           )}
 
@@ -2079,14 +2492,21 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
 
 const tl = StyleSheet.create({
   card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
-  teamsHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
-  teamLabel: { flex: 1, fontSize: 12, fontWeight: '800' },
-  cronLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
-  halfSep: { paddingVertical: 7, alignItems: 'center' },
-  halfSepText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  // Title row ("Minuto a minuto"), centered
+  titleRow: { alignItems: 'center', paddingVertical: 9, borderBottomWidth: 1 },
+  titleText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, textTransform: 'uppercase' },
+  // Full team names row (home left / away right)
+  teamsHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingTop: 10, paddingBottom: 4 },
+  teamName: { flex: 1, fontSize: 14, fontWeight: '800' },
+  // Phase START header ("Primer tiempo")
+  phaseHeader: { paddingVertical: 7, alignItems: 'center' },
+  phaseHeaderText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  // Boundary marker with cumulative score ("Medio tiempo · 2-0")
+  boundary: { paddingVertical: 8, alignItems: 'center' },
+  boundaryText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
   resultText: { flex: 1, fontSize: 13, fontWeight: '500', lineHeight: 18 },
   // Filter toggle
-  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1 },
+  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderTopWidth: 1 },
   filterBtn: { flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
   filterBtnText: { fontSize: 12, fontWeight: '700', letterSpacing: 0.2 },
   // Empty highlights state

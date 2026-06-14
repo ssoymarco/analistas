@@ -1,10 +1,12 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { navigationRef } from '../utils/navigationRef';
+import { logScreenView } from '../services/analytics';
 import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useOnboarding } from '../contexts/OnboardingContext';
@@ -316,6 +318,7 @@ const TAB_ICONS: Record<string, (color: string, focused: boolean) => React.React
 function MainTabs() {
   const c = useThemeColors();
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -324,8 +327,15 @@ function MainTabs() {
           backgroundColor: c.tabBg,
           borderTopColor: c.border,
           borderTopWidth: 1,
-          height: Platform.OS === 'ios' ? 80 : 64,
-          paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+          // iOS keeps its existing manual hardcode (untouched, was already correct).
+          // Android: add the system bottom inset (3-button nav bar or gesture pill)
+          //   so the tab bar doesn't collide with the native bottom system buttons.
+          //   Math.max with a 48dp floor because edge-to-edge on Android 15+ was
+          //   returning insets.bottom = 0 on some devices (3-button nav devices
+          //   in particular), leaving the tab labels glued to the system buttons.
+          //   48dp matches the 3-button nav bar height and is a safe minimum.
+          height: Platform.OS === 'ios' ? 80 : 64 + Math.max(insets.bottom, 48),
+          paddingBottom: Platform.OS === 'ios' ? 24 : 8 + Math.max(insets.bottom, 48),
           paddingTop: 8,
           elevation: 0,
           shadowOpacity: 0,
@@ -398,6 +408,12 @@ export const AppNavigator: React.FC = () => {
   // Fade-in the main app after onboarding completes (Feature 9)
   const mainFade     = useRef(new Animated.Value(0)).current;
   const wasOnboarding = useRef(false);
+  // Last-seen route name for analytics screen-view dedup. MUST live here with
+  // the other hooks — above the `if (!ready)` / `if (!hasCompletedOnboarding)`
+  // early returns below. Declaring it after those returns made the hook count
+  // change between renders (3 → 4) and crashed with "Rendered more hooks than
+  // during the previous render" (Sentry REACT-NATIVE-9, Build 23). Never move it down.
+  const routeNameRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!ready) return;
@@ -429,9 +445,33 @@ export const AppNavigator: React.FC = () => {
     return <OnboardingScreen />;
   }
 
+  // Track screen views centrally: capture the active route name on first
+  // render (onReady) and on every navigation change (onStateChange), then
+  // forward to Firebase Analytics. `routeNameRef` is declared at the top with
+  // the other hooks (Rules of Hooks); these are plain functions, not hooks, so
+  // they're safe to define here after the early returns.
+  const handleNavReady = () => {
+    const current = navigationRef.getCurrentRoute()?.name;
+    routeNameRef.current = current;
+    if (current) logScreenView(current);
+  };
+  const handleNavStateChange = () => {
+    const previous = routeNameRef.current;
+    const current = navigationRef.getCurrentRoute()?.name;
+    if (current && previous !== current) {
+      routeNameRef.current = current;
+      logScreenView(current);
+    }
+  };
+
   return (
     <Animated.View style={{ flex: 1, opacity: mainFade }}>
-      <NavigationContainer ref={navigationRef} theme={navTheme}>
+      <NavigationContainer
+        ref={navigationRef}
+        theme={navTheme}
+        onReady={handleNavReady}
+        onStateChange={handleNavStateChange}
+      >
         <MainTabs />
       </NavigationContainer>
     </Animated.View>

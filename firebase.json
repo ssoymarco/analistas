@@ -18,5 +18,10 @@
         "npm --prefix \"$RESOURCE_DIR\" run build"
       ]
     }
-  ]
+  ],
+  "react-native": {
+    "messaging_android_notification_channel_id": "analistas-live",
+    "messaging_ios_auto_register_for_remote_messages": true,
+    "messaging_ios_foreground_presentation_options": ["badge", "sound", "list", "banner"]
+  }
 }

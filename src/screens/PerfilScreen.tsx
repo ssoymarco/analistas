@@ -31,6 +31,7 @@ import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useTranslation } from 'react-i18next';
 import i18n, { LANGUAGE_STORAGE_KEY } from '../i18n';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
+import { PREMIUM_ENABLED, BETTING_CONTENT_ENABLED, REDEEM_CODE_ENABLED } from '../config/features';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getInitials(name: string) {
@@ -361,20 +362,6 @@ export const PerfilScreen: React.FC = () => {
   const [showNameInHeader, setShowNameInHeader] = useState(false);
   const { timeFormat, setTimeFormat } = useTimeFormat();
   const [momiosEnabled, setMomiosEnabled] = useState(true);
-  const [wcBannerEnabled, setWcBannerEnabled] = useState(true);
-
-  // Hydrate the World Cup banner master toggle on mount
-  useEffect(() => {
-    AsyncStorage.getItem('analistas_wc_banner_enabled')
-      .then(v => setWcBannerEnabled(v !== '0'))
-      .catch(() => {});
-  }, []);
-
-  const toggleWcBanner = useCallback(() => {
-    const next = !wcBannerEnabled;
-    setWcBannerEnabled(next);
-    AsyncStorage.setItem('analistas_wc_banner_enabled', next ? '1' : '0').catch(() => {});
-  }, [wcBannerEnabled]);
   const [selectedLang, setSelectedLang] = useState(i18n.language || 'es');
   const [levelSheetVisible, setLevelSheetVisible] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
@@ -653,7 +640,7 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 16, fontWeight: '700', color: c.textPrimary }}>{displayName}</Text>
               {isAuthenticated && <Text style={{ fontSize: 14, fontWeight: '500', color: '#60a5fa', marginTop: 1 }}>{displayUsername}</Text>}
               {!isAuthenticated && <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 2 }}>{t('profile.loginPrompt')}</Text>}
-              {isAuthenticated && (
+              {isAuthenticated && PREMIUM_ENABLED && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
                   <TouchableOpacity
                     onPress={() => { haptics.light(); setLevelSheetVisible(true); }}
@@ -850,31 +837,34 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#06b6d4' }}>{timeFormat}</Text>
             </TouchableOpacity>
           } />
-          <MenuRow c={c} emoji="📱" label={t('profile.appIcon')} sublabel={t('profile.appIconSub')} iconBg="rgba(168,85,247,0.15)" onPress={() => navigation.navigate('HazteTitular', { source: 'icon' })} />
-          <MenuRow c={c} emoji="🎁" label={t('profile.redeemCode')} iconBg="rgba(236,72,153,0.15)" onPress={() => setCodeModalVisible(true)} />
+          {PREMIUM_ENABLED && (
+            <MenuRow c={c} emoji="📱" label={t('profile.appIcon')} sublabel={t('profile.appIconSub')} iconBg="rgba(168,85,247,0.15)" onPress={() => navigation.navigate('HazteTitular', { source: 'icon' })} />
+          )}
+          {/* Redeem a code — gated off for v1.0 (Apple 3.1.1: promo codes can't unlock digital content) */}
+          {REDEEM_CODE_ENABLED && (
+            <MenuRow c={c} emoji="🎁" label={t('profile.redeemCode')} iconBg="rgba(236,72,153,0.15)" onPress={() => setCodeModalVisible(true)} />
+          )}
           <MenuRow c={c} emoji="👥" label={t('profile.inviteFriends')} sublabel={t('profile.shareApp')} iconBg="rgba(99,102,241,0.15)" onPress={handleShare} />
+          {/* Odds toggle — only meaningful when betting content is enabled (off for v1.0, Apple 2.3.6) */}
+          {BETTING_CONTENT_ENABLED && (
           <MenuRow c={c} emoji="📊" label={t('profile.odds')} sublabel={momiosEnabled ? t('profile.oddsVisible') : t('profile.oddsHidden')} iconBg="rgba(16,185,129,0.15)" rightElement={<CustomToggle value={momiosEnabled} onToggle={() => {
-            if (momiosEnabled) {
-              // Trying to turn OFF → requires premium
+            // v1.0: odds are a free toggle. When premium ships, turning them OFF
+            // becomes a premium perk again (gated by PREMIUM_ENABLED).
+            if (PREMIUM_ENABLED && momiosEnabled) {
               navigation.navigate('HazteTitular', { source: 'momios' });
             } else {
-              setMomiosEnabled(true);
+              setMomiosEnabled(!momiosEnabled);
             }
-          }} activeColor="#10b981" icon={momiosEnabled ? '📊' : '🔒'} />} />
-          <MenuRow
-            c={c}
-            emoji="🌍"
-            label="Banner Mundial 2026"
-            sublabel={wcBannerEnabled ? 'Visible en Partidos' : 'Oculto'}
-            iconBg="rgba(194,24,91,0.15)"
-            rightElement={<CustomToggle value={wcBannerEnabled} onToggle={toggleWcBanner} activeColor="#C2185B" icon="🌍" />}
-          />
+          }} activeColor="#10b981" icon={momiosEnabled ? '📊' : (PREMIUM_ENABLED ? '🔒' : '📊')} />} />
+          )}
           <MenuRow c={c} emoji="🗑️" label={t('profile.clearCache')} sublabel={t('profile.freeSpace')} iconBg="rgba(239,68,68,0.1)" isLast onPress={handleClearCache} />
         </View>
 
         <ModoEstadioCard c={c} isDark={isDark} />
 
-        <PromoBanner onPress={() => navigation.navigate('HazteTitular', { source: 'promo' })} />
+        {PREMIUM_ENABLED && (
+          <PromoBanner onPress={() => navigation.navigate('HazteTitular', { source: 'promo' })} />
+        )}
 
         {/* Información */}
         <SectionHeader label={t('profile.information')} />
@@ -1031,7 +1021,8 @@ export const PerfilScreen: React.FC = () => {
         </View>
       </Modal>
 
-      {/* Canjea un código */}
+      {/* Canjea un código — gated off for v1.0 (Apple 3.1.1) */}
+      {REDEEM_CODE_ENABLED && (
       <CenterModal visible={codeModalVisible} onClose={() => { setCodeModalVisible(false); setRedeemCode(''); }} c={c}>
         <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary, marginBottom: 6 }}>{t('profile.codeTitle')}</Text>
         <Text style={{ fontSize: 12, color: c.textTertiary, marginBottom: 20, lineHeight: 18 }}>{t('profile.codeSubtitle')}</Text>
@@ -1043,6 +1034,7 @@ export const PerfilScreen: React.FC = () => {
           <Text style={{ fontSize: 14, fontWeight: '700', color: redeemCode.trim() ? '#fff' : c.textTertiary }}>{t('profile.codeRedeem')}</Text>
         </TouchableOpacity>
       </CenterModal>
+      )}
 
       {/* Sobre Analistas */}
       <BottomSheet visible={aboutModalVisible} onClose={() => setAboutModalVisible(false)} c={c}>

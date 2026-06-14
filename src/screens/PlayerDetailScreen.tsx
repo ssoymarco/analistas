@@ -29,6 +29,7 @@ import { usePlayerDetail } from '../hooks/usePlayerDetail';
 import type { PlayerDetailData, PlayerSeasonStats } from '../hooks/usePlayerDetail';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { BackArrow, ShareIcon } from '../components/NavIcons';
+import { isImageUri } from '../utils/imageUri';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'PlayerDetail'>;
 type Tab = 'resumen' | 'estadisticas' | 'historial';
@@ -198,7 +199,7 @@ const ResumenTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
           }}
         >
           <View style={rt.teamRow}>
-            {data.teamLogo?.startsWith('http') ? (
+            {isImageUri(data.teamLogo) ? (
               <Image source={{ uri: data.teamLogo }} style={rt.teamLogo} resizeMode="contain" />
             ) : (
               <View style={[rt.teamLogo, { backgroundColor: c.surface, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }]}>
@@ -657,7 +658,7 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
           <View style={ps.expanded}>
             {/* Player avatar */}
             <View style={[ps.avatarWrap, { backgroundColor: hLogoBg }]}>
-              {displayImage?.startsWith('http') ? (
+              {isImageUri(displayImage) ? (
                 <Image source={{ uri: displayImage }} style={ps.avatar} resizeMode="cover" />
               ) : (
                 <Text style={{ fontSize: 40 }}>{displayFlag}</Text>
@@ -692,7 +693,7 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
                       }
                     }}
                   >
-                    {displayTeamLogo?.startsWith('http') ? (
+                    {isImageUri(displayTeamLogo) ? (
                       <Image source={{ uri: displayTeamLogo }} style={ps.teamDot} resizeMode="contain" />
                     ) : (
                       <View style={[ps.teamDot, { backgroundColor: c.accent }]} />

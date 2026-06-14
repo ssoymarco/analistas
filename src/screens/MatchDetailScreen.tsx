@@ -11,6 +11,9 @@ import {
   Animated,
   Dimensions,
   ScrollView,
+  Switch,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { haptics } from '../utils/haptics';
@@ -22,6 +25,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useUserStats } from '../contexts/UserStatsContext';
+import { logEvent, ANALYTICS_EVENTS } from '../services/analytics';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFixtureDetail } from '../hooks/useFixtureDetail';
 import { useCountdown } from '../hooks/useCountdown';
@@ -41,6 +45,7 @@ import { BackArrow, ShareIcon } from '../components/NavIcons';
 import { MatchNotificationsSheet } from '../components/MatchNotificationsSheet';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatMatchTime } from '../utils/formatMatchTime';
+import { isImageUri } from '../utils/imageUri';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'MatchDetail'>;
 type Tab  = 'previa' | 'alineacion' | 'estadisticas' | 'tabla' | 'noticias';
@@ -163,7 +168,7 @@ function UpChevron({ color }: { color: string }) {
 
 // ── Team badge (large) ───────────────────────────────────────────────────────
 function TeamBadge({ name, logo, size = 80 }: { name: string; logo: string; size?: number }) {
-  const isUrl = logo.startsWith('http');
+  const isUrl = isImageUri(logo);
   const hue = name.charCodeAt(0) * 37 % 360;
   // Real logo → transparent container (logo is self-contained)
   // Fallback text/emoji → colored pill so the initials are legible
@@ -187,7 +192,7 @@ function TeamBadge({ name, logo, size = 80 }: { name: string; logo: string; size
 
 // ── Team badge (small — compact header) ──────────────────────────────────────
 function TeamBadgeSmall({ name, logo, size = 32 }: { name: string; logo: string; size?: number }) {
-  const isUrl = logo.startsWith('http');
+  const isUrl = isImageUri(logo);
   const hue = name.charCodeAt(0) * 37 % 360;
   const bg  = isUrl ? 'transparent' : `hsl(${hue}, 40%, 18%)`;
   const fg  = `hsl(${hue}, 70%, 70%)`;
@@ -225,27 +230,48 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   // Prefer the API-fresh match (real score, correct minute) over the prop (may be time-inferred)
   const displayMatch = liveMatch ?? match;
 
-  const isLive      = displayMatch.status === 'live';
-  const isFinished  = displayMatch.status === 'finished';
-  const isScheduled = displayMatch.status === 'scheduled';
+  const rawIsLive      = displayMatch.status === 'live';
+  const rawIsFinished  = displayMatch.status === 'finished';
+  const rawIsScheduled = displayMatch.status === 'scheduled';
+
+  // ── Sticky "match is past kick-off" ─────────────────────────────────────
+  // Belt-and-suspenders against the 2H-reset bug: once we've EVER observed
+  // status='live' or status='finished' (or a non-zero minute) for this
+  // match, never let the UI flip back to the pre-match Previa view, even if
+  // a later snapshot re-asserts 'scheduled' (which would normally trigger a
+  // status-driven re-render of the wrong tab).
+  //
+  // The state-id and time-based fixes upstream (mappers.ts + firestoreApi.ts)
+  // should prevent this from being needed in practice, but a ref keeps the
+  // UX stable for any future regression of the upstream feed.
+  const startedRef = useRef(false);
+  if (rawIsLive || rawIsFinished || (typeof displayMatch.minute === 'number' && displayMatch.minute > 0)) {
+    startedRef.current = true;
+  }
+
+  const isFinished  = rawIsFinished;
+  // Once started, force "live" treatment even if status briefly flickers to
+  // 'scheduled'. This keeps the user on the EnVivo tab and the live
+  // indicator visible until the server explicitly reports 'finished'.
+  const isLive      = rawIsLive || (startedRef.current && !rawIsFinished);
+  const isScheduled = rawIsScheduled && !startedRef.current;
   const { incrementMatchesViewed } = useUserStats();
   const {
     prefs,
-    toggleMatchEstadio, isMatchEstadio,
+    togglePref, setEstadioDelay,
     isMatchMuted, hasMatchCustomization,
   } = useNotificationPrefs();
   // Per-match notifications bottom sheet (opened from the bell in the header).
   const [notifSheetVisible, setNotifSheetVisible] = useState(false);
+  // Modo Estadio global mini-sheet (opened from 🏟️ in the header).
+  const [estadioSheetVisible, setEstadioSheetVisible] = useState(false);
   const matchMuted = isMatchMuted(match.id);
   // 'muted' wins; if not muted but the user has any override → 'custom';
   // otherwise plain default.
   const bellState: 'default' | 'custom' | 'muted' =
     matchMuted ? 'muted' : (hasMatchCustomization(match.id) ? 'custom' : 'default');
-  // When global is ON: being in the set means "excluded for this match" (off)
-  // When global is OFF: being in the set means "enabled for this match" (on)
-  const matchEstadioActive = prefs.estadioMode
-    ? !isMatchEstadio(match.id)
-    : isMatchEstadio(match.id);
+  // Modo Estadio is now GLOBAL — the 🏟️ button reflects the global state.
+  const estadioGlobalActive = prefs.estadioMode;
   const countdown = useCountdown(isScheduled ? match.startingAtUtc : undefined);
 
   // ── Centralized live clock ─────────────────────────────────────────────────
@@ -259,7 +285,10 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const liveClock = liveDisplay ? formatLiveClock(liveDisplay) : null;
 
   // Track match view (once per unique match)
-  useEffect(() => { incrementMatchesViewed(match.id); }, [match.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    incrementMatchesViewed(match.id);
+    logEvent(ANALYTICS_EVENTS.OPEN_MATCH, { match_id: match.id, league: match.league ?? '', status: match.status ?? '' });
+  }, [match.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
   // Determine immediately (without waiting for TablaTab to render) whether this
@@ -370,11 +399,25 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     toastTimer.current = setTimeout(() => {}, 3600);
   }, [toastOpacity]);
 
-  const handleToggleEstadio = useCallback(() => {
+  // 🏟️ button: open the global Modo Estadio mini-sheet.
+  // The mini-sheet lets the user toggle global estadioMode + choose delay (2/5/10).
+  const handleOpenEstadioSheet = useCallback(() => {
     haptics.medium();
-    toggleMatchEstadio(match.id);          // always flip set membership
-    showEstadioToast(!matchEstadioActive); // toast = what the NEW state will be
-  }, [match.id, toggleMatchEstadio, matchEstadioActive, showEstadioToast]);
+    setEstadioSheetVisible(true);
+  }, []);
+
+  // Called from the mini-sheet toggle switch: toggle global Modo Estadio.
+  const handleToggleEstadioGlobal = useCallback(() => {
+    haptics.medium();
+    togglePref('estadioMode');
+    showEstadioToast(!prefs.estadioMode); // toast = NEW state
+  }, [togglePref, prefs.estadioMode, showEstadioToast]);
+
+  // Called from the mini-sheet delay selector.
+  const handleSetEstadioDelay = useCallback((minutes: number) => {
+    haptics.light();
+    setEstadioDelay(minutes);
+  }, [setEstadioDelay]);
 
   // ── "Volver arriba" FAB ────────────────────────────────────────────────────
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -402,18 +445,24 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
       return parts.length >= 2 ? parts[1] : parts[0];
     };
 
+    // Format a minute including any added/stoppage time, so an ET goal at
+    // SM minute=105 + extra_minute=1 reads as "105+1'" instead of being
+    // truncated to "105'" (the form FotMob and 365scores both render).
+    const formatMinute = (g: typeof goals[number]) =>
+      g.addedTime ? `${g.minute}+${g.addedTime}'` : `${g.minute}'`;
+
     const build = (side: 'home' | 'away') => {
       const sideGoals = goals.filter(g => g.team === side);
-      const byPlayer = new Map<string, number[]>();
+      const byPlayer = new Map<string, string[]>();
       for (const g of sideGoals) {
         if (!byPlayer.has(g.player)) byPlayer.set(g.player, []);
-        byPlayer.get(g.player)!.push(g.minute);
+        byPlayer.get(g.player)!.push(formatMinute(g));
       }
       const seen = new Set<string>();
       return sideGoals.reduce<string[]>((acc, g) => {
         if (seen.has(g.player)) return acc;
         seen.add(g.player);
-        const mins = byPlayer.get(g.player)!.map(m => `${m}'`).join(', ');
+        const mins = byPlayer.get(g.player)!.join(', ');
         const suffix = g.type === 'own-goal' ? ' (pp)' : '';
         acc.push(`${firstLastName(g.player)}${suffix} ${mins}`);
         return acc;
@@ -446,7 +495,21 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     const monthStr = monthsShort[m - 1];
     return `${dayName} ${d} ${monthStr}`;
   })();
-  const compactScoreText = isScheduled ? displayTime : `${displayMatch.homeScore} - ${displayMatch.awayScore}`;
+  // Compact header score — kickoff time when scheduled, regulation score
+  // otherwise. The penalty shootout result is rendered as a SEPARATE, smaller
+  // text element next to the main score (see `compactPenText` below) so it
+  // doesn't blow up the sticky header's width/height. The main score stays
+  // in the large compact font; the "(3-0 pen)" sits beside it at a reduced
+  // size, keeping the tight visual rhythm.
+  const compactScoreText = isScheduled
+    ? displayTime
+    : `${displayMatch.homeScore} - ${displayMatch.awayScore}`;
+  const compactPenText =
+    !isScheduled
+    && typeof displayMatch.homePenScore === 'number'
+    && typeof displayMatch.awayPenScore === 'number'
+      ? `(${displayMatch.homePenScore}-${displayMatch.awayPenScore} pen)`
+      : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
@@ -496,16 +559,17 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           >
             <BellIcon size={18} state={bellState} />
           </TouchableOpacity>
+          {/* 🏟️ Modo Estadio — opens global mini-sheet. Active = estadioMode ON globally. */}
           <TouchableOpacity
             style={[
               scr.navBtn,
-              matchEstadioActive && { backgroundColor: 'rgba(0,224,150,0.18)', borderWidth: 1, borderColor: 'rgba(0,224,150,0.35)' },
-              !matchEstadioActive && { backgroundColor: hBtnBg },
+              estadioGlobalActive && { backgroundColor: 'rgba(0,224,150,0.18)', borderWidth: 1, borderColor: 'rgba(0,224,150,0.35)' },
+              !estadioGlobalActive && { backgroundColor: hBtnBg },
             ]}
-            onPress={handleToggleEstadio}
+            onPress={handleOpenEstadioSheet}
             activeOpacity={0.7}
           >
-            <Text style={{ fontSize: 15, opacity: matchEstadioActive ? 1 : 0.5 }}>🏟️</Text>
+            <Text style={{ fontSize: 15, opacity: estadioGlobalActive ? 1 : 0.5 }}>🏟️</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[scr.navBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7}>
             <ShareIcon color={hText} size={16} />
@@ -523,7 +587,14 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               if (h > HERO_COMPACT) setHeroExpandedH(h);
             }}
           >
-            {/* Live pill */}
+            {/* Live pill — only renders for actually-live matches. The
+                `stateLabel === 'HT'` branch is the "DESCANSO" halftime
+                badge. The bug it used to produce on finished penalty
+                matches (showing "DESCANSO" on 2022 World Cup games years
+                after they ended) is fixed at the data layer: the server
+                mapper now clears stateLabel when status='finished'. This
+                guard remains belt-and-suspenders so a stale Firestore
+                doc still doesn't leak the live pill onto a finished view. */}
             {isLive && (
               <View style={scr.livePill}>
                 <View style={scr.liveDot} />
@@ -638,6 +709,17 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                         ({detail.aggregateScore.home}-{detail.aggregateScore.away} {t('matches.aggregateAbbr')})
                       </Text>
                     )}
+                    {/* Penalty shootout caption — matches the 365scores
+                        pattern: regulation/ET score on the main row, then a
+                        small "Pen 4-2" line directly below. We use both the
+                        compact "Pen X-Y" notation and the more descriptive
+                        "{Winner} ganó en penales" caption to combine the
+                        clarity of FotMob with the friendliness of 365scores. */}
+                    {typeof displayMatch.homePenScore === 'number' && typeof displayMatch.awayPenScore === 'number' && (
+                      <Text style={[scr.aggregateLabel, { color: hTextSoft, marginTop: 2 }]}>
+                        Pen {displayMatch.homePenScore}–{displayMatch.awayPenScore}
+                      </Text>
+                    )}
                   </>
                 )}
               </View>
@@ -736,6 +818,9 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               <View style={scr.compactCenter} pointerEvents="none">
                 {isLive && <View style={scr.compactLiveDot} />}
                 <Text style={[scr.compactScore, { color: hText }]}>{compactScoreText}</Text>
+                {compactPenText && (
+                  <Text style={[scr.compactPen, { color: hTextSoft }]}>{compactPenText}</Text>
+                )}
               </View>
               <TouchableOpacity
                 onPress={() => {
@@ -756,12 +841,21 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               </TouchableOpacity>
             </View>
             <Text style={[scr.compactDate, { color: hTextSoft }]}>
+              {/* Sticky header status line.
+                  • Live → minute / halftime label / live clock
+                  • Finished + ended in penalties → render NOTHING here, the
+                    score line above already says "3 - 3 (4-2 pen)" which
+                    implies finished. Stacking another "Finalizado" pill
+                    underneath in the compact sticky header was visually
+                    crowded (user feedback) — drop it for pens matches.
+                  • Finished, regulation → "Finalizado"
+                  • Scheduled → kickoff date */}
               {isLive
                 ? displayMatch.stateLabel === 'HT'
                   ? t('matchStatus.halfTimeLong')
                   : liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`
                 : isFinished
-                ? 'Finalizado'
+                ? (typeof displayMatch.homePenScore === 'number' ? '' : 'Finalizado')
                 : displayDate}
             </Text>
           </Animated.View>
@@ -912,6 +1006,86 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
         matchId={match.id}
         matchLabel={`${translateNationalTeam(match.homeTeam.name)} · ${translateNationalTeam(match.awayTeam.name)}`}
       />
+
+      {/* ── Modo Estadio global mini-sheet ── */}
+      <Modal
+        visible={estadioSheetVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEstadioSheetVisible(false)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }}
+          onPress={() => setEstadioSheetVisible(false)}
+        />
+        <View style={{
+          backgroundColor: c.card,
+          borderTopLeftRadius: 24, borderTopRightRadius: 24,
+          paddingHorizontal: 24, paddingTop: 16, paddingBottom: 36,
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+        }}>
+          {/* Handle */}
+          <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 20 }} />
+
+          {/* Title row */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ fontSize: 20 }}>🏟️</Text>
+              <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary }}>
+                {t('estadioMode.title')}
+              </Text>
+            </View>
+            <Switch
+              value={prefs.estadioMode}
+              onValueChange={handleToggleEstadioGlobal}
+              trackColor={{ false: c.border, true: 'rgba(0,224,150,0.5)' }}
+              thumbColor={prefs.estadioMode ? '#00E096' : c.textSecondary}
+            />
+          </View>
+
+          {/* Description */}
+          <Text style={{ fontSize: 13, color: c.textSecondary, marginBottom: 20, lineHeight: 18 }}>
+            {t('estadioMode.description')}
+          </Text>
+
+          {/* Delay selector — only shown when ON */}
+          {prefs.estadioMode && (
+            <>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: c.textSecondary, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10 }}>
+                {t('estadioMode.delay')}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {[2, 5, 10].map(min => (
+                  <TouchableOpacity
+                    key={min}
+                    onPress={() => handleSetEstadioDelay(min)}
+                    style={{
+                      flex: 1, alignItems: 'center', paddingVertical: 12,
+                      borderRadius: 14,
+                      backgroundColor: prefs.estadioDelay === min ? '#00E096' : c.surface,
+                      borderWidth: 1,
+                      borderColor: prefs.estadioDelay === min ? '#00E096' : c.border,
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{
+                      fontSize: 15, fontWeight: '700',
+                      color: prefs.estadioDelay === min ? '#000' : c.textPrimary,
+                    }}>
+                      {t('estadioMode.delayMinutes', { count: min })}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* Global note */}
+          <Text style={{ fontSize: 11, color: c.textSecondary, marginTop: 16, opacity: 0.7, textAlign: 'center' }}>
+            {t('estadioMode.globalNote')}
+          </Text>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1057,6 +1231,13 @@ const scr = StyleSheet.create({
   },
   compactScore: {
     fontSize: 28, fontWeight: '900', color: '#fff', letterSpacing: -0.5,
+  },
+  // Penalty shootout suffix in the sticky compact header — much smaller than
+  // the main score so "(3-0 pen)" reads as a secondary annotation instead of
+  // dominating the header width. Nudged down to sit on the score's baseline.
+  compactPen: {
+    fontSize: 12, fontWeight: '700', letterSpacing: -0.2,
+    marginBottom: 3,
   },
   compactDate: {
     fontSize: 11, fontWeight: '500', color: 'rgba(255,255,255,0.5)',

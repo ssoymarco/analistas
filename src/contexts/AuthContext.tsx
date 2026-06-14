@@ -26,6 +26,7 @@ import {
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../services/firebase';
+import { captureError } from '../services/sentry';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -195,21 +196,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── onAuthStateChanged ─────────────────────────────────────────────────────
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async fbUser => {
+    const unsubscribe = onAuthStateChanged(auth, fbUser => {
       if (!fbUser) {
         setUser(null);
         setIsLoading(false);
         return;
       }
-      try {
-        const appUser = await ensureUserProfile(fbUser, pendingNameRef.current);
-        pendingNameRef.current = undefined;
-        setUser(appUser);
-      } catch {
-        setUser(null);
-      } finally {
-        setIsLoading(false);
-      }
+
+      // OPTIMISTIC: as soon as we know who's signed in, project a minimal
+      // user from the FirebaseUser and unblock the UI. The full profile
+      // (username + persisted displayName + provider mapping) is fetched in
+      // the background by ensureUserProfile and patched in when it lands.
+      //
+      // Why this matters: ensureUserProfile does a getDoc(users/{uid}) +
+      // possibly an updateDoc, both of which add network round-trips. On
+      // Android cold start those round-trips were holding isLoading=true
+      // for ~1-2s before the app could even start rendering Partidos, and
+      // they would stack on top of the Firestore subscription's own first
+      // snapshot wait. With this change the UI renders against cached
+      // fixtures immediately while auth and profile finish in parallel.
+      setUser(mapFirebaseUser(fbUser, {
+        displayName: fbUser.displayName ?? 'Analista',
+        username:    '',
+        email:       fbUser.email ?? null,
+        authMethod:  fbUser.isAnonymous
+          ? 'guest'
+          : (fbUser.providerData[0]?.providerId ?? 'guest'),
+      } as unknown as FirestoreProfile));
+      setIsLoading(false);
+
+      // Background: fetch / create the real profile and replace the
+      // optimistic user when it resolves. If this fails (offline,
+      // permission, etc.) we keep the optimistic user instead of
+      // dropping back to null so signed-in screens keep working.
+      ensureUserProfile(fbUser, pendingNameRef.current)
+        .then(appUser => {
+          pendingNameRef.current = undefined;
+          setUser(appUser);
+        })
+        .catch(err => {
+          // Keep the optimistic user so signed-in screens keep working, but
+          // surface the failure: a guest whose profile doc never lands here
+          // can't save a username later (the Apple 2.1 "Error saving" bug).
+          captureError(err, { where: 'ensureUserProfile' });
+        });
     });
     return unsubscribe;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -307,27 +337,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const userRef = doc(db, 'users', user.id);
 
     if (updates.username && updates.username !== user.username) {
-      // Atomic swap: delete old username doc, create new, update user doc
+      // Atomic swap: reserve the new username, free the old one, persist on the user doc.
       const newUsername = normalizeUsername(updates.username);
       if (!USERNAME_REGEX.test(newUsername)) throw new Error('username_invalid');
 
       await runTransaction(db, async tx => {
-        const newRef = doc(db, 'usernames', newUsername);
+        // ── Reads first (Firestore requires ALL reads before ANY writes) ──
+        const newRef  = doc(db, 'usernames', newUsername);
         const newSnap = await tx.get(newRef);
         if (newSnap.exists()) throw new Error('username_taken');
 
-        // Only delete old username doc if it actually exists
-        if (user.username) {
-          const oldRef  = doc(db, 'usernames', user.username);
-          const oldSnap = await tx.get(oldRef);
-          if (oldSnap.exists()) tx.delete(oldRef);
-        }
+        const userSnap = await tx.get(userRef);
+
+        const oldRef    = user.username ? doc(db, 'usernames', user.username) : null;
+        const oldExists = oldRef ? (await tx.get(oldRef)).exists() : false;
+
+        // ── Writes ──
+        if (oldRef && oldExists) tx.delete(oldRef);
         tx.set(newRef, { uid: user.id });
-        tx.update(userRef, {
-          ...(updates.displayName ? { displayName: updates.displayName } : {}),
-          username: newUsername,
-          updatedAt: serverTimestamp(),
-        });
+
+        if (userSnap.exists()) {
+          tx.update(userRef, {
+            ...(updates.displayName ? { displayName: updates.displayName } : {}),
+            username:  newUsername,
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          // The user doc can be missing for guests whose background
+          // ensureUserProfile() never landed. A plain `update` would throw
+          // "No document to update" → the Apple 2.1 "Error saving" bug. Create
+          // the doc in full instead so the Firestore `create` rule is satisfied
+          // (it requires displayName + createdAt).
+          tx.set(userRef, {
+            displayName: updates.displayName ?? user.name ?? 'Analista',
+            username:    newUsername,
+            email:       user.email ?? null,
+            authMethod:  user.isGuest ? 'guest' : (user.method ?? 'guest'),
+            createdAt:   serverTimestamp(),
+            updatedAt:   serverTimestamp(),
+          });
+        }
       });
 
       setUser(prev => prev
@@ -335,7 +384,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         : prev
       );
     } else if (updates.displayName) {
-      await updateDoc(userRef, { displayName: updates.displayName, updatedAt: serverTimestamp() });
+      // Name-only change. Upsert so a guest with no doc yet still succeeds
+      // instead of failing on a non-existent document.
+      const snap = await getDoc(userRef);
+      if (snap.exists()) {
+        await updateDoc(userRef, { displayName: updates.displayName, updatedAt: serverTimestamp() });
+      } else {
+        await setDoc(userRef, {
+          displayName: updates.displayName,
+          username:    user.username ?? '',
+          email:       user.email ?? null,
+          authMethod:  user.isGuest ? 'guest' : (user.method ?? 'guest'),
+          createdAt:   serverTimestamp(),
+          updatedAt:   serverTimestamp(),
+        });
+      }
       setUser(prev => prev ? { ...prev, name: updates.displayName! } : prev);
     }
   }, [user]);

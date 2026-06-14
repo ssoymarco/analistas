@@ -26,10 +26,16 @@ import { Image } from 'react-native';
 // plain URL strings for remote-hosted overrides if that's ever preferred.
 //
 const OVERRIDE_ASSETS: Record<string, number | string> = {
-  // Cruz Azul rebranded to "Club de Futbol Cruz Azul" with a new crest in
-  // 2024. SportMonks still serves the classic "DEPORTIVO CRUZ AZUL MEXICO"
-  // badge from their CDN — keep this override until they update.
-  '2626': require('../../assets/team-logos/2626.png'),
+  // Cruz Azul (team_id 2626) used to have a local-asset override for the new
+  // 2024 crest, but Image.resolveAssetSource was returning a non-loadable URI
+  // for that asset on Android production builds in some code paths — the path
+  // ended up rendered as raw text where the image should have been (match
+  // cards, opponent previews, team detail header). Reverted on 2026-05-25 to
+  // fall back to SportMonks' (older) crest so the rendering is consistent
+  // across every screen on both platforms. When SportMonks updates their CDN
+  // — or when we have a reliable remote host for the new crest — we can put
+  // the entry back. The override system itself stays in place so other teams
+  // (or Cruz Azul again later) can be plugged in here with one line.
 };
 
 // ── Resolved URI cache ──────────────────────────────────────────────────────

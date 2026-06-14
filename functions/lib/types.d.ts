@@ -19,6 +19,15 @@ export interface MatchDoc {
     awayScore: number;
     homeScoreHT: number | null;
     awayScoreHT: number | null;
+    /** Penalty shootout final score. Populated ONLY when the fixture's
+     *  state_id reaches FT_PEN (8) — extracted from `scores[]` entries with
+     *  `description: 'PENALTIES'` in `extractScores()`. UI surfaces these as
+     *  the FotMob-style `"3-3 (4-2 pen)"` suffix and the 365scores-style
+     *  "Argentina ganó en penales" caption. Absent / null on every other
+     *  fixture, including ones still in regulation, ET, or that ended in
+     *  a regular FT / AET decision. */
+    homePenScore: number | null;
+    awayPenScore: number | null;
     status: 'live' | 'finished' | 'scheduled';
     stateId: number;
     stateLabel: string | null;
@@ -31,6 +40,10 @@ export interface MatchDoc {
     startingAtUtc: string;
     seasonId: number | null;
     updatedAt: Timestamp;
+    liveClock?: {
+        periodStartedAt: number;
+        periodMinuteOffset: number;
+    };
     detail?: unknown;
     /** ISO/Timestamp of last enrichment fetch — used by the sync to skip
      *  matches that were updated very recently. */
@@ -136,17 +149,27 @@ export interface SquadDoc {
     players: SquadPlayerDoc[];
     updatedAt: Timestamp;
 }
-/** Snapshot for diff detection — stored in _meta/livescoresSnapshot */
+/** Snapshot for diff detection — stored in _meta/livescoresSnapshot.
+ *  Counts track running totals per side so the detector can fire a change
+ *  event when any count goes up since the last poll. */
 export interface LivescoresSnapshot {
     matches: Record<string, {
         homeScore: number;
         awayScore: number;
         status: string;
         stateId: number;
+        redCardsHome: number;
+        redCardsAway: number;
+        yellowCardsHome: number;
+        yellowCardsAway: number;
+        substitutionsHome: number;
+        substitutionsAway: number;
+        reminderSent?: boolean;
+        lineupsSent?: boolean;
     }>;
     updatedAt: Timestamp;
 }
-export type ChangeType = 'goal' | 'matchStart' | 'matchEnd' | 'statusChange';
+export type ChangeType = 'goal' | 'goalCancelled' | 'matchStart' | 'halftime' | 'matchEnd' | 'extraTimeStart' | 'penaltiesStart' | 'redCard' | 'yellowCard' | 'substitution' | 'matchSuspended' | 'matchReminder' | 'lineups' | 'statusChange';
 export interface DetectedChange {
     type: ChangeType;
     matchId: string;
@@ -156,8 +179,17 @@ export interface DetectedChange {
     awayScore: number;
     league: string;
     leagueId: string;
-    /** Which side scored (for goal events) */
+    /** Which side caused the event (goal / card / substitution) */
     scoringTeamSide?: 'home' | 'away';
+    /** Subtype for goals: 'normal' | 'penalty' | 'own'. Default = 'normal'. */
+    goalKind?: 'normal' | 'penalty' | 'own';
+    /** Goal scorer / card recipient (best-effort, may be missing). */
+    scorerName?: string;
+    /** Player involved in the event (red cards, yellow cards). */
+    playerName?: string;
+    /** For substitutions: the player coming ON (replacing playerName). */
+    relatedPlayerName?: string;
+    /** Match minute when the event occurred. */
     minute?: number | null;
 }
 export interface SMPagination {
@@ -212,6 +244,23 @@ export interface SMLeague {
     sub_type: string;
     category: number;
 }
+/** SportMonks period — one phase of the match (1H, HT, 2H, ET, PEN). */
+export interface SMPeriod {
+    id: number;
+    fixture_id: number;
+    type_id: number;
+    started: number | null;
+    ended: number | null;
+    counts_from: number;
+    ticking: boolean;
+    sort_order: number;
+    description?: string;
+    time_added?: number | null;
+    period_length?: number;
+    minutes?: number;
+    seconds?: number | null;
+    has_timer?: boolean;
+}
 export interface SMFixture {
     id: number;
     sport_id: number;
@@ -234,6 +283,10 @@ export interface SMFixture {
     scores?: SMScore[];
     state?: SMState;
     league?: SMLeague;
+    /** include=periods — required for live clock extrapolation. */
+    periods?: SMPeriod[];
+    /** include=events — required for red card / scorer detection. */
+    events?: SMFixtureEvent[];
 }
 export interface SMStandingDetail {
     id: number;
@@ -294,27 +347,61 @@ export interface SMTopScorer {
         image_path?: string;
     };
 }
+/**
+ * SportMonks v3 Football API state IDs.
+ *
+ * Verified 2026-05-28 against docs.sportmonks.com/v3/tutorials-and-guides/
+ * tutorials/includes/states — the OFFICIAL state developer_name table.
+ *
+ * ⚠️ HISTORICAL NOTE — the previous map was scrambled (BREAK=8, SECOND_HALF=4,
+ * FINISHED_PENALTIES=10, etc.) which caused a critical production bug: live
+ * 2nd-half matches were misclassified as `scheduled` because SportMonks
+ * reports `state_id: 22` for INPLAY_2ND_HALF, but our LIVE_STATE_IDS set only
+ * had {2, 3, 4, 6, 7, 8}. Every match silently reverted to the "Previa"
+ * screen ~2-3 min into the second half (when SM finalized the transition).
+ * Source of the wrong map: appears to have come from an unrelated reference,
+ * not SportMonks docs.
+ */
 export declare const SM_STATE_IDS: {
     readonly NOT_STARTED: 1;
     readonly FIRST_HALF: 2;
     readonly HALF_TIME: 3;
-    readonly SECOND_HALF: 4;
-    readonly FULL_TIME: 5;
+    readonly SECOND_HALF: 22;
+    readonly ET_BREAK: 4;
     readonly EXTRA_TIME: 6;
-    readonly PENALTIES: 7;
-    readonly BREAK: 8;
-    readonly FINISHED_AET: 9;
-    readonly FINISHED_PENALTIES: 10;
-    readonly POSTPONED: 13;
-    readonly CANCELLED: 14;
-    readonly SUSPENDED: 15;
-    readonly INTERRUPTED: 16;
-    readonly ABANDONED: 17;
-    readonly DELETED: 22;
-    readonly TBD: 25;
+    readonly EXTRA_TIME_BREAK: 21;
+    readonly PENALTIES: 9;
+    readonly PEN_BREAK: 25;
+    readonly FULL_TIME: 5;
+    readonly FINISHED_AET: 7;
+    readonly FINISHED_PENALTIES: 8;
+    readonly AWARDED: 17;
+    readonly POSTPONED: 10;
+    readonly SUSPENDED: 11;
+    readonly CANCELLED: 12;
+    readonly TBA: 13;
+    readonly WALK_OVER: 14;
+    readonly ABANDONED: 15;
+    readonly DELAYED: 16;
+    readonly INTERRUPTED: 18;
+    readonly AWAITING_UPDATES: 19;
+    readonly DELETED: 20;
+    readonly PENDING: 26;
+    /** @deprecated use SECOND_HALF — kept as alias so existing imports compile. */
+    readonly BREAK: 4;
+    /** @deprecated use FINISHED_PENALTIES — kept as alias. */
+    readonly FINISHED_PEN: 8;
+    /** @deprecated use TBA — kept as alias. */
+    readonly TBD: 13;
 };
-export declare const LIVE_STATE_IDS: Set<4 | 8 | 2 | 3 | 6 | 7>;
-export declare const FINISHED_STATE_IDS: Set<9 | 5 | 10>;
+/** State IDs where the match is actively being played — UI shows live tab. */
+export declare const LIVE_STATE_IDS: Set<number>;
+/** State IDs where the match has concluded normally — UI shows summary tab. */
+export declare const FINISHED_STATE_IDS: Set<number>;
+/** State IDs where the match will NOT proceed normally — never infer "live"
+ *  from time even if kickoff was hours ago. Keeps the time-based fallback in
+ *  `getMatchStatus` from second-guessing a definitive "won't happen" signal. */
+export declare const DEAD_STATE_IDS: Set<number>;
 /** Standing detail type_id → meaning */
 export declare const STANDING_DETAIL_TYPES: {
     readonly GP: 129;
@@ -325,3 +412,48 @@ export declare const STANDING_DETAIL_TYPES: {
     readonly GA: 134;
     readonly GD: 179;
 };
+/** SportMonks event type_id → semantic meaning. Mirrors the client-side
+ *  SM_EVENT_TYPES in src/services/sportmonks.ts — keep both in sync.
+ *
+ *  ⚠️ Verified 2026-05-29 against docs.sportmonks.com/v3/definitions/types/events.
+ *  PENALTY_GOAL↔OWN_GOAL (15/16) and RED_CARD↔SECOND_YELLOW (20/21) were
+ *  previously swapped. Red-card DETECTION here was unaffected (countRedCards
+ *  matches the {RED_CARD, SECOND_YELLOW} set, identical either way), but the
+ *  goalKind label and timeline icons were wrong. */
+export declare const SM_EVENT_TYPES: {
+    readonly GOAL: 14;
+    readonly PENALTY_GOAL: 16;
+    readonly OWN_GOAL: 15;
+    readonly PENALTY_MISS: 17;
+    readonly SUBSTITUTION: 18;
+    readonly YELLOW_CARD: 19;
+    readonly SECOND_YELLOW: 21;
+    readonly RED_CARD: 20;
+    /** Penalty shootout kick — missed (type_id 22). Distinct from in-play
+     *  PENALTY_MISS (17). Only appears on fixtures that go to a shootout. */
+    readonly PENALTY_SHOOTOUT_MISS: 22;
+    /** Penalty shootout kick — scored (type_id 23). Distinct from in-play
+     *  PENALTY_GOAL (16). Pair with PENALTY_SHOOTOUT_MISS to render the
+     *  full kick-by-kick shootout timeline. */
+    readonly PENALTY_SHOOTOUT_GOAL: 23;
+    readonly VAR: 24;
+};
+/** Subset of a SportMonks event payload we care about for change detection.
+ *  The full payload has more fields; we only type what we read. */
+export interface SMFixtureEvent {
+    id: number;
+    fixture_id: number;
+    type_id: number;
+    participant_id?: number;
+    minute?: number | null;
+    extra_minute?: number | null;
+    player_id?: number | null;
+    player_name?: string | null;
+    related_player_id?: number | null;
+    related_player_name?: string | null;
+    result?: string | null;
+    /** SportMonks sometimes marks goals as cancelled by VAR. */
+    cancelled?: boolean;
+    /** Some VAR events have an `info` string explaining the call. */
+    info?: string | null;
+}

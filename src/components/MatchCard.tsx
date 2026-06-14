@@ -12,6 +12,7 @@ import { MatchBell } from './MatchBell';
 import { useLiveTick, computeLiveMinuteSeconds, formatLiveMinute } from '../hooks/useLiveTick';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatMatchTime } from '../utils/formatMatchTime';
+import { isImageUri } from '../utils/imageUri';
 import type { Match } from '../data/types';
 import { getLeagueConfig } from '../config/leagues';
 import { getDisplayVenueName, getDisplayVenueCity } from '../config/worldCupVenues';
@@ -19,8 +20,11 @@ import { translateNationalTeam } from '../utils/nationalTeams';
 
 /** Renders a team logo — Image if URL, Text if emoji/short string */
 const TeamLogo = ({ logo, size = 24 }: { logo: string; size?: number }) => {
-  const isUrl = logo.startsWith('http');
-  if (isUrl) {
+  // Production builds resolve bundled `require()` assets to `file://...`
+  // URIs (Cruz Azul override case) — `isImageUri()` accepts both http and
+  // file/asset/data so we render the image correctly instead of falling
+  // through to <Text> and printing the file path as a string.
+  if (isImageUri(logo)) {
     return (
       <Image
         source={{ uri: logo }}
@@ -112,12 +116,29 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
               </Text>
             </View>
           )}
+          {/* Live indicator — but ONLY when the match is actually live. The
+              `match.stateLabel === 'HT'` check used to render the "DESCANSO"
+              label on finished penalty matches because the old server mapper
+              left a stale 'HT' label sitting in Firestore. Now that
+              stateLabel is cleared at write time when status='finished'
+              (see functions/src/mappers.ts), this branch is gated on isLive. */}
           {isLive && (
             <Text style={s.liveMin}>
               {match.stateLabel === 'HT' ? t('matchStatus.halfTime') : liveMinuteLabel}
             </Text>
           )}
-          {isFinished && <Text style={[s.ftLabel, { color: c.textTertiary }]}>Final</Text>}
+          {isFinished && (
+            <Text style={[s.ftLabel, { color: c.textTertiary }]}>
+              {/* FotMob-style inline shootout result. When the match ended in
+                  penalties we surface "Final · 4-2 pen" so the user reading
+                  the list immediately knows who won the shootout without
+                  having to open the match detail. Falls back to plain
+                  "Final" for every other finished match. */}
+              {typeof match.homePenScore === 'number' && typeof match.awayPenScore === 'number'
+                ? `Final · ${match.homePenScore}-${match.awayPenScore} pen`
+                : 'Final'}
+            </Text>
+          )}
         </View>
 
         {/* Away team (right) */}

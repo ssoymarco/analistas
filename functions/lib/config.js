@@ -50,10 +50,22 @@ exports.SM_BASE_URL = 'https://api.sportmonks.com/v3/football';
 /** Timeout for each SportMonks API request (ms) */
 exports.SM_TIMEOUT = 15_000;
 // ── Polling Intervals ───────────────────────────────────────────────────────
-/** Seconds between livescore polls within a single Cloud Function invocation */
-exports.LIVESCORE_POLL_INTERVAL_SEC = 15;
-/** Number of polls per Cloud Function invocation (1 invocation = 1 minute) */
-exports.POLLS_PER_INVOCATION = 4;
+/**
+ * Seconds between livescore polls within a single Cloud Function invocation.
+ * Lowered from 15s → 4s on 2026-05-28 to push score/minute freshness closer
+ * to real-time on the client (live tick + push notifications). SportMonks Pro
+ * limit is 3000 calls/h per entity → 4s × 15/min × 60 = 900/h = 30% of quota
+ * on livescores alone, comfortable margin for other endpoints.
+ */
+exports.LIVESCORE_POLL_INTERVAL_SEC = 4;
+/**
+ * Number of polls per Cloud Function invocation. The scheduled trigger fires
+ * every 1 minute, and we sleep LIVESCORE_POLL_INTERVAL_SEC between polls, so
+ * POLLS_PER_INVOCATION × LIVESCORE_POLL_INTERVAL_SEC ≈ 60s.
+ *
+ * 15 × 4s = 60s → fits exactly in one scheduled invocation.
+ */
+exports.POLLS_PER_INVOCATION = 15;
 /** Max live matches to enrich per invocation (rate limit safety) */
 exports.MAX_ENRICHMENTS_PER_RUN = 20;
 /**

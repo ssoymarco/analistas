@@ -30,6 +30,13 @@ export interface Match {
   seasonId?: number;      // SM season ID — used for standings tab
   homeScoreHT?: number;   // half-time score (home)
   awayScoreHT?: number;   // half-time score (away)
+  /** Penalty shootout final score. Set ONLY when the fixture ended in a
+   *  shootout (state_id 8 / FT_PEN). Drives the "(4-2 pen)" suffix on
+   *  match cards and the bracket, plus the "Argentina ganó en penales"
+   *  caption on the match detail hero. Absent on every other fixture
+   *  (including normal FT, AET-only, scheduled, etc.). */
+  homePenScore?: number;
+  awayPenScore?: number;
   homeRedCards?: number;  // number of players sent off (red/second-yellow)
   awayRedCards?: number;
   stateLabel?: string;    // "1T" | "HT" | "2T" | "ET" | "PEN" — live state
@@ -48,6 +55,19 @@ export interface Match {
   venueId?: number;
   venueName?: string;
   venueCity?: string;
+  /** Stage info (cup phase: Group A, Round of 32, Quarter-finals, etc.).
+   *  Critical for bracket rendering — without it the bracket builder can't
+   *  distinguish group-stage matches from knockout matches. Populated by
+   *  the Firestore mapper when the match doc has stage data. */
+  stageId?: number | null;
+  roundId?: number | null;
+  groupId?: number | null;
+  /** Raw SM stage / round / group objects, preserved verbatim for the bracket
+   *  builder. May be undefined for matches written before the stage/round
+   *  enrichment was added to syncFixtures (older docs upgrade on next sync). */
+  stage?: unknown | null;
+  round?: unknown | null;
+  group?: unknown | null;
 }
 
 export interface LeagueStanding {
@@ -190,11 +210,23 @@ export type MatchEventType =
   | 'own-goal'
   | 'penalty-goal'
   | 'penalty-miss'
+  // Penalty-shootout kicks (post-ET tiebreaker). Distinct from the in-play
+  // 'penalty-goal' / 'penalty-miss' so the timeline can separate them into
+  // their own "Tanda de penales" section instead of mixing them with goals
+  // scored during the 90/120-minute match. SportMonks distinguishes them via
+  // dedicated event type_ids (22 / 23) — see SM_EVENT_TYPES.
+  | 'shootout-goal'
+  | 'shootout-miss'
   | 'yellow'
   | 'second-yellow'
   | 'red'
   | 'sub'
-  | 'var';
+  | 'var'
+  // Match delay timeline events. SportMonks introduced these May 26, 2026
+  // for hydration breaks, injuries, weather stoppages, etc. The Mundial 2026
+  // is the first major tournament covered.
+  | 'delay-start'
+  | 'delay-end';
 
 export interface MatchEvent {
   id: string;
@@ -206,6 +238,26 @@ export interface MatchEvent {
   relatedPlayer?: string;
   description?: string;
   xG?: number;
+  /**
+   * Only set on delay-start events when the delay is caused by an injury.
+   * When true, `player` carries the injured player's name (SM may also
+   * supply player_id at the API level; we only keep the name client-side).
+   */
+  injured?: boolean;
+  /**
+   * Only set on 'shootout-goal' / 'shootout-miss' events — the sequential
+   * kick number (1, 2, 3, …) used to order the penalty shootout timeline.
+   * Comes from SportMonks' `sort_order` field; falls back to event id order
+   * when missing.
+   */
+  shootoutOrder?: number;
+  /**
+   * Running shootout tally at the moment of this kick — SportMonks supplies
+   * it as e.g. "4-2" on the `result` field. Kept verbatim for direct
+   * rendering ("4-2 después de Messi") without having to compute it from
+   * cumulative event filtering.
+   */
+  shootoutResult?: string;
 }
 
 export interface MatchStatCategory {

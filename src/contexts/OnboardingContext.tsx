@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logEvent, ANALYTICS_EVENTS } from '../services/analytics';
 
 const KEYS = {
   onboarding:    'analistas_onboarding_done',
@@ -28,8 +29,8 @@ interface OnboardingContextType {
   togglePlayer: (playerId: string) => void;
   notifications: Record<string, boolean>;
   toggleNotification: (key: string) => void;
-  fanLevel: 'casual' | 'fan' | 'analista' | null;
-  setFanLevel: (level: 'casual' | 'fan' | 'analista') => void;
+  fanLevel: 'espectador' | 'casual' | 'fan' | 'analista' | null;
+  setFanLevel: (level: 'espectador' | 'casual' | 'fan' | 'analista') => void;
 }
 
 const OnboardingContext = createContext<OnboardingContextType>({
@@ -50,7 +51,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const [selectedLeagues, setSelectedLeagues] = useState<string[]>([]);
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<Record<string, boolean>>(DEFAULT_NOTIFS);
-  const [fanLevel, setFanLevelState] = useState<'casual' | 'fan' | 'analista' | null>(null);
+  const [fanLevel, setFanLevelState] = useState<'espectador' | 'casual' | 'fan' | 'analista' | null>(null);
 
   useEffect(() => {
     AsyncStorage.multiGet(Object.values(KEYS)).then(results => {
@@ -69,8 +70,8 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         try { setNotifications({ ...DEFAULT_NOTIFS, ...JSON.parse(map[KEYS.notifications]!) }); } catch {}
       }
       if (map[KEYS.fanLevel]) {
-        const lvl = map[KEYS.fanLevel] as 'casual' | 'fan' | 'analista';
-        if (lvl === 'casual' || lvl === 'fan' || lvl === 'analista') setFanLevelState(lvl);
+        const lvl = map[KEYS.fanLevel] as 'espectador' | 'casual' | 'fan' | 'analista';
+        if (lvl === 'espectador' || lvl === 'casual' || lvl === 'fan' || lvl === 'analista') setFanLevelState(lvl);
       }
       setReady(true);
     });
@@ -79,6 +80,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const completeOnboarding = useCallback(() => {
     setHasCompleted(true);
     AsyncStorage.setItem(KEYS.onboarding, 'true');
+    logEvent(ANALYTICS_EVENTS.ONBOARDING_COMPLETE);
   }, []);
 
   const resetOnboarding = useCallback(() => {
@@ -118,7 +120,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setFanLevel = useCallback((level: 'casual' | 'fan' | 'analista') => {
+  const setFanLevel = useCallback((level: 'espectador' | 'casual' | 'fan' | 'analista') => {
     setFanLevelState(level);
     AsyncStorage.setItem(KEYS.fanLevel, level);
   }, []);

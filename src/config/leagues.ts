@@ -187,7 +187,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Repechaje',        color: REP, from: 15, to: 15 },
       { label: 'Descenso',         color: REL, from: 16, to: 16 },
     ] },
-  { id: 806,  name: 'Premier League',         country: 'Egypt',       flag: '🇪🇬', currentSeasonId: 26173,
+  { id: 830,  name: 'Premier League',         country: 'Egypt',       flag: '🇪🇬', currentSeasonId: 26148,
     zones: [
       { label: 'CAF Champions League',     color: CL,  from: 1,  to: 2  },
       { label: 'CAF Confederation Cup',    color: EL,  from: 3,  to: 4  },
@@ -245,19 +245,19 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Playoffs',           color: PO,  from: 1,  to: 8  },
       { label: 'Descenso',           color: REL, from: 15, to: 16 },
     ] },
-  { id: 687,  name: 'Primera División',   country: 'Uruguay',   flag: '🇺🇾', currentSeasonId: 25761,
+  { id: 770,  name: 'Primera División',   country: 'Uruguay',   flag: '🇺🇾', currentSeasonId: 27710,
     zones: [
       { label: 'Copa Libertadores',  color: CL,  from: 1,  to: 4  },
       { label: 'Copa Sudamericana',  color: EL,  from: 5,  to: 8  },
       { label: 'Descenso',           color: REL, from: 15, to: 16 },
     ] },
-  { id: 702,  name: 'Primera División',   country: 'Paraguay',  flag: '🇵🇾', currentSeasonId: 25889,
+  { id: 755,  name: 'División 1',          country: 'Paraguay',  flag: '🇵🇾', currentSeasonId: 26765,
     zones: [
       { label: 'Copa Libertadores',  color: CL,  from: 1,  to: 4  },
       { label: 'Copa Sudamericana',  color: EL,  from: 5,  to: 8  },
       { label: 'Descenso',           color: REL, from: 11, to: 12 },
     ] },
-  { id: 708,  name: 'Primera División',   country: 'Peru',      flag: '🇵🇪', currentSeasonId: 25594,
+  { id: 764,  name: 'Primera División',   country: 'Peru',      flag: '🇵🇪', currentSeasonId: 26882,
     hasPlayoffs: true, playoffsLabel: 'Playoffs',
     zones: [
       { label: 'Copa Libertadores',  color: CL,  from: 1,  to: 2  },
@@ -340,7 +340,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
   { id: 1108, name: 'CAF Confederation Cup', country: 'Africa',      flag: '🏆', currentSeasonId: 26264, isCup: true },
 
   // ── Otros ─────────────────────────────────────────────────────────────────
-  { id: 732,  name: 'Mundial 2026',              country: 'World',    flag: '🌍', currentSeasonId: 26618, isCup: true, hasPlayoffs: true, playoffsLabel: 'Eliminatoria',
+  { id: 732,  name: 'Fútbol 2026', country: 'World',    flag: '🌍', currentSeasonId: 26618, isCup: true, hasPlayoffs: true, playoffsLabel: 'Eliminatoria',
     // Hidden search aliases — let users find the tournament with common
     // queries without displaying any FIFA-trademarked term in the UI.
     searchAliases: [
@@ -364,6 +364,23 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Descenso',           color: REL, from: 15, to: 16 },
     ] },
   { id: 1419, name: 'UEFA Women\'s Champions League', country: 'Europe', flag: '🏆', currentSeasonId: 25515, isCup: true },
+
+  // ── Additional leagues added May 2026 (SportMonks Pro coverage expansion) ──
+  // High-value tournaments + niche but covered leagues. All IDs + currentSeasonId
+  // verified live against SportMonks /football/leagues/{id}.
+  { id: 3211, name: 'Leagues Cup',              country: 'North America', flag: '🏆', currentSeasonId: 27500, isCup: true },
+  { id: 1328, name: 'UEFA Super Cup',           country: 'Europe',        flag: '⭐', currentSeasonId: 25488, isCup: true },
+  { id: 1452, name: 'Copa Intercontinental',    country: 'World',        flag: '🌍', currentSeasonId: 27741, isCup: true },
+  { id: 1085, name: 'AFC Champions League Elite', country: 'Asia',        flag: '🏆', currentSeasonId: 25585, isCup: true },
+  { id: 642,  name: 'Copa Argentina',           country: 'Argentina',     flag: '🇦🇷', currentSeasonId: 26830, isCup: true },
+  { id: 1798, name: 'Supercopa do Brasil',      country: 'Brazil',        flag: '🇧🇷', currentSeasonId: 27800, isCup: true },
+  { id: 3213, name: 'MLS All-Star',             country: 'USA',           flag: '🇺🇸', currentSeasonId: 27751, isCup: true },
+  { id: 573,  name: 'Allsvenskan',              country: 'Sweden',        flag: '🇸🇪', currentSeasonId: 26806 },
+  { id: 1356, name: 'A-League Men',             country: 'Australia',     flag: '🇦🇺', currentSeasonId: 26529 },
+  { id: 325,  name: 'Super League',             country: 'Greece',        flag: '🇬🇷', currentSeasonId: 25759 },
+  { id: 474,  name: 'Superliga',                country: 'Romania',       flag: '🇷🇴', currentSeasonId: 25641 },
+  { id: 989,  name: 'Super League',             country: 'China',         flag: '🇨🇳', currentSeasonId: 27223 },
+  { id: 938,  name: 'Stars League',             country: 'Qatar',         flag: '🇶🇦', currentSeasonId: 25612 },
 ];
 
 /** Comma-separated league IDs for API filter params */
@@ -495,4 +512,200 @@ export function isSuggestedLeague(
   if (!deviceCountry) return false;
   const countries = COUNTRY_LEAGUE_NAMES[deviceCountry];
   return !!countries && countries.includes(league.country);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEAGUE POPULARITY RANKING
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Two-layer system that drives the order of leagues in the picker AFTER the
+// user's country preset (Mundial → local league → top European → etc. via
+// countryPresets.suggestedLeagueIds and secondaryLeagueIds).
+//
+//   1. LEAGUE_POPULARITY        — global default score (0-100)
+//   2. LEAGUE_POPULARITY_BY_COUNTRY — per-market overrides
+//
+// Use getLeaguePopularity(leagueId, country) — country override takes
+// precedence, falls back to global.
+//
+// Tiers (subjective, LATAM-MX biased):
+//   S (94-100): Mundial 2026, Champions League, Premier, La Liga
+//   A (84-92):  Liga MX, Serie A, Bundesliga, Ligue 1, Europa
+//   B (75-82):  Brasileirão, Liga Argentina, Libertadores, MLS, Saudi
+//   C (65-73):  Leagues Cup, Conference, Liga Portugal, Eredivisie, etc.
+//   D (50-62):  National cups, Süper Lig, secondary South American
+//   E (35-48):  Scotland, J1, Carabao, K League, Allsvenskan, etc.
+//   F (22-32):  2nd divisions of top-5 Europe, Liga de Expansión MX
+//   G (5-20):   Femenil, Russia, China, Egypt, Iran, Morocco, CAF
+//
+// ⚠️ Mundial 2026: set to 100 during the tournament cycle.
+//    After Jul 20, 2026 (Final) → manually update to 55 (Tier D).
+//    Same for Libertadores final / Champions final / Eurocopa cycles if
+//    we want to do that elsewhere.
+
+/** Global popularity score (0-100) per league. Higher = appears earlier. */
+export const LEAGUE_POPULARITY: Record<number, number> = {
+  // ── Tier S (94-100) ────────────────────────────────────────────────────
+  732:  100, // Mundial 2026 — update to 55 after Jul 20, 2026 Final
+  2:    98,  // UEFA Champions League
+  8:    96,  // Premier League
+  564:  95,  // La Liga
+  // ── Tier A (84-92) ─────────────────────────────────────────────────────
+  743:  92,  // Liga MX
+  384:  90,  // Serie A
+  82:   85,  // Bundesliga
+  301:  84,  // Ligue 1
+  5:    84,  // UEFA Europa League
+  // ── Tier B (75-82) ─────────────────────────────────────────────────────
+  648:  82,  // Brasileirão Serie A
+  636:  80,  // Liga Profesional Argentina
+  1122: 78,  // Copa Libertadores
+  779:  76,  // MLS
+  944:  75,  // Saudi Pro League
+  // ── Tier C (65-73) ─────────────────────────────────────────────────────
+  3211: 73,  // Leagues Cup
+  2286: 72,  // UEFA Conference League
+  462:  70,  // Liga Portugal
+  72:   68,  // Eredivisie
+  1111: 67,  // CONCACAF Champions Cup
+  1116: 66,  // Copa Sudamericana
+  1328: 65,  // UEFA Super Cup
+  570:  65,  // Copa del Rey
+  24:   65,  // FA Cup
+  // ── Tier D (50-62) ─────────────────────────────────────────────────────
+  600:  62,  // Süper Lig (Turkey)
+  208:  60,  // Pro League (Belgium)
+  109:  58,  // DFB Pokal
+  390:  58,  // Coppa Italia
+  307:  57,  // Coupe de France
+  672:  56,  // Liga BetPlay (Colombia)
+  663:  55,  // Primera División (Chile)
+  770:  54,  // Primera División (Uruguay)
+  654:  54,  // Copa do Brasil
+  642:  53,  // Copa Argentina
+  1798: 52,  // Supercopa do Brasil
+  1085: 52,  // AFC Champions League Elite
+  1452: 50,  // FIFA Intercontinental Cup
+  // ── Tier E (35-48) ─────────────────────────────────────────────────────
+  501:  48,  // Premiership (Scotland)
+  968:  46,  // J1 League (Japan)
+  27:   45,  // Carabao Cup
+  1741: 45,  // CONCACAF Nations League
+  1034: 43,  // K League 1 (Korea)
+  1082: 42,  // Amistosos Internacionales — boost dinámico durante fechas FIFA (TODO)
+  764:  41,  // Primera División (Peru)
+  696:  40,  // Liga Pro (Ecuador)
+  755:  40,  // División 1 (Paraguay)
+  3213: 38,  // MLS All-Star
+  573:  37,  // Allsvenskan (Sweden)
+  1356: 36,  // A-League Men (Australia)
+  325:  35,  // Super League (Greece)
+  // ── Tier F (22-32) ─────────────────────────────────────────────────────
+  9:    32,  // Championship (England)
+  567:  30,  // La Liga 2
+  85:   28,  // 2. Bundesliga
+  387:  28,  // Serie B
+  304:  27,  // Ligue 2
+  651:  26,  // Brasileirão Serie B
+  749:  25,  // Liga de Expansión MX
+  645:  25,  // Primera B Nacional (Argentina)
+  271:  24,  // Superliga (Denmark)
+  474:  22,  // Superliga (Romania)
+  // ── Tier G (5-20) ──────────────────────────────────────────────────────
+  1579: 20,  // Liga MX Femenil
+  1419: 18,  // UEFA Women's Champions League
+  1568: 16,  // Primera División Femenil (España)
+  734:  15,  // Liga Nacional (Honduras)
+  486:  12,  // Premier League (Russia)
+  989:  12,  // Super League (China)
+  830:  10,  // Premier League (Egypt)
+  938:  10,  // Stars League (Qatar)
+  860:  8,   // Botola Pro (Morocco)
+  902:  8,   // Persian Gulf Pro League (Iran)
+  1107: 7,   // CAF Champions League
+  1108: 5,   // CAF Confederation Cup
+};
+
+/**
+ * Per-country popularity overrides.
+ * ISO 3166-1 alpha-2 country code → leagueId → popularity (0-100).
+ *
+ * If a (country, leagueId) pair is missing, falls back to LEAGUE_POPULARITY.
+ * Used to bias the ranking for local audiences without rewriting the global
+ * scale (e.g. an Argentine sees Liga Profesional at #2 below Mundial, but a
+ * Mexican sees it in its global slot at Tier B).
+ */
+export const LEAGUE_POPULARITY_BY_COUNTRY: Record<string, Record<number, number>> = {
+  // 🇲🇽 México — primary audience
+  MX: {
+    1111: 86,  // CONCACAF Champions Cup ⬆ (was 67) — Liga MX clubs siempre
+    1122: 88,  // Copa Libertadores ⬆ (was 78)
+    3211: 87,  // Leagues Cup ⬆ (was 73)
+    1741: 85,  // CONCACAF Nations League ⬆ (was 45)
+    944:  88,  // Saudi Pro League ⬆ (was 75) — efecto Cristiano
+    779:  87,  // MLS ⬆ (was 76) — efecto Messi
+    1579: 71,  // Liga MX Femenil ⬆ (was 20)
+    1419: 69,  // UEFA Women's CL ⬆ (was 18)
+    749:  66,  // Liga de Expansión MX ⬆ (was 25)
+    24:   78,  // FA Cup ⬆ (was 65) — usuario lo quiso en Tier B
+  },
+  // 🇦🇷 Argentina — Liga Profesional como #2
+  AR: {
+    636:  99,  // Liga Profesional ⬆⬆ (was 80) — segunda después de Mundial
+    1122: 92,  // Copa Libertadores ⬆ (was 78)
+    642:  78,  // Copa Argentina ⬆ (was 53)
+    1116: 80,  // Copa Sudamericana ⬆ (was 66)
+    779:  84,  // MLS ⬆ (was 76) — efecto Messi
+    944:  78,  // Saudi Pro League ⬆ (was 75) — Otamendi/Paredes
+  },
+  // 🇧🇷 Brasil — Brasileirão como #2
+  BR: {
+    648:  99,  // Brasileirão Serie A ⬆⬆ (was 82) — segunda después de Mundial
+    1122: 92,  // Copa Libertadores ⬆ (was 78)
+    654:  80,  // Copa do Brasil ⬆ (was 54)
+    1116: 82,  // Copa Sudamericana ⬆ (was 66)
+    1798: 70,  // Supercopa do Brasil ⬆ (was 52)
+  },
+  // 🇺🇸 USA — MLS como #2, Liga MX como #6
+  US: {
+    779:  99,  // MLS ⬆⬆ (was 76) — segunda después de Mundial
+    743:  94,  // Liga MX ⬆ (was 92) — boost LATAM diaspora, #6
+    3211: 88,  // Leagues Cup ⬆ (was 73)
+    384:  88,  // Serie A ⬆ (was 90, kept) — Pulisic en Milan
+    944:  80,  // Saudi Pro League ⬆ (was 75)
+    1111: 80,  // CONCACAF Champions Cup ⬆ (was 67)
+    1741: 78,  // CONCACAF Nations League ⬆ (was 45)
+  },
+  // 🇪🇸 España — La Liga como #2
+  ES: {
+    564:  99,  // La Liga ⬆ (was 95) — segunda después de Mundial
+    570:  88,  // Copa del Rey ⬆ (was 65)
+    567:  62,  // La Liga 2 ⬆ (was 30)
+    1419: 80,  // UEFA Women's CL ⬆ (was 18) — Barça Femení domina
+    1568: 65,  // Primera División Femenil España ⬆ (was 16)
+  },
+  // 🏴 Inglaterra — Premier League como #2
+  GB: {
+    8:    100, // Premier League ⬆ (was 96) — segunda después de Mundial
+    24:   90,  // FA Cup ⬆ (was 65)
+    27:   75,  // Carabao Cup ⬆ (was 45)
+    9:    72,  // Championship ⬆ (was 32)
+  },
+};
+
+/**
+ * Returns the popularity score for a league, taking country bias into account.
+ *
+ * @example
+ *   getLeaguePopularity(743, 'MX')  // 92 (global) — Liga MX is already top for MX
+ *   getLeaguePopularity(743, 'US')  // 94 (US override)
+ *   getLeaguePopularity(743, 'AR')  // 92 (no AR override → falls back to global)
+ *   getLeaguePopularity(902)        // 8 (Persian Gulf Pro)
+ */
+export function getLeaguePopularity(leagueId: number, country?: string): number {
+  if (country) {
+    const v = LEAGUE_POPULARITY_BY_COUNTRY[country]?.[leagueId];
+    if (typeof v === 'number') return v;
+  }
+  return LEAGUE_POPULARITY[leagueId] ?? 0;
 }

@@ -79,14 +79,6 @@ export const TermsOfServiceBody: React.FC = () => {
       <Bullet>Interferir con el funcionamiento normal del servicio (ataques, sobrecarga, distribución de malware).</Bullet>
       <Bullet>Reproducir o redistribuir el contenido de Analistas sin autorización por escrito.</Bullet>
 
-      <SectionTitle>Contenido de apuestas (momios)</SectionTitle>
-      <Paragraph>
-        La App puede mostrar momios, cuotas y enlaces a casas de apuestas asociadas (por ejemplo, Caliente.mx). Esta información se proporciona con fines informativos. Analistas no opera ninguna casa de apuestas ni acepta apuestas por sí mismo.
-      </Paragraph>
-      <Paragraph>
-        El contenido relacionado con apuestas solo es apto para <Bold>mayores de 18 años</Bold>. Eres responsable de cumplir con las leyes de apuestas aplicables en tu jurisdicción. Las apuestas pueden generar adicción; juega con responsabilidad.
-      </Paragraph>
-
       <SectionTitle>Suscripciones (Titular)</SectionTitle>
       <Bullet>"Titular" es la suscripción premium de Analistas que desbloquea funciones adicionales. Los precios y beneficios se muestran dentro de la App antes de la compra.</Bullet>
       <Bullet>La suscripción se cobra a través de la App Store de Apple o Google Play, según tu dispositivo, y se <Bold>renueva automáticamente</Bold> al final de cada periodo de facturación salvo que la canceles con al menos 24 horas de anticipación.</Bullet>
@@ -106,7 +98,7 @@ export const TermsOfServiceBody: React.FC = () => {
 
       <SectionTitle>Disclaimers y limitación de responsabilidad</SectionTitle>
       <Paragraph>
-        El servicio se ofrece "tal cual" y "según disponibilidad". Analistas no garantiza que el contenido sea exacto, completo o esté libre de errores en todo momento. Las estadísticas, momios y resultados pueden tener retrasos o inexactitudes y no deben usarse como única base para decisiones financieras o de apuestas.
+        El servicio se ofrece "tal cual" y "según disponibilidad". Analistas no garantiza que el contenido sea exacto, completo o esté libre de errores en todo momento. Las estadísticas y resultados pueden tener retrasos o inexactitudes.
       </Paragraph>
       <Paragraph>
         En la máxima medida permitida por la ley, Analistas no será responsable por daños indirectos, incidentales, especiales, consecuentes o punitivos derivados del uso del servicio, incluyendo pérdidas por decisiones tomadas con base en información proporcionada por la App.

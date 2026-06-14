@@ -77,9 +77,11 @@ async function executeSinglePoll(pollIndex) {
         if (doc)
             matchDocs.push(doc);
     }
-    // 3. Load previous snapshot and detect changes
+    // 3. Load previous snapshot and detect changes. We pass the raw SMFixtures
+    //    too so the detector can pull scorer names and red-card events from
+    //    the events array on the same response.
     const prevSnapshot = await (0, detect_changes_1.loadSnapshot)();
-    const changes = (0, detect_changes_1.detectChanges)(matchDocs, prevSnapshot);
+    const changes = (0, detect_changes_1.detectChanges)(matchDocs, prevSnapshot, smFixtures);
     // 4. Batch write to Firestore (max 500 per batch)
     const batches = [];
     let currentBatch = admin_init_1.db.batch();
@@ -97,8 +99,10 @@ async function executeSinglePoll(pollIndex) {
     if (opCount > 0)
         batches.push(currentBatch);
     await Promise.all(batches.map(b => b.commit()));
-    // 5. Save snapshot for next poll
-    await (0, detect_changes_1.saveSnapshot)(matchDocs);
+    // 5. Save snapshot for next poll. The detector reads event counts off
+    //    the fixtures' events array; we also pass the previous snapshot so
+    //    one-time flags (reminderSent, lineupsSent) are preserved across polls.
+    await (0, detect_changes_1.saveSnapshot)(matchDocs, smFixtures, prevSnapshot);
     // 6. Dispatch notifications for detected changes
     if (changes.length > 0) {
         await (0, detect_changes_1.dispatchNotifications)(changes);

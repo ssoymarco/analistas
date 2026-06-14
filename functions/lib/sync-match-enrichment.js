@@ -61,6 +61,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.enrichMatchesByIds = enrichMatchesByIds;
 exports.syncMatchEnrichmentHandler = syncMatchEnrichmentHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
@@ -118,10 +119,14 @@ async function queryHotMatches() {
                 id: d.id,
                 homeTeamId: homeId,
                 awayTeamId: awayId,
+                homeTeamName: data?.homeTeam?.name ?? '',
+                awayTeamName: data?.awayTeam?.name ?? '',
+                league: data?.league ?? '',
                 status: data.status,
                 startingAtUtc: data.startingAtUtc,
                 lastDetailUpdate: lastDetail,
                 lastH2hUpdate: lastH2h,
+                lineupsSent: data?.lineupsSent ?? false,
             });
         }
     }
@@ -185,6 +190,66 @@ function extractStaticEnrichment(fixture) {
         out.season_id = f.season_id;
     return out;
 }
+/**
+ * Enrich a specific list of match IDs regardless of the hot window.
+ * Used by the `backfillEnrichmentByMatchIds` callable to repair historical
+ * matches whose `detail.events` was incomplete (e.g. 2022 WC knockouts that
+ * went to ET/penalties — the regulation/ET goals were missing because
+ * syncMatchEnrichment never ran outside the 2-hour post-finish window).
+ */
+async function enrichMatchesByIds(matchIds) {
+    if (matchIds.length === 0)
+        return { enriched: 0, errors: 0 };
+    logger.info(`🔧 enrichMatchesByIds: processing ${matchIds.length} match IDs`);
+    // Build HotMatch list from Firestore docs
+    const hot = [];
+    const chunks = [];
+    for (let i = 0; i < matchIds.length; i += 10)
+        chunks.push(matchIds.slice(i, i + 10));
+    for (const chunk of chunks) {
+        const snap = await admin_init_1.db.collection('matches')
+            .where(admin_init_1.admin.firestore.FieldPath.documentId(), 'in', chunk)
+            .get();
+        snap.forEach(doc => {
+            const d = doc.data();
+            const home = d.homeTeam?.id ? Number(d.homeTeam.id) : 0;
+            const away = d.awayTeam?.id ? Number(d.awayTeam.id) : 0;
+            hot.push({
+                id: doc.id,
+                homeTeamId: home,
+                awayTeamId: away,
+                homeTeamName: d?.homeTeam?.name ?? '',
+                awayTeamName: d?.awayTeam?.name ?? '',
+                league: d?.league ?? '',
+                status: d.status ?? 'finished',
+                startingAtUtc: d.startingAtUtc ?? '',
+                lastDetailUpdate: null,
+                lastH2hUpdate: null,
+                lineupsSent: d?.lineupsSent ?? false,
+            });
+        });
+    }
+    const now = new Date();
+    const h2hSkipCutoff = new Date(now.getTime() - H2H_REFRESH_HOURS * 3600_000);
+    let enriched = 0;
+    let errors = 0;
+    for (const m of hot) {
+        try {
+            const fixture = await (0, sportmonks_1.fetchFixtureFullDetail)(Number(m.id));
+            if (fixture) {
+                await writeEnrichment(m, fixture, h2hSkipCutoff);
+                enriched++;
+            }
+        }
+        catch (err) {
+            logger.error(`enrichMatchesByIds: error on ${m.id}`, err);
+            errors++;
+        }
+        await sleep(SLEEP_BETWEEN_MATCHES_MS);
+    }
+    logger.info(`🔧 enrichMatchesByIds: done — ${enriched} enriched, ${errors} errors`);
+    return { enriched, errors };
+}
 async function syncMatchEnrichmentHandler() {
     const startMs = Date.now();
     logger.info('🎯 syncMatchEnrichment: querying hot window');
@@ -201,34 +266,12 @@ async function syncMatchEnrichmentHandler() {
     let errors = 0;
     for (const m of hot) {
         try {
-            // ── Detail (/fixtures/{id} with full includes) ──
             const fixture = await (0, sportmonks_1.fetchFixtureFullDetail)(Number(m.id));
-            const seasonId = fixture?.season_id ?? null;
             if (fixture) {
-                const enrichment = extractStaticEnrichment(fixture);
-                await admin_init_1.db.collection('matches').doc(m.id).set({
-                    detail: enrichment,
-                    detailUpdatedAt: admin_init_1.admin.firestore.Timestamp.now(),
-                }, { merge: true });
+                const wrote = await writeEnrichment(m, fixture, h2hSkipCutoff);
                 detailsWritten++;
-            }
-            // ── Sidelined for both teams (only if we have a seasonId) ──
-            if (seasonId) {
-                const [sidelinedHome, sidelinedAway] = await Promise.all([
-                    (0, sportmonks_1.fetchSidelined)(seasonId, m.homeTeamId),
-                    (0, sportmonks_1.fetchSidelined)(seasonId, m.awayTeamId),
-                ]);
-                await admin_init_1.db.collection('matches').doc(m.id).set({ sidelinedHome, sidelinedAway }, { merge: true });
-            }
-            // ── H2H (skip if fetched within H2H_REFRESH_HOURS) ──
-            const needsH2h = !m.lastH2hUpdate || m.lastH2hUpdate < h2hSkipCutoff;
-            if (needsH2h) {
-                const h2h = await (0, sportmonks_1.fetchH2H)(m.homeTeamId, m.awayTeamId).catch(() => []);
-                await admin_init_1.db.collection('matches').doc(m.id).set({
-                    h2h,
-                    h2hUpdatedAt: admin_init_1.admin.firestore.Timestamp.now(),
-                }, { merge: true });
-                h2hWritten++;
+                if (wrote.h2h)
+                    h2hWritten++;
             }
             await sleep(SLEEP_BETWEEN_MATCHES_MS);
         }
@@ -240,5 +283,76 @@ async function syncMatchEnrichmentHandler() {
     const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
     logger.info(`✅ syncMatchEnrichment: ${detailsWritten} details + ${h2hWritten} h2h written ` +
         `(${errors} errors) in ${elapsed}s`);
+}
+/** Shared enrichment write — used by both the scheduled handler and the
+ *  ad-hoc backfill. Returns flags for what was written. */
+async function writeEnrichment(m, fixture, h2hSkipCutoff) {
+    const seasonId = fixture?.season_id ?? null;
+    const result = { detail: false, h2h: false };
+    // ── Detail (events, lineups, statistics, venue, predictions, …) ──
+    const enrichment = extractStaticEnrichment(fixture);
+    // ── Lineup notification (one-time, fires when official lineups arrive) ──
+    // Condition: match is scheduled/upcoming, lineups not yet notified, and
+    // the fixture now has ≥ 11 confirmed lineup entries (at least one full XI).
+    const newLineups = Array.isArray(enrichment.lineups)
+        ? enrichment.lineups
+        : [];
+    const hasRealLineups = newLineups.length >= 11;
+    if (!m.lineupsSent && hasRealLineups && m.status === 'scheduled') {
+        try {
+            const messaging = admin_init_1.admin.messaging();
+            const homeId = m.homeTeamId;
+            const awayId = m.awayTeamId;
+            const title = '📋 Alineaciones confirmadas';
+            const body = `${m.homeTeamName} vs ${m.awayTeamName} · ${m.league}`;
+            const data = {
+                type: 'lineups',
+                matchId: m.id,
+                homeTeam: m.homeTeamName,
+                awayTeam: m.awayTeamName,
+            };
+            // Send to both teams' lineup topics (no delay — lineups are pre-match info)
+            await Promise.allSettled([
+                messaging.send({
+                    topic: `team_${homeId}_lineups`,
+                    notification: { title, body }, data,
+                    android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
+                    apns: { payload: { aps: { sound: 'default', badge: 0 } } },
+                }),
+                messaging.send({
+                    topic: `team_${awayId}_lineups`,
+                    notification: { title, body }, data,
+                    android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
+                    apns: { payload: { aps: { sound: 'default', badge: 0 } } },
+                }),
+            ]);
+            // Persist the flag so future enrichment runs don't re-notify
+            await admin_init_1.db.collection('matches').doc(m.id).set({ lineupsSent: true }, { merge: true });
+            m.lineupsSent = true;
+            logger.info(`📋 Lineup notification sent for match ${m.id}: ${m.homeTeamName} vs ${m.awayTeamName}`);
+        }
+        catch (err) {
+            logger.warn(`📋 Lineup notification failed for match ${m.id}:`, err);
+            // Non-fatal — enrichment continues normally
+        }
+    }
+    await admin_init_1.db.collection('matches').doc(m.id).set({ detail: enrichment, detailUpdatedAt: admin_init_1.admin.firestore.Timestamp.now() }, { merge: true });
+    result.detail = true;
+    // ── Sidelined ──
+    if (seasonId) {
+        const [sidelinedHome, sidelinedAway] = await Promise.all([
+            (0, sportmonks_1.fetchSidelined)(seasonId, m.homeTeamId),
+            (0, sportmonks_1.fetchSidelined)(seasonId, m.awayTeamId),
+        ]);
+        await admin_init_1.db.collection('matches').doc(m.id).set({ sidelinedHome, sidelinedAway }, { merge: true });
+    }
+    // ── H2H ──
+    const needsH2h = !m.lastH2hUpdate || m.lastH2hUpdate < h2hSkipCutoff;
+    if (needsH2h) {
+        const h2h = await (0, sportmonks_1.fetchH2H)(m.homeTeamId, m.awayTeamId).catch(() => []);
+        await admin_init_1.db.collection('matches').doc(m.id).set({ h2h, h2hUpdatedAt: admin_init_1.admin.firestore.Timestamp.now() }, { merge: true });
+        result.h2h = true;
+    }
+    return result;
 }
 //# sourceMappingURL=sync-match-enrichment.js.map

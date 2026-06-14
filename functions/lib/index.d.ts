@@ -11,6 +11,7 @@
  * - syncTopScorers:   Every 12 hours → top scorers for all configured leagues
  */
 import './admin-init';
+export { deliverDelayedPush } from './deliver-delayed-push';
 /**
  * Poll livescores every 1 minute.
  * Internally runs 4 polls with 15-second delays for near-real-time updates.
@@ -28,6 +29,77 @@ export declare const pollLivescores: import("firebase-functions/v2/scheduler").S
  * Runs every 30 minutes.
  */
 export declare const syncFixtures: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const backfillFixturesByDates: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    ok: boolean;
+    dates: any[];
+}>, unknown>;
+/**
+ * Diagnostic endpoint: send a test FCM push to an arbitrary topic so an
+ * operator can verify that a specific device is subscribed end-to-end.
+ *
+ * Why this exists — the user reported zero notifications on Build 13 +
+ * Build 14 because the client never bound APNs↔FCM (see commit ea1be8f).
+ * After Build 15 ships the fix, we need a way to confirm the binding
+ * worked WITHOUT having to wait for a real goal to be scored. This
+ * endpoint takes a topic + title + body and dispatches via the same
+ * `admin.messaging().send({topic})` path the real notifications use.
+ *
+ * Gated on the same BACKFILL_TOKEN as the other diagnostic endpoint —
+ * an explicit allow-list approach is cleaner than wiring per-endpoint
+ * secrets.
+ *
+ * Invocation example (curl):
+ *   curl -X POST .../sendTestPush -d '{
+ *     "data": {
+ *       "adminToken": "...",
+ *       "topic": "team_3371_goals",
+ *       "title": "Test",
+ *       "body":  "Si ves esto el binding funciona"
+ *     }
+ *   }'
+ */
+/**
+ * Diagnostic endpoint: records the FCM + APNs tokens reported by a device
+ * after `initializeFCM` runs. Used to verify end-to-end binding when the
+ * topic-targeted push diagnostic fails — a direct token-targeted push
+ * bypasses topic membership entirely and isolates whether the device is
+ * truly registered with FCM or whether the registration token itself
+ * is a phantom.
+ *
+ * Public endpoint (the device hits it on launch, no auth available there).
+ * Tokens are PII-adjacent — store in logs only, no Firestore write, so
+ * they age out with the normal Cloud Logging retention.
+ */
+export declare const reportFcmToken: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    ok: boolean;
+}>, unknown>;
+/**
+ * Backfill enrichment (events, lineups, h2h, statistics) for arbitrary match
+ * IDs that are outside the scheduled hot window. Primary use case: historical
+ * cup matches that went to ET/penalties (2022 WC knockouts, etc.) whose
+ * `detail.events` only has shootout kicks because the scheduled enrichment
+ * function never revisits finished matches older than 2 hours.
+ *
+ * Input: `{ matchIds: string[], adminToken: string }` — max 20 IDs per call
+ * (each requires a separate SportMonks API call + H2H call).
+ */
+export declare const backfillEnrichmentByMatchIds: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    matchIds: string[];
+    enriched: number;
+    errors: number;
+    ok: boolean;
+}>, unknown>;
+export declare const sendTestPush: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    ok: boolean;
+    messageId: string;
+    target: {
+        token: string;
+        topic?: undefined;
+    } | {
+        topic: string;
+        token?: undefined;
+    };
+}>, unknown>;
 /**
  * Sync league standings for all configured leagues.
  * Runs every 1 hour — keeps tables fresh after match days.

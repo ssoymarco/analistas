@@ -24,9 +24,11 @@ import { radius, ui } from '../theme/tokens';
 import { useFavorites } from '../contexts/FavoritesContext';
 import {
   getSearchableTeams,
+  getAllSearchableTeams,
   getSearchablePlayers,
   getAllSearchablePlayers,
   getSearchableLeagues,
+  POPULAR_NATIONAL_TEAMS,
 } from '../services/sportsApi';
 import type {
   SearchableTeam,
@@ -36,6 +38,14 @@ import type {
 import type { FavoritosStackParamList } from '../navigation/AppNavigator';
 import { normalize } from '../utils/normalize';
 import { useTranslation } from 'react-i18next';
+import { isImageUri } from '../utils/imageUri';
+import { useUserCountry } from '../hooks/useUserCountry';
+import {
+  buildOnboardingTeamGrid,
+  buildOnboardingLeagueOrder,
+  buildOnboardingPlayerNames,
+} from '../services/onboardingGrid';
+import { getCountryPreset } from '../config/countryPresets';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,6 +61,9 @@ interface FavItem {
   teamLogo?: string;
   jerseyNumber?: number;
   position?: string;
+  /** Hidden search keywords — never displayed, only matched against queries.
+   *  e.g. Guadalajara → ['chivas'] so fans searching "chivas" find it. */
+  searchAliases?: string[];
 }
 
 type Tab = 'equipos' | 'ligas' | 'jugadores';
@@ -61,7 +74,7 @@ type Tab = 'equipos' | 'ligas' | 'jugadores';
 const POPULAR_TEAMS: FavItem[] = [
   // Liga MX
   { id: '2687',  name: 'América',             subtitle: 'Liga MX · México',             emoji: 'AM', smId: 2687,   image: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png' },
-  { id: '427',   name: 'Guadalajara',         subtitle: 'Liga MX · México',             emoji: 'GU', smId: 427,    image: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png' },
+  { id: '427',   name: 'Guadalajara',         subtitle: 'Liga MX · México',             emoji: 'GU', smId: 427,    image: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png', searchAliases: ['chivas', 'chivas de guadalajara'] },
   { id: '609',   name: 'Tigres UANL',         subtitle: 'Liga MX · México',             emoji: 'TI', smId: 609,    image: 'https://cdn.sportmonks.com/images/soccer/teams/1/609.png' },
   { id: '2626',  name: 'Cruz Azul',           subtitle: 'Liga MX · México',             emoji: 'CA', smId: 2626,   image: 'https://cdn.sportmonks.com/images/soccer/teams/2/2626.png' },
   { id: '2662',  name: 'Monterrey',           subtitle: 'Liga MX · México',             emoji: 'MO', smId: 2662,   image: 'https://cdn.sportmonks.com/images/soccer/teams/6/2662.png' },
@@ -257,7 +270,7 @@ const ItemAvatar: React.FC<{
   // Unified container tint — works for image logos, league flags and initials
   const containerBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
 
-  if (image?.startsWith('http') && !imgFailed) {
+  if (isImageUri(image) && !imgFailed) {
     return (
       <View style={{
         width: s, height: s, borderRadius: radius,
@@ -446,6 +459,12 @@ export const FavoritosScreen: React.FC = () => {
     followedLeagueIds, isFollowingLeague, toggleFollowLeague,
   } = useFavorites();
 
+  // Region + language drive the same country-aware ordering as the onboarding
+  // grid — Mexican users see México + Liga MX first, Argentine users see
+  // Argentina + Liga Profesional first, etc. Falls back to a sensible default
+  // ordering before the IP-based country resolves.
+  const { country, language } = useUserCountry();
+
   const [activeTab, setActiveTab] = useState<Tab>('equipos');
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestedVisible, setSuggestedVisible] = useState(INITIAL_SUGGESTED);
@@ -457,7 +476,9 @@ export const FavoritosScreen: React.FC = () => {
 
   // ── Load SportMonks enrichment data ──
   useEffect(() => {
-    // Phase 1: quick results — teams + 15 hardcoded popular players (fast, ~1-2s)
+    // Phase 1: quick results — the curated ~30 popular teams + 15 hardcoded
+    // popular players (fast, ~1-2 s). Renders MIS SEGUIDOS / SUGERIDOS for
+    // mainstream picks immediately so the tab feels snappy.
     Promise.all([
       getSearchableTeams().then(setSmTeams).catch(() => {}),
       getSearchablePlayers().then(setSmPlayers).catch(() => {}),
@@ -465,12 +486,28 @@ export const FavoritosScreen: React.FC = () => {
 
     setSmLeagues(getSearchableLeagues());
 
-    // Phase 2: background enrichment — replaces smPlayers with full squad data
-    // that has CORRECT player IDs sourced directly from live team squad API responses.
-    // This fixes navigation bugs where hardcoded IDs map to the wrong player.
+    // Phase 2: background enrichment.
+    //
+    // Teams: previously stopped at the 30-team popular list, which produced
+    // the visible bug where a user who followed Cruzeiro (in onboarding's
+    // FULL search) couldn't find it in MIS SEGUIDOS, and "Equipos (N)"
+    // miscounted the followed list. Now upgrade to the same
+    // getAllSearchableTeams() result the onboarding uses — cached for 7
+    // days under `searchable_teams_all_v1`, so this is a cache hit on
+    // first launch after onboarding (the screen the user came from
+    // populated the cache). Length-guard keeps us from regressing if
+    // the full-list call fails or returns empty.
+    //
+    // Players: replaces the hardcoded 15 with full squad data sourced
+    // directly from live team-squad API responses — fixes navigation
+    // bugs where hardcoded IDs map to the wrong player.
+    getAllSearchableTeams()
+      .then(full => { if (full.length > smTeams.length) setSmTeams(full); })
+      .catch(() => {});
     getAllSearchablePlayers()
       .then(full => { if (full.length > 15) setSmPlayers(full); })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Reset visible count when tab/search changes
@@ -497,8 +534,8 @@ export const FavoritosScreen: React.FC = () => {
       // Prefer the entry that has a real HTTP image over one that doesn't.
       // This prevents Phase 2 squad entries (often have empty image_path) from
       // overwriting Phase 1 entries that already have a verified real photo URL.
-      const existingHasImg = existing.image?.startsWith('http');
-      const newHasImg      = p.image?.startsWith('http');
+      const existingHasImg = isImageUri(existing.image);
+      const newHasImg      = isImageUri(p.image);
       if (newHasImg && !existingHasImg) {
         m.set(key, p);
       }
@@ -513,50 +550,137 @@ export const FavoritosScreen: React.FC = () => {
   }, [smLeagues]);
 
   // ── Enriched items ──
-  // KEY FIX: API image only overrides hardcoded if it's a valid URL.
-  // Fall back to hardcoded `item.image` instead of setting undefined.
+  // The base list is built from the SAME country-aware grid the onboarding
+  // uses (buildOnboardingTeamGrid). This:
+  //   • Includes national teams from POPULAR_NATIONAL_TEAMS — without this,
+  //     a user who picked "México" in onboarding never saw México appear in
+  //     MIS SEGUIDOS because the screen's local POPULAR_TEAMS hardcode only
+  //     had clubs.
+  //   • Orders entries by relevance to the user's country (national team
+  //     first, then local clubs, then mixed globals), matching what the
+  //     user saw during onboarding.
+  //   • Preserves the hardcoded "Liga MX · México" style subtitles for the
+  //     30 teams we maintain locally, falling back to leagueName for the
+  //     other entries.
+  const popularTeamMeta = useMemo(() => {
+    const m = new Map<string, { subtitle: string; emoji: string; searchAliases?: string[] }>();
+    for (const t of POPULAR_TEAMS) {
+      const meta = { subtitle: t.subtitle, emoji: t.emoji, searchAliases: t.searchAliases };
+      if (t.smId) m.set(String(t.smId), meta);
+      m.set(t.id, meta);
+    }
+    return m;
+  }, []);
+
   const enrichedTeams = useMemo(() => {
-    const names = new Set(POPULAR_TEAMS.map(t => normalize(t.name)));
-    const popular = POPULAR_TEAMS.map(item => {
+    // Country-aware ordering — same source the onboarding picker uses
+    const ordered = buildOnboardingTeamGrid(country, language);
+
+    const baseItems: FavItem[] = ordered.map(st => {
+      const id = String(st.id);
+      const pretty = popularTeamMeta.get(id);
+      const isNational = st.leagueName === 'Selección Nacional';
+      return {
+        id,
+        name: st.name,
+        subtitle: pretty?.subtitle ?? (isNational ? 'Selección Nacional' : (st.leagueName || '')),
+        emoji: pretty?.emoji ?? (isNational ? '🏳️' : abbrev(st.name)),
+        smId: st.id,
+        image: isImageUri(st.logo) ? st.logo : undefined,
+        seasonId: st.seasonId,
+        searchAliases: pretty?.searchAliases,
+      };
+    });
+
+    // Enrich with live SportMonks data (logo, seasonId) by name match
+    const enriched = baseItems.map(item => {
       const sm = smTeamMap.get(normalize(item.name));
       if (!sm) return item;
-      const apiImage = sm.logo?.startsWith('http') ? sm.logo : undefined;
-      return { ...item, smId: sm.id ?? item.smId, image: apiImage ?? item.image, seasonId: sm.seasonId };
+      const apiImage = isImageUri(sm.logo) ? sm.logo : undefined;
+      return {
+        ...item,
+        smId:     sm.id ?? item.smId,
+        image:    apiImage ?? item.image,
+        seasonId: sm.seasonId ?? item.seasonId,
+      };
     });
+
+    // Tail: any SportMonks team not in our ordered set (long tail for search)
+    const seenNames = new Set(enriched.map(t => normalize(t.name)));
     const extras: FavItem[] = smTeams
-      .filter(t => !names.has(normalize(t.name)))
+      .filter(t => !seenNames.has(normalize(t.name)))
       .map(t => ({
         id: String(t.id),
         name: t.name,
         subtitle: t.leagueName || '',
         emoji: abbrev(t.name),
         smId: t.id,
-        image: t.logo?.startsWith('http') ? t.logo : undefined,
+        image: isImageUri(t.logo) ? t.logo : undefined,
         seasonId: t.seasonId,
       }));
-    return deduplicateItems([...popular, ...extras]);
-  }, [smTeamMap, smTeams]);
+
+    return deduplicateItems([...enriched, ...extras]);
+  }, [country, language, popularTeamMeta, smTeamMap, smTeams]);
 
   // ── Players: split into popular (suggestions) vs all (search index) ──
   // Popular = curated 15 globally top players (Messi, Ronaldo, etc.) → shown as suggestions.
   // All = popular + Phase 2 squad data (~750 players from popular team rosters) → search only.
   // This prevents the suggestions list from being flooded with squad players (e.g. all of
   // América's roster), while still allowing the user to search for any squad player by name.
+  //
+  // Order: SAME country-aware ordering the onboarding picker uses
+  // (buildOnboardingPlayerNames). Mexican user lands on Santi Giménez +
+  // Raúl Jiménez first, then Messi/CR7/Mbappé/Haaland; Argentine sees Messi
+  // first; Brazilian sees Vini Jr / Neymar first; etc. Anything in
+  // POPULAR_PLAYERS that the country-aware function doesn't surface is
+  // appended at the end so we never drop a player from the suggestions.
   const enrichedPopularPlayers = useMemo(() => {
-    return POPULAR_PLAYERS.map(item => {
+    // Build a lookup of POPULAR_PLAYERS by normalized name for O(1) reorder
+    const playerByName = new Map<string, FavItem>();
+    POPULAR_PLAYERS.forEach(item => {
+      playerByName.set(normalize(item.name), item);
+    });
+
+    // Pull country-ordered names from the same function as the onboarding
+    const orderedNames = buildOnboardingPlayerNames(country, language);
+
+    // Project ordered names → FavItems (preserving local hardcoded metadata)
+    const ordered: FavItem[] = [];
+    const usedKeys = new Set<string>();
+    for (const name of orderedNames) {
+      const key = normalize(name);
+      const item = playerByName.get(key);
+      if (item && !usedKeys.has(key)) {
+        ordered.push(item);
+        usedKeys.add(key);
+      }
+    }
+
+    // Defensive tail: any POPULAR_PLAYERS not surfaced by buildOnboardingPlayerNames
+    // get appended at the end so we never silently drop a curated player.
+    for (const item of POPULAR_PLAYERS) {
+      const key = normalize(item.name);
+      if (!usedKeys.has(key)) {
+        ordered.push(item);
+        usedKeys.add(key);
+      }
+    }
+
+    // Enrich with live SportMonks player data (current club, image, jersey)
+    return ordered.map(item => {
       const sm = smPlayerMap.get(normalize(item.name));
       if (!sm) return item;
       // API-verified image only; do NOT fall back to hardcoded CDN path.
-      const apiImage = sm.image?.startsWith('http') ? sm.image : undefined;
+      const apiImage = isImageUri(sm.image) ? sm.image : undefined;
       // Replace the hardcoded "Club · Country" subtitle with a fresh
       // "{API-club} · {country-from-hardcoded-subtitle}" so transfers don't
       // leave stale team names visible (e.g. KdB moved Man City → Napoli).
       // The country is the part AFTER the last " · " in the original subtitle.
-      const country = item.subtitle.includes(' · ')
+      const playerNationality = item.subtitle.includes(' · ')
         ? item.subtitle.split(' · ').pop() ?? ''
         : item.subtitle;
       const subtitle = sm.teamName
-        ? `${sm.teamName} · ${country}`
+        ? `${sm.teamName} · ${playerNationality}`
         : item.subtitle;
       return {
         ...item,
@@ -569,7 +693,7 @@ export const FavoritosScreen: React.FC = () => {
         position: sm.position,
       };
     });
-  }, [smPlayerMap]);
+  }, [country, language, smPlayerMap]);
 
   const enrichedAllPlayers = useMemo(() => {
     const names = new Set(POPULAR_PLAYERS.map(p => normalize(p.name)));
@@ -582,7 +706,7 @@ export const FavoritosScreen: React.FC = () => {
         subtitle: [p.teamName, p.leagueName || p.position].filter(Boolean).join(' · ') || '',
         emoji: abbrev(p.name),
         smId: p.id,
-        image: p.image?.startsWith('http') ? p.image : undefined,
+        image: isImageUri(p.image) ? p.image : undefined,
         teamName: p.teamName,
         teamLogo: p.teamLogo,
         jerseyNumber: p.jerseyNumber,
@@ -592,11 +716,26 @@ export const FavoritosScreen: React.FC = () => {
   }, [enrichedPopularPlayers, smPlayers]);
 
   const enrichedLeagues = useMemo(() => {
-    const names = new Set(POPULAR_LEAGUES.map(l => normalize(l.name)));
-    const popular = POPULAR_LEAGUES.map(item => {
+    // Reorder POPULAR_LEAGUES so the country's preferred leagues come first.
+    // buildOnboardingLeagueOrder returns the same order used by the onboarding
+    // Competiciones screen — so a Mexican user lands on Mundial 2026 + Liga MX
+    // + Champions League first, an Argentine on Mundial 2026 + Liga Profesional
+    // first, etc. Anything not in the preset keeps its original config order.
+    const { order: leagueOrder } = buildOnboardingLeagueOrder(country, language);
+    const orderMap = new Map<number, number>();
+    leagueOrder.forEach((id, idx) => orderMap.set(id, idx));
+
+    const sortedPopular = [...POPULAR_LEAGUES].sort((a, b) => {
+      const ai = orderMap.get(Number(a.smId ?? a.id)) ?? Number.MAX_SAFE_INTEGER;
+      const bi = orderMap.get(Number(b.smId ?? b.id)) ?? Number.MAX_SAFE_INTEGER;
+      return ai - bi;
+    });
+
+    const names = new Set(sortedPopular.map(l => normalize(l.name)));
+    const popular = sortedPopular.map(item => {
       const sm = smLeagueMap.get(normalize(item.name));
       if (!sm) return item;
-      const apiImage = sm.image?.startsWith('http') ? sm.image : undefined;
+      const apiImage = isImageUri(sm.image) ? sm.image : undefined;
       return { ...item, smId: sm.id ?? item.smId, seasonId: sm.seasonId, image: apiImage ?? item.image };
     });
     const extras: FavItem[] = smLeagues
@@ -607,11 +746,11 @@ export const FavoritosScreen: React.FC = () => {
         subtitle: l.country || '',
         emoji: l.flag || '🏆',
         smId: l.id,
-        image: l.image?.startsWith('http') ? l.image : undefined,
+        image: isImageUri(l.image) ? l.image : undefined,
         seasonId: l.seasonId,
       }));
     return deduplicateItems([...popular, ...extras]);
-  }, [smLeagueMap, smLeagues]);
+  }, [country, language, smLeagueMap, smLeagues]);
 
   // ── Effective ID helper ──
   // Uses item.id directly (always stable). For teams/leagues, item.id = String(smId)
@@ -677,7 +816,9 @@ export const FavoritosScreen: React.FC = () => {
     if (!searchQuery.trim()) return null;
     const q = normalize(searchQuery);
     return config.searchItems.filter(i =>
-      normalize(i.name).includes(q) || normalize(i.subtitle).includes(q)
+      normalize(i.name).includes(q) ||
+      normalize(i.subtitle).includes(q) ||
+      (i.searchAliases?.some(a => normalize(a).includes(q)) ?? false)
     );
   }, [config.searchItems, searchQuery]);
 

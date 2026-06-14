@@ -18,6 +18,8 @@ import type { CupRound, CupTie } from '../../services/sportsApi';
 import { SkeletonLeagueDetail } from '../../components/Skeleton';
 import type { PartidosStackParamList } from '../../navigation/AppNavigator';
 import { getLeagueConfig, getLeagueConfigByName, getLeagueDisplayName, type LeagueZone } from '../../config/leagues';
+import { translateNationalTeam } from '../../utils/nationalTeams';
+import { isImageUri } from '../../utils/imageUri';
 
 // ── Dynamic imports ──────────────────────────────────────────────────────────
 let ViewShot: any = null;
@@ -46,7 +48,7 @@ function getZoneColor(position: number, totalTeams: number, zones?: LeagueZone[]
 
 // ── Team logo ────────────────────────────────────────────────────────────────
 const TeamLogo: React.FC<{ logo: string; size?: number }> = ({ logo, size = 22 }) => {
-  if (logo.startsWith('http')) {
+  if (isImageUri(logo)) {
     return <Image source={{ uri: logo }} style={{ width: size, height: size, borderRadius: 2 }} resizeMode="contain" />;
   }
   return <Text style={{ fontSize: size - 4 }}>{logo}</Text>;
@@ -137,7 +139,7 @@ const StandingRow: React.FC<{
 
       {/* Name + badge */}
       <View style={st.nameWrap}>
-        <Text style={[st.name, { color: textColor }]} numberOfLines={1}>{row.team.name}</Text>
+        <Text style={[st.name, { color: textColor }]} numberOfLines={1}>{translateNationalTeam(row.team.name)}</Text>
         {isHome && (
           <View style={[st.matchBadge, { backgroundColor: '#f97316' }]}>
             <Text style={st.matchBadgeText}>LOCAL</Text>
@@ -261,14 +263,14 @@ const GroupStageView: React.FC<{
                   <View style={[gs.zoneBar, { backgroundColor: zoneColor || 'transparent' }]} />
                   <Text style={[gs.pos, { color: zoneColor || c.textTertiary }]}>{row.position}</Text>
                   <View style={gs.logoCell}>
-                    {row.team.logo.startsWith('http')
+                    {isImageUri(row.team.logo)
                       ? <Image source={{ uri: row.team.logo }} style={{ width: 20, height: 20, borderRadius: 2 }} resizeMode="contain" />
                       : <Text style={{ fontSize: 16 }}>{row.team.logo}</Text>
                     }
                   </View>
                   <View style={gs.nameWrap}>
                     <Text style={[gs.name, { color: textColor }]} numberOfLines={1}>
-                      {row.team.shortName || row.team.name}
+                      {row.team.shortName || translateNationalTeam(row.team.name)}
                     </Text>
                     {isHome && (
                       <View style={[gs.badge, { backgroundColor: '#3b82f6' }]}>
@@ -349,12 +351,17 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
   const hasPlayoffs     = leagueConfig?.hasPlayoffs ?? false;
   const playoffsLabel   = leagueConfig?.playoffsLabel ?? 'Playoffs';
 
-  // Fetch bracket for cups AND for playoff leagues
-  // isPlayoffsOnly=true filters out regular-season stages and isolates the current tournament
+  // Fetch bracket for cups AND for playoff leagues.
+  // `isPlayoffsOnly=true` filters out regular-season stages — used for HYBRID
+  // leagues like Liga MX / MLS that have a regular season + a playoff bracket.
+  // For PURE cups (Mundial, Champions, Copa Libertadores, etc.) the entire
+  // competition IS the bracket, and group stage matches are bracket cells.
+  // Passing isPlayoffsOnly=true for a cup wipes out the group-stage view
+  // before the knockout phase starts → user sees "Bracket no disponible".
   const { rounds, loading: bracketLoading } = useCupBracket(
     (isCup || hasPlayoffs) ? seasonId : null,
     match.id,
-    hasPlayoffs,
+    hasPlayoffs && !isCup,
   );
 
   // Group stage (parallel fetch — only meaningful when isCup)

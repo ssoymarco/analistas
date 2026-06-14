@@ -1,12 +1,13 @@
 /**
- * League popularity tiers — used by PartidosScreen to order the progressive "Ver más" feed.
+ * @deprecated Use getLeaguePopularity() from config/leagues.ts instead.
  *
- * Tier 1 → Top global leagues (shown first after user's personalized content, or immediately
- *           if the user has no personalization)
- * Tier 2 → Important regional leagues (second reveal)
- * Tier 3 → Niche / women's / lower-division leagues (third and final reveal)
+ * This file's hardcoded tier sets are superseded by the LEAGUE_POPULARITY
+ * + LEAGUE_POPULARITY_BY_COUNTRY system, which gives finer-grained scoring
+ * (0-100) and country-aware bias. PartidosScreen now derives its tiers
+ * dynamically: popularity ≥75 → Tier 1, ≥50 → Tier 2, else Tier 3.
  *
- * IDs match SportMonks league IDs defined in src/config/leagues.ts
+ * Kept exported for any external scripts/tests that still reference it.
+ * Safe to delete once we confirm no external dependencies.
  */
 
 // ── Tier 1: Elite global leagues ──────────────────────────────────────────────

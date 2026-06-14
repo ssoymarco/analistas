@@ -20,6 +20,7 @@ import { NetworkProvider } from './src/contexts/NetworkContext';
 import { TimeFormatProvider } from './src/contexts/TimeFormatContext';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { initialize } from './src/services/notifications';
+import { initializeFCM, initializeFCMAtStartup, attachFCMHandlers } from './src/services/fcmInit';
 import { navigateToMatch } from './src/utils/navigationRef';
 import type { NotificationPayload } from './src/services/notifications';
 import type { Match } from './src/data/types';
@@ -109,12 +110,39 @@ function SentryUserSync() {
 
 function App() {
   const notifResponseListener = useRef<Notifications.Subscription | null>(null);
+  const detachFcmHandlers = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     // Restore user's saved language preference (overrides device default).
     applyStoredLanguage().catch(() => {});
 
-    // Bootstrap: configure foreground handler + Android channel (no permissions yet).
+    // ⚠️ ORDER MATTERS — FCM must register its UNUserNotificationCenter
+    // delegate BEFORE expo-notifications swizzles the same delegate.
+    // Whichever lib runs first wins on iOS. When expo-notifications won
+    // (Build 15), the APNs `didRegisterForRemoteNotificationsWithDeviceToken`
+    // callback never reached `[FIRMessaging appDidReceiveMessage]`, so
+    // FCM's token was a "phantom" — subscribeToTopic resolved fine, the
+    // server-side topic membership filed correctly, but every push got
+    // dropped at the APNs layer because the device wasn't bound.
+    //
+    // We now call `initializeFCMAtStartup` instead of `initializeFCM` to
+    // avoid showing the iOS permission dialog on the very first screen.
+    //   • Android: full init runs immediately (no dialog — permission granted
+    //     at install or managed at API 33+ via expo-notifications separately).
+    //   • iOS returning user (permission already granted): full init runs.
+    //   • iOS new user: only registers the RNFB delegate; the actual
+    //     requestPermission() call is deferred to after the onboarding
+    //     notification-preferences screen (goNextFromNotifs in
+    //     OnboardingScreen.tsx → initializeFCM()).
+    initializeFCMAtStartup().catch(() => {});
+
+    // Foreground + token-refresh handlers — registered BEFORE expo-notifications
+    // takes the foreground display reins so onMessage callbacks fire correctly.
+    detachFcmHandlers.current = attachFCMHandlers();
+
+    // Bootstrap expo-notifications: configure foreground handler + Android channel
+    // (no permissions yet). Runs AFTER FCM init so the delegate ordering is
+    // RNFB → expo-notifications → user permission flow.
     initialize().catch(() => {});
 
     // Handle notification TAP (user tapped the banner/notification center entry).
@@ -133,6 +161,7 @@ function App() {
 
     return () => {
       notifResponseListener.current?.remove();
+      detachFcmHandlers.current?.();
     };
   }, []);
 

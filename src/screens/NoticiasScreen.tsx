@@ -23,6 +23,7 @@ import type { NoticiasStackParamList } from '../navigation/AppNavigator';
 import { normalize } from '../utils/normalize';
 import { useTranslation } from 'react-i18next';
 import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
+import { BETTING_CONTENT_ENABLED } from '../config/features';
 
 // ── League color map ──────────────────────────────────────────────────────────
 const LEAGUE_COLORS: Record<string, string> = {
@@ -308,8 +309,8 @@ export const NoticiasScreen: React.FC = () => {
               </View>
             )}
 
-            {/* Banner ad — below hero, above "Más noticias" */}
-            <PlaceholderBannerAd variant="amazon-banner" />
+            {/* Caliente banner — gated off for v1.0 (no agreement + Apple 2.3.6) */}
+            {BETTING_CONTENT_ENABLED && <PlaceholderBannerAd variant="caliente-banner" />}
 
             {/* Stories horizontal scroll */}
             {stories.length > 0 && (
@@ -337,8 +338,6 @@ export const NoticiasScreen: React.FC = () => {
               </View>
             )}
 
-            {/* Small banner at bottom of news list */}
-            <PlaceholderBannerAd variant="telcel-banner" />
           </>
         )}
         <View style={{ height: 24 }} />

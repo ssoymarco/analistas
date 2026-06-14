@@ -16,32 +16,51 @@
       [
         "expo-notifications",
         {
-          "color": "#00E096",
-          "defaultChannel": "analistas-live"
+          "color": "#00E096"
         }
       ],
       "expo-web-browser",
       "expo-localization",
       "expo-apple-authentication",
       [
-        "expo-tracking-transparency",
+        "@react-native-google-signin/google-signin",
         {
-          "userTrackingPermission": "Los anuncios nos permiten mantener Analistas gratis. Tu información nunca se vende a terceros."
+          "iosUrlScheme": "com.googleusercontent.apps.562270448336-7telon5j0pjscfbet7pqo3faq6mu3pc4"
+        }
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static",
+            "forceStaticLinking": ["RNFBApp", "RNFBMessaging", "RNFBAnalytics"]
+          }
         }
       ]
     ],
     "ios": {
       "bundleIdentifier": "app.analistas",
-      "buildNumber": "3",
+      "buildNumber": "2",
       "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": true,
+      "entitlements": {
+        "aps-environment": "production"
+      },
       "infoPlist": {
         "UIBackgroundModes": [
           "remote-notification"
         ],
-        "ITSAppUsesNonExemptEncryption": false
-      },
-      "buildNumber": "2"
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "com.googleusercontent.apps.562270448336-7telon5j0pjscfbet7pqo3faq6mu3pc4"
+            ]
+          }
+        ]
+      }
     },
     "android": {
       "package": "app.analistas",
@@ -57,6 +76,30 @@
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.VIBRATE",
         "android.permission.POST_NOTIFICATIONS"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": {
+            "scheme": "com.googleusercontent.apps.562270448336-l6465c4ietcle0b6kgevabe0hglsjbv6"
+          }
+        },
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": {
+            "scheme": "com.googleusercontent.apps.562270448336-v86ai9gk29pgiv6ng9dosepvvl4pgeou"
+          }
+        }
       ]
     },
     "web": {

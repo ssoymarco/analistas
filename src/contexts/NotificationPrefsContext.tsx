@@ -1,5 +1,8 @@
-import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db } from '../services/firebase';
 import { cancelAllNotificationsForMatch, PUSH_TOKEN_KEY } from '../services/notifications';
 
 export interface NotificationPrefs {
@@ -42,16 +45,23 @@ export const MATCH_EVENT_KEYS: MatchEventPrefKey[] = [
 
 export type MatchEventOverrides = Record<string /* matchId */, Partial<Record<MatchEventPrefKey, boolean>>>;
 
-// Defaults reflect the polite happy-path:
-//   - Master switch ON (the user opened settings because they want alerts)
-//   - Match reminder ON at 15 min (the universal sweet spot in competitor apps)
-//   - Yellow cards OFF (4-5× noisier than reds; opt-in)
+// Defaults aligned with the notification spec the user signed off on
+// 2026-05-28 (see also functions/src/detect-changes.ts).
+//
+// CORE EVENTS — on by default:
+//   goals, matchStart, halftime, matchEnd, redCards, var
+//
+// OPT-IN — off by default (too noisy / niche for first-time users):
+//   yellowCards, substitutions, lineups, matchReminder
+//
+// Modo Estadio defaults off; delay default = 2 min (the second of the four
+// presets shown in the UI: 1 / 2 / 5 / 10).
 const DEFAULT_PREFS: NotificationPrefs = {
   notificationsEnabled: true,
-  matchReminder: true,
+  matchReminder: false,
   matchReminderMinutes: 15,
-  goals: true, matchStart: true, halftime: false,
-  matchEnd: true, lineups: true,
+  goals: true, matchStart: true, halftime: true,
+  matchEnd: true, lineups: false,
   yellowCards: false, redCards: true,
   substitutions: false, var: true,
   estadioMode: false,
@@ -138,6 +148,21 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   const [pushToken, setPushTokenState] = useState<string | null>(null);
   const [permissionStatus, setPermissionStatusState] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
 
+  // Stable refs so the cross-device Firestore sync writes the latest values
+  // without re-creating the effect on every state change.
+  const prefsRef = useRef<NotificationPrefs>(DEFAULT_PREFS);
+  const uidRef   = useRef<string | null>(null);
+  useEffect(() => { prefsRef.current = prefs; }, [prefs]);
+
+  /** Persist the full prefs object to Firestore under users/{uid}.notificationPrefs.
+   *  Fire-and-forget — UI must never block on cloud sync. */
+  const syncPrefsToCloud = useCallback((next: NotificationPrefs) => {
+    const uid = uidRef.current;
+    if (!uid) return;
+    setDoc(doc(db, 'users', uid), { notificationPrefs: next }, { merge: true })
+      .catch(() => {/* offline / permission — local AsyncStorage is the source of truth */});
+  }, []);
+
   useEffect(() => {
     AsyncStorage.multiGet([PREFS_KEY, MUTED_KEY, ESTADIO_KEY, ESTADIO_DELAYS_KEY, OVERRIDES_KEY, PUSH_TOKEN_KEY, PERM_KEY]).then(
       ([[, rawPrefs], [, rawMuted], [, rawEstadio], [, rawDelays], [, rawOverrides], [, savedToken], [, savedPerm]]) => {
@@ -168,25 +193,61 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
     setPrefs(p => {
       const next = { ...p, [key]: !p[key] };
       AsyncStorage.setItem(PREFS_KEY, JSON.stringify(next));
+      syncPrefsToCloud(next);
       return next;
     });
-  }, []);
+  }, [syncPrefsToCloud]);
 
   const setEstadioDelay = useCallback((minutes: number) => {
     setPrefs(p => {
       const next = { ...p, estadioDelay: minutes };
       AsyncStorage.setItem(PREFS_KEY, JSON.stringify(next));
+      syncPrefsToCloud(next);
       return next;
     });
-  }, []);
+  }, [syncPrefsToCloud]);
 
   const setMatchReminderMinutes = useCallback((minutes: number) => {
     setPrefs(p => {
       const next = { ...p, matchReminderMinutes: minutes };
       AsyncStorage.setItem(PREFS_KEY, JSON.stringify(next));
+      syncPrefsToCloud(next);
       return next;
     });
-  }, []);
+  }, [syncPrefsToCloud]);
+
+  // ── Firestore cross-device sync ─────────────────────────────────────────────
+  // On non-anonymous auth, pull cloud prefs as authoritative and overwrite the
+  // local cache. After that, every togglePref / setEstadioDelay /
+  // setMatchReminderMinutes also writes to Firestore via syncPrefsToCloud.
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async fbUser => {
+      const newUid = (fbUser && !fbUser.isAnonymous) ? fbUser.uid : null;
+      if (newUid === uidRef.current) return;
+      uidRef.current = newUid;
+      if (!newUid) return; // guest — AsyncStorage is the source of truth
+
+      try {
+        const snap = await getDoc(doc(db, 'users', newUid));
+        const remote = snap.exists()
+          ? (snap.data() as { notificationPrefs?: Partial<NotificationPrefs> }).notificationPrefs
+          : null;
+        if (remote && Object.keys(remote).length > 0) {
+          // Cloud wins on first sync. Merge over DEFAULT_PREFS so any
+          // newly-introduced fields (added to the schema after the user's
+          // last save) default to the new default rather than being undefined.
+          const merged: NotificationPrefs = { ...DEFAULT_PREFS, ...remote };
+          setPrefs(merged);
+          AsyncStorage.setItem(PREFS_KEY, JSON.stringify(merged)).catch(() => {});
+        } else {
+          // No cloud entry yet — push the current local prefs up so the user's
+          // setup survives a reinstall / cross-device sign-in.
+          syncPrefsToCloud(prefsRef.current);
+        }
+      } catch {/* offline — keep local prefs */}
+    });
+    return unsub;
+  }, [syncPrefsToCloud]);
 
   const toggleMatchMute = useCallback((matchId: string) => {
     setMutedMatchIds(prev => {

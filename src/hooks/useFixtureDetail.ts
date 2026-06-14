@@ -102,11 +102,23 @@ export function useFixtureDetail(
         // minute — these come from pollLivescores even before enrichment).
         if (sub.match) setLiveMatch(sub.match);
 
-        if (sub.isEnriched && sub.detail) {
+        // Detect "enriched-but-empty": the `detail` blob exists in Firestore
+        // (so isEnriched=true) but `detail.events` is empty for a finished match.
+        // This happens for historical cup matches whose enrichment was written
+        // during the live match but only captured shootout kicks — regulation and
+        // ET goals were missing because the events endpoint wasn't called at the
+        // right time. Treat this as not-enriched so we fall through to the proxy.
+        const isEnrichedButEmpty =
+          sub.isEnriched &&
+          sub.detail !== null &&
+          (sub.detail as any).events?.length === 0 &&
+          sub.match?.status === 'finished';
+
+        if (sub.isEnriched && sub.detail && !isEnrichedButEmpty) {
           // Firestore has the full enrichment → render from it. Zero SM calls.
           setDetail(mapDetail({ match: sub.match!, detail: sub.detail }));
           setLoading(false);
-        } else if (sub.match && !sub.isEnriched && !didProxyFallbackRef.current) {
+        } else if (sub.match && (!sub.isEnriched || isEnrichedButEmpty) && !didProxyFallbackRef.current) {
           // Match exists in Firestore but enrichment hasn't been written yet
           // (cold match outside the hot window). Make ONE proxy call to
           // populate the screen — scheduled enrichment will catch up by the

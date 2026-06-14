@@ -13,8 +13,38 @@ import {
   type SMParticipant,
   type SMFixture,
   type SMScore,
+  SM_STATE_IDS,
 } from '../services/sportmonks';
 import { getLeagueConfig } from '../config/leagues';
+
+// Finished / live state-id sets (verified SportMonks v3 — see sportmonks.ts).
+// FixtureRow keys off these NUMERIC ids instead of the string `short_name`,
+// which the Firestore shim doesn't populate (penalty matches were showing as
+// "upcoming" with dashes because short_name was undefined → 'NS').
+const LF_FINISHED_STATE_IDS = new Set<number>([
+  SM_STATE_IDS.FULL_TIME, SM_STATE_IDS.FINISHED_AET, SM_STATE_IDS.FINISHED_PEN, SM_STATE_IDS.AWARDED,
+]);
+const LF_LIVE_STATE_IDS = new Set<number>([
+  SM_STATE_IDS.FIRST_HALF, SM_STATE_IDS.HALF_TIME, SM_STATE_IDS.SECOND_HALF,
+  SM_STATE_IDS.ET_BREAK, SM_STATE_IDS.EXTRA_TIME, SM_STATE_IDS.EXTRA_TIME_BREAK,
+  SM_STATE_IDS.PENALTIES, SM_STATE_IDS.PEN_BREAK,
+]);
+
+/** Robust finished/live/scheduled derivation from the numeric state_id, with
+ *  the same 2-135 min time fallback the rest of the app uses (covers lagging
+ *  feeds and any unmapped state). */
+function deriveFixtureStatus(stateId: number, startingAt?: string): 'live' | 'finished' | 'scheduled' {
+  if (LF_FINISHED_STATE_IDS.has(stateId)) return 'finished';
+  if (LF_LIVE_STATE_IDS.has(stateId)) return 'live';
+  if (startingAt) {
+    const ms = new Date(startingAt.replace(' ', 'T') + 'Z').getTime();
+    if (!Number.isNaN(ms)) {
+      const elapsed = (Date.now() - ms) / 60000;
+      if (elapsed > 2 && elapsed < 135) return 'live';
+    }
+  }
+  return 'scheduled';
+}
 import {
   getStandingsFromFirestore,
   getTopScorersAllCategories,
@@ -200,7 +230,10 @@ export interface LeagueFixture {
   awayTeamLogo: string;
   homeScore: number | null;
   awayScore: number | null;
-  stateShort: string; // NS, FT, 1H, HT, 2H, etc.
+  stateShort: string; // NS, FT, 1H, HT, 2H, etc. (string hint, may be 'NS' on Firestore path)
+  /** Robust live/finished/scheduled derived from the numeric state_id —
+   *  FixtureRow should key off THIS, not stateShort. */
+  status: 'live' | 'finished' | 'scheduled';
   seasonId: number;
   leagueId: number;
   stageName: string;  // e.g. "Group Stage", "Round of 16", "Quarter-finals"
@@ -347,6 +380,7 @@ function mapFixture(f: SMFixture): LeagueFixture {
     homeScore: extractFixtureScore(f.scores, 'home'),
     awayScore: extractFixtureScore(f.scores, 'away'),
     stateShort: f.state?.short_name ?? 'NS',
+    status: deriveFixtureStatus(f.state_id, f.starting_at),
     seasonId: f.season_id,
     leagueId: f.league_id,
     stageName: f.stage?.name ?? '',
@@ -534,9 +568,35 @@ export function useLeagueDetail(
         // Cards (type_id=84, yellow cards) — stored in `goals` field for UI reuse
         const topCards = buildStatRows(topCardsRaw);
 
+        // Sort: today/live first, then past matches (most recent first),
+        // then future matches (soonest first). Matches 365scores' UX where the
+        // current matchday is what the user lands on, scroll up = history,
+        // scroll down = upcoming. Previously this was a flat ascending sort
+        // which forced the user to scroll all the way down past the August
+        // games to find today's match.
+        const todayUTC = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
         const fixtures = fixturesRaw
           .map(mapFixture)
-          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+          .sort((a, b) => {
+            const dayA = a.date.slice(0, 10);
+            const dayB = b.date.slice(0, 10);
+            const isTodayA = dayA === todayUTC;
+            const isTodayB = dayB === todayUTC;
+            const isPastA  = dayA < todayUTC;
+            const isPastB  = dayB < todayUTC;
+
+            // Group precedence: today (0) > past (1) > future (2)
+            const groupA = isTodayA ? 0 : isPastA ? 1 : 2;
+            const groupB = isTodayB ? 0 : isPastB ? 1 : 2;
+            if (groupA !== groupB) return groupA - groupB;
+
+            // Within today: chronological (earliest kickoff first)
+            if (isTodayA) return new Date(a.date).getTime() - new Date(b.date).getTime();
+            // Within past: most recent first (descending)
+            if (isPastA)  return new Date(b.date).getTime() - new Date(a.date).getTime();
+            // Within future: soonest first (ascending)
+            return new Date(a.date).getTime() - new Date(b.date).getTime();
+          });
 
         setData({
           leagueId,

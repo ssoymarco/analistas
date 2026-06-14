@@ -26,4 +26,15 @@
  *   - status === 'scheduled' AND kickoff is within next 6 hours
  *   - status === 'finished' AND kickoff was within last 2 hours
  */
+/**
+ * Enrich a specific list of match IDs regardless of the hot window.
+ * Used by the `backfillEnrichmentByMatchIds` callable to repair historical
+ * matches whose `detail.events` was incomplete (e.g. 2022 WC knockouts that
+ * went to ET/penalties — the regulation/ET goals were missing because
+ * syncMatchEnrichment never ran outside the 2-hour post-finish window).
+ */
+export declare function enrichMatchesByIds(matchIds: string[]): Promise<{
+    enriched: number;
+    errors: number;
+}>;
 export declare function syncMatchEnrichmentHandler(): Promise<void>;
