@@ -43,6 +43,55 @@ import type { DelayedPushPayload } from './deliver-delayed-push';
 import {
   SM_STATE_IDS, SM_EVENT_TYPES, LIVE_STATE_IDS, FINISHED_STATE_IDS,
 } from './types';
+
+// ── Server-side Spanish team name lookup ──────────────────────────────────────
+// Notifications are built server-side; i18n lives on the client. Since our
+// primary audience is MX/LATAM we localize to Spanish here. Club names that
+// don't appear in the map are returned unchanged (safe call).
+const TEAMS_ES: Record<string, string> = {
+  'Afghanistan': 'Afganistán', 'Albania': 'Albania', 'Algeria': 'Argelia',
+  'Angola': 'Angola', 'Argentina': 'Argentina', 'Armenia': 'Armenia',
+  'Australia': 'Australia', 'Austria': 'Austria', 'Azerbaijan': 'Azerbaiyán',
+  'Bahrain': 'Baréin', 'Belgium': 'Bélgica', 'Bolivia': 'Bolivia',
+  'Bosnia and Herzegovina': 'Bosnia y Herzegovina', 'Brazil': 'Brasil',
+  'Bulgaria': 'Bulgaria', 'Cameroon': 'Camerún', 'Canada': 'Canadá',
+  'Cape Verde Islands': 'Cabo Verde',
+  'Chile': 'Chile', 'China PR': 'China', 'Colombia': 'Colombia',
+  'Congo DR': 'Congo RD', 'Costa Rica': 'Costa Rica', 'Croatia': 'Croacia',
+  'Czech Republic': 'República Checa', 'Czechia': 'República Checa',
+  'Denmark': 'Dinamarca', 'Ecuador': 'Ecuador', 'Egypt': 'Egipto',
+  'England': 'Inglaterra', 'Finland': 'Finlandia', 'France': 'Francia',
+  'Germany': 'Alemania', 'Ghana': 'Ghana', 'Greece': 'Grecia',
+  'Guatemala': 'Guatemala', 'Honduras': 'Honduras', 'Hungary': 'Hungría',
+  'India': 'India', 'Indonesia': 'Indonesia', 'Iran': 'Irán',
+  'Iraq': 'Irak', 'Ireland': 'Irlanda', 'Israel': 'Israel',
+  'Italy': 'Italia',
+  'Ivory Coast': 'Costa de Marfil', "Côte d'Ivoire": 'Costa de Marfil',
+  'Jamaica': 'Jamaica', 'Japan': 'Japón', 'Jordan': 'Jordania',
+  'Kenya': 'Kenia', 'Korea DPR': 'Corea del Norte',
+  'Korea Republic': 'Corea del Sur', 'Kosovo': 'Kosovo', 'Kuwait': 'Kuwait',
+  'Mali': 'Malí', 'Mexico': 'México', 'Morocco': 'Marruecos',
+  'Netherlands': 'Países Bajos', 'New Zealand': 'Nueva Zelanda',
+  'Nigeria': 'Nigeria', 'Norway': 'Noruega', 'Oman': 'Omán',
+  'Panama': 'Panamá', 'Paraguay': 'Paraguay', 'Peru': 'Perú',
+  'Poland': 'Polonia', 'Portugal': 'Portugal', 'Qatar': 'Catar',
+  'Romania': 'Rumanía', 'Russia': 'Rusia', 'Saudi Arabia': 'Arabia Saudita',
+  'Scotland': 'Escocia', 'Senegal': 'Senegal', 'Serbia': 'Serbia',
+  'Slovakia': 'Eslovaquia', 'Slovenia': 'Eslovenia',
+  'South Africa': 'Sudáfrica', 'South Korea': 'Corea del Sur',
+  'Spain': 'España', 'Sweden': 'Suecia', 'Switzerland': 'Suiza',
+  'Thailand': 'Tailandia', 'Tunisia': 'Túnez',
+  'Turkey': 'Türkiye', 'Türkiye': 'Türkiye',
+  'Ukraine': 'Ucrania', 'United Arab Emirates': 'Emiratos Árabes',
+  'United States': 'Estados Unidos', 'USA': 'Estados Unidos',
+  'Uruguay': 'Uruguay', 'Venezuela': 'Venezuela',
+  'Wales': 'Gales', 'Zimbabwe': 'Zimbabue',
+};
+
+/** Translate a team name to Spanish. Club names not in the map pass through unchanged. */
+function loc(name: string): string {
+  return TEAMS_ES[name] ?? name;
+}
 import type {
   MatchDoc, LivescoresSnapshot, DetectedChange, SMFixture, SMFixtureEvent, TeamDoc,
 } from './types';
@@ -486,10 +535,10 @@ function scoreWithBrackets(
 }
 
 function copyForGoal(c: DetectedChange): FcmCopy {
-  const scoringTeamName = c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name;
+  const scoringTeamName = loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
   const score = scoreWithBrackets(
-    c.homeTeam.name, c.homeScore,
-    c.awayTeam.name, c.awayScore,
+    loc(c.homeTeam.name), c.homeScore,
+    loc(c.awayTeam.name), c.awayScore,
     c.scoringTeamSide ?? 'home',
   );
   const minute = c.minute != null ? `${c.minute}'` : '';
@@ -505,15 +554,15 @@ function copyForGoal(c: DetectedChange): FcmCopy {
   const goalKind = c.goalKind ?? 'normal';
   const title =
     goalKind === 'penalty' ? `⚽ ¡Gol de penal de ${scoringTeamName}!` :
-    goalKind === 'own'     ? `⚽ Autogol de ${scoringTeamName === c.homeTeam.name ? c.awayTeam.name : c.homeTeam.name}` :
+    goalKind === 'own'     ? `⚽ Autogol de ${scoringTeamName === loc(c.homeTeam.name) ? loc(c.awayTeam.name) : loc(c.homeTeam.name)}` :
                              `⚽ ¡GOL de ${scoringTeamName}!`;
   const body = `${minute ? minute + ' ' : ''}${scorer}${score}`;
   return { title, body: body.trim() };
 }
 
 function copyForGoalCancelled(c: DetectedChange): FcmCopy {
-  const cancelledFromTeam = c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name;
-  const score = `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`;
+  const cancelledFromTeam = loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
+  const score = `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`;
   const minute = c.minute != null ? `${c.minute}' ` : '';
   return {
     title: `🚫 El VAR anula gol de ${cancelledFromTeam}`,
@@ -524,29 +573,29 @@ function copyForGoalCancelled(c: DetectedChange): FcmCopy {
 function copyForMatchStart(c: DetectedChange): FcmCopy {
   return {
     title: `⚽ ¡Empieza el partido!`,
-    body:  `${c.homeTeam.name} vs ${c.awayTeam.name} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league}`,
   };
 }
 
 function copyForHalftime(c: DetectedChange): FcmCopy {
   return {
     title: `⏱️ Medio tiempo · Marcador:`,
-    body:  `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`,
   };
 }
 
 function copyForMatchEnd(c: DetectedChange): FcmCopy {
   return {
     title: `🏁 Final del partido`,
-    body:  `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
   };
 }
 
 function copyForRedCard(c: DetectedChange): FcmCopy {
-  const team = c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name;
+  const team = loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
   const minute = c.minute != null ? `${c.minute}' ` : '';
   const player = c.playerName ? `${c.playerName} ` : '';
-  const score = `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`;
+  const score = `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`;
   return {
     title: `🟥 TARJETA ROJA`,
     body:  `${minute}${player}(${team}) · ${score}`.trim(),
@@ -554,10 +603,10 @@ function copyForRedCard(c: DetectedChange): FcmCopy {
 }
 
 function copyForYellowCard(c: DetectedChange): FcmCopy {
-  const team = c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name;
+  const team = loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
   const minute = c.minute != null ? `${c.minute}' ` : '';
   const player = c.playerName ? `${c.playerName} ` : '';
-  const score = `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`;
+  const score = `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`;
   return {
     title: `🟨 Tarjeta amarilla`,
     body:  `${minute}${player}(${team}) · ${score}`.trim(),
@@ -565,49 +614,49 @@ function copyForYellowCard(c: DetectedChange): FcmCopy {
 }
 
 function copyForSubstitution(c: DetectedChange): FcmCopy {
-  const team = c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name;
+  const team = loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
   const minute = c.minute != null ? `${c.minute}' ` : '';
   const playerOut = c.playerName        ? `↓ ${c.playerName}`        : '';
   const playerIn  = c.relatedPlayerName ? ` ↑ ${c.relatedPlayerName}` : '';
   return {
     title: `🔄 Cambio · ${team}`,
     body:  `${minute}${playerOut}${playerIn}`.trim() ||
-           `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`,
+           `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`,
   };
 }
 
 function copyForExtraTimeStart(c: DetectedChange): FcmCopy {
   return {
     title: `⏱️ ¡Prórroga!`,
-    body:  `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
   };
 }
 
 function copyForPenaltiesStart(c: DetectedChange): FcmCopy {
   return {
     title: `🥅 ¡Tanda de penaltis!`,
-    body:  `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
   };
 }
 
 function copyForMatchSuspended(c: DetectedChange): FcmCopy {
   return {
     title: `⚠️ Partido suspendido`,
-    body:  `${c.homeTeam.name} ${c.homeScore}-${c.awayScore} ${c.awayTeam.name}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`,
   };
 }
 
 function copyForMatchReminder(c: DetectedChange): FcmCopy {
   return {
     title: `⏰ ¡El partido comienza pronto!`,
-    body:  `${c.homeTeam.name} vs ${c.awayTeam.name} · ${c.league} · en ~15 min`,
+    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league} · en ~15 min`,
   };
 }
 
 function copyForLineups(c: DetectedChange): FcmCopy {
   return {
     title: `📋 Alineaciones confirmadas`,
-    body:  `${c.homeTeam.name} vs ${c.awayTeam.name} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league}`,
   };
 }
 
