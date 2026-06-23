@@ -170,10 +170,13 @@ export interface LivescoresSnapshot {
         suspendedSent?: boolean;
         extraTimeSent?: boolean;
         penaltiesSent?: boolean;
+        penMissHome?: number;
+        penMissAway?: number;
+        rivalResultSent?: boolean;
     }>;
     updatedAt: Timestamp;
 }
-export type ChangeType = 'goal' | 'goalCancelled' | 'matchStart' | 'halftime' | 'matchEnd' | 'extraTimeStart' | 'penaltiesStart' | 'redCard' | 'yellowCard' | 'substitution' | 'matchSuspended' | 'matchReminder' | 'lineups' | 'statusChange';
+export type ChangeType = 'goal' | 'goalCancelled' | 'matchStart' | 'halftime' | 'matchEnd' | 'extraTimeStart' | 'penaltiesStart' | 'redCard' | 'yellowCard' | 'substitution' | 'matchSuspended' | 'matchReminder' | 'lineups' | 'rivalLoss' | 'rivalBigLoss' | 'rivalRedCard' | 'rivalPenMiss' | 'statusChange';
 export interface DetectedChange {
     type: ChangeType;
     matchId: string;

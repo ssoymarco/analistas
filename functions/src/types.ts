@@ -201,6 +201,10 @@ export interface LivescoresSnapshot {
     suspendedSent?:     boolean;
     extraTimeSent?:     boolean;
     penaltiesSent?:     boolean;
+    // Modo Rival diff state
+    penMissHome?:       number;   // in-play missed-penalty count (home)
+    penMissAway?:       number;   // in-play missed-penalty count (away)
+    rivalResultSent?:   boolean;  // rival loss/big-loss push already fired this match
   }>;
   updatedAt: Timestamp;
 }
@@ -221,6 +225,11 @@ export type ChangeType =
   | 'matchSuspended'  // Match suspended or postponed mid-game
   | 'matchReminder'   // Pre-match reminder (~15 min before kickoff)
   | 'lineups'         // Confirmed starting lineups published
+  // ── Modo Rival ("bad news" about a team the user marked as rival) ──────────
+  | 'rivalLoss'       // Rival lost a match (margin 1-3)
+  | 'rivalBigLoss'    // Rival lost by 4+ (goleada)
+  | 'rivalRedCard'    // A rival player was sent off
+  | 'rivalPenMiss'    // Rival missed a penalty (in-play)
   | 'statusChange';   // Catch-all for other state transitions
 
 export interface DetectedChange {

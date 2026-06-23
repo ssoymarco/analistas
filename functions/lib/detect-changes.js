@@ -150,6 +150,39 @@ function countRedCards(events, participantId) {
     }
     return count;
 }
+/** Count in-play missed penalties (type 17) for a given side. Shootout misses
+ *  (type 22) are excluded — those belong to the penalty-shootout timeline. */
+function countPenaltyMisses(events, participantId) {
+    if (!events || !participantId)
+        return 0;
+    let count = 0;
+    for (const ev of events) {
+        if (ev.participant_id !== participantId)
+            continue;
+        if (ev.type_id === types_1.SM_EVENT_TYPES.PENALTY_MISS)
+            count++;
+    }
+    return count;
+}
+/** Find the most recent in-play missed penalty for a given side. */
+function findRecentPenaltyMiss(fixture, side) {
+    if (!fixture?.events?.length)
+        return null;
+    const home = fixture.participants?.find(p => p.meta?.location === 'home');
+    const away = fixture.participants?.find(p => p.meta?.location === 'away');
+    const teamId = side === 'home' ? home?.id : away?.id;
+    if (!teamId)
+        return null;
+    for (let i = fixture.events.length - 1; i >= 0; i--) {
+        const ev = fixture.events[i];
+        if (ev.participant_id !== teamId)
+            continue;
+        if (ev.type_id === types_1.SM_EVENT_TYPES.PENALTY_MISS) {
+            return { playerName: ev.player_name ?? undefined, minute: ev.minute ?? null };
+        }
+    }
+    return null;
+}
 /** Count first yellow cards (NOT second yellows — those are counted as red cards). */
 function countYellowCards(events, participantId) {
     if (!events || !participantId)
@@ -244,6 +277,8 @@ async function saveSnapshot(matches, fixtures, previousSnapshot) {
             yellowCardsAway: countYellowCards(fixture?.events, away?.id),
             substitutionsHome: countSubstitutions(fixture?.events, home?.id),
             substitutionsAway: countSubstitutions(fixture?.events, away?.id),
+            penMissHome: countPenaltyMisses(fixture?.events, home?.id),
+            penMissAway: countPenaltyMisses(fixture?.events, away?.id),
             // Preserve flags that track whether one-time pushes have already been sent.
             reminderSent: prev?.reminderSent ?? false,
             lineupsSent: prev?.lineupsSent ?? false,
@@ -251,6 +286,7 @@ async function saveSnapshot(matches, fixtures, previousSnapshot) {
             suspendedSent: prev?.suspendedSent ?? false,
             extraTimeSent: prev?.extraTimeSent ?? false,
             penaltiesSent: prev?.penaltiesSent ?? false,
+            rivalResultSent: prev?.rivalResultSent ?? false,
         };
     }
     await admin_init_1.db.doc('_meta/livescoresSnapshot').set({
@@ -403,6 +439,20 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
         // ── Match end ─────────────────────────────────────────────────────────
         if (prev.status === 'live' && match.status === 'finished') {
             changes.push({ ...baseEvent, type: 'matchEnd' });
+            // ── Modo Rival: a finished match with a loser is "bad news" for them.
+            // Latched (rivalResultSent) so a finished↔live state flap can't re-fire.
+            // scoringTeamSide carries the LOSING side → dispatch routes to its rival
+            // topic. Margin ≥ 4 promotes it to a "goleada" (rivalBigLoss).
+            if (!prev.rivalResultSent && match.homeScore !== match.awayScore) {
+                const homeLost = match.homeScore < match.awayScore;
+                const margin = Math.abs(match.homeScore - match.awayScore);
+                changes.push({
+                    ...baseEvent,
+                    type: margin >= 4 ? 'rivalBigLoss' : 'rivalLoss',
+                    scoringTeamSide: homeLost ? 'home' : 'away',
+                });
+                prev.rivalResultSent = true;
+            }
         }
         // ── Event-count detection (cards, substitutions) ──────────────────────
         const home = fixture?.participants?.find(p => p.meta?.location === 'home');
@@ -413,6 +463,8 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
         const yelAway = countYellowCards(fixture?.events, away?.id);
         const subHome = countSubstitutions(fixture?.events, home?.id);
         const subAway = countSubstitutions(fixture?.events, away?.id);
+        const penMissHome = countPenaltyMisses(fixture?.events, home?.id);
+        const penMissAway = countPenaltyMisses(fixture?.events, away?.id);
         // ── Extra time start ──────────────────────────────────────────────────
         // Latched: EXTRA_TIME is also re-entered for the 2nd ET half (after the
         // EXTRA_TIME_BREAK state) and can flap with INTERRUPTED — the latch keeps
@@ -468,23 +520,25 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
         }
         if (redHome > prev.redCardsHome) {
             const ev = findRecentRedCard(fixture, 'home');
-            changes.push({
-                ...baseEvent,
-                type: 'redCard',
-                scoringTeamSide: 'home',
-                playerName: ev?.playerName,
-                minute: ev?.minute ?? match.minute,
-            });
+            const base = { ...baseEvent, scoringTeamSide: 'home', playerName: ev?.playerName, minute: ev?.minute ?? match.minute };
+            changes.push({ ...base, type: 'redCard' });
+            changes.push({ ...base, type: 'rivalRedCard' }); // Modo Rival: rival player sent off
         }
         if (redAway > prev.redCardsAway) {
             const ev = findRecentRedCard(fixture, 'away');
-            changes.push({
-                ...baseEvent,
-                type: 'redCard',
-                scoringTeamSide: 'away',
-                playerName: ev?.playerName,
-                minute: ev?.minute ?? match.minute,
-            });
+            const base = { ...baseEvent, scoringTeamSide: 'away', playerName: ev?.playerName, minute: ev?.minute ?? match.minute };
+            changes.push({ ...base, type: 'redCard' });
+            changes.push({ ...base, type: 'rivalRedCard' });
+        }
+        // ── Modo Rival: missed penalty (in-play) ──────────────────────────────
+        // Count-based (fires on increase) → naturally idempotent, no latch needed.
+        if (penMissHome > (prev.penMissHome ?? 0)) {
+            const ev = findRecentPenaltyMiss(fixture, 'home');
+            changes.push({ ...baseEvent, type: 'rivalPenMiss', scoringTeamSide: 'home', playerName: ev?.playerName, minute: ev?.minute ?? match.minute });
+        }
+        if (penMissAway > (prev.penMissAway ?? 0)) {
+            const ev = findRecentPenaltyMiss(fixture, 'away');
+            changes.push({ ...baseEvent, type: 'rivalPenMiss', scoringTeamSide: 'away', playerName: ev?.playerName, minute: ev?.minute ?? match.minute });
         }
         // ── Yellow card detection ─────────────────────────────────────────────
         const prevYelHome = prev.yellowCardsHome ?? 0;
@@ -756,9 +810,48 @@ function routeChange(c) {
             return { retrasableBases: [], immediateTopic: null, legacyTopics: [] };
     }
 }
+// ── Modo Rival copy (banter tone — sporting reverses only, never injuries) ───
+/** The team the bad news is about = the side carried in scoringTeamSide. */
+function rivalAffectedName(c) {
+    return loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
+}
+function copyForRivalLoss(c) {
+    const score = `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`;
+    return {
+        title: `😈 ${rivalAffectedName(c)} perdió`,
+        body: `${score} · a disfrutar 🍿`,
+    };
+}
+function copyForRivalBigLoss(c) {
+    const score = `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`;
+    return {
+        title: `😈 ¡Goleada al ${rivalAffectedName(c)}!`,
+        body: `${score} · ¡vaya paliza! 🤭`,
+    };
+}
+function copyForRivalRedCard(c) {
+    const minute = c.minute != null ? `${c.minute}' ` : '';
+    const player = c.playerName ? `${c.playerName} ` : '';
+    return {
+        title: `🟥😈 Roja al ${rivalAffectedName(c)}`,
+        body: `${minute}${player}expulsado · se quedan con 10`.trim(),
+    };
+}
+function copyForRivalPenMiss(c) {
+    const minute = c.minute != null ? `${c.minute}' ` : '';
+    const player = c.playerName ? `${c.playerName} ` : '';
+    return {
+        title: `😈 ${rivalAffectedName(c)} falló un penal`,
+        body: `${minute}${player}la mandó a volar 🚀`.trim(),
+    };
+}
 // ── Notification payload builder ────────────────────────────────────────────
 function buildFcmCopy(c) {
     switch (c.type) {
+        case 'rivalLoss': return copyForRivalLoss(c);
+        case 'rivalBigLoss': return copyForRivalBigLoss(c);
+        case 'rivalRedCard': return copyForRivalRedCard(c);
+        case 'rivalPenMiss': return copyForRivalPenMiss(c);
         case 'goal': return copyForGoal(c);
         case 'goalCancelled': return copyForGoalCancelled(c);
         case 'matchStart': return copyForMatchStart(c);
@@ -842,6 +935,21 @@ async function dispatchNotifications(changes) {
         // apns-collapse-id (collapses duplicates within the notification centre);
         // Android uses it as `tag` (replaces rather than stacks). Capped at 64 B.
         const dedupId = `${change.matchId}_${change.type}_${change.homeScore}-${change.awayScore}`.slice(0, 64);
+        // ── Modo Rival events (immediate, single topic, no delay buckets) ──────
+        // Routed to team_{affectedId}_rival_<event> — only users who set that team
+        // as a rival (and enabled the event) are subscribed. scoringTeamSide is the
+        // team the bad news is about.
+        if (change.type === 'rivalLoss' || change.type === 'rivalBigLoss' ||
+            change.type === 'rivalRedCard' || change.type === 'rivalPenMiss') {
+            const affectedId = change.scoringTeamSide === 'home' ? change.homeTeam.id : change.awayTeam.id;
+            const suffix = change.type === 'rivalBigLoss' ? 'rival_bigloss' :
+                change.type === 'rivalRedCard' ? 'rival_redcard' :
+                    change.type === 'rivalPenMiss' ? 'rival_penmiss' :
+                        'rival_loss';
+            sendPromises.push(sendToTopic(messaging, `team_${affectedId}_${suffix}`, title, body, data, dedupId));
+            logger.info(`😈 ${change.type.toUpperCase()} — ${title}`, { matchId: change.matchId });
+            continue;
+        }
         // ── Special handling for matchStart (kickoff) ──────────────────────────
         // matchStart goes to the new _kickoff topics (immediate only, no bucket).
         // Also dual-sent to legacy _start topics for old builds.
