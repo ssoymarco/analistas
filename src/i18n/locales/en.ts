@@ -83,6 +83,8 @@ const en: TranslationKeys = {
     postponed: 'Postponed',
     cancelled: 'Cancelled',
     suspended: 'Suspended',
+    interrupted: 'Interrupted',
+    interruptedLong: 'INTERRUPTED',
   },
 
   matchBell: {
@@ -1102,6 +1104,16 @@ const en: TranslationKeys = {
   season: {
     pickerTitle: 'Pick a season',
     live: 'Live',
+  },
+
+  // ── Version check / update prompt ────────────────────────────────────────
+  update: {
+    optionalTitle: 'New version available',
+    optionalBody: 'Update to enjoy the latest improvements and fixes.',
+    requiredTitle: 'Update required',
+    requiredBody: 'This version is no longer supported. Update to keep using Analistas.',
+    updateNow: 'Update now',
+    later: 'Later',
   },
 
   // ── World Cup 2026 hero header ────────────────────────────────────────────

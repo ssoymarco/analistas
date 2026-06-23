@@ -1042,11 +1042,15 @@ function fixtureToMatch(f: LeagueFixture, leagueName: string, leagueLogo: string
   // instead of 'scheduled'. stateShort is only used for the live label below.
   const status: MatchStatus = f.status;
 
-  // Display time: "HH:MM" for upcoming, state label for live, "FT" for finished
-  const d = new Date(f.date);
+  // Parse as UTC (starting_at from SportMonks has no tz suffix)
+  const d = new Date(f.date.replace(' ', 'T') + 'Z');
+  // Local date string for grouping (avoids UTC-date-vs-local-date mismatch for
+  // late-evening matches that cross midnight UTC, e.g. 19:00 MX = 01:00 UTC+1d)
+  const localDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // Display time in device local timezone
   const timeStr = status === 'finished' ? 'FT'
     : status === 'live' ? s
-    : `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+    : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
   return {
     id: String(f.id),
@@ -1069,7 +1073,7 @@ function fixtureToMatch(f: LeagueFixture, leagueName: string, leagueLogo: string
     league: leagueName,
     leagueLogo,
     leagueId: String(f.leagueId),
-    date: f.date.slice(0, 10),
+    date: localDateStr,
     seasonId: f.seasonId,
     startingAtUtc: f.date,
   };

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated, Platform } from 'react-native';
-import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
-import { BETTING_CONTENT_ENABLED } from '../config/features';
+import AdMobBanner from '../components/AdMobBanner';
+import { ADMOB_ENABLED } from '../config/features';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPartidos } from '../components/Skeleton';
 import { ScreenHeader } from '../components/ScreenHeader';
@@ -156,7 +156,7 @@ export const PartidosScreen: React.FC = () => {
     });
 
     // Sort my team matches: live → scheduled → finished
-    const statusOrder: Record<string, number> = { live: 0, scheduled: 1, finished: 2 };
+    const statusOrder: Record<string, number> = { live: 0, interrupted: 0, scheduled: 1, finished: 2 };
     myTeamMatches.sort((a, b) => (statusOrder[a.status] ?? 1) - (statusOrder[b.status] ?? 1));
 
     // ── Priority leagues = inferred (from teams) ∪ explicitly followed ────────
@@ -483,7 +483,7 @@ export const PartidosScreen: React.FC = () => {
                 {hasPersonalContent ? (
                   <>
                     {/* Caliente banner — gated off for v1.0 (no agreement + Apple 2.3.6) */}
-                    {BETTING_CONTENT_ENABLED && <PlaceholderBannerAd variant="caliente-banner" />}
+                    {ADMOB_ENABLED && <AdMobBanner />}
                     {visibleGlobalLeagues.map((lg, idx) => renderGlobalLeague(lg, idx))}
                   </>
                 ) : (
@@ -495,8 +495,8 @@ export const PartidosScreen: React.FC = () => {
 
                     {/* Banner only when there's at least one league above — keeps
                        the rule "banner never alone, never first". Gated off for v1.0. */}
-                    {BETTING_CONTENT_ENABLED && visibleGlobalLeagues.length > 0 && (
-                      <PlaceholderBannerAd variant="caliente-banner" />
+                    {ADMOB_ENABLED && visibleGlobalLeagues.length > 0 && (
+                      <AdMobBanner />
                     )}
 
                     {/* Remaining visible leagues (revealed by "Cargar más"). */}

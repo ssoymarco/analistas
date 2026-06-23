@@ -218,6 +218,10 @@ export async function saveSnapshot(
       // Preserve flags that track whether one-time pushes have already been sent.
       reminderSent:  prev?.reminderSent  ?? false,
       lineupsSent:   prev?.lineupsSent   ?? false,
+      halftimeSent:  prev?.halftimeSent  ?? false,
+      suspendedSent: prev?.suspendedSent ?? false,
+      extraTimeSent: prev?.extraTimeSent ?? false,
+      penaltiesSent: prev?.penaltiesSent ?? false,
     };
   }
   await db.doc('_meta/livescoresSnapshot').set({
@@ -377,9 +381,15 @@ export function detectChanges(
     }
 
     // ── Halftime ──────────────────────────────────────────────────────────
-    if (prev.stateId !== SM_STATE_IDS.HALF_TIME &&
-        match.stateId === SM_STATE_IDS.HALF_TIME) {
+    // Only the genuine FIRST_HALF → HALF_TIME transition. Guarding on
+    // FIRST_HALF (rather than "any non-HT state → HT") prevents re-firing when
+    // SportMonks flaps between HALF_TIME and INTERRUPTED/SUSPENDED on a paused
+    // match — which otherwise spams a "Medio tiempo" push every poll.
+    if (prev.stateId === SM_STATE_IDS.FIRST_HALF &&
+        match.stateId === SM_STATE_IDS.HALF_TIME &&
+        !prev.halftimeSent) {
       changes.push({ ...baseEvent, type: 'halftime' });
+      prev.halftimeSent = true;
     }
 
     // ── Match end ─────────────────────────────────────────────────────────
@@ -398,15 +408,24 @@ export function detectChanges(
     const subAway  = countSubstitutions(fixture?.events, away?.id);
 
     // ── Extra time start ──────────────────────────────────────────────────
+    // Latched: EXTRA_TIME is also re-entered for the 2nd ET half (after the
+    // EXTRA_TIME_BREAK state) and can flap with INTERRUPTED — the latch keeps
+    // this to a single push at the genuine start of extra time.
     if (prev.stateId !== SM_STATE_IDS.EXTRA_TIME &&
-        match.stateId === SM_STATE_IDS.EXTRA_TIME) {
+        match.stateId === SM_STATE_IDS.EXTRA_TIME &&
+        !prev.extraTimeSent) {
       changes.push({ ...baseEvent, type: 'extraTimeStart' });
+      prev.extraTimeSent = true;
     }
 
     // ── Penalties start ───────────────────────────────────────────────────
+    // Latched: PENALTIES is re-entered between shootout rounds (PEN_BREAK) and
+    // can flap with INTERRUPTED — fire exactly once.
     if (prev.stateId !== SM_STATE_IDS.PENALTIES &&
-        match.stateId === SM_STATE_IDS.PENALTIES) {
+        match.stateId === SM_STATE_IDS.PENALTIES &&
+        !prev.penaltiesSent) {
       changes.push({ ...baseEvent, type: 'penaltiesStart' });
+      prev.penaltiesSent = true;
     }
 
     // ── Match suspended / postponed mid-game ──────────────────────────────
@@ -414,8 +433,19 @@ export function detectChanges(
       SM_STATE_IDS.SUSPENDED, SM_STATE_IDS.POSTPONED,
       SM_STATE_IDS.INTERRUPTED, SM_STATE_IDS.ABANDONED,
     ] as readonly number[];
-    if (prev.status === 'live' && suspendedStateIds.includes(match.stateId)) {
+    // Ball-rolling states. The suspension push fires ONLY on the transition
+    // FROM active play INTO a halted state — never when SportMonks flaps
+    // between HALF_TIME and INTERRUPTED on an already-paused match (prev=HT is
+    // not "playing"), which otherwise spams a push every poll.
+    const playingStateIds = [
+      SM_STATE_IDS.FIRST_HALF, SM_STATE_IDS.SECOND_HALF,
+      SM_STATE_IDS.EXTRA_TIME, SM_STATE_IDS.PENALTIES,
+    ] as readonly number[];
+    if (playingStateIds.includes(prev.stateId) &&
+        suspendedStateIds.includes(match.stateId) &&
+        !prev.suspendedSent) {
       changes.push({ ...baseEvent, type: 'matchSuspended' });
+      prev.suspendedSent = true;
     }
 
     // ── Pre-match reminder (one-time, ~15 min before kickoff) ────────────
@@ -926,13 +956,11 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
     // deliverDelayedPush will suppress the pending goal task at delivery time.
     // We don't notify them about a cancellation they never knew happened.
     if (change.type === 'goalCancelled') {
-      // Send to _d0 bases (new devices on the immediate bucket)
+      // Send to _d0 bases only (new devices on the immediate bucket).
+      // No legacy dual-send: v1.0.x devices no longer receive the original goal
+      // so sending a VAR cancellation would be confusing.
       for (const base of [`team_${change.homeTeam.id}_goals`, `team_${change.awayTeam.id}_goals`]) {
         sendPromises.push(sendToTopic(messaging, `${base}_d0`, title, body, data, dedupId));
-      }
-      // Dual-send legacy
-      for (const topic of legacyTopics) {
-        sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
       }
       logger.info(`📣 GOALCANCELLED (VAR) — ${title}`, { matchId: change.matchId });
       continue;
@@ -941,7 +969,8 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
     // ── Live retrasable events (goal, halftime, matchEnd, redCard) ─────────
     // 1. Send _d0 immediately.
     // 2. Enqueue Cloud Tasks for d2/d5/d10.
-    // 3. Dual-send legacy topics for old-build compatibility.
+    // Legacy dual-send REMOVED (migration window closed June 2026 with v1.1.0).
+    // Sending to legacy topics bypasses all delay buckets and breaks Modo Estadio.
 
     // 1. Immediate send to _d0 bucket
     for (const base of retrasableBases) {
@@ -976,15 +1005,9 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
       }
     }
 
-    // 3. Dual-send legacy topics (migration window)
-    for (const topic of legacyTopics) {
-      sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
-    }
-
     logger.info(`📣 ${change.type.toUpperCase()} — ${title} · ${body}`, {
       matchId:        change.matchId,
       retrasableBases,
-      legacyTopics,
       estadioEnabled: ESTADIO_DELAY_ENABLED,
     });
   }

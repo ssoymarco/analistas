@@ -57,3 +57,12 @@ export const BETTING_CONTENT_ENABLED = false;
  * redeem modal are hidden entirely.
  */
 export const REDEEM_CODE_ENABLED = false;
+
+/**
+ * Master switch for Google AdMob banner ads.
+ *
+ * Independent of BETTING_CONTENT_ENABLED — AdMob serves general ads, not
+ * gambling content. Uses non-personalized ads only (no ATT prompt needed).
+ * Ad Unit IDs live in src/components/AdMobBanner.tsx.
+ */
+export const ADMOB_ENABLED = true;

@@ -115,15 +115,20 @@ const FINISHED_STATE_IDS = new Set<number>([
   SM_STATE_IDS.AWARDED,            // 17
 ]);
 
+// Matches paused mid-game but not yet finished (weather, incidents, etc.)
+// Kept separate from DEAD so the UI can show "INTERRUMPIDO" and preserve score.
+const INTERRUPTED_STATE_IDS = new Set<number>([
+  SM_STATE_IDS.SUSPENDED,          // 11 — mid-match suspension
+  SM_STATE_IDS.INTERRUPTED,        // 18 — temporary interruption (weather, etc.)
+]);
+
 // State IDs that definitively mean "not playing" (postponed, cancelled, etc.)
 const DEAD_STATE_IDS = new Set<number>([
   SM_STATE_IDS.POSTPONED,          // 10
-  SM_STATE_IDS.SUSPENDED,          // 11
   SM_STATE_IDS.CANCELLED,          // 12
   SM_STATE_IDS.WALK_OVER,          // 14
   SM_STATE_IDS.ABANDONED,          // 15
   SM_STATE_IDS.DELAYED,            // 16
-  SM_STATE_IDS.INTERRUPTED,        // 18
   SM_STATE_IDS.DELETED,            // 20
   SM_STATE_IDS.TBA,                // 13  (renamed from TBD)
 ]);
@@ -139,6 +144,7 @@ const DEAD_STATE_IDS = new Set<number>([
 function mapStateToStatus(stateId: number, startingAt?: string): MatchStatus {
   if (LIVE_STATE_IDS.has(stateId)) return 'live';
   if (FINISHED_STATE_IDS.has(stateId)) return 'finished';
+  if (INTERRUPTED_STATE_IDS.has(stateId)) return 'interrupted';
   if (DEAD_STATE_IDS.has(stateId)) return 'scheduled'; // postponed/cancelled → never infer live
   // Time-based live inference (applies to NOT_STARTED, 0, undefined, or any unexpected id)
   if (startingAt) {
@@ -181,6 +187,8 @@ function mapStateLabel(stateId: number): string | undefined {
     case SM_STATE_IDS.EXTRA_TIME_BREAK:  return 'ET';
     case SM_STATE_IDS.PENALTIES:         return 'PEN';
     case SM_STATE_IDS.PEN_BREAK:         return 'PEN';
+    case SM_STATE_IDS.SUSPENDED:         return 'SUSP';
+    case SM_STATE_IDS.INTERRUPTED:       return 'INT';
     default: return undefined;
   }
 }
@@ -305,6 +313,8 @@ function getTimeDisplay(fixture: SMFixture): string {
   const status = mapStateToStatus(fixture.state_id, fixture.starting_at);
 
   if (status === 'finished') return 'FT';
+
+  if (status === 'interrupted') return 'INT';
 
   if (status === 'live') {
     if (fixture.state_id === SM_STATE_IDS.HALF_TIME) return 'HT';

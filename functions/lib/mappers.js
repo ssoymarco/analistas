@@ -21,9 +21,22 @@ function getStateLabel(stateId) {
         case types_1.SM_STATE_IDS.EXTRA_TIME: return 'ET';
         case types_1.SM_STATE_IDS.PENALTIES: return 'PEN';
         case types_1.SM_STATE_IDS.BREAK: return 'HT';
+        case types_1.SM_STATE_IDS.SUSPENDED: return 'SUSP';
+        case types_1.SM_STATE_IDS.INTERRUPTED: return 'INT';
         default: return null;
     }
 }
+// States where the match is in progress but temporarily halted (weather,
+// floodlight failure, crowd incident, etc.). SportMonks keeps these distinct
+// from both "live" and "dead/postponed/cancelled". We map them to 'live' so the
+// deployed client — which only understands live/finished/scheduled — renders
+// the in-progress view with the current score instead of reverting to the
+// pre-match "Previa" screen. The distinct stateLabel ('SUSP'/'INT') lets newer
+// clients surface the interrupted treatment by reading stateId.
+const PAUSED_LIVE_STATE_IDS = new Set([
+    types_1.SM_STATE_IDS.SUSPENDED, // 11
+    types_1.SM_STATE_IDS.INTERRUPTED, // 18
+]);
 /**
  * Map a SportMonks state_id to our internal MatchStatus.
  *
@@ -52,6 +65,12 @@ function getMatchStatus(stateId, startingAt) {
         return 'live';
     if (types_1.FINISHED_STATE_IDS.has(stateId))
         return 'finished';
+    // Suspended/interrupted matches are in progress — surface them as 'live'
+    // (checked BEFORE the dead set, which also lists these IDs to suppress the
+    // time-based "won't happen" inference). Keeps a live-but-paused match out of
+    // the scheduled bucket so the client never reverts to the pre-match view.
+    if (PAUSED_LIVE_STATE_IDS.has(stateId))
+        return 'live';
     if (types_1.DEAD_STATE_IDS.has(stateId))
         return 'scheduled';
     // Time-based inference for NOT_STARTED, unknown IDs, or lagging feeds.
@@ -70,8 +89,25 @@ function calculateLiveMinute(fixture) {
     const status = getMatchStatus(fixture.state_id, fixture.starting_at);
     if (status !== 'live')
         return null;
+    // Suspended/interrupted: in progress but the clock isn't ticking. Return null
+    // so the UI shows the 'SUSP'/'INT' label instead of a bogus elapsed minute.
+    if (PAUSED_LIVE_STATE_IDS.has(fixture.state_id))
+        return null;
     if (fixture.state_id === types_1.SM_STATE_IDS.HALF_TIME)
         return 45;
+    // Prefer the ticking-period anchor (started + counts_from). SportMonks resets
+    // `started` when a period (re)begins, so this tracks the REAL played minute
+    // across stoppages. A wall-clock-from-kickoff estimate counts a long
+    // suspension (e.g. weather) as match time and inflates the minute — e.g.
+    // reporting 177' for a match that resumed and is actually at 54', which then
+    // pushes the pressure-chart playhead to the far right of the axis.
+    const anchor = getLiveClockAnchor(fixture);
+    if (anchor) {
+        const nowSec = Math.floor(Date.now() / 1000);
+        const elapsedMin = Math.floor((nowSec - anchor.periodStartedAt) / 60);
+        return Math.max(1, anchor.periodMinuteOffset + elapsedMin);
+    }
+    // Fallback: wall-clock from kickoff when no usable period anchor is present.
     const kickoffTs = fixture.starting_at_timestamp;
     if (!kickoffTs)
         return null;
@@ -89,6 +125,13 @@ function formatTimeDisplay(fixture, status, minute) {
         return 'FT';
     if (status === 'live' && fixture.state_id === types_1.SM_STATE_IDS.HALF_TIME)
         return 'HT';
+    // Suspended/interrupted: legacy clients (≤ v1.1.x) render this `time` string
+    // verbatim and have no i18n key for the state, so we write the full word here.
+    // Newer clients derive 'interrupted' from stateId and localise via i18n,
+    // ignoring this field. Audience is es-MX, so Spanish is the safe default.
+    if (status === 'live' && PAUSED_LIVE_STATE_IDS.has(fixture.state_id)) {
+        return fixture.state_id === types_1.SM_STATE_IDS.SUSPENDED ? 'Suspendido' : 'Interrumpido';
+    }
     if (status === 'live' && minute)
         return `${minute}'`;
     // Scheduled: store the raw UTC HH:MM. We can't compute the user's local time

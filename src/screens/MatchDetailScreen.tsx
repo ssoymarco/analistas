@@ -230,9 +230,10 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   // Prefer the API-fresh match (real score, correct minute) over the prop (may be time-inferred)
   const displayMatch = liveMatch ?? match;
 
-  const rawIsLive      = displayMatch.status === 'live';
-  const rawIsFinished  = displayMatch.status === 'finished';
-  const rawIsScheduled = displayMatch.status === 'scheduled';
+  const rawIsLive        = displayMatch.status === 'live';
+  const rawIsFinished    = displayMatch.status === 'finished';
+  const rawIsScheduled   = displayMatch.status === 'scheduled';
+  const rawIsInterrupted = displayMatch.status === 'interrupted';
 
   // ── Sticky "match is past kick-off" ─────────────────────────────────────
   // Belt-and-suspenders against the 2H-reset bug: once we've EVER observed
@@ -245,15 +246,16 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   // should prevent this from being needed in practice, but a ref keeps the
   // UX stable for any future regression of the upstream feed.
   const startedRef = useRef(false);
-  if (rawIsLive || rawIsFinished || (typeof displayMatch.minute === 'number' && displayMatch.minute > 0)) {
+  if (rawIsLive || rawIsFinished || rawIsInterrupted || (typeof displayMatch.minute === 'number' && displayMatch.minute > 0)) {
     startedRef.current = true;
   }
 
-  const isFinished  = rawIsFinished;
+  const isFinished    = rawIsFinished;
+  const isInterrupted = rawIsInterrupted;
   // Once started, force "live" treatment even if status briefly flickers to
   // 'scheduled'. This keeps the user on the EnVivo tab and the live
   // indicator visible until the server explicitly reports 'finished'.
-  const isLive      = rawIsLive || (startedRef.current && !rawIsFinished);
+  const isLive      = rawIsLive || (startedRef.current && !rawIsFinished && !rawIsInterrupted);
   const isScheduled = rawIsScheduled && !startedRef.current;
   const { incrementMatchesViewed } = useUserStats();
   const {
@@ -602,6 +604,15 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                   {displayMatch.stateLabel === 'HT'
                     ? t('matchStatus.halfTimeLong')
                     : `EN VIVO · ${liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`}`}
+                </Text>
+              </View>
+            )}
+
+            {isInterrupted && (
+              <View style={[scr.livePill, { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
+                <View style={[scr.liveDot, { backgroundColor: '#F59E0B' }]} />
+                <Text style={[scr.livePillText, { color: '#F59E0B' }]}>
+                  {t('matchStatus.interruptedLong')}
                 </Text>
               </View>
             )}

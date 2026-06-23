@@ -24,6 +24,7 @@ import { getCoachProfile, type CoachProfile } from '../../services/sportsApi';
 import { translateCountry } from '../../i18n/countries';
 import { translateNationalTeam } from '../../utils/nationalTeams';
 import { isImageUri } from '../../utils/imageUri';
+import AdMobBanner from '../../components/AdMobBanner';
 
 // ── Optional packages (graceful degradation if missing) ──────────────────────
 let ViewShot: any = null;
@@ -789,7 +790,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   // • live/finished with real lineup data                → "✅ Confirmada"
   // • scheduled with non-expected data (rare)            → "ℹ️ Probable"
   const isExpected  = detail.homeLineup?.isExpected ?? detail.awayLineup?.isExpected ?? false;
-  const isConfirmed = !isExpected && match.status !== 'scheduled';
+  const isConfirmed = !isExpected;
 
   const handleShare = async () => {
     if (!ViewShot || !captureRef.current) return;
@@ -809,8 +810,8 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   // ── Pitch block ──────────────────────────────────────────────────────────
   const PitchBlock = (
     <View style={{ overflow: 'hidden', borderRadius: 18 }}>
-      {/* Top advertising banner */}
-      <MatchBanner />
+      {/* Top advertising banner — AdMob */}
+      <AdMobBanner />
 
       {/* Pitch */}
       <View style={[ms.pitchContainer, { backgroundColor: theme.grassA, borderRadius: 0 }]}>

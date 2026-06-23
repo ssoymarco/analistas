@@ -150,7 +150,7 @@ export declare const syncSquads: import("firebase-functions/v2/scheduler").Sched
  * every 10s while a match was live (360 calls/hour PER concurrent viewer).
  * This Cloud Function runs at a fixed cadence regardless of user count.
  *
- * Schedule: every 5 minutes. Cost: ~30-80 SM calls per run for the
+ * Schedule: every 4 minutes. Cost: ~30-80 SM calls per run for the
  * `fixtures` entity. Well below the 3,000/hour cap.
  */
 export declare const syncMatchEnrichment: import("firebase-functions/v2/scheduler").ScheduleFunction;

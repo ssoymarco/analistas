@@ -22,8 +22,8 @@ import type { NewsArticle } from '../data/types';
 import type { NoticiasStackParamList } from '../navigation/AppNavigator';
 import { normalize } from '../utils/normalize';
 import { useTranslation } from 'react-i18next';
-import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
-import { BETTING_CONTENT_ENABLED } from '../config/features';
+import AdMobBanner from '../components/AdMobBanner';
+import { ADMOB_ENABLED } from '../config/features';
 
 // ── League color map ──────────────────────────────────────────────────────────
 const LEAGUE_COLORS: Record<string, string> = {
@@ -310,7 +310,7 @@ export const NoticiasScreen: React.FC = () => {
             )}
 
             {/* Caliente banner — gated off for v1.0 (no agreement + Apple 2.3.6) */}
-            {BETTING_CONTENT_ENABLED && <PlaceholderBannerAd variant="caliente-banner" />}
+            {ADMOB_ENABLED && <AdMobBanner />}
 
             {/* Stories horizontal scroll */}
             {stories.length > 0 && (

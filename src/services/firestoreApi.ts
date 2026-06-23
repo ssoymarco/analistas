@@ -267,6 +267,17 @@ function matchFromDoc(d: MatchDoc): Match {
     } catch { /* keep the original status as best-effort */ }
   }
 
+  // ── Interrupted / suspended derivation ──
+  // The Cloud Function writes status:'live' for suspended (stateId 11) and
+  // interrupted (18) matches — backward-compatible with older clients that only
+  // know live/finished/scheduled. This client understands the dedicated
+  // 'interrupted' status, so re-derive it from stateId to drive the amber
+  // "INTERRUMPIDO" treatment. The minute is meaningless while halted.
+  if (d.stateId === 11 || d.stateId === 18) {
+    correctedStatus = 'interrupted';
+    correctedMinute = null;
+  }
+
   // ── Timezone fix ──
   // The mapper on the Cloud Function stores `time` as the raw UTC HH:MM
   // because the server doesn't know the user's timezone. For scheduled

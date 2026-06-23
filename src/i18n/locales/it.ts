@@ -83,6 +83,8 @@ const it: TranslationKeys = {
     postponed: 'Rinviato',
     cancelled: 'Cancellato',
     suspended: 'Sospeso',
+    interrupted: 'Interrotto',
+    interruptedLong: 'INTERROTTO',
   },
 
   matchBell: {

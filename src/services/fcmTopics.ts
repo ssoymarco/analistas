@@ -82,6 +82,12 @@ async function safeUnsubscribe(topic: string): Promise<boolean> {
 // but they DO go through the network — skipping a no-op saves battery.
 const SUBSCRIBED_TOPICS_KEY = 'analistas_fcm_subscribed_topics';
 
+// One-time flag: after the v1.1.0 migration window we stopped dual-sending
+// to legacy topics (team_X_goals, team_X_cards, team_X_start). Devices that
+// updated from v1.0.x may still be subscribed to these stale topics. This flag
+// marks that we've already run the cleanup so we don't redo it on every launch.
+const LEGACY_TOPICS_CLEANED_KEY = 'analistas_fcm_legacy_v110_cleaned';
+
 /** Delay bucket type for Modo Estadio. */
 export type DelayBucket = 'd0' | 'd2' | 'd5' | 'd10';
 
@@ -279,6 +285,32 @@ export async function unsubscribePlayerTopics(playerId: string): Promise<void> {
  *
  * Leagues are intentionally excluded — display-only, no FCM subscriptions.
  */
+/**
+ * One-time migration: unsubscribe from legacy topics (no bucket suffix) that
+ * were subscribed on v1.0.x builds. The server stopped dual-sending to these
+ * in v1.1.0 (June 2026), so they are now dead — but devices that updated from
+ * v1.0.x may still be subscribed. Called from reconcileSubscriptions on first
+ * run after update; subsequent calls are instant no-ops via the flag key.
+ */
+async function migrateFromLegacyTopics(teamIds: string[]): Promise<void> {
+  try {
+    const done = await AsyncStorage.getItem(LEGACY_TOPICS_CLEANED_KEY);
+    if (done) return;
+
+    const legacyTopics = teamIds.flatMap(id => [
+      TopicNames._legacyTeamGoals(id),
+      TopicNames._legacyTeamCards(id),
+      TopicNames._legacyTeamStart(id),
+    ]);
+
+    await Promise.all(legacyTopics.map(t => safeUnsubscribe(t)));
+    await AsyncStorage.setItem(LEGACY_TOPICS_CLEANED_KEY, '1');
+    addBreadcrumb('fcm', 'legacy topics cleaned', { count: legacyTopics.length });
+  } catch {
+    // Non-fatal — will retry on next app launch.
+  }
+}
+
 export async function reconcileSubscriptions(args: {
   teamIds:    string[];
   leagueIds:  string[];  // kept in signature for call-site compatibility; ignored
@@ -286,6 +318,9 @@ export async function reconcileSubscriptions(args: {
   delayBucket?: DelayBucket;  // defaults to 'd0' (Modo Estadio OFF)
 }): Promise<void> {
   const bucket: DelayBucket = args.delayBucket ?? 'd0';
+
+  // One-time cleanup of v1.0.x legacy topic subscriptions (fire-and-forget).
+  migrateFromLegacyTopics(args.teamIds).catch(() => {});
 
   const wanted = new Set<string>();
   for (const id of args.teamIds) {

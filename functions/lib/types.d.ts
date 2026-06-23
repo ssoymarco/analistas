@@ -166,6 +166,10 @@ export interface LivescoresSnapshot {
         substitutionsAway: number;
         reminderSent?: boolean;
         lineupsSent?: boolean;
+        halftimeSent?: boolean;
+        suspendedSent?: boolean;
+        extraTimeSent?: boolean;
+        penaltiesSent?: boolean;
     }>;
     updatedAt: Timestamp;
 }

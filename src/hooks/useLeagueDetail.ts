@@ -574,16 +574,23 @@ export function useLeagueDetail(
         // scroll down = upcoming. Previously this was a flat ascending sort
         // which forced the user to scroll all the way down past the August
         // games to find today's match.
-        const todayUTC = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+        // Use device-local today so late-evening fixtures (e.g. 19:00 MX = 01:00 UTC
+        // next day) are correctly classified as today/future rather than off by one day.
+        const _now = new Date();
+        const todayLocal = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
+        const localDateOf = (utcStr: string) => {
+          const d = new Date(utcStr.replace(' ', 'T') + 'Z');
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        };
         const fixtures = fixturesRaw
           .map(mapFixture)
           .sort((a, b) => {
-            const dayA = a.date.slice(0, 10);
-            const dayB = b.date.slice(0, 10);
-            const isTodayA = dayA === todayUTC;
-            const isTodayB = dayB === todayUTC;
-            const isPastA  = dayA < todayUTC;
-            const isPastB  = dayB < todayUTC;
+            const dayA = localDateOf(a.date);
+            const dayB = localDateOf(b.date);
+            const isTodayA = dayA === todayLocal;
+            const isTodayB = dayB === todayLocal;
+            const isPastA  = dayA < todayLocal;
+            const isPastB  = dayB < todayLocal;
 
             // Group precedence: today (0) > past (1) > future (2)
             const groupA = isTodayA ? 0 : isPastA ? 1 : 2;

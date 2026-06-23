@@ -32,6 +32,7 @@ import { useTranslation } from 'react-i18next';
 import i18n, { LANGUAGE_STORAGE_KEY } from '../i18n';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { PREMIUM_ENABLED, BETTING_CONTENT_ENABLED, REDEEM_CODE_ENABLED } from '../config/features';
+import Constants from 'expo-constants';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getInitials(name: string) {
@@ -563,7 +564,7 @@ export const PerfilScreen: React.FC = () => {
       `${t('profile.contactBodyGreeting')}\n\n` +
       `${t('profile.contactBodyPlaceholder')}\n\n` +
       `---\n` +
-      `${t('profile.contactBodyFooter', { version: '1.0.0', platform })}`;
+      `${t('profile.contactBodyFooter', { version: Constants.expoConfig?.version ?? '1.1.1', platform })}`;
     const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
     try {
@@ -918,7 +919,7 @@ export const PerfilScreen: React.FC = () => {
             opacity 0.12-0.15, basically invisible). */}
         <View style={{ alignItems: 'center', marginTop: 16, gap: 4 }}>
           <Text style={{ fontSize: 13, color: c.textSecondary, fontWeight: '700', letterSpacing: 0.3 }}>Analistas APP</Text>
-          <Text style={{ fontSize: 11, color: c.textTertiary, fontWeight: '500' }}>{t('profile.version', { version: '1.0.0', year: '2026' })}</Text>
+          <Text style={{ fontSize: 11, color: c.textTertiary, fontWeight: '500' }}>{t('profile.version', { version: Constants.expoConfig?.version ?? '1.1.1', year: '2026' })}</Text>
           <Text style={{ fontSize: 11, color: c.textTertiary, fontWeight: '500' }}>{t('profile.madeIn')}</Text>
         </View>
         <View style={{ height: 32 }} />
@@ -1045,7 +1046,7 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 36 }}>⚽</Text>
             </View>
             <Text style={{ fontSize: 20, fontWeight: '800', color: c.textPrimary }}>Analistas</Text>
-            <Text style={{ fontSize: 12, color: c.textTertiary, marginTop: 2 }}>Versión 1.0.0</Text>
+            <Text style={{ fontSize: 12, color: c.textTertiary, marginTop: 2 }}>Versión {Constants.expoConfig?.version ?? '1.1.1'}</Text>
           </View>
           <View style={{ backgroundColor: c.surface, borderRadius: 16, padding: 16, marginBottom: 20 }}>
             <Text style={{ fontSize: 14, color: c.textSecondary, lineHeight: 22 }}>Tu compañero definitivo para seguir el fútbol en tiempo real. Resultados en vivo, estadísticas detalladas, alineaciones, noticias y mucho más de las mejores ligas del mundo.</Text>

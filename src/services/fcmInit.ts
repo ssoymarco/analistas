@@ -44,6 +44,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { Sentry, addBreadcrumb, captureError } from './sentry';
+import { navigateToMatch, buildMatchStubFromPayload } from '../utils/navigationRef';
 
 const FCM_TOKEN_KEY = 'analistas_fcm_token';
 /** Bump this string whenever a release ships an FCM-init change that
@@ -317,6 +318,28 @@ export function attachFCMHandlers(): () => void {
     }
   });
 
+  // ── Notification TAP → deep link to the match ──────────────────────────────
+  // For BACKGROUND/KILLED apps the OS (via FCM/APNs) shows the notification
+  // directly — expo-notifications does NOT reliably observe those taps on
+  // Android. RNFB's own handlers do, on both platforms:
+  //   • onNotificationOpenedApp — app in background, notification tapped.
+  //   • getInitialNotification — app was killed; returns the launch notification.
+  // navigateToMatch() dedups against the expo-notifications path (iOS) and
+  // queues until the navigator is ready (cold start).
+  const deepLinkFromMessage = (remoteMessage: FirebaseMessagingTypes.RemoteMessage | null): void => {
+    if (!remoteMessage?.data) return;
+    const match = buildMatchStubFromPayload(remoteMessage.data as Record<string, unknown>);
+    if (match) navigateToMatch(match);
+  };
+
+  const unsubOpened = messaging().onNotificationOpenedApp(deepLinkFromMessage);
+
+  // One-shot: the notification that launched the app from a killed state.
+  messaging()
+    .getInitialNotification()
+    .then(deepLinkFromMessage)
+    .catch(() => {});
+
   // Token refresh — FCM occasionally rotates the device token (e.g. after
   // a system reset or app reinstall). Persist the new token; topic subs
   // are preserved by FCM across the rotation, no re-subscribe needed.
@@ -326,6 +349,7 @@ export function attachFCMHandlers(): () => void {
 
   return () => {
     unsubMessage();
+    unsubOpened();
     unsubRefresh();
   };
 }

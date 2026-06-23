@@ -10,7 +10,7 @@ export interface Team {
   logo: string; // emoji or image URL
 }
 
-export type MatchStatus = 'live' | 'finished' | 'scheduled';
+export type MatchStatus = 'live' | 'finished' | 'scheduled' | 'interrupted';
 
 export interface Match {
   id: string;

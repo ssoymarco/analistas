@@ -46,9 +46,10 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
   const { t } = useTranslation();
   const { timeFormat } = useTimeFormat();
 
-  const isLive      = match.status === 'live';
-  const isFinished  = match.status === 'finished';
-  const isScheduled = match.status === 'scheduled';
+  const isLive        = match.status === 'live';
+  const isFinished    = match.status === 'finished';
+  const isScheduled   = match.status === 'scheduled';
+  const isInterrupted = match.status === 'interrupted';
 
   // Venue label — only shown for cup competitions where stadiums vary
   // (World Cup, Copa Libertadores, FA Cup, etc.). For regular leagues the
@@ -107,11 +108,11 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
             </View>
           ) : (
             <View style={s.scoreRow}>
-              <Text style={[s.scoreNum, { color: c.textPrimary }, (!homeWon && !isLive) && { color: c.textTertiary }]}>
+              <Text style={[s.scoreNum, { color: c.textPrimary }, (!homeWon && !isLive && !isInterrupted) && { color: c.textTertiary }]}>
                 {match.homeScore}
               </Text>
               <Text style={[s.scoreDash, { color: c.textTertiary }]}>—</Text>
-              <Text style={[s.scoreNum, { color: c.textPrimary }, (!awayWon && !isLive) && { color: c.textTertiary }]}>
+              <Text style={[s.scoreNum, { color: c.textPrimary }, (!awayWon && !isLive && !isInterrupted) && { color: c.textTertiary }]}>
                 {match.awayScore}
               </Text>
             </View>
@@ -125,6 +126,11 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
           {isLive && (
             <Text style={s.liveMin}>
               {match.stateLabel === 'HT' ? t('matchStatus.halfTime') : liveMinuteLabel}
+            </Text>
+          )}
+          {isInterrupted && (
+            <Text style={[s.liveMin, { color: '#F59E0B' }]}>
+              {t('matchStatus.interrupted')}
             </Text>
           )}
           {isFinished && (

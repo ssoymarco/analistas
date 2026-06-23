@@ -28,6 +28,7 @@ import {
 } from '../../utils/matchPhases';
 import { translateNationalTeam } from '../../utils/nationalTeams';
 import { BETTING_CONTENT_ENABLED } from '../../config/features';
+import { useLiveTick, computeLiveMinuteSeconds } from '../../hooks/useLiveTick';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH   = SCREEN_WIDTH - 72; // prediction card width
@@ -1802,6 +1803,21 @@ const PressureSection: React.FC<{
 }> = ({ pressure, match, events = [], statistics = [] }) => {
   const c           = useThemeColors();
   const { isDark }  = useDarkMode();
+
+  // Accurate current minute from the SportMonks period anchor (`liveClock`) —
+  // the SAME source the header clock uses. We deliberately do NOT use
+  // `match.minute` for positioning: it's derived server-side from wall-clock
+  // elapsed since kickoff, so a long stoppage (e.g. a weather suspension)
+  // inflates it (e.g. 177' for a match actually at 54'), which would shove the
+  // curve fill and the live playhead to the far-right of the axis.
+  // computeLiveMinuteSeconds extrapolates from the anchor and falls back to
+  // match.minute only when there's no anchor.
+  const now = useLiveTick(match.status === 'live');
+  const liveMinute: number | undefined =
+    match.status === 'live'
+      ? computeLiveMinuteSeconds(match, now).minute
+      : undefined;
+
   // The X-axis maxes out at 90 for a regulation match and 120 when extra
   // time happened — see matchPhases.maxRegulationMinute. This is what lets
   // FotMob-style ET goals (Mbappé 108', Messi 118', Petković 117') sit on
@@ -1823,8 +1839,8 @@ const PressureSection: React.FC<{
   // the match had ended — explicit status mapping prevents that.
   const matchMinutes = match.status === 'finished'
     ? totalMin
-    : match.status === 'live' && typeof match.minute === 'number' && match.minute > 0
-      ? match.minute
+    : match.status === 'live' && typeof liveMinute === 'number' && liveMinute > 0
+      ? Math.min(liveMinute, totalMin)
       : 0;
 
   const rawCurve = React.useMemo(
@@ -1868,9 +1884,9 @@ const PressureSection: React.FC<{
   // chart stays clean for scheduled/finished matches.
   const playheadMin: number | null =
     match.status === 'live' &&
-    typeof match.minute === 'number' &&
-    match.minute > 0
-      ? Math.min(match.minute, totalMin)
+    typeof liveMinute === 'number' &&
+    liveMinute > 0
+      ? Math.min(liveMinute, totalMin)
       : null;
 
   const pulseAnim = React.useRef(new Animated.Value(0.45)).current;

@@ -91,6 +91,8 @@ const es = {
     postponed: 'Aplazado',
     cancelled: 'Cancelado',
     suspended: 'Suspendido',
+    interrupted: 'Interrumpido',
+    interruptedLong: 'INTERRUMPIDO',
   },
 
   matchBell: {
@@ -1124,6 +1126,16 @@ const es = {
   season: {
     pickerTitle: 'Elegir temporada',
     live: 'En curso',
+  },
+
+  // ── Version check / update prompt ────────────────────────────────────────
+  update: {
+    optionalTitle: 'Nueva versión disponible',
+    optionalBody: 'Actualiza para disfrutar las últimas mejoras y correcciones.',
+    requiredTitle: 'Actualización requerida',
+    requiredBody: 'Esta versión ya no es compatible. Actualiza para seguir usando Analistas.',
+    updateNow: 'Actualizar ahora',
+    later: 'Más tarde',
   },
 
   // ── Mundial 2026 hero header ──────────────────────────────────────────────

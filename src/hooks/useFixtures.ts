@@ -42,7 +42,7 @@ interface UseFixturesResult {
 
 // ── Display sort: live first, then scheduled by kickoff time, then finished ──
 function sortForDisplay(a: Match, b: Match): number {
-  const order = { live: 0, scheduled: 1, finished: 2 };
+  const order: Record<string, number> = { live: 0, interrupted: 0, scheduled: 1, finished: 2 };
   const so = order[a.status] - order[b.status];
   if (so !== 0) return so;
   // Within the same status, sort by start time (or id as final tiebreaker)

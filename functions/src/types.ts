@@ -194,6 +194,13 @@ export interface LivescoresSnapshot {
     substitutionsAway:  number;
     reminderSent?:      boolean;  // true once the pre-match reminder push has fired
     lineupsSent?:       boolean;  // true once the lineup-confirmed push has fired
+    // Once-per-match latches. Set true the first time each push fires so a
+    // SportMonks state that flaps (e.g. HALF_TIME ↔ INTERRUPTED on a paused
+    // match, or EXTRA_TIME ↔ its break) can never re-trigger the push.
+    halftimeSent?:      boolean;
+    suspendedSent?:     boolean;
+    extraTimeSent?:     boolean;
+    penaltiesSent?:     boolean;
   }>;
   updatedAt: Timestamp;
 }

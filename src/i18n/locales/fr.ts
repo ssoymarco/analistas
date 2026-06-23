@@ -83,6 +83,8 @@ const fr: TranslationKeys = {
     postponed: 'Reporté',
     cancelled: 'Annulé',
     suspended: 'Suspendu',
+    interrupted: 'Interrompu',
+    interruptedLong: 'INTERROMPU',
   },
 
   matchBell: {

@@ -80,6 +80,8 @@ const tr: TranslationKeys = {
     postponed: 'Ertelendi',
     cancelled: 'İptal',
     suspended: 'Askıya Alındı',
+    interrupted: 'Kesildi',
+    interruptedLong: 'KESİLDİ',
   },
 
   matchBell: {

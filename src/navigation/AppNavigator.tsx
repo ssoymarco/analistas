@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { navigationRef } from '../utils/navigationRef';
+import * as Notifications from 'expo-notifications';
+import { navigationRef, navigateToMatch, buildMatchStubFromPayload, flushPendingMatchNavigation } from '../utils/navigationRef';
 import { logScreenView } from '../services/analytics';
 import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -454,6 +455,23 @@ export const AppNavigator: React.FC = () => {
     const current = navigationRef.getCurrentRoute()?.name;
     routeNameRef.current = current;
     if (current) logScreenView(current);
+
+    // Cold-start deep link: if the app was killed and the user tapped a
+    // notification, the response handler fires before the navigator is ready
+    // and can't navigate yet. Two recovery paths, deduped in navigateToMatch:
+    //   1. expo-notifications' getLastNotificationResponseAsync() — the iOS
+    //      APNs-swizzle path; returns the tap that launched the app.
+    //   2. flushPendingMatchNavigation() — replays a target that RNFB's
+    //      getInitialNotification() (fcmInit.ts) queued before mount, covering
+    //      Android (and iOS) killed-state taps.
+    Notifications.getLastNotificationResponseAsync().then(response => {
+      if (!response) return;
+      const data = response.notification.request.content.data as Record<string, unknown>;
+      const match = buildMatchStubFromPayload(data);
+      if (match) navigateToMatch(match);
+    }).catch(() => {});
+
+    flushPendingMatchNavigation();
   };
   const handleNavStateChange = () => {
     const previous = routeNameRef.current;
