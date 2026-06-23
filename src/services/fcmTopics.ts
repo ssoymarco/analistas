@@ -103,6 +103,16 @@ export const TopicNames = {
   teamLineups:   (teamId: string)   => `team_${teamId}_lineups`,
   teamReminders: (teamId: string)   => `team_${teamId}_reminders`,
 
+  // ── Modo Rival topics (immediate, no bucket) ───────────────────────────────
+  // "Bad news" about a team the user marked as a RIVAL. Delivered immediately
+  // (the delay buckets of Modo Estadio don't apply — schadenfreude isn't a
+  // spoiler-avoidance scenario). Must stay in sync with detect-changes.ts.
+  teamRivalLoss:       (teamId: string) => `team_${teamId}_rival_loss`,
+  teamRivalBigLoss:    (teamId: string) => `team_${teamId}_rival_bigloss`,
+  teamRivalRedCard:    (teamId: string) => `team_${teamId}_rival_redcard`,
+  teamRivalPenMiss:    (teamId: string) => `team_${teamId}_rival_penmiss`,
+  teamRivalEliminated: (teamId: string) => `team_${teamId}_rival_eliminated`,
+
   // ── Player topics (server currently dispatches nothing here — future use) ──
   playerGoals:  (playerId: string)  => `player_${playerId}_goals`,
   playerCards:  (playerId: string)  => `player_${playerId}_cards`,
@@ -155,6 +165,26 @@ function topicsForPlayer(playerId: string): string[] {
     TopicNames.playerGoals(playerId),
     TopicNames.playerCards(playerId),
   ];
+}
+
+/** Modo Rival event classes (v1). Maps a settings-toggle key → topic builder.
+ *  Exported so the notification-settings screen can subscribe/unsubscribe a
+ *  single event class across all rival teams. */
+export type RivalEvent = 'loss' | 'bigLoss' | 'redCard' | 'penMiss' | 'eliminated';
+
+export const RIVAL_EVENTS: RivalEvent[] = ['loss', 'bigLoss', 'redCard', 'penMiss', 'eliminated'];
+
+const RIVAL_TOPIC_BY_EVENT: Record<RivalEvent, (teamId: string) => string> = {
+  loss:       TopicNames.teamRivalLoss,
+  bigLoss:    TopicNames.teamRivalBigLoss,
+  redCard:    TopicNames.teamRivalRedCard,
+  penMiss:    TopicNames.teamRivalPenMiss,
+  eliminated: TopicNames.teamRivalEliminated,
+};
+
+/** All rival "bad news" topics for a team. */
+function topicsForRival(teamId: string): string[] {
+  return RIVAL_EVENTS.map(ev => RIVAL_TOPIC_BY_EVENT[ev](teamId));
 }
 
 // ── Persistence helpers ─────────────────────────────────────────────────────
@@ -267,6 +297,60 @@ export async function unsubscribePlayerTopics(playerId: string): Promise<void> {
   await writeSubscribedTopics(subscribed);
 }
 
+// ── Modo Rival ──────────────────────────────────────────────────────────────
+
+/** Subscribe to a rival team's "bad news" topics. `events` defaults to all
+ *  five; pass a subset to honour the user's per-event settings toggles. */
+export async function subscribeRivalTopics(
+  teamId: string,
+  events: RivalEvent[] = RIVAL_EVENTS,
+): Promise<void> {
+  const subscribed = await readSubscribedTopics();
+  const wanted = events.map(ev => RIVAL_TOPIC_BY_EVENT[ev](teamId));
+  const toAdd = wanted.filter(t => !subscribed.has(t));
+  if (toAdd.length === 0) return;
+
+  const results = await Promise.all(toAdd.map(t => safeSubscribe(t)));
+  toAdd.forEach((t, i) => { if (results[i]) subscribed.add(t); });
+  await writeSubscribedTopics(subscribed);
+}
+
+/** Unsubscribe from a rival team's bad-news topics (all five). */
+export async function unsubscribeRivalTopics(teamId: string): Promise<void> {
+  const subscribed = await readSubscribedTopics();
+  const toRemove = topicsForRival(teamId).filter(t => subscribed.has(t));
+  if (toRemove.length === 0) return;
+
+  await Promise.all(toRemove.map(t => safeUnsubscribe(t)));
+  toRemove.forEach(t => subscribed.delete(t));
+  await writeSubscribedTopics(subscribed);
+}
+
+/** Subscribe/unsubscribe a SINGLE rival event class across many rival teams.
+ *  Used when the user flips a per-event toggle in notification settings. */
+export async function setRivalEventForTeams(
+  event: RivalEvent,
+  teamIds: string[],
+  enabled: boolean,
+): Promise<void> {
+  if (teamIds.length === 0) return;
+  const subscribed = await readSubscribedTopics();
+  const topics = teamIds.map(id => RIVAL_TOPIC_BY_EVENT[event](id));
+
+  if (enabled) {
+    const toAdd = topics.filter(t => !subscribed.has(t));
+    if (toAdd.length === 0) return;
+    const results = await Promise.all(toAdd.map(t => safeSubscribe(t)));
+    toAdd.forEach((t, i) => { if (results[i]) subscribed.add(t); });
+  } else {
+    const toRemove = topics.filter(t => subscribed.has(t));
+    if (toRemove.length === 0) return;
+    await Promise.all(toRemove.map(t => safeUnsubscribe(t)));
+    toRemove.forEach(t => subscribed.delete(t));
+  }
+  await writeSubscribedTopics(subscribed);
+}
+
 /**
  * Reconcile FCM subscriptions against the user's current follow list and
  * current Modo Estadio delay bucket.
@@ -315,9 +399,12 @@ export async function reconcileSubscriptions(args: {
   teamIds:    string[];
   leagueIds:  string[];  // kept in signature for call-site compatibility; ignored
   playerIds:  string[];
+  rivalTeamIds?: string[];      // Modo Rival teams
+  rivalEvents?:  RivalEvent[];  // enabled rival event classes (defaults to all)
   delayBucket?: DelayBucket;  // defaults to 'd0' (Modo Estadio OFF)
 }): Promise<void> {
   const bucket: DelayBucket = args.delayBucket ?? 'd0';
+  const rivalEvents = args.rivalEvents ?? RIVAL_EVENTS;
 
   // One-time cleanup of v1.0.x legacy topic subscriptions (fire-and-forget).
   migrateFromLegacyTopics(args.teamIds).catch(() => {});
@@ -329,6 +416,10 @@ export async function reconcileSubscriptions(args: {
   // Note: leagueIds intentionally skipped — display-only
   for (const id of args.playerIds) {
     topicsForPlayer(id).forEach(t => wanted.add(t));
+  }
+  // Modo Rival — only the enabled event classes for each rival team.
+  for (const id of args.rivalTeamIds ?? []) {
+    for (const ev of rivalEvents) wanted.add(RIVAL_TOPIC_BY_EVENT[ev](id));
   }
 
   const current = await readSubscribedTopics();

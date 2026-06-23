@@ -532,6 +532,11 @@ const de: TranslationKeys = {
     ageYears: '{{age}} J.',
     followToast: '{{name}} wird verfolgt',
     unfollowToast: '{{name}} nicht mehr verfolgt',
+    rival: '😈 Rivalen-Modus',
+    rivalOn: '😈 Aktiv',
+    rivalCaption: 'Wir sagen dir, wenn sie verlieren',
+    rivalOnToast: 'Rivalen-Modus für {{name}} an 😈',
+    rivalOffToast: '{{name}} aus deinen Rivalen entfernt',
   },
 
   // ── Player detail ──────────────────────────────────────────────────────────

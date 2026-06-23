@@ -36,9 +36,13 @@ import { CupBracketView } from '../components/CupBracketView';
 import { useCupBracket } from '../hooks/useCupBracket';
 import type { CupTie } from '../services/sportsApi';
 import { getLeagueConfig, type LeagueZone } from '../config/leagues';
+import { MODO_RIVAL_ENABLED } from '../config/features';
 import { isImageUri } from '../utils/imageUri';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'TeamDetail'>;
+
+/** Modo Rival accent — fiery red-orange, distinct from the live red. */
+const RIVAL_COLOR = '#FF5630';
 type Tab = 'resumen' | 'partidos' | 'plantilla' | 'tabla' | 'bracket';
 type MatchFilter = 'all' | 'wc' | 'friendly';
 
@@ -1449,7 +1453,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
   const { t } = useTranslation();
   const { isDark } = useDarkMode();
   const navigation = useNavigation();
-  const { isFollowingTeam, toggleFollowTeam } = useFavorites();
+  const { isFollowingTeam, toggleFollowTeam, isRivalTeam, toggleRivalTeam } = useFavorites();
   const [activeTab, setActiveTab] = useState<Tab>('resumen');
   const scrollY = useRef(new Animated.Value(0)).current;
   const heroHeight = useRef(0);
@@ -1457,6 +1461,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
 
   const { data, loading, error } = useTeamDetail(teamId, seasonId);
   const isFollowing = isFollowingTeam(String(teamId));
+  const isRival = isRivalTeam(String(teamId));
 
   // WC bracket — only fetch for WC teams (leagueId 732)
   const isWCTeam = data?.info.leagueId === 732;
@@ -1614,16 +1619,36 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
               <Text style={[hs.cityText, { color: hTextSoft }]}>{data.info.city}</Text>
             ) : null}
 
-            {/* Follow button */}
-            <TouchableOpacity
-              style={[hs.followBtn, { borderColor: hBorderCol }, isFollowing && { backgroundColor: hText, borderColor: hText }]}
-              onPress={() => toggleFollowTeam(String(teamId))}
-              activeOpacity={0.8}
-            >
-              <Text style={[hs.followText, { color: hText }, isFollowing && { color: isDark ? '#111' : '#fff' }]}>
-                {isFollowing ? t('team.following') : t('team.follow')}
+            {/* Follow + Modo Rival buttons */}
+            <View style={hs.actionRow}>
+              <TouchableOpacity
+                style={[hs.followBtn, { borderColor: hBorderCol }, isFollowing && { backgroundColor: hText, borderColor: hText }]}
+                onPress={() => toggleFollowTeam(String(teamId))}
+                activeOpacity={0.8}
+              >
+                <Text style={[hs.followText, { color: hText }, isFollowing && { color: isDark ? '#111' : '#fff' }]}>
+                  {isFollowing ? t('team.following') : t('team.follow')}
+                </Text>
+              </TouchableOpacity>
+
+              {MODO_RIVAL_ENABLED && (
+                <TouchableOpacity
+                  style={[hs.followBtn, { borderColor: hBorderCol }, isRival && { backgroundColor: RIVAL_COLOR, borderColor: RIVAL_COLOR }]}
+                  onPress={() => toggleRivalTeam(String(teamId))}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[hs.followText, { color: hText }, isRival && { color: '#fff' }]}>
+                    {isRival ? t('team.rivalOn') : t('team.rival')}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {MODO_RIVAL_ENABLED && isRival && (
+              <Text style={[hs.rivalCaption, { color: RIVAL_COLOR }]}>
+                {t('team.rivalCaption')}
               </Text>
-            </TouchableOpacity>
+            )}
 
             {/* Stats strip: pos, pts, form */}
             {data?.teamStanding && (() => {
@@ -1741,11 +1766,13 @@ const hs = StyleSheet.create({
   logo: { width: 56, height: 56, borderRadius: 6 },
   teamName: { fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
   cityText: { fontSize: 12, marginTop: -2 },
+  actionRow: { flexDirection: 'row', gap: 8, marginTop: 2 },
   followBtn: {
     paddingHorizontal: 20, paddingVertical: 7, borderRadius: 20,
     borderWidth: 1.5, backgroundColor: 'transparent', marginTop: 2,
   },
   followText: { fontSize: 12, fontWeight: '700' },
+  rivalCaption: { fontSize: 11, fontWeight: '600', marginTop: 6 },
   statsStrip: { flexDirection: 'row', alignItems: 'center', gap: 20, marginTop: 4 },
   statItem: { alignItems: 'center', gap: 2 },
   statValue: { fontSize: 18, fontWeight: '800' },

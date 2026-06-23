@@ -532,6 +532,11 @@ const fr: TranslationKeys = {
     ageYears: '{{age}} ans',
     followToast: 'Vous suivez {{name}}',
     unfollowToast: 'Vous ne suivez plus {{name}}',
+    rival: '😈 Mode Rival',
+    rivalOn: '😈 Activé',
+    rivalCaption: 'On te prévient quand ça tourne mal pour eux',
+    rivalOnToast: 'Mode Rival activé pour {{name}} 😈',
+    rivalOffToast: '{{name}} retiré de tes rivaux',
   },
 
   // ── Player detail ──────────────────────────────────────────────────────────

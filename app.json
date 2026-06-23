@@ -3,7 +3,7 @@
     "name": "Analistas",
     "slug": "Analistas",
     "scheme": "analistas",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -60,6 +60,7 @@
           "remote-notification"
         ],
         "ITSAppUsesNonExemptEncryption": false,
+        "FirebaseAutomaticScreenReportingEnabled": false,
         "CFBundleURLTypes": [
           {
             "CFBundleURLSchemes": [
@@ -116,6 +117,12 @@
       "eas": {
         "projectId": "97403d80-dd71-466d-8a26-43eec99646fd"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/97403d80-dd71-466d-8a26-43eec99646fd"
     }
   }
 }

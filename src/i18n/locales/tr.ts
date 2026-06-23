@@ -529,6 +529,11 @@ const tr: TranslationKeys = {
     ageYears: '{{age}} yaş',
     followToast: '{{name}} takip ediliyor',
     unfollowToast: '{{name}} takip bırakıldı',
+    rival: '😈 Rakip Modu',
+    rivalOn: '😈 Aktif',
+    rivalCaption: 'Kötü gittiğinde haber veririz',
+    rivalOnToast: '{{name}} için Rakip Modu açık 😈',
+    rivalOffToast: '{{name}} rakiplerinden çıkarıldı',
   },
 
   // ── Player detail ──────────────────────────────────────────────────────────

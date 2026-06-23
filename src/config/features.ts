@@ -66,3 +66,17 @@ export const REDEEM_CODE_ENABLED = false;
  * Ad Unit IDs live in src/components/AdMobBanner.tsx.
  */
 export const ADMOB_ENABLED = true;
+
+/**
+ * Master switch for Modo Rival (the 😈 "rival bad-news" feature).
+ *
+ * Kept FALSE until the full feature is complete: Cloud Functions detectors
+ * (loss / big loss / red card / missed penalty / eliminated), the per-event
+ * settings toggles, and the discovery card. The client foundation (the button
+ * in TeamDetailScreen, the rival FCM topics, and the rival state in
+ * FavoritesContext) ships DORMANT in the binary so the remaining pieces can be
+ * switched on later via an EAS Update (OTA) — no new App Store submission.
+ *
+ * Flip to TRUE (via OTA) once detectors are deployed + settings/discovery land.
+ */
+export const MODO_RIVAL_ENABLED = false;
