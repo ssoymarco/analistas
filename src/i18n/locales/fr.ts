@@ -122,6 +122,11 @@ const fr: TranslationKeys = {
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',
     footnote: 'Tous les matchs de ta liste de suivis respectent ces paramètres. Tu peux désactiver les notifications d\'un match en particulier avec le bouton cloche.',
+    sectionRival: 'Mode Rival 😈',
+    rivalResult: 'A perdu un match',
+    rivalResultDescription: 'Inclut les lourdes défaites (4+).',
+    rivalRedCard: 'Carton rouge',
+    rivalPenMiss: 'A raté un penalty',
   },
 
   // ── PartidosScreen ─────────────────────────────────────────────────────────

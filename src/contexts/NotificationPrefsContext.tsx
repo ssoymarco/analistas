@@ -28,6 +28,13 @@ export interface NotificationPrefs {
   estadioMode: boolean;
   /** Delay in minutes when Modo Estadio is active (1 | 2 | 5 | 10) */
   estadioDelay: number;
+  // ── 😈 Modo Rival — which "bad news" about rival teams to receive ──────────
+  /** Rival lost a match (covers normal losses AND goleadas). */
+  rivalResult: boolean;
+  /** A rival player was sent off. */
+  rivalRedCard: boolean;
+  /** Rival missed a penalty (in-play). */
+  rivalPenMiss: boolean;
 }
 
 /** Subset of NotificationPrefs that the user can override on a per-match
@@ -66,11 +73,14 @@ const DEFAULT_PREFS: NotificationPrefs = {
   substitutions: false, var: true,
   estadioMode: false,
   estadioDelay: 2,
+  rivalResult: true,
+  rivalRedCard: true,
+  rivalPenMiss: true,
 };
 
 interface NotificationPrefsContextType {
   prefs: NotificationPrefs;
-  togglePref: (key: keyof Pick<NotificationPrefs, 'notificationsEnabled' | 'matchReminder' | 'goals' | 'matchStart' | 'halftime' | 'matchEnd' | 'lineups' | 'yellowCards' | 'redCards' | 'substitutions' | 'var' | 'estadioMode'>) => void;
+  togglePref: (key: keyof Pick<NotificationPrefs, 'notificationsEnabled' | 'matchReminder' | 'goals' | 'matchStart' | 'halftime' | 'matchEnd' | 'lineups' | 'yellowCards' | 'redCards' | 'substitutions' | 'var' | 'estadioMode' | 'rivalResult' | 'rivalRedCard' | 'rivalPenMiss'>) => void;
   /** Set the Modo Estadio delay in minutes */
   setEstadioDelay: (minutes: number) => void;
   /** Set how many minutes before kickoff the match reminder fires */

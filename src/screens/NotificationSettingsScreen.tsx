@@ -17,6 +17,7 @@ import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useNotificationPrefs, type NotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { SectionHeader } from '../components/SectionHeader';
+import { MODO_RIVAL_ENABLED } from '../config/features';
 import { radius } from '../theme/tokens';
 
 // ── Pill picker options ────────────────────────────────────────────────────
@@ -218,6 +219,38 @@ export const NotificationSettingsScreen: React.FC = () => {
             onChange={setEstadioDelay}
             c={c}
           />
+        )}
+
+        {/* Modo Rival */}
+        {MODO_RIVAL_ENABLED && (
+          <>
+            <SectionHeader label={t('notifications.sectionRival')} />
+            <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
+              <ToggleRow
+                icon="😈"
+                label={t('notifications.rivalResult')}
+                description={t('notifications.rivalResultDescription')}
+                value={prefs.rivalResult}
+                onValueChange={toggle('rivalResult')}
+                c={c}
+              />
+              <ToggleRow
+                icon="🟥"
+                label={t('notifications.rivalRedCard')}
+                value={prefs.rivalRedCard}
+                onValueChange={toggle('rivalRedCard')}
+                c={c}
+              />
+              <ToggleRow
+                icon="🥅"
+                label={t('notifications.rivalPenMiss')}
+                value={prefs.rivalPenMiss}
+                onValueChange={toggle('rivalPenMiss')}
+                c={c}
+                isLast
+              />
+            </View>
+          </>
         )}
 
         {/* Footer note */}

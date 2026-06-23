@@ -122,6 +122,11 @@ const it: TranslationKeys = {
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',
     footnote: 'Tutte le partite nella tua lista di seguite rispettano queste impostazioni. Puoi silenziare le singole partite con il pulsante della campana su ogni scheda.',
+    sectionRival: 'Modalità Rivale 😈',
+    rivalResult: 'Ha perso una partita',
+    rivalResultDescription: 'Include le goleade subite (4+).',
+    rivalRedCard: 'Cartellino rosso',
+    rivalPenMiss: 'Ha sbagliato un rigore',
   },
 
   // ── PartidosScreen ─────────────────────────────────────────────────────────

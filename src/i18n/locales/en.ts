@@ -122,6 +122,11 @@ const en: TranslationKeys = {
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',
     footnote: 'Any match in your followed list respects these settings. You can silence individual matches with the bell button on each card.',
+    sectionRival: 'Rival Mode 😈',
+    rivalResult: 'Lost a match',
+    rivalResultDescription: 'Includes heavy losses (4+).',
+    rivalRedCard: 'Red card',
+    rivalPenMiss: 'Missed a penalty',
     matchSheet: {
       title: 'Notifications for this match',
       subtitle: "Customize which events you want for this match only. Changes won't affect your global settings.",

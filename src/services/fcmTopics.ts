@@ -187,6 +187,18 @@ function topicsForRival(teamId: string): string[] {
   return RIVAL_EVENTS.map(ev => RIVAL_TOPIC_BY_EVENT[ev](teamId));
 }
 
+/** Map the user's 3 rival settings toggles to the rival event classes they
+ *  subscribe to. "Result" covers both normal losses and goleadas. */
+export function rivalEventsFromPrefs(
+  p: { rivalResult: boolean; rivalRedCard: boolean; rivalPenMiss: boolean },
+): RivalEvent[] {
+  const events: RivalEvent[] = [];
+  if (p.rivalResult)  events.push('loss', 'bigLoss');
+  if (p.rivalRedCard) events.push('redCard');
+  if (p.rivalPenMiss) events.push('penMiss');
+  return events;
+}
+
 // ── Persistence helpers ─────────────────────────────────────────────────────
 
 async function readSubscribedTopics(): Promise<Set<string>> {

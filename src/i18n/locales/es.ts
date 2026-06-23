@@ -130,6 +130,11 @@ const es = {
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',
     footnote: 'Cualquier partido en tu lista de seguidos respeta esta configuración. Puedes silenciar partidos individuales con el botón de campana en cada tarjeta.',
+    sectionRival: 'Modo Rival 😈',
+    rivalResult: 'Perdió un partido',
+    rivalResultDescription: 'Incluye goleadas en contra (4+).',
+    rivalRedCard: 'Tarjeta roja',
+    rivalPenMiss: 'Falló un penal',
     // Per-match notifications sheet (opened from the bell in MatchDetailScreen)
     matchSheet: {
       title: 'Notificaciones de este partido',

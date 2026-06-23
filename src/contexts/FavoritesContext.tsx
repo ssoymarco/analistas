@@ -14,7 +14,9 @@ import {
   subscribePlayerTopics, unsubscribePlayerTopics,
   subscribeRivalTopics, unsubscribeRivalTopics,
   reconcileSubscriptions,
+  rivalEventsFromPrefs,
   type DelayBucket,
+  type RivalEvent,
 } from '../services/fcmTopics';
 import { useNotificationPrefs } from './NotificationPrefsContext';
 
@@ -102,6 +104,15 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   const delayBucketRef = useRef<DelayBucket>(delayBucket);
   useEffect(() => { delayBucketRef.current = delayBucket; }, [delayBucket]);
 
+  // ── Modo Rival enabled events (derived from notification prefs) ──
+  // Which rival "bad news" classes the user wants. Threaded into reconcile so
+  // toggling a rival setting subscribes/unsubscribes that class across every
+  // rival team. Signature string drives the re-reconcile effect below.
+  const rivalEvents: RivalEvent[] = rivalEventsFromPrefs(prefs);
+  const rivalEventsSig = `${prefs.rivalResult}|${prefs.rivalRedCard}|${prefs.rivalPenMiss}`;
+  const rivalEventsRef = useRef<RivalEvent[]>(rivalEvents);
+  useEffect(() => { rivalEventsRef.current = rivalEvents; }, [rivalEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Refs keep latest values accessible inside async callbacks without stale closures
   const matchRef  = useRef<string[]>([]);
   const teamRef   = useRef<string[]>([]);
@@ -145,6 +156,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
         leagueIds:    parsedLeagues,  // ignored inside reconcileSubscriptions (display-only)
         playerIds:    parsedPlayers,
         rivalTeamIds: parsedRivals,
+        rivalEvents:  rivalEventsRef.current,
         delayBucket:  delayBucketRef.current,
       }).catch(() => {});
     });
@@ -163,9 +175,27 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       leagueIds:    leagueRef.current,
       playerIds:    playerRef.current,
       rivalTeamIds: rivalRef.current,
+      rivalEvents:  rivalEventsRef.current,
       delayBucket:  delayBucket,
     }).catch(() => {});
   }, [delayBucket]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Modo Rival settings change → re-reconcile rival subscriptions ──────────
+  // When the user toggles which rival "bad news" they want, every rival team
+  // needs to (un)subscribe the affected event class. Skipped on mount (the
+  // cold-start reconcile already covers it).
+  const isFirstRivalMount = useRef(true);
+  useEffect(() => {
+    if (isFirstRivalMount.current) { isFirstRivalMount.current = false; return; }
+    reconcileSubscriptions({
+      teamIds:      teamRef.current,
+      leagueIds:    leagueRef.current,
+      playerIds:    playerRef.current,
+      rivalTeamIds: rivalRef.current,
+      rivalEvents:  rivalEventsRef.current,
+      delayBucket:  delayBucketRef.current,
+    }).catch(() => {});
+  }, [rivalEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── AppState foreground → re-reconcile to heal any mid-flip desync ─────────
   // If the user changed their Modo Estadio delay while the app was backgrounded,
@@ -179,6 +209,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
           leagueIds:    leagueRef.current,
           playerIds:    playerRef.current,
           rivalTeamIds: rivalRef.current,
+          rivalEvents:  rivalEventsRef.current,
           delayBucket:  delayBucketRef.current,
         }).catch(() => {});
       }
@@ -233,6 +264,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
           // wrong topics (or nothing) for their actual favorites.
           reconcileSubscriptions({
             teamIds: t, leagueIds: l, playerIds: p, rivalTeamIds: rv,
+            rivalEvents: rivalEventsRef.current,
             delayBucket: delayBucketRef.current,
           }).catch(() => {});
         } else {
@@ -344,7 +376,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       if (isRival) {
         unsubscribeRivalTopics(teamId).catch(() => {});
       } else {
-        subscribeRivalTopics(teamId).catch(() => {});
+        subscribeRivalTopics(teamId, rivalEventsRef.current).catch(() => {});
         // Mutual exclusivity: a rival isn't a followed team — drop the follow.
         if (teamRef.current.includes(teamId)) {
           const nextTeams = teamRef.current.filter(id => id !== teamId);

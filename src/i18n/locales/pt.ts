@@ -122,6 +122,11 @@ const pt: TranslationKeys = {
     minutes_one: '{{count}} min',
     minutes_other: '{{count}} min',
     footnote: 'Qualquer jogo na sua lista de seguidos respeita estas configurações. Você pode silenciar jogos individuais com o botão de sino em cada cartão.',
+    sectionRival: 'Modo Rival 😈',
+    rivalResult: 'Perdeu um jogo',
+    rivalResultDescription: 'Inclui goleadas sofridas (4+).',
+    rivalRedCard: 'Cartão vermelho',
+    rivalPenMiss: 'Perdeu um pênalti',
   },
 
   // ── PartidosScreen ─────────────────────────────────────────────────────────

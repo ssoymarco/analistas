@@ -122,6 +122,11 @@ const de: TranslationKeys = {
     minutes_one: '{{count}} Min.',
     minutes_other: '{{count}} Min.',
     footnote: 'Jedes Spiel in deiner Verfolgungsliste respektiert diese Einstellungen. Du kannst einzelne Spiele mit der Glocke auf jeder Karte stummschalten.',
+    sectionRival: 'Rivalen-Modus 😈',
+    rivalResult: 'Hat verloren',
+    rivalResultDescription: 'Inklusive klarer Niederlagen (4+).',
+    rivalRedCard: 'Rote Karte',
+    rivalPenMiss: 'Elfmeter verschossen',
   },
 
   // ── PartidosScreen ─────────────────────────────────────────────────────────

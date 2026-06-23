@@ -119,6 +119,11 @@ const tr: TranslationKeys = {
     minutes_one: '{{count}} dk',
     minutes_other: '{{count}} dk',
     footnote: 'Takip ettiğin tüm maçlar bu ayarlara uyar. Her karttaki çan düğmesiyle tek tek maçları sessize alabilirsin.',
+    sectionRival: 'Rakip Modu 😈',
+    rivalResult: 'Maç kaybetti',
+    rivalResultDescription: 'Ağır yenilgileri de içerir (4+).',
+    rivalRedCard: 'Kırmızı kart',
+    rivalPenMiss: 'Penaltı kaçırdı',
   },
 
   // ── PartidosScreen ─────────────────────────────────────────────────────────
