@@ -13,6 +13,9 @@
 
 import * as Sentry from '@sentry/react-native';
 
+// In-memory rate-limit counter — resets on each app launch.
+const _sentryEventCounts = new Map<string, number>();
+
 const SENTRY_DSN: string = 'https://4b909e1e1c12141e4efc1c001335f321@o4511302084460544.ingest.us.sentry.io/4511302091407360';
 
 export function initSentry(): void {
@@ -43,40 +46,58 @@ export function initSentry(): void {
     // Log Sentry SDK activity in dev (remove if too noisy).
     debug: false,
 
-    // Called before every event is sent. Used for two things:
-    //   1. Scrubbing PII (email, etc.) — none today, hook is here for later.
-    //   2. Dropping known-benign noise that the auto-fetch instrumentation
-    //      captures even though our code already handles it (see below).
+    // ── beforeSend: noise filter + per-type rate limiter ─────────────────
+    // Goals:
+    //   1. Drop known-benign errors that are already handled in code.
+    //   2. Cap repeated errors so one flapping issue can't burn the monthly quota.
+    //   3. Never drop genuine crashes (fatal = level 'fatal' or unhandled).
     beforeSend(event) {
-      // ── Drop AbortError ────────────────────────────────────────────────
-      // The Sentry React-Native SDK auto-instruments `fetch()` and reports
-      // EVERY rejection, including intentional aborts via AbortController.
-      // We use timeouts in two places and both already catch + fall back:
-      //
-      //   • useUserCountry.ts        4s timeout on the Cloudflare /geo Worker
-      //                              → returns null, falls back to device locale.
-      //
-      //   • services/sportmonks.ts  15s timeout on SportMonks calls
-      //                              → throws cleanly, caller decides how to
-      //                                react (typically retry or use cache).
-      //
-      // Both are non-fatal and already log/handle. Reporting them to Sentry
-      // produces noise that drowns out real bugs, so we drop the event here.
-      // We match conservatively: the exception's `type` is "AbortError" AND
-      // its `value` is "Aborted" (DOM spec exact wording).
-      const ex = event.exception?.values?.[0];
-      if (ex?.type === 'AbortError' && ex?.value === 'Aborted') {
-        return null;
-      }
+      const ex   = event.exception?.values?.[0];
+      const type  = ex?.type  ?? '';
+      const value = ex?.value ?? '';
+
+      // ── 1. Always let fatal / unhandled crashes through ───────────────
+      // These are the events we actually need to investigate.
+      const isFatal = event.level === 'fatal' ||
+        event.exception?.values?.some(e => e.mechanism?.handled === false);
+      if (isFatal) return event;
+
+      // ── 2. Drop AbortError ────────────────────────────────────────────
+      // Intentional fetch aborts via AbortController (timeouts in
+      // useUserCountry + sportmonks). Non-fatal, already caught + handled.
+      if (type === 'AbortError') return null;
+
+      // ── 3. Drop Firebase offline / permission noise ───────────────────
+      // These fire on every session where the device is offline or a
+      // public Firestore read races with auth init. Both cases are handled
+      // gracefully in the data layer (fallback to cache / retry).
+      if (value.includes('client is offline')) return null;
+      if (value.includes('Missing or insufficient permissions')) return null;
+      if (value.includes('Failed to get document because')) return null;
+
+      // ── 4. Drop generic network errors ───────────────────────────────
+      // RN's fetch throws TypeError("Network request failed") on any
+      // connectivity blip. Our API layer already retries / shows offline
+      // banner. No actionable info for us here.
+      if (type === 'TypeError' && value.includes('Network request failed')) return null;
+
+      // ── 5. Per-type rate limit: max 25 events per session ─────────────
+      // Prevents a single flapping error from consuming the whole quota.
+      // Resets on each app launch (in-memory map). Fatal events are exempt
+      // (already returned above).
+      const key   = `${type}::${value.substring(0, 80)}`;
+      const count = (_sentryEventCounts.get(key) ?? 0) + 1;
+      _sentryEventCounts.set(key, count);
+      if (count > 25) return null;
 
       return event;
     },
 
-    // Belt-and-suspenders: even if `beforeSend` somehow misses the event
-    // (e.g. error thrown outside a fetch wrapper), this regex stops Sentry
-    // from capturing it at SDK level. Cheap and idempotent.
     ignoreErrors: [
       /AbortError/i,
+      /client is offline/i,
+      /Missing or insufficient permissions/i,
+      /Network request failed/i,
     ],
   });
 }
