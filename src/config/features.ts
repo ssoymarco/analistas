@@ -79,4 +79,18 @@ export const ADMOB_ENABLED = true;
  *
  * Flip to TRUE (via OTA) once detectors are deployed + settings/discovery land.
  */
-export const MODO_RIVAL_ENABLED = false;
+export const MODO_RIVAL_ENABLED = true;
+
+/**
+ * Master switch for AdMob App Open ads.
+ *
+ * Shows a full-screen ad when the user brings the app to the foreground
+ * (background → active). Capped at 1 show per 4 hours. Uses non-personalized
+ * ads only (no ATT prompt needed).
+ *
+ * ⚠️  Before flipping to TRUE: create two "App Open" ad units in AdMob
+ *      (one iOS, one Android) and paste their IDs into AppOpenAdManager.tsx.
+ *
+ * Flip to TRUE via OTA (eas update --channel production) — no new build needed.
+ */
+export const APPOPEN_ENABLED = false;

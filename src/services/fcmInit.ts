@@ -66,6 +66,9 @@ const SUBSCRIBED_TOPICS_KEY = 'analistas_fcm_subscribed_topics';
 // Singleton promise so callers can `await fcmReady()` instead of racing
 // the root App useEffect — see FavoritesContext.reconcileSubscriptions.
 let fcmInitPromise: Promise<string | null> | null = null;
+// Set to true when the user explicitly denied notification permission.
+// Prevents retry loops — there's nothing we can do until they re-enable in Settings.
+let fcmPermissionDenied = false;
 
 /**
  * Initialize Firebase Messaging — request permission via the Firebase SDK
@@ -87,7 +90,21 @@ let fcmInitPromise: Promise<string | null> | null = null;
  * permission is denied or the platform can't deliver push.
  */
 export function initializeFCM(): Promise<string | null> {
-  if (!fcmInitPromise) fcmInitPromise = doInitializeFCM();
+  if (fcmPermissionDenied) return Promise.resolve(null);
+  if (!fcmInitPromise) {
+    fcmInitPromise = doInitializeFCM().then(token => {
+      if (!token && !fcmPermissionDenied) {
+        // Transient failure (network timeout, APNs slow, etc.) — reset the
+        // singleton so the next foreground reconcile retries init instead of
+        // permanently returning null for the rest of the session.
+        fcmInitPromise = null;
+      }
+      return token;
+    }).catch(() => {
+      fcmInitPromise = null;
+      return null;
+    });
+  }
   return fcmInitPromise;
 }
 
@@ -180,6 +197,7 @@ async function doInitializeFCM(): Promise<string | null> {
       authStatus === messaging.AuthorizationStatus.PROVISIONAL;
     addBreadcrumb('fcm', 'permission resolved', { authStatus, granted });
     if (!granted) {
+      fcmPermissionDenied = true;
       Sentry.setContext('fcm', { granted: false, authStatus });
       return null;
     }
@@ -223,20 +241,17 @@ async function doInitializeFCM(): Promise<string | null> {
       fcm_token_first12:   fcmToken?.substring(0, 12) ?? null,
     });
 
-    // Final guaranteed Sentry event — captureMessage always sends a payload
-    // (unlike setContext which only attaches to other events). Tags carry
-    // the booleans so dashboard filters can find broken devices instantly.
-    Sentry.captureMessage('fcm-init result', {
-      level: !!fcmToken ? 'info' : 'warning',
-      tags: {
-        fcm_apns_obtained: String(apnsHadToken),
-        fcm_token_obtained: String(!!fcmToken),
-      },
-      extra: {
-        fcm_token_first12: fcmToken?.substring(0, 12) ?? null,
-        platform: Platform.OS,
-      },
-    });
+    // Only report to Sentry when FCM init fails — successful inits are noise
+    // that burns quota (was generating 6K+ events/month from normal sessions).
+    if (!fcmToken) {
+      Sentry.captureMessage('fcm-init: no token obtained', {
+        level: 'warning',
+        tags: {
+          fcm_apns_obtained: String(apnsHadToken),
+          platform: Platform.OS,
+        },
+      });
+    }
 
     return fcmToken ?? null;
   } catch (err) {
@@ -347,10 +362,38 @@ export function attachFCMHandlers(): () => void {
     await AsyncStorage.setItem(FCM_TOKEN_KEY, token).catch(() => {});
   });
 
+  // Background dedup — dismiss duplicate notifications from the notification
+  // center when the app comes to foreground. Handles the case where a user
+  // follows BOTH teams in a match: FCM sends to both team topics and the OS
+  // displays two banners. apns-collapse-id handles the notification CENTER
+  // (collapses duplicates into one entry) but can't prevent two simultaneous
+  // banners. On return to foreground we clean up any remaining duplicates.
+  const appStateRef = AppState.currentState;
+  const unsubAppState = AppState.addEventListener('change', async nextState => {
+    if (nextState !== 'active') return;
+    try {
+      const presented = await Notifications.getPresentedNotificationsAsync();
+      const seen = new Map<string, string>(); // dedupKey → notification identifier
+      for (const notif of presented) {
+        const d = notif.request.content.data as Record<string, unknown> | undefined;
+        const key = buildDedupId(d);
+        if (!key) continue;
+        if (seen.has(key)) {
+          await Notifications.dismissNotificationAsync(notif.request.identifier).catch(() => {});
+        } else {
+          seen.set(key, notif.request.identifier);
+        }
+      }
+    } catch {
+      // Non-fatal — notification center dedup is best-effort.
+    }
+  });
+
   return () => {
     unsubMessage();
     unsubOpened();
     unsubRefresh();
+    unsubAppState.remove();
   };
 }
 

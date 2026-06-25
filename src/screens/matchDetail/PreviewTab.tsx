@@ -12,7 +12,8 @@ import { useThemeColors } from '../../theme/useTheme';
 import type { Match, MatchDetail, TeamFormEntry, MissingPlayer } from '../../data/types';
 import { PredictionsCarousel, AIPredictionsSection } from './EnVivoTab';
 import { PlaceholderBannerAd } from '../../components/PlaceholderBannerAd';
-import { BETTING_CONTENT_ENABLED } from '../../config/features';
+import AdMobBanner from '../../components/AdMobBanner';
+import { BETTING_CONTENT_ENABLED, ADMOB_ENABLED } from '../../config/features';
 import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupVenues';
 
 // ── Traduce condiciones meteorológicas de la API (siempre en inglés) ──────────
@@ -516,6 +517,7 @@ export const PreviewTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
       )}
       {/* SportMonks-powered pre-match insights (Spanish-translated) */}
       <MatchFactsCard     match={match} detail={detail} />
+      {ADMOB_ENABLED && <AdMobBanner />}
       {/* Caliente ad — gated off for v1.0 (no agreement yet + Apple 2.3.6) */}
       {BETTING_CONTENT_ENABLED && (
         <PlaceholderBannerAd variant="caliente-mrec" />

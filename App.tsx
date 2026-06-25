@@ -25,7 +25,7 @@ import { initialize } from './src/services/notifications';
 import { initializeFCM, initializeFCMAtStartup, attachFCMHandlers } from './src/services/fcmInit';
 import { navigateToMatch, buildMatchStubFromPayload } from './src/utils/navigationRef';
 import mobileAds from 'react-native-google-mobile-ads';
-import { ADMOB_ENABLED } from './src/config/features';
+import { ADMOB_ENABLED, APPOPEN_ENABLED } from './src/config/features';
 // ── Sentry user sync ──────────────────────────────────────────────────────────
 // Sits inside AuthProvider so it can read the current user and tag Sentry
 // events with the user ID. Renders nothing.
@@ -54,6 +54,7 @@ function AppInner() {
     <>
       <AppNavigator />
       <OfflineBanner />
+      {APPOPEN_ENABLED && <AppOpenAdManager />}
       <UpdateModal
         visible={status !== 'none' && !updateDismissed}
         status={status}
