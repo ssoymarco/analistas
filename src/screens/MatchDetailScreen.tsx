@@ -442,7 +442,8 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
       .sort((a, b) => a.minute - b.minute);
 
     // "Guillermo Martínez Ayala" → "Martínez"
-    const firstLastName = (name: string) => {
+    const firstLastName = (name: string | null | undefined) => {
+      if (!name) return '?';
       const parts = name.trim().split(/\s+/);
       return parts.length >= 2 ? parts[1] : parts[0];
     };
