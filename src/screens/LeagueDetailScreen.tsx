@@ -9,10 +9,10 @@ import {
   ScrollView,
   Animated,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -83,7 +83,7 @@ function getZoneColor(position: number, totalTeams: number, zones?: LeagueZone[]
 // ── Team Logo ──────────────────────────────────────────────────────────────
 const TeamLogo: React.FC<{ logo: string; size?: number }> = ({ logo, size = 22 }) => {
   if (isImageUri(logo)) {
-    return <Image source={{ uri: logo }} style={{ width: size, height: size, borderRadius: 2 }} resizeMode="contain" />;
+    return <Image source={{ uri: logo }} style={{ width: size, height: size, borderRadius: 2 }} contentFit="contain" />;
   }
   return <Text style={{ fontSize: size - 4 }}>⚽</Text>;
 };
@@ -489,7 +489,7 @@ const GoleadoresTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
               </Text>
               <View style={gs.avatarWrap}>
                 {isImageUri(scorer.playerImage) ? (
-                  <Image source={{ uri: scorer.playerImage }} style={gs.avatar} resizeMode="cover" />
+                  <Image source={{ uri: scorer.playerImage }} style={gs.avatar} contentFit="cover" />
                 ) : (
                   <View style={[gs.avatar, { backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }]}>
                     <Text style={{ fontSize: 14 }}>👤</Text>
@@ -501,7 +501,7 @@ const GoleadoresTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
                 {scorer.teamName ? (
                   <View style={gs.teamRow}>
                     {isImageUri(scorer.teamLogo) && (
-                      <Image source={{ uri: scorer.teamLogo }} style={gs.teamMiniLogo} resizeMode="contain" />
+                      <Image source={{ uri: scorer.teamLogo }} style={gs.teamMiniLogo} contentFit="contain" />
                     )}
                     <Text style={[gs.teamName, { color: c.textTertiary }]} numberOfLines={1}>{scorer.teamName}</Text>
                   </View>
@@ -608,7 +608,7 @@ const StatListTab: React.FC<{ data: LeagueDetailData; type: 'assists' | 'cards' 
               </Text>
               <View style={gs.avatarWrap}>
                 {isImageUri(row.playerImage) ? (
-                  <Image source={{ uri: row.playerImage }} style={gs.avatar} resizeMode="cover" />
+                  <Image source={{ uri: row.playerImage }} style={gs.avatar} contentFit="cover" />
                 ) : (
                   <View style={[gs.avatar, { backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }]}>
                     <Text style={{ fontSize: 14 }}>👤</Text>
@@ -620,7 +620,7 @@ const StatListTab: React.FC<{ data: LeagueDetailData; type: 'assists' | 'cards' 
                 {row.teamName ? (
                   <View style={gs.teamRow}>
                     {isImageUri(row.teamLogo) && (
-                      <Image source={{ uri: row.teamLogo }} style={gs.teamMiniLogo} resizeMode="contain" />
+                      <Image source={{ uri: row.teamLogo }} style={gs.teamMiniLogo} contentFit="contain" />
                     )}
                     <Text style={[gs.teamName, { color: c.textTertiary }]} numberOfLines={1}>{row.teamName}</Text>
                   </View>
@@ -681,7 +681,7 @@ const EquiposTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
               >
                 <View style={eq.logoWrap}>
                   {isImageUri(team.logo) ? (
-                    <Image source={{ uri: team.logo }} style={eq.logo} resizeMode="contain" />
+                    <Image source={{ uri: team.logo }} style={eq.logo} contentFit="contain" />
                   ) : (
                     <Text style={{ fontSize: 28 }}>⚽</Text>
                   )}
@@ -1523,7 +1523,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
             {/* League logo */}
             <View style={[s.leagueLogoWrap, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)' }]}>
               {isImageUri(displayLogo) ? (
-                <Image source={{ uri: displayLogo }} style={s.leagueLogo} resizeMode="contain" />
+                <Image source={{ uri: displayLogo }} style={s.leagueLogo} contentFit="contain" />
               ) : (
                 <Text style={{ fontSize: 56 }}>{fallbackEmoji}</Text>
               )}

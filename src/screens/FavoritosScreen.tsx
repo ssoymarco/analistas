@@ -6,8 +6,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, FlatList, Image, SectionList,
+  TextInput, FlatList, SectionList,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -281,7 +282,7 @@ const ItemAvatar: React.FC<{
         <Image
           source={{ uri: image }}
           style={{ width: s * 0.86, height: s * 0.86, borderRadius: isPlayer ? s / 2 : radius - 1 }}
-          resizeMode="contain"
+          contentFit="contain"
           onError={() => setImgFailed(true)}
         />
       </View>

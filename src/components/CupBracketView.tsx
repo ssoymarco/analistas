@@ -6,11 +6,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   ScrollView,
   StyleSheet,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import type { CupRound, CupTie, CupLeg } from '../services/sportsApi';
@@ -48,7 +48,7 @@ const formatTieDate = (iso: string, lang: string): string => {
 // ── Team Logo ─────────────────────────────────────────────────────────────────
 const Logo: React.FC<{ uri: string; size?: number }> = ({ uri, size = 22 }) => {
   if (isImageUri(uri)) {
-    return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: 3 }} resizeMode="contain" />;
+    return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: 3 }} contentFit="contain" />;
   }
   return <Text style={{ fontSize: size - 4 }}>{uri || '⚽'}</Text>;
 };

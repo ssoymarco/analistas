@@ -2,9 +2,9 @@ import React from 'react';
 import {
   View,
   Text,
-  Image,
   StyleSheet,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { AnimatedPressable } from './AnimatedPressable';
@@ -29,7 +29,7 @@ const TeamLogo = ({ logo, size = 24 }: { logo: string; size?: number }) => {
       <Image
         source={{ uri: logo }}
         style={{ width: size, height: size, borderRadius: 3 }}
-        resizeMode="contain"
+        contentFit="contain"
       />
     );
   }

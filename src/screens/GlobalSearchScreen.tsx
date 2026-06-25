@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, FlatList, Image,
+  View, Text, TextInput, TouchableOpacity, FlatList,
   StyleSheet, Keyboard, ActivityIndicator, Platform,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
@@ -451,7 +452,7 @@ export const GlobalSearchScreen: React.FC = () => {
             borderRadius: type === 'player' ? size / 2 : 8,
             backgroundColor: badgeBg,
           }}
-          resizeMode="contain"
+          contentFit="contain"
         />
       );
     }

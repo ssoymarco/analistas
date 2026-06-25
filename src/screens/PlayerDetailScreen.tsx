@@ -9,10 +9,10 @@ import {
   ScrollView,
   Animated,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -200,7 +200,7 @@ const ResumenTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
         >
           <View style={rt.teamRow}>
             {isImageUri(data.teamLogo) ? (
-              <Image source={{ uri: data.teamLogo }} style={rt.teamLogo} resizeMode="contain" />
+              <Image source={{ uri: data.teamLogo }} style={rt.teamLogo} contentFit="contain" />
             ) : (
               <View style={[rt.teamLogo, { backgroundColor: c.surface, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }]}>
                 <Text style={{ fontSize: 20 }}>⚽</Text>
@@ -659,7 +659,7 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
             {/* Player avatar */}
             <View style={[ps.avatarWrap, { backgroundColor: hLogoBg }]}>
               {isImageUri(displayImage) ? (
-                <Image source={{ uri: displayImage }} style={ps.avatar} resizeMode="cover" />
+                <Image source={{ uri: displayImage }} style={ps.avatar} contentFit="cover" />
               ) : (
                 <Text style={{ fontSize: 40 }}>{displayFlag}</Text>
               )}
@@ -694,7 +694,7 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
                     }}
                   >
                     {isImageUri(displayTeamLogo) ? (
-                      <Image source={{ uri: displayTeamLogo }} style={ps.teamDot} resizeMode="contain" />
+                      <Image source={{ uri: displayTeamLogo }} style={ps.teamDot} contentFit="contain" />
                     ) : (
                       <View style={[ps.teamDot, { backgroundColor: c.accent }]} />
                     )}

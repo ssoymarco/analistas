@@ -7,7 +7,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   Animated,
   Dimensions,
   ScrollView,
@@ -15,6 +14,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -181,7 +181,7 @@ function TeamBadge({ name, logo, size = 80 }: { name: string; logo: string; size
       backgroundColor: bg, alignItems: 'center', justifyContent: 'center',
     }}>
       {isUrl
-        ? <Image source={{ uri: logo }} style={{ width: size * 0.92, height: size * 0.92 }} resizeMode="contain" />
+        ? <Image source={{ uri: logo }} style={{ width: size * 0.92, height: size * 0.92 }} contentFit="contain" />
         : logo.length <= 2
           ? <Text style={{ fontSize: size * 0.4 }}>{logo}</Text>
           : <Text style={{ fontWeight: '800', color: fg, fontSize: size * 0.27 }}>{init}</Text>
@@ -203,7 +203,7 @@ function TeamBadgeSmall({ name, logo, size = 32 }: { name: string; logo: string;
       backgroundColor: bg, alignItems: 'center', justifyContent: 'center',
     }}>
       {isUrl
-        ? <Image source={{ uri: logo }} style={{ width: size * 0.92, height: size * 0.92 }} resizeMode="contain" />
+        ? <Image source={{ uri: logo }} style={{ width: size * 0.92, height: size * 0.92 }} contentFit="contain" />
         : logo.length <= 2
           ? <Text style={{ fontSize: size * 0.42 }}>{logo}</Text>
           : <Text style={{ fontWeight: '800', color: fg, fontSize: 9 }}>{init}</Text>

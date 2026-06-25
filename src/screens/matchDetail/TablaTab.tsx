@@ -4,7 +4,8 @@
 //   • Cup (knockout only)   → bracket view with ties/legs/aggregate
 //   • Cup (group + knockout) → toggle between "Grupos" and "Bracket" views
 import React, { useRef, useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -49,7 +50,7 @@ function getZoneColor(position: number, totalTeams: number, zones?: LeagueZone[]
 // ── Team logo ────────────────────────────────────────────────────────────────
 const TeamLogo: React.FC<{ logo: string; size?: number }> = ({ logo, size = 22 }) => {
   if (isImageUri(logo)) {
-    return <Image source={{ uri: logo }} style={{ width: size, height: size, borderRadius: 2 }} resizeMode="contain" />;
+    return <Image source={{ uri: logo }} style={{ width: size, height: size, borderRadius: 2 }} contentFit="contain" />;
   }
   return <Text style={{ fontSize: size - 4 }}>{logo}</Text>;
 };
@@ -264,7 +265,7 @@ const GroupStageView: React.FC<{
                   <Text style={[gs.pos, { color: zoneColor || c.textTertiary }]}>{row.position}</Text>
                   <View style={gs.logoCell}>
                     {isImageUri(row.team.logo)
-                      ? <Image source={{ uri: row.team.logo }} style={{ width: 20, height: 20, borderRadius: 2 }} resizeMode="contain" />
+                      ? <Image source={{ uri: row.team.logo }} style={{ width: 20, height: 20, borderRadius: 2 }} contentFit="contain" />
                       : <Text style={{ fontSize: 16 }}>{row.team.logo}</Text>
                     }
                   </View>

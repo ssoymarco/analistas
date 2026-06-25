@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Animated, Easing } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Easing } from 'react-native';
+import { Image } from 'expo-image';
 import { useThemeColors } from '../theme/useTheme';
 import type { Match } from '../data/types';
 import type { LeagueWithMatches } from '../services/sportsApi';
@@ -15,7 +16,7 @@ const LeagueFlag = ({ logo, size = 18 }: { logo: string; size?: number }) => {
       <Image
         source={{ uri: logo }}
         style={{ width: size, height: size, borderRadius: 2 }}
-        resizeMode="contain"
+        contentFit="contain"
       />
     );
   }

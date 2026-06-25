@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Animated, Dimensions, Share, Platform, Image,
+  Animated, Dimensions, Share, Platform,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { PlaceholderBannerAd } from '../components/PlaceholderBannerAd';
 import { BETTING_CONTENT_ENABLED } from '../config/features';
 import { haptics } from '../utils/haptics';
@@ -88,7 +89,7 @@ function ArticleImage({ uri }: { uri: string }) {
     <Image
       source={{ uri }}
       style={s.inlineImage}
-      resizeMode="cover"
+      contentFit="cover"
       onError={() => setFailed(true)}
     />
   );
@@ -292,7 +293,7 @@ export const NewsDetailScreen: React.FC = () => {
             <Image
               source={{ uri: article.image }}
               style={StyleSheet.absoluteFill}
-              resizeMode="cover"
+              contentFit="cover"
               onError={() => setHeroImgFailed(true)}
             />
           ) : (

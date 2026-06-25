@@ -9,13 +9,13 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   Dimensions,
   Modal,
   Pressable,
   ScrollView,
   Animated,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
 import { useDarkMode } from '../../contexts/DarkModeContext';
@@ -359,7 +359,7 @@ const CoachAvatar: React.FC<{
   color: string;
 }> = ({ name, imageUrl, size, color }) => {
   if (imageUrl) {
-    return <Image source={{ uri: imageUrl }} style={{ width: size, height: size, borderRadius: size / 2 }} resizeMode="cover" />;
+    return <Image source={{ uri: imageUrl }} style={{ width: size, height: size, borderRadius: size / 2 }} contentFit="cover" />;
   }
   return (
     <View style={{
@@ -433,7 +433,7 @@ const CoachDetailModal: React.FC<{
             {lineup.coachNationality ? (
               <View style={cdm.flagRow}>
                 {lineup.coachNationalityFlag ? (
-                  <Image source={{ uri: lineup.coachNationalityFlag }} style={cdm.flagImg} resizeMode="cover" />
+                  <Image source={{ uri: lineup.coachNationalityFlag }} style={cdm.flagImg} contentFit="cover" />
                 ) : null}
                 <Text style={[cdm.coachNat, { color: c.textSecondary }]}>
                   {translateCountry(lineup.coachNationalityCode, lineup.coachNationality)}
@@ -443,7 +443,7 @@ const CoachDetailModal: React.FC<{
             {/* Team badge */}
             <View style={cdm.teamRow}>
               {isImageUri(teamLogo) ? (
-                <Image source={{ uri: teamLogo }} style={cdm.teamLogo} resizeMode="contain" />
+                <Image source={{ uri: teamLogo }} style={cdm.teamLogo} contentFit="contain" />
               ) : null}
               <Text style={[cdm.teamName, { color: c.textTertiary }]} numberOfLines={1}>
                 {teamName}
@@ -466,7 +466,7 @@ const CoachDetailModal: React.FC<{
             <Text style={[cdm.infoLabel, { color: c.textTertiary }]}>{t('matchInfo.nationality')}</Text>
             <View style={cdm.infoValueRow}>
               {lineup.coachNationalityFlag ? (
-                <Image source={{ uri: lineup.coachNationalityFlag }} style={cdm.flagImgSmall} resizeMode="cover" />
+                <Image source={{ uri: lineup.coachNationalityFlag }} style={cdm.flagImgSmall} contentFit="cover" />
               ) : null}
               <Text style={[cdm.infoValue, { color: c.textPrimary }]}>
                 {lineup.coachNationality
@@ -546,7 +546,7 @@ const CoachDetailModal: React.FC<{
               {profile.teams.map(team => (
                 <View key={team.id} style={[cdm.teamChip, { backgroundColor: c.card, borderColor: c.border }]}>
                   {team.logo ? (
-                    <Image source={{ uri: team.logo }} style={cdm.teamChipLogo} resizeMode="contain" />
+                    <Image source={{ uri: team.logo }} style={cdm.teamChipLogo} contentFit="contain" />
                   ) : (
                     <Text style={{ fontSize: 16 }}>⚽</Text>
                   )}
@@ -997,7 +997,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
           </Text>
           <View style={ms.coachMeta}>
             {detail.homeLineup.coachNationalityFlag ? (
-              <Image source={{ uri: detail.homeLineup.coachNationalityFlag }} style={ms.coachFlagImg} resizeMode="cover" />
+              <Image source={{ uri: detail.homeLineup.coachNationalityFlag }} style={ms.coachFlagImg} contentFit="cover" />
             ) : null}
             <View style={[ms.coachBadge, { backgroundColor: HOME_COLOR }]}>
               <Text style={ms.coachBadgeText}>Local</Text>
@@ -1033,7 +1033,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
           </Text>
           <View style={ms.coachMeta}>
             {detail.awayLineup.coachNationalityFlag ? (
-              <Image source={{ uri: detail.awayLineup.coachNationalityFlag }} style={ms.coachFlagImg} resizeMode="cover" />
+              <Image source={{ uri: detail.awayLineup.coachNationalityFlag }} style={ms.coachFlagImg} contentFit="cover" />
             ) : null}
             <View style={[ms.coachBadge, { backgroundColor: AWAY_COLOR }]}>
               <Text style={ms.coachBadgeText}>Visitante</Text>

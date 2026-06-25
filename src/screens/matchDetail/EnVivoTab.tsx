@@ -4,9 +4,10 @@
 // Live/Finished: Quick stats, Events, Pressure, Odds, H2H, Form, Info.
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Image,
+  View, Text, StyleSheet, TouchableOpacity,
   ScrollView, Dimensions, Modal, Pressable, Animated, Easing,
 } from 'react-native';
+import { Image } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
@@ -1266,7 +1267,7 @@ const VenueDetailModal: React.FC<{
 
         {/* Venue image */}
         {!!venue.image && isImageUri(venue.image) && (
-          <Image source={{ uri: venue.image }} style={vdm.heroImage} resizeMode="cover" />
+          <Image source={{ uri: venue.image }} style={vdm.heroImage} contentFit="cover" />
         )}
 
         {/* Icon + name row */}
@@ -1367,7 +1368,7 @@ const RefereeDetailModal: React.FC<{
         <View style={rdm.heroRow}>
           <View style={[rdm.photoWrap, { borderColor: '#f59e0b60', backgroundColor: c.surface }]}>
             {referee.imageUrl && isImageUri(referee.imageUrl) ? (
-              <Image source={{ uri: referee.imageUrl }} style={rdm.photo} resizeMode="cover" />
+              <Image source={{ uri: referee.imageUrl }} style={rdm.photo} contentFit="cover" />
             ) : (
               <Text style={{ fontSize: 40 }}>👤</Text>
             )}

@@ -1,6 +1,7 @@
 // ── Noticias Tab — placeholder for match-related news ────────────────────────
 import React from 'react';
-import { View, Text, StyleSheet, Image } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
 import type { Match, MatchDetail } from '../../data/types';

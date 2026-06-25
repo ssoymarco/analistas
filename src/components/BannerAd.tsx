@@ -1,5 +1,6 @@
 import React from 'react';
-import { TouchableOpacity, Image, Text, View, Linking } from 'react-native';
+import { TouchableOpacity, Text, View, Linking } from 'react-native';
+import { Image } from 'expo-image';
 
 interface BannerAdProps {
   imageUrl: string;
@@ -27,7 +28,7 @@ export const BannerAd: React.FC<BannerAdProps> = ({
         <Image
           source={{ uri: imageUrl }}
           style={{ width, height, borderRadius: 6 }}
-          resizeMode="cover"
+          contentFit="cover"
         />
       </TouchableOpacity>
     </View>

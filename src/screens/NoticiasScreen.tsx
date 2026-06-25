@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, RefreshControl,
+  TextInput, RefreshControl,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { haptics } from '../utils/haptics';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -77,7 +78,7 @@ function HeroCard({ article, onPress, c }: { article: NewsArticle; onPress: () =
           <Image
             source={{ uri: article.image }}
             style={StyleSheet.absoluteFill}
-            resizeMode="cover"
+            contentFit="cover"
             onError={() => setImgFailed(true)}
           />
         ) : (
@@ -123,7 +124,7 @@ function StoryCard({ article, onPress, c }: { article: NewsArticle; onPress: () 
           <Image
             source={{ uri: article.image }}
             style={StyleSheet.absoluteFill}
-            resizeMode="cover"
+            contentFit="cover"
             onError={() => setImgFailed(true)}
           />
         ) : (
@@ -157,7 +158,7 @@ function ArticleRow({ article, onPress, c }: { article: NewsArticle; onPress: ()
           <Image
             source={{ uri: article.image }}
             style={[StyleSheet.absoluteFill, { borderRadius: 10 }]}
-            resizeMode="cover"
+            contentFit="cover"
             onError={() => setImgFailed(true)}
           />
         ) : (
