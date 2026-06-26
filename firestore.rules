@@ -145,7 +145,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // ── Deny everything else (including _meta) ────────────────────────────────
+    /// _meta/appVersion — public version manifest read by useVersionCheck on every launch.
+    /// Other _meta docs (e.g. livescoresSnapshot) remain server-only.
+    match /_meta/appVersion {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ── Deny everything else (including the rest of _meta) ────────────────────
     // _meta/livescoresSnapshot is internal diff state for Cloud Functions only —
     // no client should ever need to read it.
     match /{document=**} {
