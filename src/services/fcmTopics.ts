@@ -87,6 +87,11 @@ const SUBSCRIBED_TOPICS_KEY = 'analistas_fcm_subscribed_topics';
 // updated from v1.0.x may still be subscribed to these stale topics. This flag
 // marks that we've already run the cleanup so we don't redo it on every launch.
 const LEGACY_TOPICS_CLEANED_KEY = 'analistas_fcm_legacy_v110_cleaned';
+// One-time flag: heal devices where a Modo Estadio bucket change had a silent
+// FCM unsubscription failure — leaving them subscribed to the old bucket AND
+// the new one, causing every event to arrive twice (once immediately via the
+// stale bucket, once after the Modo Estadio delay via the correct bucket).
+const STALE_BUCKET_HEALED_KEY = 'analistas_fcm_bucket_desync_v1_healed';
 
 /** Delay bucket type for Modo Estadio. */
 export type DelayBucket = 'd0' | 'd2' | 'd5' | 'd10';
@@ -235,12 +240,17 @@ export async function subscribeTeamTopics(teamId: string, bucket: DelayBucket = 
   const wanted     = new Set(topicsForTeam(teamId, bucket));
 
   // Sibling live-event topics across ALL buckets (includes the target bucket).
-  // Unsubscribe from any bucket we're not targeting before subscribing.
+  // Unsubscribe from every sibling bucket — intentionally do NOT filter by
+  // subscribed.has(t). The local tracking can be stale (a prior unsubscription
+  // failed but was incorrectly removed from tracking), so we always try to
+  // unsubscribe to guarantee mutual exclusion. FCM unsubscription is idempotent.
   const allBucketTopics = allBucketTopicsForTeam(teamId);
-  const toUnsubFirst = allBucketTopics.filter(t => !wanted.has(t) && subscribed.has(t));
+  const toUnsubFirst = allBucketTopics.filter(t => !wanted.has(t));
   if (toUnsubFirst.length > 0) {
-    await Promise.all(toUnsubFirst.map(t => safeUnsubscribe(t)));
-    toUnsubFirst.forEach(t => subscribed.delete(t));
+    const unsubResults = await Promise.all(toUnsubFirst.map(t => safeUnsubscribe(t)));
+    // Only remove from local tracking if the FCM call actually succeeded —
+    // failed entries stay in SUBSCRIBED_TOPICS_KEY and get retried next reconcile.
+    toUnsubFirst.forEach((t, i) => { if (unsubResults[i]) subscribed.delete(t); });
   }
 
   const toAdd = [...wanted].filter(t => !subscribed.has(t));
@@ -407,6 +417,59 @@ async function migrateFromLegacyTopics(teamIds: string[]): Promise<void> {
   }
 }
 
+/**
+ * One-time heal: for each followed team, unsubscribe from every delay bucket
+ * that is NOT the user's current bucket.
+ *
+ * Root cause this targets: reconcileSubscriptions used to delete topics from
+ * SUBSCRIBED_TOPICS_KEY regardless of whether the FCM unsubscription call
+ * actually succeeded. When it failed (network error, token refresh, iOS
+ * background limits), the local record showed the device as clean but FCM
+ * still had the old bucket subscription active. Every subsequent reconcile
+ * saw current === wanted and did nothing, leaving the stale subscription
+ * permanently. Result: two notifications per event — one immediate (stale
+ * bucket) and one Modo Estadio–delayed (correct bucket).
+ *
+ * This runs once on first launch after the fix ships. If some unsubscriptions
+ * fail, the flag is NOT set so it retries on the next app launch. Only marks
+ * done when all calls succeed, guaranteeing full cleanup.
+ */
+async function healStaleBucketSubscriptions(teamIds: string[], currentBucket: DelayBucket): Promise<void> {
+  try {
+    const done = await AsyncStorage.getItem(STALE_BUCKET_HEALED_KEY);
+    if (done) return;
+
+    const topicsToRemove: string[] = [];
+    for (const id of teamIds) {
+      for (const b of ALL_BUCKETS) {
+        if (b === currentBucket) continue;
+        topicsToRemove.push(
+          TopicNames.teamGoals(id, b),
+          TopicNames.teamCards(id, b),
+          TopicNames.teamLive(id, b),
+        );
+      }
+    }
+
+    if (topicsToRemove.length === 0) {
+      await AsyncStorage.setItem(STALE_BUCKET_HEALED_KEY, '1');
+      return;
+    }
+
+    const results = await Promise.all(topicsToRemove.map(t => safeUnsubscribe(t)));
+    const succeeded = results.filter(Boolean).length;
+    addBreadcrumb('fcm', 'stale bucket heal', { total: topicsToRemove.length, succeeded });
+
+    // Only mark done when EVERY unsubscription succeeded — otherwise retry
+    // on next launch until the device is fully clean.
+    if (succeeded === topicsToRemove.length) {
+      await AsyncStorage.setItem(STALE_BUCKET_HEALED_KEY, '1');
+    }
+  } catch {
+    // Non-fatal — will retry on next app launch.
+  }
+}
+
 export async function reconcileSubscriptions(args: {
   teamIds:    string[];
   leagueIds:  string[];  // kept in signature for call-site compatibility; ignored
@@ -420,6 +483,10 @@ export async function reconcileSubscriptions(args: {
 
   // One-time cleanup of v1.0.x legacy topic subscriptions (fire-and-forget).
   migrateFromLegacyTopics(args.teamIds).catch(() => {});
+  // One-time heal: remove stale bucket subscriptions on devices where a prior
+  // Modo Estadio change had a silent FCM unsubscription failure. Fire-and-forget;
+  // retries on subsequent launches until all calls succeed.
+  healStaleBucketSubscriptions(args.teamIds, bucket).catch(() => {});
 
   const wanted = new Set<string>();
   for (const id of args.teamIds) {
@@ -443,10 +510,14 @@ export async function reconcileSubscriptions(args: {
 
   if (toAdd.length === 0 && toRemove.length === 0) return;
 
-  // Unsubscribe first to ensure no brief window with two active buckets
+  // Unsubscribe first to ensure no brief window with two active buckets.
+  // Only remove from local tracking if the FCM call actually succeeded —
+  // topics where unsubscription failed stay in SUBSCRIBED_TOPICS_KEY so the
+  // next reconcile (next foreground, next Modo Estadio toggle) retries them
+  // instead of losing track and leaving stale server-side subscriptions.
   if (toRemove.length > 0) {
-    await Promise.all(toRemove.map(t => safeUnsubscribe(t)));
-    toRemove.forEach(t => current.delete(t));
+    const removeResults = await Promise.all(toRemove.map(t => safeUnsubscribe(t)));
+    toRemove.forEach((t, i) => { if (removeResults[i]) current.delete(t); });
   }
 
   if (toAdd.length > 0) {
