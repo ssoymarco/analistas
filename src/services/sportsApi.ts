@@ -2827,7 +2827,7 @@ export function getSearchableLeagues(): SearchableLeague[] {
 export const POPULAR_TEAMS: SearchableTeam[] = [
   // Liga MX — México (first for Mexican market)
   { id: 2687,   name: 'América',              shortName: 'AME', logo: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 427,    name: 'Guadalajara',          shortName: 'GUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 427,    name: 'Guadalajara',          shortName: 'GUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539, searchTerms: ['Chivas', 'Chivas de Guadalajara'] },
   { id: 2626,   name: 'Cruz Azul',            shortName: 'CAZ', logo: 'https://cdn.sportmonks.com/images/soccer/teams/2/2626.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
   { id: 609,    name: 'Tigres UANL',          shortName: 'TUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/1/609.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
   { id: 2662,   name: 'Monterrey',            shortName: 'MNT', logo: 'https://cdn.sportmonks.com/images/soccer/teams/6/2662.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
@@ -3836,6 +3836,9 @@ export interface CoachCareerTeam {
   id: number;
   name: string;
   logo: string;
+  start?: string;   // ISO date "2021-07-01"
+  end?: string;     // ISO date, undefined if currently active
+  active?: boolean;
 }
 
 export interface CoachCareerStats {
@@ -3843,16 +3846,36 @@ export interface CoachCareerStats {
   wins: number;
   draws: number;
   losses: number;
-  goalsScored: number;
+  /** Goals scored by the team under this coach (career total) */
+  teamGoals: number;
   /** Percentage (0–100), rounded to integer */
   winRate: number;
+}
+
+export interface CoachSeasonStats {
+  seasonId: number;
+  teamId: number;
+  teamName: string;
+  teamLogo: string;
+  matchesPlayed: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  winRate: number;
+  teamGoals: number;
+  goalsPerMatch: number;
 }
 
 export interface CoachProfile {
   id: number;
   name: string;
-  teams: CoachCareerTeam[];      // distinct teams from coach's career
-  stats: CoachCareerStats;       // aggregated across all seasons
+  photo?: string;
+  dateOfBirth?: string;
+  height?: number;
+  weight?: number;
+  teams: CoachCareerTeam[];
+  stats: CoachCareerStats;
+  seasonHistory: CoachSeasonStats[];
 }
 
 const SM_COACH_STAT = {
@@ -3889,47 +3912,82 @@ export async function getCoachProfile(coachId: number): Promise<CoachProfile | n
     const raw: SMCoachProfile = await fetchCoachProfile(coachId);
     if (!raw) return null;
 
-    // ── Career teams (distinct) ─────────────────────────────────────────────
-    // SportMonks `teams[]` only contains the CURRENT team for most coaches.
-    // True career history lives in `statistics[].team` (one entry per
-    // coach-team-season tuple). We aggregate the distinct teams there.
+    // ── Career teams with start/end dates from raw.teams[] ─────────────────
+    // raw.teams[] has the richer data (start/end/active). statistics[].team
+    // fills in any team not yet in the map (e.g. older clubs).
     const teamMap = new Map<number, CoachCareerTeam>();
 
-    // Pass 1: include current team(s) from teams[] (may be empty)
     for (const entry of raw.teams ?? []) {
       const t = entry.team;
-      if (!t || teamMap.has(t.id)) continue;
-      teamMap.set(t.id, { id: t.id, name: t.name, logo: t.image_path ?? '' });
+      if (!t) continue;
+      if (!teamMap.has(t.id)) {
+        const e = entry as any;
+        teamMap.set(t.id, {
+          id: t.id, name: t.name, logo: t.image_path ?? '',
+          start: e.start ?? undefined,
+          end: e.end ?? undefined,
+          active: e.active ?? false,
+        });
+      }
     }
-
-    // Pass 2: derive career teams from statistics (handles Bayern, Barça, etc.)
     for (const stat of raw.statistics ?? []) {
       const t = stat.team;
       if (!t || teamMap.has(t.id)) continue;
       teamMap.set(t.id, { id: t.id, name: t.name, logo: t.image_path ?? '' });
     }
 
-    // ── Aggregated stats across all seasons ────────────────────────────────
-    let matchesPlayed = 0, wins = 0, draws = 0, losses = 0, goalsScored = 0;
-    for (const stat of raw.statistics ?? []) {
-      for (const d of stat.details ?? []) {
-        const count = d.value?.count ?? 0;
-        switch (d.type_id) {
-          case SM_COACH_STAT.MATCHES: matchesPlayed += count; break;
-          case SM_COACH_STAT.WINS:    wins += count; break;
-          case SM_COACH_STAT.DRAWS:   draws += count; break;
-          case SM_COACH_STAT.LOSSES:  losses += count; break;
-          case SM_COACH_STAT.GOALS:   goalsScored += count; break;
+    // ── Per-season history ─────────────────────────────────────────────────
+    const seasonHistory: CoachSeasonStats[] = (raw.statistics ?? [])
+      .map((stat: any) => {
+        let pj = 0, w = 0, d = 0, l = 0, goals = 0, goalsAvg = 0;
+        for (const det of stat.details ?? []) {
+          const count = det.value?.count ?? 0;
+          const avg   = det.value?.average ?? 0;
+          switch (det.type_id) {
+            case SM_COACH_STAT.MATCHES: pj = count; break;
+            case SM_COACH_STAT.WINS:    w  = count; break;
+            case SM_COACH_STAT.DRAWS:   d  = count; break;
+            case SM_COACH_STAT.LOSSES:  l  = count; break;
+            case SM_COACH_STAT.GOALS:   goals = count; goalsAvg = avg; break;
+          }
         }
-      }
+        if (pj === 0) return null;
+        const t = stat.team;
+        return {
+          seasonId: stat.season_id,
+          teamId: stat.team_id ?? t?.id ?? 0,
+          teamName: t?.name ?? '',
+          teamLogo: t?.image_path ?? '',
+          matchesPlayed: pj, wins: w, draws: d, losses: l,
+          winRate: Math.round((w / pj) * 100),
+          teamGoals: goals,
+          goalsPerMatch: Math.round(goalsAvg * 10) / 10,
+        } as CoachSeasonStats;
+      })
+      .filter((x): x is CoachSeasonStats => x !== null)
+      .sort((a, b) => b.seasonId - a.seasonId);
+
+    // ── Aggregated career totals ───────────────────────────────────────────
+    let matchesPlayed = 0, wins = 0, draws = 0, losses = 0, teamGoals = 0;
+    for (const s of seasonHistory) {
+      matchesPlayed += s.matchesPlayed;
+      wins          += s.wins;
+      draws         += s.draws;
+      losses        += s.losses;
+      teamGoals     += s.teamGoals;
     }
     const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
 
     const profile: CoachProfile = {
       id: raw.id,
       name: pickCoachName(raw),
+      photo: raw.image_path ?? undefined,
+      dateOfBirth: raw.date_of_birth ?? undefined,
+      height: raw.height ?? undefined,
+      weight: raw.weight ?? undefined,
       teams: Array.from(teamMap.values()),
-      stats: { matchesPlayed, wins, draws, losses, goalsScored, winRate },
+      stats: { matchesPlayed, wins, draws, losses, teamGoals, winRate },
+      seasonHistory,
     };
 
     // Cache 7 days — coach career stats change slowly

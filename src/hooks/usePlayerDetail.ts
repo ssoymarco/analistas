@@ -141,6 +141,7 @@ interface SMStatDetail {
 // SM stat type IDs
 const STAT_TYPE = {
   APPEARANCES: 321,      // Appearances (lineups)
+  STARTS: 41,            // Matches started (titular)
   GOALS: 52,             // Goals scored
   ASSISTS: 79,           // Assists
   MINUTES_PLAYED: 119,   // Minutes played
@@ -150,6 +151,7 @@ const STAT_TYPE = {
   SHOTS_TOTAL: 42,       // Total shots
   SHOTS_ON_TARGET: 44,   // Shots on target
   PASSES: 80,            // Total passes
+  PASS_ACCURACY: 1584,   // Pass accuracy %
   KEY_PASSES: 117,       // Key passes
   DRIBBLES: 86,          // Successful dribbles
   TACKLES: 78,           // Tackles
@@ -215,6 +217,7 @@ export interface PlayerSeasonStats {
   teamLogo: string;
   jerseyNumber: number | null;
   appearances: number;
+  starts: number;
   goals: number;
   assists: number;
   minutesPlayed: number;
@@ -224,6 +227,7 @@ export interface PlayerSeasonStats {
   shotsTotal: number;
   shotsOnTarget: number;
   passes: number;
+  passAccuracy: number;
   keyPasses: number;
   dribbles: number;
   tackles: number;
@@ -300,6 +304,7 @@ function mapSeasonStats(stat: SMSeasonStatistic): PlayerSeasonStats {
     teamLogo: stat.team?.image_path ?? '',
     jerseyNumber: stat.jersey_number,
     appearances: getStatValue(d, STAT_TYPE.APPEARANCES),
+    starts: getStatValue(d, STAT_TYPE.STARTS),
     goals: getStatValue(d, STAT_TYPE.GOALS),
     assists: getStatValue(d, STAT_TYPE.ASSISTS),
     minutesPlayed: getStatValue(d, STAT_TYPE.MINUTES_PLAYED),
@@ -309,6 +314,7 @@ function mapSeasonStats(stat: SMSeasonStatistic): PlayerSeasonStats {
     shotsTotal: getStatValue(d, STAT_TYPE.SHOTS_TOTAL),
     shotsOnTarget: getStatValue(d, STAT_TYPE.SHOTS_ON_TARGET),
     passes: getStatValue(d, STAT_TYPE.PASSES),
+    passAccuracy: Math.round(getStatValue(d, STAT_TYPE.PASS_ACCURACY) * 10) / 10,
     keyPasses: getStatValue(d, STAT_TYPE.KEY_PASSES),
     dribbles: getStatValue(d, STAT_TYPE.DRIBBLES),
     tackles: getStatValue(d, STAT_TYPE.TACKLES),

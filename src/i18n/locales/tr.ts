@@ -497,6 +497,7 @@ const tr: TranslationKeys = {
   // ── Team detail ────────────────────────────────────────────────────────────
   team: {
     info: 'Bilgi',
+    country: 'Ülke',
     stadium: 'Stadyum',
     capacity: 'Kapasite',
     founded: 'Kuruluş',
@@ -559,7 +560,9 @@ const tr: TranslationKeys = {
     performance: 'Performans',
     shots: 'Şutlar',
     shotsOnTarget: '{{count}} isabetli',
+    starts: 'İlk 11',
     passes: 'Paslar',
+    passAccuracy: 'Pas isabet oranı',
     keyPasses: '{{count}} kilit pas',
     tackles: 'Top kesme',
     interceptions: 'Müdahaleler',

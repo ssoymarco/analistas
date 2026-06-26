@@ -524,6 +524,7 @@ const en: TranslationKeys = {
   // ── Team detail ────────────────────────────────────────────────────────────
   team: {
     info: 'Information',
+    country: 'Country',
     stadium: 'Stadium',
     capacity: 'Capacity',
     founded: 'Founded',
@@ -609,7 +610,9 @@ const en: TranslationKeys = {
     performance: 'Performance',
     shots: 'Shots',
     shotsOnTarget: '{{count}} on target',
+    starts: 'Starts',
     passes: 'Passes',
+    passAccuracy: 'Pass accuracy',
     keyPasses: '{{count}} key',
     tackles: 'Tackles',
     interceptions: 'Interceptions',

@@ -118,6 +118,7 @@ export interface SquadPlayer {
   positionId: number;
   nationality: string;
   age: number;
+  dateOfBirth?: string;
   image: string;
   isCaptain: boolean;
   clubName: string;
@@ -537,6 +538,7 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
               positionId: sp.position_id,
               nationality: '',
               age: sp.player!.date_of_birth ? calculateAge(sp.player!.date_of_birth) : 0,
+              dateOfBirth: sp.player!.date_of_birth || undefined,
               image: sp.player!.image_path,
               isCaptain: sp.captain,
               clubName: clubMembership?.team?.name ?? '',

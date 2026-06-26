@@ -444,9 +444,23 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
   // ── Info card ───────────────────────────────────────────────────────────
   const InfoCard: React.FC = () => (
     <View style={[rs.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>
+      {/* Stadium photo header */}
+      {data.info.venueImage ? (
+        <Image
+          source={{ uri: data.info.venueImage }}
+          style={rs.venueImage}
+          contentFit="cover"
+        />
+      ) : null}
       <View style={rs.sectionHeader}>
         <Text style={[rs.sectionTitle, { color: c.textPrimary }]}>{t('team.info')}</Text>
       </View>
+      {data.info.country ? (
+        <View style={[rs.infoRow, { borderTopColor: border }]}>
+          <Text style={[rs.infoLabel, { color: textSec }]}>{t('team.country')}</Text>
+          <Text style={[rs.infoValue, { color: c.textPrimary }]}>{data.info.country}</Text>
+        </View>
+      ) : null}
       {data.info.founded > 0 && (
         <View style={[rs.infoRow, { borderTopColor: border }]}>
           <Text style={[rs.infoLabel, { color: textSec }]}>{t('team.founded')}</Text>
@@ -627,6 +641,7 @@ const rs = StyleSheet.create({
   coachMeta: { fontSize: 12, marginTop: 2 },
 
   // Info rows
+  venueImage: { width: '100%', height: 160 },
   infoRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 14, paddingVertical: 11,
@@ -947,9 +962,16 @@ const PlantillaTab: React.FC<{ data: TeamDetailData }> = ({ data }) => {
         ) : null}
       </View>
 
-      {/* Age */}
+      {/* Age + DOB */}
       {player.age > 0 && (
-        <Text style={[pl.ageText, { color: textSec }]}>{player.age}</Text>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={[pl.ageText, { color: c.textPrimary }]}>{player.age}</Text>
+          {player.dateOfBirth ? (
+            <Text style={[pl.dobText, { color: textSec }]}>
+              {new Date(player.dateOfBirth).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
+            </Text>
+          ) : null}
+        </View>
       )}
     </TouchableOpacity>
   );
@@ -1042,7 +1064,8 @@ const pl = StyleSheet.create({
   captainText: { fontSize: 9, fontWeight: '900', color: '#111' },
   clubLogo: { width: 14, height: 14, borderRadius: 7 },
   clubName: { fontSize: 11 },
-  ageText: { fontSize: 13, width: 26, textAlign: 'center' },
+  ageText: { fontSize: 13, textAlign: 'right', fontWeight: '600' },
+  dobText: { fontSize: 10, textAlign: 'right', marginTop: 1 },
 });
 
 // ════════════════════════════════════════════════════════════════════════════

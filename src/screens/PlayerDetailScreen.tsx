@@ -154,13 +154,14 @@ const ResumenTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
       </View>
 
       {/* ── Additional Stats Card (if available) ── */}
-      {st && (st.tackles > 0 || st.passes > 0 || st.dribbles > 0 || st.saves > 0) && (
+      {st && (st.tackles > 0 || st.passes > 0 || st.dribbles > 0 || st.saves > 0 || st.starts > 0) && (
         <View style={[rt.card, { backgroundColor: c.card, borderColor: c.border }]}>
           <Text style={[rt.sectionTitle, { color: c.textPrimary }]}>{t('player.performance')}</Text>
           <View style={rt.perfGrid}>
             {[
+              st.starts > 0 && { label: t('player.starts'), value: st.starts },
               st.shotsTotal > 0 && { label: t('player.shots'), value: st.shotsTotal, sub: t('player.shotsOnTarget', { count: st.shotsOnTarget }) },
-              st.passes > 0 && { label: t('player.passes'), value: st.passes, sub: t('player.keyPasses', { count: st.keyPasses }) },
+              st.passes > 0 && { label: t('player.passes'), value: st.passes, sub: st.passAccuracy > 0 ? `${st.passAccuracy}% precisión` : t('player.keyPasses', { count: st.keyPasses }) },
               st.tackles > 0 && { label: t('player.tackles'), value: st.tackles },
               st.interceptions > 0 && { label: t('player.interceptions'), value: st.interceptions },
               st.dribbles > 0 && { label: t('player.dribbles'), value: st.dribbles },
@@ -293,10 +294,11 @@ const EstadisticasTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
     { emoji: '⚽', value: st.goals, label: t('player.goals') },
     { emoji: '🅰️', value: st.assists, label: t('player.assists') },
     { emoji: '🏟️', value: st.appearances, label: t('player.appearances') },
+    st.starts > 0 && { emoji: '🔰', value: st.starts, label: t('player.starts') },
     { emoji: '⏱️', value: `${st.minutesPlayed}'`, label: t('player.minutes') },
     { emoji: '🟨', value: st.yellowCards, label: t('player.yellowCards') },
     { emoji: '🟥', value: st.redCards, label: t('player.redCards') },
-  ];
+  ].filter(Boolean) as { emoji: string; value: string | number; label: string }[];
 
   // Penalties
   const hasPens = st.penScored > 0 || st.penMissed > 0;
@@ -371,6 +373,7 @@ const EstadisticasTab: React.FC<{ data: PlayerDetailData }> = ({ data }) => {
           <Text style={[et.sectionTitle, { color: c.textPrimary }]}>{t('player.passesSection')}</Text>
           {[
             { label: t('player.passes'), value: st.passes },
+            st.passAccuracy > 0 && { label: t('player.passAccuracy'), value: `${st.passAccuracy}%` },
             st.keyPasses > 0 && { label: t('player.keyPasses', { count: st.keyPasses }), value: st.keyPasses },
           ].filter(Boolean).map((s: any, i) => (
             <View key={i} style={[et.avgRow, { borderTopColor: c.border }]}>

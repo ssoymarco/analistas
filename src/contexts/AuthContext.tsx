@@ -238,6 +238,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Keep the optimistic user so signed-in screens keep working, but
           // surface the failure: a guest whose profile doc never lands here
           // can't save a username later (the Apple 2.1 "Error saving" bug).
+          // permission-denied is an expected race: auth token hasn't
+          // propagated to Firestore yet on the very first cold launch.
+          if ((err as { code?: string })?.code === 'permission-denied') return;
           captureError(err, { where: 'ensureUserProfile' });
         });
     });

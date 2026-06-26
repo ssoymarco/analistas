@@ -274,6 +274,11 @@ export interface SMTeamFull {
   image_path:       string;
   country_id?:      number;
   founded?:         number;
+  country?: {
+    name?:           string;
+    iso2?:           string;
+    official_name?:  string;
+  };
   venue?: {
     id?:         number;
     name?:       string;
@@ -294,7 +299,7 @@ export interface SMTeamFull {
 
 export async function fetchTeamsForSeason(seasonId: number): Promise<SMTeamFull[]> {
   return fetchAllPages<SMTeamFull>(`/teams/seasons/${seasonId}`, {
-    include: 'venue;coaches',
+    include: 'venue;coaches;country',
   });
 }
 

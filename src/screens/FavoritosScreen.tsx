@@ -283,6 +283,7 @@ const ItemAvatar: React.FC<{
           source={{ uri: image }}
           style={{ width: s * 0.86, height: s * 0.86, borderRadius: isPlayer ? s / 2 : radius - 1 }}
           contentFit="contain"
+          recyclingKey={image}
           onError={() => setImgFailed(true)}
         />
       </View>
@@ -523,6 +524,14 @@ export const FavoritosScreen: React.FC = () => {
     return m;
   }, [smTeams]);
 
+  // ID-based lookup — used first in enrichment to avoid name collisions
+  // (e.g. Guadalajara MX id=427 vs. Guadalajara ES id=85668).
+  const smTeamById = useMemo(() => {
+    const m = new Map<number, SearchableTeam>();
+    smTeams.forEach(t => m.set(t.id, t));
+    return m;
+  }, [smTeams]);
+
   const smPlayerMap = useMemo(() => {
     const m = new Map<string, SearchablePlayer>();
     smPlayers.forEach(p => {
@@ -593,14 +602,18 @@ export const FavoritosScreen: React.FC = () => {
       };
     });
 
-    // Enrich with live SportMonks data (logo, seasonId) by name match
+    // Enrich with live SportMonks data (logo, seasonId).
+    // Prefer ID lookup so teams with the same name in different leagues
+    // (e.g. Guadalajara MX id=427 vs. Guadalajara ES id=85668) always
+    // resolve to the correct team.
     const enriched = baseItems.map(item => {
-      const sm = smTeamMap.get(normalize(item.name));
+      const sm = (item.smId ? smTeamById.get(item.smId) : undefined)
+        ?? smTeamMap.get(normalize(item.name));
       if (!sm) return item;
       const apiImage = isImageUri(sm.logo) ? sm.logo : undefined;
       return {
         ...item,
-        smId:     sm.id ?? item.smId,
+        smId:     item.smId ?? sm.id,
         image:    apiImage ?? item.image,
         seasonId: sm.seasonId ?? item.seasonId,
       };

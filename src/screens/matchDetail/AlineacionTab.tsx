@@ -3,7 +3,7 @@
 // goal frame markings, and polished player dots.
 // NEW: confirmation banner, coaches cards, bench with segmented toggle.
 // PITCH IS UNCHANGED — kept exactly as before.
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
+import { useNavigation } from '@react-navigation/native';
 import { useThemeColors } from '../../theme/useTheme';
 import { useDarkMode } from '../../contexts/DarkModeContext';
 import type { Match, MatchDetail, LineupPlayer, MatchLineup, MissingPlayer } from '../../data/types';
@@ -108,7 +109,7 @@ function mixColor(hexA: string, hexB: string, ratio: number): string {
 }
 
 // ── Player dot ───────────────────────────────────────────────────────────────
-const PlayerDot: React.FC<{ player: LineupPlayer; color: string; theme: PitchTheme }> = ({ player, color, theme }) => {
+const PlayerDot: React.FC<{ player: LineupPlayer; color: string; theme: PitchTheme; onPress: () => void }> = ({ player, color, theme, onPress }) => {
   let bgColor = color;
   let borderStyle: any = { borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)' };
   if (player.redCard) { bgColor = '#dc2626'; borderStyle = { borderWidth: 2.5, borderColor: '#fca5a5' }; }
@@ -118,7 +119,7 @@ const PlayerDot: React.FC<{ player: LineupPlayer; color: string; theme: PitchThe
   const subbed = player.isSubstituted;
 
   return (
-    <View style={dot.wrap}>
+    <TouchableOpacity style={dot.wrap} onPress={onPress} activeOpacity={0.75}>
       <View style={[dot.glow, { backgroundColor: theme.dotGlow }]} />
       <View style={dot.outer}>
         {goalCount > 0 && (
@@ -145,7 +146,7 @@ const PlayerDot: React.FC<{ player: LineupPlayer; color: string; theme: PitchThe
         </View>
       </View>
       <Text style={dot.name} numberOfLines={1}>{player.shortName}</Text>
-    </View>
+    </TouchableOpacity>
   );
 };
 
@@ -493,7 +494,36 @@ const CoachDetailModal: React.FC<{
           </View>
         </View>
 
-        {/* ── Career stats card (from /coaches/{id}) ─────────────────────── */}
+        {/* ── Personal info ───────────────────────────────────────────────── */}
+        {profile && (profile.height || profile.weight || profile.dateOfBirth) ? (
+          <>
+            <Text style={[cdm.sectionTitle, { color: c.textTertiary }]}>
+              DATOS PERSONALES
+            </Text>
+            <View style={[cdm.infoCard, { backgroundColor: c.card, borderColor: c.border }]}>
+              {computeAge(profile.dateOfBirth) !== null ? (
+                <View style={cdm.infoRow}>
+                  <Text style={[cdm.infoLabel, { color: c.textTertiary }]}>Edad</Text>
+                  <Text style={[cdm.infoValue, { color: c.textPrimary }]}>{computeAge(profile.dateOfBirth)} años</Text>
+                </View>
+              ) : null}
+              {profile.height ? (
+                <View style={[cdm.infoRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
+                  <Text style={[cdm.infoLabel, { color: c.textTertiary }]}>Altura</Text>
+                  <Text style={[cdm.infoValue, { color: c.textPrimary }]}>{(profile.height / 100).toFixed(2)} m</Text>
+                </View>
+              ) : null}
+              {profile.weight ? (
+                <View style={[cdm.infoRow, { borderTopWidth: 1, borderTopColor: c.border }]}>
+                  <Text style={[cdm.infoLabel, { color: c.textTertiary }]}>Peso</Text>
+                  <Text style={[cdm.infoValue, { color: c.textPrimary }]}>{profile.weight} kg</Text>
+                </View>
+              ) : null}
+            </View>
+          </>
+        ) : null}
+
+        {/* ── Career stats card ───────────────────────────────────────────── */}
         {profile && profile.stats.matchesPlayed > 0 ? (
           <>
             <Text style={[cdm.sectionTitle, { color: c.textTertiary }]}>
@@ -520,8 +550,8 @@ const CoachDetailModal: React.FC<{
                   <Text style={[cdm.statBoxLabel, { color: c.textTertiary }]}>Partidos</Text>
                 </View>
                 <View style={[cdm.statBox, { backgroundColor: c.surface }]}>
-                  <Text style={[cdm.statBoxNum, { color: c.textPrimary }]}>{profile.stats.goalsScored}</Text>
-                  <Text style={[cdm.statBoxLabel, { color: c.textTertiary }]}>Goles</Text>
+                  <Text style={[cdm.statBoxNum, { color: c.textPrimary }]}>{profile.stats.teamGoals}</Text>
+                  <Text style={[cdm.statBoxLabel, { color: c.textTertiary }]}>Goles marcados</Text>
                 </View>
                 <View style={[cdm.statBox, { backgroundColor: c.surface }]}>
                   <Text style={[cdm.statBoxNum, { color: c.textPrimary }]}>{profile.teams.length}</Text>
@@ -532,7 +562,7 @@ const CoachDetailModal: React.FC<{
           </>
         ) : null}
 
-        {/* ── Career teams chips ──────────────────────────────────────────── */}
+        {/* ── Career teams chips with dates ───────────────────────────────── */}
         {profile && profile.teams.length > 0 ? (
           <>
             <Text style={[cdm.sectionTitle, { color: c.textTertiary }]}>
@@ -543,22 +573,73 @@ const CoachDetailModal: React.FC<{
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={cdm.teamsScroll}
             >
-              {profile.teams.map(team => (
-                <View key={team.id} style={[cdm.teamChip, { backgroundColor: c.card, borderColor: c.border }]}>
-                  {team.logo ? (
-                    <Image source={{ uri: team.logo }} style={cdm.teamChipLogo} contentFit="contain" />
-                  ) : (
-                    <Text style={{ fontSize: 16 }}>⚽</Text>
-                  )}
-                  <Text style={[cdm.teamChipName, { color: c.textPrimary }]} numberOfLines={1}>
-                    {translateNationalTeam(team.name)}
-                  </Text>
-                </View>
-              ))}
+              {profile.teams.map(team => {
+                const startYear = team.start ? team.start.slice(0, 4) : null;
+                const endYear = team.end ? team.end.slice(0, 4) : null;
+                const period = startYear
+                  ? `${startYear}–${team.active ? 'hoy' : (endYear ?? '?')}`
+                  : null;
+                return (
+                  <View key={team.id} style={[cdm.teamChip, { backgroundColor: c.card, borderColor: team.active ? teamColor + '60' : c.border }]}>
+                    {team.logo ? (
+                      <Image source={{ uri: team.logo }} style={cdm.teamChipLogo} contentFit="contain" />
+                    ) : (
+                      <Text style={{ fontSize: 16 }}>⚽</Text>
+                    )}
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[cdm.teamChipName, { color: c.textPrimary }]} numberOfLines={1}>
+                        {translateNationalTeam(team.name)}
+                      </Text>
+                      {period ? (
+                        <Text style={[cdm.teamChipPeriod, { color: team.active ? teamColor : c.textTertiary }]}>{period}</Text>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              })}
             </ScrollView>
           </>
         ) : loadingProfile ? (
           <Text style={[cdm.loadingText, { color: c.textTertiary }]}>Cargando carrera…</Text>
+        ) : null}
+
+        {/* ── Season-by-season history ────────────────────────────────────── */}
+        {profile && profile.seasonHistory.length > 0 ? (
+          <>
+            <Text style={[cdm.sectionTitle, { color: c.textTertiary }]}>
+              HISTORIAL POR TEMPORADA
+            </Text>
+            <View style={[cdm.historyTable, { backgroundColor: c.card, borderColor: c.border }]}>
+              {/* Header */}
+              <View style={[cdm.historyHeader, { borderBottomColor: c.border }]}>
+                <Text style={[cdm.historyHeaderTeam, { color: c.textTertiary }]}>Equipo</Text>
+                <Text style={[cdm.historyHeaderStat, { color: c.textTertiary }]}>PJ</Text>
+                <Text style={[cdm.historyHeaderStat, { color: c.textTertiary }]}>V</Text>
+                <Text style={[cdm.historyHeaderStat, { color: c.textTertiary }]}>E</Text>
+                <Text style={[cdm.historyHeaderStat, { color: c.textTertiary }]}>D</Text>
+                <Text style={[cdm.historyHeaderStat, { color: c.textTertiary }]}>%V</Text>
+                <Text style={[cdm.historyHeaderStat, { color: c.textTertiary }]}>G/PJ</Text>
+              </View>
+              {profile.seasonHistory.map((s, i) => (
+                <View key={`${s.seasonId}-${s.teamId}`} style={[cdm.historyRow, i > 0 && { borderTopWidth: 1, borderTopColor: c.border }]}>
+                  <View style={cdm.historyTeamCell}>
+                    {s.teamLogo ? (
+                      <Image source={{ uri: s.teamLogo }} style={cdm.historyTeamLogo} contentFit="contain" />
+                    ) : null}
+                    <Text style={[cdm.historyTeamName, { color: c.textPrimary }]} numberOfLines={1}>
+                      {translateNationalTeam(s.teamName)}
+                    </Text>
+                  </View>
+                  <Text style={[cdm.historyStatVal, { color: c.textPrimary }]}>{s.matchesPlayed}</Text>
+                  <Text style={[cdm.historyStatVal, { color: '#10b981' }]}>{s.wins}</Text>
+                  <Text style={[cdm.historyStatVal, { color: c.textSecondary }]}>{s.draws}</Text>
+                  <Text style={[cdm.historyStatVal, { color: '#ef4444' }]}>{s.losses}</Text>
+                  <Text style={[cdm.historyStatVal, { color: teamColor }]}>{s.winRate}%</Text>
+                  <Text style={[cdm.historyStatVal, { color: c.textSecondary }]}>{s.goalsPerMatch > 0 ? s.goalsPerMatch : '—'}</Text>
+                </View>
+              ))}
+            </View>
+          </>
         ) : null}
 
         {/* Close button */}
@@ -628,13 +709,24 @@ const cdm = StyleSheet.create({
   // Teams chips
   teamsScroll: { gap: 8, paddingBottom: 6, paddingRight: 8 },
   teamChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
     paddingHorizontal: 12, paddingVertical: 10,
     borderRadius: 12, borderWidth: 1,
     maxWidth: 200,
   },
   teamChipLogo: { width: 22, height: 22 },
   teamChipName: { fontSize: 13, fontWeight: '600' },
+  teamChipPeriod: { fontSize: 11, fontWeight: '500', marginTop: 2 },
+  // Season history table
+  historyTable: { borderRadius: 14, borderWidth: 1, marginBottom: 24, overflow: 'hidden' },
+  historyHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1 },
+  historyHeaderTeam: { flex: 1, fontSize: 10, fontWeight: '700', letterSpacing: 0.4 },
+  historyHeaderStat: { width: 34, fontSize: 10, fontWeight: '700', letterSpacing: 0.4, textAlign: 'right' },
+  historyRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10 },
+  historyTeamCell: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0 },
+  historyTeamLogo: { width: 20, height: 20, flexShrink: 0 },
+  historyTeamName: { fontSize: 12, fontWeight: '600', flexShrink: 1 },
+  historyStatVal: { width: 34, fontSize: 12, fontWeight: '700', textAlign: 'right' },
   loadingText: { fontSize: 13, textAlign: 'center', paddingVertical: 16, fontStyle: 'italic' },
 });
 
@@ -742,8 +834,23 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   const c = useThemeColors();
   const { t } = useTranslation();
   const { isDark } = useDarkMode();
+  const navigation = useNavigation<any>();
   const captureRef = useRef<any>(null);
   const theme = isDark ? DARK_PITCH : LIGHT_PITCH;
+
+  const handlePlayerPress = useCallback((p: LineupPlayer, isHome: boolean) => {
+    const playerId = parseInt(p.id, 10);
+    if (!playerId) return;
+    const team = isHome ? match.homeTeam : match.awayTeam;
+    navigation.push('PlayerDetail', {
+      playerId,
+      playerName: p.name || p.shortName,
+      playerImage: p.imageUrl,
+      teamName: team.name,
+      teamLogo: team.logo,
+      jerseyNumber: p.number,
+    });
+  }, [navigation, match]);
 
   const homeStarters = detail.homeLineup.starters ?? [];
   const awayStarters = detail.awayLineup.starters ?? [];
@@ -822,7 +929,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
           <View style={ms.topHalf}>
             {homeRows.map((row, ri) => (
               <View key={ri} style={ms.playerRow}>
-                {row.map(p => <PlayerDot key={p.id} player={p} color={HOME_COLOR} theme={theme} />)}
+                {row.map(p => <PlayerDot key={p.id} player={p} color={HOME_COLOR} theme={theme} onPress={() => handlePlayerPress(p, true)} />)}
               </View>
             ))}
           </View>
@@ -838,7 +945,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
           <View style={ms.bottomHalf}>
             {awayRows.map((row, ri) => (
               <View key={ri} style={ms.playerRow}>
-                {row.map(p => <PlayerDot key={p.id} player={p} color={AWAY_COLOR} theme={theme} />)}
+                {row.map(p => <PlayerDot key={p.id} player={p} color={AWAY_COLOR} theme={theme} onPress={() => handlePlayerPress(p, false)} />)}
               </View>
             ))}
           </View>
@@ -1079,7 +1186,12 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
                 <Text style={{ color: c.textTertiary, fontSize: 13 }}>Sin suplentes disponibles</Text>
               </View>
             ) : activeBench.map((p, i) => (
-              <View key={p.id} style={[ms.benchRow, i > 0 && { borderTopWidth: 1, borderTopColor: c.border }]}>
+              <TouchableOpacity
+                key={p.id}
+                style={[ms.benchRow, i > 0 && { borderTopWidth: 1, borderTopColor: c.border }]}
+                onPress={() => handlePlayerPress(p, benchTeam === 'home')}
+                activeOpacity={0.7}
+              >
                 {/* Player photo or number badge */}
                 {p.imageUrl ? (
                   <Image source={{ uri: p.imageUrl }} style={ms.benchPhoto} />
@@ -1095,7 +1207,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
                 {p.nationalityFlag ? (
                   <Text style={{ fontSize: 16 }}>{p.nationalityFlag}</Text>
                 ) : null}
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         </>

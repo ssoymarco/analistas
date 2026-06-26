@@ -75,13 +75,18 @@ export function initSentry(): void {
       if (value.includes('Missing or insufficient permissions')) return null;
       if (value.includes('Failed to get document because')) return null;
 
-      // ── 4. Drop generic network errors ───────────────────────────────
+      // ── 4. Drop FCM native SDK noise ──────────────────────────────────
+      // RNFB native layer emits "fcm-init result" events from an anonymous
+      // callback (~9k/mo, ~1.3k users). Internal init callbacks, not actionable.
+      if (value.includes('fcm-init result') || value.includes('fcm-init:')) return null;
+
+      // ── 5. Drop generic network errors ───────────────────────────────
       // RN's fetch throws TypeError("Network request failed") on any
       // connectivity blip. Our API layer already retries / shows offline
       // banner. No actionable info for us here.
       if (type === 'TypeError' && value.includes('Network request failed')) return null;
 
-      // ── 5. Per-type rate limit: max 25 events per session ─────────────
+      // ── 6. Per-type rate limit: max 25 events per session ─────────────
       // Prevents a single flapping error from consuming the whole quota.
       // Resets on each app launch (in-memory map). Fatal events are exempt
       // (already returned above).

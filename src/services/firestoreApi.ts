@@ -200,6 +200,7 @@ export interface FirestoreSquadPlayer {
   positionId:   number;
   nationality:  string;
   age:          number;
+  dateOfBirth?: string;
   image:        string;
   isCaptain:    boolean;
   clubName:     string;
@@ -473,15 +474,7 @@ function pickCoachNameFromRaw(raw: any): string {
  */
 export async function getCoachProfileFromFirestore(
   coachId: number,
-): Promise<{
-  id: number;
-  name: string;
-  teams: { id: number; name: string; logo: string }[];
-  stats: {
-    matchesPlayed: number; wins: number; draws: number; losses: number;
-    goalsScored: number; winRate: number;
-  };
-} | null> {
+): Promise<import('./sportsApi').CoachProfile | null> {
   const ref = doc(db, 'coaches', String(coachId));
   const snap = await getDoc(ref);
   if (!snap.exists()) return null;
@@ -489,12 +482,19 @@ export async function getCoachProfileFromFirestore(
   const raw = (data as any)?.raw;
   if (!raw) return null;
 
-  // Distinct career teams (current + history)
-  const teamMap = new Map<number, { id: number; name: string; logo: string }>();
+  // Career teams with start/end dates from raw.teams[]
+  const teamMap = new Map<number, import('./sportsApi').CoachCareerTeam>();
   for (const entry of raw.teams ?? []) {
     const t = entry?.team;
-    if (!t || teamMap.has(t.id)) continue;
-    teamMap.set(t.id, { id: t.id, name: t.name, logo: t.image_path ?? '' });
+    if (!t) continue;
+    if (!teamMap.has(t.id)) {
+      teamMap.set(t.id, {
+        id: t.id, name: t.name, logo: t.image_path ?? '',
+        start: entry.start ?? undefined,
+        end: entry.end ?? undefined,
+        active: entry.active ?? false,
+      });
+    }
   }
   for (const stat of raw.statistics ?? []) {
     const t = stat?.team;
@@ -502,27 +502,58 @@ export async function getCoachProfileFromFirestore(
     teamMap.set(t.id, { id: t.id, name: t.name, logo: t.image_path ?? '' });
   }
 
-  // Aggregate stats across all seasons
-  let matchesPlayed = 0, wins = 0, draws = 0, losses = 0, goalsScored = 0;
-  for (const stat of raw.statistics ?? []) {
-    for (const d of stat.details ?? []) {
-      const count = d?.value?.count ?? 0;
-      switch (d?.type_id) {
-        case SM_COACH_STAT_FS.MATCHES: matchesPlayed += count; break;
-        case SM_COACH_STAT_FS.WINS:    wins += count; break;
-        case SM_COACH_STAT_FS.DRAWS:   draws += count; break;
-        case SM_COACH_STAT_FS.LOSSES:  losses += count; break;
-        case SM_COACH_STAT_FS.GOALS:   goalsScored += count; break;
+  // Per-season history
+  const seasonHistory: import('./sportsApi').CoachSeasonStats[] = (raw.statistics ?? [])
+    .map((stat: any) => {
+      let pj = 0, w = 0, d = 0, l = 0, goals = 0, goalsAvg = 0;
+      for (const det of stat?.details ?? []) {
+        const count = det?.value?.count ?? 0;
+        const avg   = det?.value?.average ?? 0;
+        switch (det?.type_id) {
+          case SM_COACH_STAT_FS.MATCHES: pj = count; break;
+          case SM_COACH_STAT_FS.WINS:    w  = count; break;
+          case SM_COACH_STAT_FS.DRAWS:   d  = count; break;
+          case SM_COACH_STAT_FS.LOSSES:  l  = count; break;
+          case SM_COACH_STAT_FS.GOALS:   goals = count; goalsAvg = avg; break;
+        }
       }
-    }
+      if (pj === 0) return null;
+      const t = stat?.team;
+      return {
+        seasonId: stat.season_id,
+        teamId: stat.team_id ?? t?.id ?? 0,
+        teamName: t?.name ?? '',
+        teamLogo: t?.image_path ?? '',
+        matchesPlayed: pj, wins: w, draws: d, losses: l,
+        winRate: Math.round((w / pj) * 100),
+        teamGoals: goals,
+        goalsPerMatch: Math.round(goalsAvg * 10) / 10,
+      };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => b.seasonId - a.seasonId);
+
+  // Aggregate career totals
+  let matchesPlayed = 0, wins = 0, draws = 0, losses = 0, teamGoals = 0;
+  for (const s of seasonHistory) {
+    matchesPlayed += s.matchesPlayed;
+    wins          += s.wins;
+    draws         += s.draws;
+    losses        += s.losses;
+    teamGoals     += s.teamGoals;
   }
   const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
 
   return {
     id: coachId,
     name: pickCoachNameFromRaw(raw),
+    photo: raw.image_path ?? undefined,
+    dateOfBirth: raw.date_of_birth ?? undefined,
+    height: raw.height ?? undefined,
+    weight: raw.weight ?? undefined,
     teams: Array.from(teamMap.values()),
-    stats: { matchesPlayed, wins, draws, losses, goalsScored, winRate },
+    stats: { matchesPlayed, wins, draws, losses, teamGoals, winRate },
+    seasonHistory,
   };
 }
 
@@ -583,6 +614,7 @@ function squadPlayerFromDoc(p: SquadPlayerDoc): FirestoreSquadPlayer {
     positionId:  p.positionId,
     nationality: '',
     age:         calculateAgeFromDob(p.dateOfBirth),
+    dateOfBirth: p.dateOfBirth || undefined,
     image:       p.image,
     isCaptain:   p.isCaptain,
     clubName:    p.clubName,

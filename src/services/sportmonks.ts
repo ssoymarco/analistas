@@ -285,17 +285,6 @@ export interface SMFixtureCoach extends SMCoach {
   country?: SMCountry;
 }
 
-/** Country / nationality shape returned by SportMonks */
-export interface SMCountry {
-  id: number;
-  continent_id: number;
-  name: string;
-  official_name: string;
-  fifa_name: string;
-  iso2: string;
-  iso3: string;
-  image_path: string;
-}
 
 export interface SMRound {
   id: number;
