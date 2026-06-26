@@ -2,7 +2,7 @@
 // Premium national-team page inspired by FotMob + BeSoccer.
 // Tabs: Resumen → Partidos → Plantilla → Tabla
 // Dark/Light mode. All strings via i18n. Real SportMonks data.
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Modal,
+  Pressable,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -1478,6 +1481,19 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
   const navigation = useNavigation();
   const { isFollowingTeam, toggleFollowTeam, isRivalTeam, toggleRivalTeam } = useFavorites();
   const [activeTab, setActiveTab] = useState<Tab>('resumen');
+  const [showRivalIntro, setShowRivalIntro] = useState(false);
+
+  const handleRivalPress = useCallback(async () => {
+    const isCurrentlyRival = isRivalTeam(String(teamId));
+    if (!isCurrentlyRival) {
+      const seen = await AsyncStorage.getItem('analistas_rival_intro_seen');
+      if (!seen) {
+        await AsyncStorage.setItem('analistas_rival_intro_seen', '1');
+        setShowRivalIntro(true);
+      }
+    }
+    toggleRivalTeam(String(teamId));
+  }, [isRivalTeam, toggleRivalTeam, teamId]);
   const scrollY = useRef(new Animated.Value(0)).current;
   const heroHeight = useRef(0);
   const [showFixedTabs, setShowFixedTabs] = useState(false);
@@ -1657,7 +1673,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
               {MODO_RIVAL_ENABLED && (
                 <TouchableOpacity
                   style={[hs.followBtn, { borderColor: hBorderCol }, isRival && { backgroundColor: RIVAL_COLOR, borderColor: RIVAL_COLOR }]}
-                  onPress={() => toggleRivalTeam(String(teamId))}
+                  onPress={handleRivalPress}
                   activeOpacity={0.8}
                 >
                   <Text style={[hs.followText, { color: hText }, isRival && { color: '#fff' }]}>
@@ -1752,6 +1768,32 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
           </View>
         ) : null}
       </ScrollView>
+
+      {/* Modo Rival — first-time intro modal */}
+      <Modal
+        visible={showRivalIntro}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRivalIntro(false)}
+      >
+        <Pressable style={hs.rivalIntroOverlay} onPress={() => setShowRivalIntro(false)}>
+          <Pressable style={[hs.rivalIntroSheet, { backgroundColor: isDark ? '#1C1C1E' : '#fff' }]}>
+            <Text style={[hs.rivalIntroTitle, { color: isDark ? '#fff' : '#000' }]}>
+              {t('team.rivalIntroTitle')}
+            </Text>
+            <Text style={[hs.rivalIntroBody, { color: isDark ? '#8E8E93' : '#555' }]}>
+              {t('team.rivalIntroBody')}
+            </Text>
+            <TouchableOpacity
+              style={[hs.rivalIntroCta, { backgroundColor: RIVAL_COLOR }]}
+              onPress={() => setShowRivalIntro(false)}
+              activeOpacity={0.85}
+            >
+              <Text style={hs.rivalIntroCtaText}>{t('team.rivalIntroCta')}</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1796,6 +1838,12 @@ const hs = StyleSheet.create({
   },
   followText: { fontSize: 12, fontWeight: '700' },
   rivalCaption: { fontSize: 11, fontWeight: '600', marginTop: 6 },
+  rivalIntroOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  rivalIntroSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 40 },
+  rivalIntroTitle: { fontSize: 20, fontWeight: '700', marginBottom: 12 },
+  rivalIntroBody: { fontSize: 15, lineHeight: 22, marginBottom: 28 },
+  rivalIntroCta: { borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
+  rivalIntroCtaText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   statsStrip: { flexDirection: 'row', alignItems: 'center', gap: 20, marginTop: 4 },
   statItem: { alignItems: 'center', gap: 2 },
   statValue: { fontSize: 18, fontWeight: '800' },
