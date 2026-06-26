@@ -36,16 +36,41 @@ async function executeSinglePoll(pollIndex: number): Promise<number> {
   // 1. Fetch live matches from SportMonks
   const smFixtures = await fetchLivescores();
 
-  if (!smFixtures.length) {
-    logger.debug(`Poll ${pollIndex}: No live matches`);
-    return 0;
-  }
-
-  // 2. Transform to MatchDoc format
+  // 2. Transform live matches to MatchDoc format
   const matchDocs: MatchDoc[] = [];
   for (const fixture of smFixtures) {
     const doc = mapFixtureToMatchDoc(fixture);
     if (doc) matchDocs.push(doc);
+  }
+
+  // 2b. Also include scheduled matches starting within the next 20 minutes so
+  //     the reminder detection in detectChanges (match.status === 'scheduled')
+  //     can fire. pollLivescores only fetches live fixtures from SportMonks, so
+  //     pre-match reminders would never trigger without this Firestore query.
+  //     We only add each match once (live matches take precedence if somehow
+  //     both appear).
+  try {
+    const nowIso  = new Date(startMs).toISOString();
+    const soonIso = new Date(startMs + 20 * 60 * 1000).toISOString();
+    const liveIds = new Set(matchDocs.map(m => m.id));
+    const upcomingSnap = await db.collection('matches')
+      .where('status', '==', 'scheduled')
+      .where('startingAtUtc', '>=', nowIso)
+      .where('startingAtUtc', '<=', soonIso)
+      .get();
+    for (const doc of upcomingSnap.docs) {
+      if (!liveIds.has(doc.id)) {
+        matchDocs.push(doc.data() as MatchDoc);
+      }
+    }
+  } catch (err) {
+    // Non-fatal — reminder may fire on the next poll if this query fails.
+    logger.warn('pollLivescores: upcoming-matches query failed', { err });
+  }
+
+  if (!matchDocs.length) {
+    logger.debug(`Poll ${pollIndex}: No live or upcoming matches`);
+    return 0;
   }
 
   // 3. Load previous snapshot and detect changes. We pass the raw SMFixtures

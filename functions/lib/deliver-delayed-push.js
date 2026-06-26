@@ -102,9 +102,10 @@ exports.deliverDelayedPush = (0, tasks_1.onTaskDispatched)({
         }
     }
     // ── FCM send ─────────────────────────────────────────────────────────────
+    const target = p.condition ? { condition: p.condition } : { topic: p.topic };
     try {
         await admin_init_1.admin.messaging().send({
-            topic: p.topic,
+            ...target,
             notification: { title: p.title, body: p.body },
             data: p.data,
             android: {

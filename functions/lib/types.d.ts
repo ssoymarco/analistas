@@ -167,6 +167,7 @@ export interface LivescoresSnapshot {
         reminderSent?: boolean;
         lineupsSent?: boolean;
         halftimeSent?: boolean;
+        secondHalfSent?: boolean;
         suspendedSent?: boolean;
         extraTimeSent?: boolean;
         penaltiesSent?: boolean;
@@ -176,7 +177,7 @@ export interface LivescoresSnapshot {
     }>;
     updatedAt: Timestamp;
 }
-export type ChangeType = 'goal' | 'goalCancelled' | 'matchStart' | 'halftime' | 'matchEnd' | 'extraTimeStart' | 'penaltiesStart' | 'redCard' | 'yellowCard' | 'substitution' | 'matchSuspended' | 'matchReminder' | 'lineups' | 'rivalLoss' | 'rivalBigLoss' | 'rivalRedCard' | 'rivalPenMiss' | 'statusChange';
+export type ChangeType = 'goal' | 'goalCancelled' | 'matchStart' | 'halftime' | 'secondHalfStart' | 'matchEnd' | 'extraTimeStart' | 'penaltiesStart' | 'redCard' | 'yellowCard' | 'substitution' | 'matchSuspended' | 'matchReminder' | 'lineups' | 'rivalLoss' | 'rivalBigLoss' | 'rivalRedCard' | 'rivalPenMiss' | 'statusChange';
 export interface DetectedChange {
     type: ChangeType;
     matchId: string;

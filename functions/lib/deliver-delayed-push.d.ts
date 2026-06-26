@@ -27,7 +27,11 @@
  *   new tasks (no redeploy needed; this handler just never gets called).
  */
 export interface DelayedPushPayload {
-    topic: string;
+    /** Single-team topic (e.g. "team_1234_goals_d5"). Mutually exclusive with condition. */
+    topic?: string;
+    /** FCM topic condition for events that affect both teams — eliminates double delivery
+     *  when a user follows both. e.g. "'team_A_goals_d5' in topics || 'team_B_goals_d5' in topics" */
+    condition?: string;
     title: string;
     body: string;
     data: Record<string, string>;

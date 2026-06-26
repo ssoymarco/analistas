@@ -198,6 +198,7 @@ export interface LivescoresSnapshot {
     // SportMonks state that flaps (e.g. HALF_TIME ↔ INTERRUPTED on a paused
     // match, or EXTRA_TIME ↔ its break) can never re-trigger the push.
     halftimeSent?:      boolean;
+    secondHalfSent?:    boolean;
     suspendedSent?:     boolean;
     extraTimeSent?:     boolean;
     penaltiesSent?:     boolean;
@@ -216,6 +217,7 @@ export type ChangeType =
   | 'goalCancelled'   // Goal disallowed by VAR
   | 'matchStart'      // Kickoff (scheduled → live, FIRST_HALF)
   | 'halftime'        // Half-time whistle
+  | 'secondHalfStart' // Start of second half (HALF_TIME → SECOND_HALF)
   | 'matchEnd'        // Full-time whistle
   | 'extraTimeStart'  // Start of extra time
   | 'penaltiesStart'  // Start of penalty shootout

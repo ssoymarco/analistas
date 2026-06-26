@@ -283,6 +283,7 @@ async function saveSnapshot(matches, fixtures, previousSnapshot) {
             reminderSent: prev?.reminderSent ?? false,
             lineupsSent: prev?.lineupsSent ?? false,
             halftimeSent: prev?.halftimeSent ?? false,
+            secondHalfSent: prev?.secondHalfSent ?? false,
             suspendedSent: prev?.suspendedSent ?? false,
             extraTimeSent: prev?.extraTimeSent ?? false,
             penaltiesSent: prev?.penaltiesSent ?? false,
@@ -435,6 +436,16 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
             !prev.halftimeSent) {
             changes.push({ ...baseEvent, type: 'halftime' });
             prev.halftimeSent = true;
+        }
+        // ── Second half start ─────────────────────────────────────────────────
+        // HALF_TIME → SECOND_HALF. Latched so flapping (HT↔INTERRUPTED during
+        // break) can't re-fire the notification.
+        if (prev.stateId === types_1.SM_STATE_IDS.HALF_TIME &&
+            match.stateId === types_1.SM_STATE_IDS.SECOND_HALF &&
+            (match.minute ?? 0) >= 46 &&
+            !prev.secondHalfSent) {
+            changes.push({ ...baseEvent, type: 'secondHalfStart' });
+            prev.secondHalfSent = true;
         }
         // ── Match end ─────────────────────────────────────────────────────────
         if (prev.status === 'live' && match.status === 'finished') {
@@ -636,6 +647,12 @@ function copyForHalftime(c) {
         body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`,
     };
 }
+function copyForSecondHalfStart(c) {
+    return {
+        title: `¡Arranca el segundo tiempo!`,
+        body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
+    };
+}
 function copyForMatchEnd(c) {
     return {
         title: `🏁 Final del partido`,
@@ -736,6 +753,12 @@ function routeChange(c) {
                 legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`, `league_${leagueId}_start`],
             };
         case 'halftime':
+            return {
+                retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
+                immediateTopic: null,
+                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`],
+            };
+        case 'secondHalfStart':
             return {
                 retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
                 immediateTopic: null,
@@ -856,6 +879,7 @@ function buildFcmCopy(c) {
         case 'goalCancelled': return copyForGoalCancelled(c);
         case 'matchStart': return copyForMatchStart(c);
         case 'halftime': return copyForHalftime(c);
+        case 'secondHalfStart': return copyForSecondHalfStart(c);
         case 'matchEnd': return copyForMatchEnd(c);
         case 'redCard': return copyForRedCard(c);
         case 'yellowCard': return copyForYellowCard(c);
@@ -878,6 +902,32 @@ const ESTADIO_DELAY_ENABLED = process.env.ESTADIO_DELAY_ENABLED !== 'false';
 /** Sanitise a string to be a valid Cloud Tasks task ID ([a-zA-Z0-9_-]). */
 function toTaskId(raw) {
     return raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 499);
+}
+/**
+ * Send one FCM push using a topic CONDITION — used when an event affects both
+ * teams so a user following both receives exactly ONE notification instead of two.
+ * FCM evaluates the condition per device: if the device matches, it gets ONE push.
+ */
+function sendWithCondition(messaging, condition, title, body, data, dedupId) {
+    return messaging.send({
+        condition,
+        notification: { title, body },
+        data,
+        android: {
+            priority: 'high',
+            collapseKey: dedupId,
+            notification: { channelId: 'analistas-live', sound: 'default', tag: dedupId },
+        },
+        apns: {
+            headers: { 'apns-collapse-id': dedupId },
+            payload: { aps: { sound: 'default', badge: 0 } },
+        },
+    }).catch(err => {
+        const code = err.code;
+        if (code !== 'messaging/invalid-argument' && code !== 'messaging/registration-token-not-registered') {
+            logger.warn(`FCM send failed for condition ${condition}`, { err, code });
+        }
+    });
 }
 /** Send one FCM alert push to a specific topic — shared helper. */
 function sendToTopic(messaging, topic, title, body, data, dedupId) {
@@ -956,9 +1006,8 @@ async function dispatchNotifications(changes) {
         if (change.type === 'matchStart') {
             const homeId = change.homeTeam.id;
             const awayId = change.awayTeam.id;
-            for (const topic of [`team_${homeId}_kickoff`, `team_${awayId}_kickoff`]) {
-                sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
-            }
+            // Single condition → users following both teams get exactly one notification.
+            sendPromises.push(sendWithCondition(messaging, `'team_${homeId}_kickoff' in topics || 'team_${awayId}_kickoff' in topics`, title, body, data, dedupId));
             // Dual-send legacy (old builds subscribed to _start / league_start)
             for (const topic of legacyTopics) {
                 sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
@@ -972,8 +1021,15 @@ async function dispatchNotifications(changes) {
         if (change.type === 'matchReminder' ||
             change.type === 'lineups' ||
             change.type === 'matchSuspended') {
-            for (const topic of legacyTopics) {
-                sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
+            // legacyTopics for these events is always [team_homeId_X, team_awayId_X] — use
+            // a single condition so users following both teams get exactly one notification.
+            if (legacyTopics.length === 2) {
+                sendPromises.push(sendWithCondition(messaging, `'${legacyTopics[0]}' in topics || '${legacyTopics[1]}' in topics`, title, body, data, dedupId));
+            }
+            else {
+                for (const topic of legacyTopics) {
+                    sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
+                }
             }
             logger.info(`📣 ${change.type.toUpperCase()} — ${title}`, { matchId: change.matchId });
             continue;
@@ -983,12 +1039,8 @@ async function dispatchNotifications(changes) {
         // deliverDelayedPush will suppress the pending goal task at delivery time.
         // We don't notify them about a cancellation they never knew happened.
         if (change.type === 'goalCancelled') {
-            // Send to _d0 bases only (new devices on the immediate bucket).
-            // No legacy dual-send: v1.0.x devices no longer receive the original goal
-            // so sending a VAR cancellation would be confusing.
-            for (const base of [`team_${change.homeTeam.id}_goals`, `team_${change.awayTeam.id}_goals`]) {
-                sendPromises.push(sendToTopic(messaging, `${base}_d0`, title, body, data, dedupId));
-            }
+            // Send to _d0 bases only via condition — users following both teams get one notification.
+            sendPromises.push(sendWithCondition(messaging, `'team_${change.homeTeam.id}_goals_d0' in topics || 'team_${change.awayTeam.id}_goals_d0' in topics`, title, body, data, dedupId));
             logger.info(`📣 GOALCANCELLED (VAR) — ${title}`, { matchId: change.matchId });
             continue;
         }
@@ -997,25 +1049,34 @@ async function dispatchNotifications(changes) {
         // 2. Enqueue Cloud Tasks for d2/d5/d10.
         // Legacy dual-send REMOVED (migration window closed June 2026 with v1.1.0).
         // Sending to legacy topics bypasses all delay buckets and breaks Modo Estadio.
-        // 1. Immediate send to _d0 bucket
-        for (const base of retrasableBases) {
-            sendPromises.push(sendToTopic(messaging, `${base}_d0`, title, body, data, dedupId));
+        // 1. Immediate send to _d0 bucket.
+        // When two bases (home + away), use a single FCM condition so users following
+        // both teams receive exactly one notification instead of two.
+        if (retrasableBases.length === 2) {
+            sendPromises.push(sendWithCondition(messaging, `'${retrasableBases[0]}_d0' in topics || '${retrasableBases[1]}_d0' in topics`, title, body, data, dedupId));
         }
-        // 2. Cloud Tasks for delayed buckets
+        else {
+            for (const base of retrasableBases) {
+                sendPromises.push(sendToTopic(messaging, `${base}_d0`, title, body, data, dedupId));
+            }
+        }
+        // 2. Cloud Tasks for delayed buckets.
+        // Two bases → one combined condition task per delay level (3 tasks instead of 6).
+        // One base  → one task per delay level (unchanged).
         if (ESTADIO_DELAY_ENABLED && retrasableBases.length > 0) {
             const queue = (0, functions_1.getFunctions)().taskQueue('deliverDelayedPush');
-            for (const base of retrasableBases) {
+            if (retrasableBases.length === 2) {
+                const [baseA, baseB] = retrasableBases;
                 for (const delayMin of [2, 5, 10]) {
-                    const taskId = toTaskId(`estadio_${base}_${dedupId}_d${delayMin}`);
+                    const taskId = toTaskId(`estadio_${baseA}_${baseB}_${dedupId}_d${delayMin}`);
                     const payload = {
-                        topic: `${base}_d${delayMin}`,
+                        condition: `'${baseA}_d${delayMin}' in topics || '${baseB}_d${delayMin}' in topics`,
                         title, body, data, dedupId,
                         changeType: change.type,
                         matchId: change.matchId,
                         homeScore: change.homeScore,
                         awayScore: change.awayScore,
                     };
-                    // Fire-and-forget; swallow ALREADY_EXISTS (idempotent re-enqueue)
                     queue.enqueue(payload, {
                         scheduleDelaySeconds: delayMin * 60,
                         id: taskId,
@@ -1025,6 +1086,31 @@ async function dispatchNotifications(changes) {
                             logger.warn(`Cloud Task enqueue failed: ${taskId}`, { err: msg });
                         }
                     });
+                }
+            }
+            else {
+                for (const base of retrasableBases) {
+                    for (const delayMin of [2, 5, 10]) {
+                        const taskId = toTaskId(`estadio_${base}_${dedupId}_d${delayMin}`);
+                        const payload = {
+                            topic: `${base}_d${delayMin}`,
+                            title, body, data, dedupId,
+                            changeType: change.type,
+                            matchId: change.matchId,
+                            homeScore: change.homeScore,
+                            awayScore: change.awayScore,
+                        };
+                        // Fire-and-forget; swallow ALREADY_EXISTS (idempotent re-enqueue)
+                        queue.enqueue(payload, {
+                            scheduleDelaySeconds: delayMin * 60,
+                            id: taskId,
+                        }).catch((err) => {
+                            const msg = String(err);
+                            if (!msg.includes('ALREADY_EXISTS') && !msg.includes('already exists')) {
+                                logger.warn(`Cloud Task enqueue failed: ${taskId}`, { err: msg });
+                            }
+                        });
+                    }
                 }
             }
         }

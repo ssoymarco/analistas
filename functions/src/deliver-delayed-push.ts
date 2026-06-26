@@ -35,7 +35,11 @@ import * as logger from 'firebase-functions/logger';
 // Must stay in sync with the enqueue call in detect-changes.ts.
 
 export interface DelayedPushPayload {
-  topic:      string;               // e.g. "team_1234_goals_d5"
+  /** Single-team topic (e.g. "team_1234_goals_d5"). Mutually exclusive with condition. */
+  topic?:     string;
+  /** FCM topic condition for events that affect both teams — eliminates double delivery
+   *  when a user follows both. e.g. "'team_A_goals_d5' in topics || 'team_B_goals_d5' in topics" */
+  condition?: string;
   title:      string;
   body:       string;
   data:       Record<string, string>;
@@ -87,9 +91,10 @@ export const deliverDelayedPush = onTaskDispatched(
     }
 
     // ── FCM send ─────────────────────────────────────────────────────────────
+    const target = p.condition ? { condition: p.condition } : { topic: p.topic! };
     try {
       await admin.messaging().send({
-        topic: p.topic,
+        ...target,
         notification: { title: p.title, body: p.body },
         data: p.data,
         android: {
