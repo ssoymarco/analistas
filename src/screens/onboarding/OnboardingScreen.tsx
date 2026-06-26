@@ -27,6 +27,11 @@ import {
 import { getStandings as getStandingsFromApi } from '../../services/sportsApi';
 import type { Match, LeagueStanding } from '../../data/types';
 import { LinearGradient } from 'expo-linear-gradient';
+// expo-image for REMOTE images (team logos, player photos) — react-native's
+// <Image> crashes with EXC_BAD_ACCESS in ImageResponseObserverCoordinator when
+// a remote load completes after the view unmounts (rapid grid selection).
+// Local/bundled assets below still use react-native Image (no remote race).
+import { Image as ExpoImage } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -315,10 +320,11 @@ const SmartLogo: React.FC<{ uri: string; size?: number; round?: boolean; fallbac
   const [failed, setFailed] = useState(false);
   if (uri && isImageUri(uri) && !failed) {
     return (
-      <Image
+      <ExpoImage
         source={{ uri }}
         style={{ width: size, height: size, borderRadius: round ? size / 2 : 4 }}
-        resizeMode="contain"
+        contentFit="contain"
+        recyclingKey={uri}
         onError={() => setFailed(true)}
       />
     );
@@ -1000,10 +1006,11 @@ const PlayerRow: React.FC<{
         {/* Avatar */}
         <View style={s4.avatar}>
           {player.image && !imgFailed ? (
-            <Image
+            <ExpoImage
               source={{ uri: player.image }}
               style={{ width: 48, height: 48, borderRadius: 24 }}
-              resizeMode="cover"
+              contentFit="cover"
+              recyclingKey={player.image}
               onError={() => setImgFailed(true)}
             />
           ) : (
