@@ -3,7 +3,7 @@
 // teams, players, and leagues. Tapping items navigates to their detail pages.
 // Two sections: "MIS SEGUIDOS" (top) → "LOS MÁS SEGUIDOS" (suggestions below).
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, FlatList, SectionList,
@@ -469,6 +469,8 @@ export const FavoritosScreen: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<Tab>('equipos');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [suggestedVisible, setSuggestedVisible] = useState(INITIAL_SUGGESTED);
 
   const [smTeams,   setSmTeams]   = useState<SearchableTeam[]>([]);
@@ -827,14 +829,14 @@ export const FavoritosScreen: React.FC = () => {
   // Uses `searchItems` (full index) so users can find any player by name —
   // including squad players that aren't in the curated suggestion list.
   const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return null;
-    const q = normalize(searchQuery);
+    if (!debouncedQuery.trim()) return null;
+    const q = normalize(debouncedQuery);
     return config.searchItems.filter(i =>
       normalize(i.name).includes(q) ||
       normalize(i.subtitle).includes(q) ||
       (i.searchAliases?.some(a => normalize(a).includes(q)) ?? false)
     );
-  }, [config.searchItems, searchQuery]);
+  }, [config.searchItems, debouncedQuery]);
 
   // ── Navigation ──
   const handleItemNav = useCallback((item: FavItem) => {
@@ -921,7 +923,7 @@ export const FavoritosScreen: React.FC = () => {
           badge: tabConfig[tab.id].count,
         }))}
         activeKey={activeTab}
-        onChange={(key) => { setActiveTab(key); setSearchQuery(''); }}
+        onChange={(key) => { setActiveTab(key); setSearchQuery(''); setDebouncedQuery(''); }}
         layout="fill"
       />
 
@@ -934,13 +936,17 @@ export const FavoritosScreen: React.FC = () => {
             placeholder={t(SEARCH_PLACEHOLDER_KEYS[activeTab])}
             placeholderTextColor={c.textTertiary}
             value={searchQuery}
-            onChangeText={setSearchQuery}
+            onChangeText={(text) => {
+              setSearchQuery(text);
+              if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+              searchDebounceRef.current = setTimeout(() => setDebouncedQuery(text), 250);
+            }}
             autoCorrect={false}
             autoCapitalize="none"
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity
-              onPress={() => setSearchQuery('')}
+              onPress={() => { setSearchQuery(''); setDebouncedQuery(''); }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               style={[st.searchClearBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)' }]}
             >
