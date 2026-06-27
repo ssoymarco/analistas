@@ -86,11 +86,33 @@ export function initSentry(): void {
       // banner. No actionable info for us here.
       if (type === 'TypeError' && value.includes('Network request failed')) return null;
 
-      // ── 6. Per-type rate limit: max 25 events per session ─────────────
+      // ── 6. Drop FCM infrastructure errors ────────────────────────────
+      // [messaging/unknown] covers: getToken timeouts (REACT-NATIVE-C),
+      // Android service connection failures / IOException (REACT-NATIVE-D).
+      // All transient infra noise — self-resolve on next launch.
+      if (value.includes('messaging/unknown')) return null;
+      // expo-notifications Keychain error on iOS 26 (REACT-NATIVE-15).
+      // Upstream SDK bug, no fix on our side.
+      if (value.includes('getRegistrationInfoAsync')) return null;
+
+      // ── 7. Drop upstream 5xx API errors ──────────────────────────────
+      // SportMonks 503/502 = their infra down, not our bug.
+      if (value.includes('SportMonks API error 5')) return null;
+
+      // ── 8. Drop non-error captureMessage calls ────────────────────────
+      // captureMessage events have no exception (event.message instead of
+      // event.exception). The type/value checks above miss them entirely.
+      // Only keep messages we explicitly mark as 'error' or 'fatal'.
+      if (!ex && event.level !== 'error' && event.level !== 'fatal') return null;
+
+      // ── 9. Per-type rate limit: max 25 events per session ─────────────
       // Prevents a single flapping error from consuming the whole quota.
-      // Resets on each app launch (in-memory map). Fatal events are exempt
-      // (already returned above).
-      const key   = `${type}::${value.substring(0, 80)}`;
+      // captureMessage events now get their own bucket keyed by message
+      // text — previously all shared key "::" and one noisy source could
+      // exhaust the 25-cap for every other message in the session.
+      const key = ex
+        ? `${type}::${value.substring(0, 80)}`
+        : `msg::${(event.message ?? '').substring(0, 80)}`;
       const count = (_sentryEventCounts.get(key) ?? 0) + 1;
       _sentryEventCounts.set(key, count);
       if (count > 25) return null;
