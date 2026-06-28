@@ -26,6 +26,7 @@ import { translateCountry } from '../../i18n/countries';
 import { translateNationalTeam } from '../../utils/nationalTeams';
 import { isImageUri } from '../../utils/imageUri';
 import AdMobBanner from '../../components/AdMobBanner';
+import { ADMOB_ENABLED } from '../../config/features';
 
 // ── Optional packages (graceful degradation if missing) ──────────────────────
 let ViewShot: any = null;
@@ -918,7 +919,7 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   const PitchBlock = (
     <View style={{ overflow: 'hidden', borderRadius: 18 }}>
       {/* Top advertising banner — AdMob */}
-      <AdMobBanner />
+      {ADMOB_ENABLED && <AdMobBanner />}
 
       {/* Pitch */}
       <View style={[ms.pitchContainer, { backgroundColor: theme.grassA, borderRadius: 0 }]}>

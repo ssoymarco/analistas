@@ -24,8 +24,7 @@ import { useVersionCheck } from './src/hooks/useVersionCheck';
 import { initialize } from './src/services/notifications';
 import { initializeFCM, initializeFCMAtStartup, attachFCMHandlers } from './src/services/fcmInit';
 import { navigateToMatch, buildMatchStubFromPayload } from './src/utils/navigationRef';
-import mobileAds from 'react-native-google-mobile-ads';
-import { ADMOB_ENABLED } from './src/config/features';
+import { initializeAdMob } from './src/services/adMobService';
 // ── Sentry user sync ──────────────────────────────────────────────────────────
 // Sits inside AuthProvider so it can read the current user and tag Sentry
 // events with the user ID. Renders nothing.
@@ -77,9 +76,7 @@ function App() {
     // the <BannerAd> components mount and reserve their adaptive height but the
     // ad request never completes — the SDK isn't started, so banners stay blank.
     // Best-effort: ad init must never block or crash app launch.
-    if (ADMOB_ENABLED) {
-      mobileAds().initialize().catch(() => {});
-    }
+    initializeAdMob().catch(() => {});
 
     // ⚠️ ORDER MATTERS — FCM must register its UNUserNotificationCenter
     // delegate BEFORE expo-notifications swizzles the same delegate.
