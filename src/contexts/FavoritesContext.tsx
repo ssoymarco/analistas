@@ -96,13 +96,19 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
   // Modo Estadio prefs — FavoritesProvider is nested INSIDE NotificationPrefsProvider
   // (see App.tsx), so this hook call is always valid.
-  const { prefs } = useNotificationPrefs();
+  const { prefs, isHydrated } = useNotificationPrefs();
   const delayBucket: DelayBucket = prefs.estadioMode
     ? (`d${prefs.estadioDelay}` as DelayBucket)
     : 'd0';
   // Keep a ref so async callbacks can read the current bucket without stale closures
   const delayBucketRef = useRef<DelayBucket>(delayBucket);
   useEffect(() => { delayBucketRef.current = delayBucket; }, [delayBucket]);
+  // Ref mirror of isHydrated for async/event callbacks (foreground handler).
+  const isHydratedRef = useRef(isHydrated);
+  useEffect(() => { isHydratedRef.current = isHydrated; }, [isHydrated]);
+  // True once the favorites AsyncStorage load resolves — gates the reconcile so
+  // it never runs with a not-yet-loaded (empty) follow list.
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
 
   // ── Modo Rival enabled events (derived from notification prefs) ──
   // Which rival "bad news" classes the user wants. Threaded into reconcile so
@@ -137,39 +143,36 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       AsyncStorage.getItem(LEAGUE_STORAGE_KEY),
       AsyncStorage.getItem(RIVAL_STORAGE_KEY),
     ]).then(([m, t, p, l, r]) => {
-      let parsedTeams:   string[] = [];
-      let parsedPlayers: string[] = [];
-      let parsedLeagues: string[] = [];
-      let parsedRivals:  string[] = [];
       try { const v = JSON.parse(m ?? '[]'); if (Array.isArray(v)) setFavoriteIds(v); } catch {}
-      try { const v = JSON.parse(t ?? '[]'); if (Array.isArray(v)) { setFollowedTeamIds(v);   parsedTeams   = v; } } catch {}
-      try { const v = JSON.parse(p ?? '[]'); if (Array.isArray(v)) { setFollowedPlayerIds(v); parsedPlayers = v; } } catch {}
-      try { const v = JSON.parse(l ?? '[]'); if (Array.isArray(v)) { setFollowedLeagueIds(v); parsedLeagues = v; } } catch {}
-      try { const v = JSON.parse(r ?? '[]'); if (Array.isArray(v)) { setRivalTeamIds(v);      parsedRivals  = v; } } catch {}
+      try { const v = JSON.parse(t ?? '[]'); if (Array.isArray(v)) setFollowedTeamIds(v); } catch {}
+      try { const v = JSON.parse(p ?? '[]'); if (Array.isArray(v)) setFollowedPlayerIds(v); } catch {}
+      try { const v = JSON.parse(l ?? '[]'); if (Array.isArray(v)) setFollowedLeagueIds(v); } catch {}
+      try { const v = JSON.parse(r ?? '[]'); if (Array.isArray(v)) setRivalTeamIds(v); } catch {}
 
-      // Reconcile FCM topic subscriptions on cold start so the subscriptions
-      // match the user's persisted favorites + current Modo Estadio bucket,
-      // even if a previous session crashed mid-toggle or the user changed devices.
-      // Fire-and-forget — FCM operations are network-bound, don't block first paint.
-      reconcileSubscriptions({
-        teamIds:      parsedTeams,
-        leagueIds:    parsedLeagues,  // ignored inside reconcileSubscriptions (display-only)
-        playerIds:    parsedPlayers,
-        rivalTeamIds: parsedRivals,
-        rivalEvents:  rivalEventsRef.current,
-        delayBucket:  delayBucketRef.current,
-      }).catch(() => {});
+      // Favorites are loaded. The unified reconcile effect below fires once prefs
+      // are ALSO hydrated, so it always runs with the authoritative delay bucket
+      // (never the pre-hydration default 'd0', which would nuke the right bucket).
+      setFavoritesLoaded(true);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Modo Estadio change → re-reconcile to switch delay buckets ─────────────
-  // When the user changes estadioMode or estadioDelay, every team they follow
-  // needs to migrate from its current bucket (e.g. _d0) to the new one (e.g. _d5).
-  // The useEffect watches `delayBucket` which changes whenever either pref does.
-  // Skipped on mount (the cold-start reconcile above already handles it).
-  const isFirstMount = useRef(true);
+  // ── Unified FCM reconcile — single authoritative entry point ───────────────
+  // Fires for: cold start (once prefs+favorites are loaded), Modo Estadio bucket
+  // changes, and rival-event toggles.
+  //
+  // ⚠️ SAFETY-CRITICAL gate on isHydrated && favoritesLoaded: the reconcile is
+  // authoritative — it force-unsubscribes every delay-bucket sibling that isn't
+  // the target. If it ran before prefs hydrate (when delayBucket is still the
+  // DEFAULT 'd0'), it would actively unsubscribe the user's correct delayed
+  // bucket, breaking a perfectly-configured device on every launch. Gating
+  // guarantees the bucket + follow list are always authoritative.
+  //
+  // Intentionally does NOT depend on the follow-list arrays: per-team
+  // follow/unfollow is handled by toggleFollowTeam's targeted subscribe, so a
+  // single tap never triggers a full sweep of every followed team. Onboarding's
+  // replace* helpers reconcile explicitly (they bypass toggleFollowTeam).
   useEffect(() => {
-    if (isFirstMount.current) { isFirstMount.current = false; return; }
+    if (!isHydrated || !favoritesLoaded) return;
     reconcileSubscriptions({
       teamIds:      teamRef.current,
       leagueIds:    leagueRef.current,
@@ -178,32 +181,15 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       rivalEvents:  rivalEventsRef.current,
       delayBucket:  delayBucket,
     }).catch(() => {});
-  }, [delayBucket]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Modo Rival settings change → re-reconcile rival subscriptions ──────────
-  // When the user toggles which rival "bad news" they want, every rival team
-  // needs to (un)subscribe the affected event class. Skipped on mount (the
-  // cold-start reconcile already covers it).
-  const isFirstRivalMount = useRef(true);
-  useEffect(() => {
-    if (isFirstRivalMount.current) { isFirstRivalMount.current = false; return; }
-    reconcileSubscriptions({
-      teamIds:      teamRef.current,
-      leagueIds:    leagueRef.current,
-      playerIds:    playerRef.current,
-      rivalTeamIds: rivalRef.current,
-      rivalEvents:  rivalEventsRef.current,
-      delayBucket:  delayBucketRef.current,
-    }).catch(() => {});
-  }, [rivalEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isHydrated, favoritesLoaded, delayBucket, rivalEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── AppState foreground → re-reconcile to heal any mid-flip desync ─────────
-  // If the user changed their Modo Estadio delay while the app was backgrounded,
-  // the subscription wipe+re-subscribe may not have completed. Re-running on
-  // foreground ensures the device always ends up in exactly one bucket.
+  // Heals subscriptions that drifted while backgrounded (e.g. a Modo Estadio
+  // change whose reconcile didn't complete). Gated on isHydrated so it never
+  // runs the authoritative reconcile with a pre-hydration default bucket.
   useEffect(() => {
     const handler = (state: AppStateStatus) => {
-      if (state === 'active') {
+      if (state === 'active' && isHydratedRef.current) {
         reconcileSubscriptions({
           teamIds:      teamRef.current,
           leagueIds:    leagueRef.current,
@@ -457,6 +443,17 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       playerIds: playerRef.current,
       leagueIds: leagueRef.current,
     });
+    // Onboarding uses this instead of toggleFollowTeam, so it bypasses the
+    // per-team subscribe. The unified effect doesn't key off the follow list,
+    // so reconcile explicitly here to subscribe the freshly-picked teams.
+    reconcileSubscriptions({
+      teamIds:      next,
+      leagueIds:    leagueRef.current,
+      playerIds:    playerRef.current,
+      rivalTeamIds: rivalRef.current,
+      rivalEvents:  rivalEventsRef.current,
+      delayBucket:  delayBucketRef.current,
+    }).catch(() => {});
   }, []);
 
   const replaceFollowedPlayers = useCallback((playerIds: string[]) => {

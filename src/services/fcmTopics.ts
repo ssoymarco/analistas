@@ -87,11 +87,6 @@ const SUBSCRIBED_TOPICS_KEY = 'analistas_fcm_subscribed_topics';
 // updated from v1.0.x may still be subscribed to these stale topics. This flag
 // marks that we've already run the cleanup so we don't redo it on every launch.
 const LEGACY_TOPICS_CLEANED_KEY = 'analistas_fcm_legacy_v110_cleaned';
-// One-time flag: heal devices where a Modo Estadio bucket change had a silent
-// FCM unsubscription failure — leaving them subscribed to the old bucket AND
-// the new one, causing every event to arrive twice (once immediately via the
-// stale bucket, once after the Modo Estadio delay via the correct bucket).
-const STALE_BUCKET_HEALED_KEY = 'analistas_fcm_bucket_desync_v1_healed';
 
 /** Delay bucket type for Modo Estadio. */
 export type DelayBucket = 'd0' | 'd2' | 'd5' | 'd10';
@@ -374,24 +369,6 @@ export async function setRivalEventForTeams(
 }
 
 /**
- * Reconcile FCM subscriptions against the user's current follow list and
- * current Modo Estadio delay bucket.
- *
- * Called on:
- *   - App cold start (AsyncStorage load)
- *   - Auth state change (Firestore sync of favorites)
- *   - estadioMode or estadioDelay change (via FavoritesContext useEffect)
- *   - App foreground (AppState 'active' — heals any mid-flip desync)
- *
- * Logic:
- *   wantedTopics  = union of all teams (in the correct bucket) + players
- *   currentTopics = what we believe we're subscribed to (AsyncStorage)
- *   unsubscribe from (current - wanted)  ← BEFORE subscribing (avoids dual-bucket)
- *   subscribe   to   (wanted - current)
- *
- * Leagues are intentionally excluded — display-only, no FCM subscriptions.
- */
-/**
  * One-time migration: unsubscribe from legacy topics (no bucket suffix) that
  * were subscribed on v1.0.x builds. The server stopped dual-sending to these
  * in v1.1.0 (June 2026), so they are now dead — but devices that updated from
@@ -417,119 +394,121 @@ async function migrateFromLegacyTopics(teamIds: string[]): Promise<void> {
   }
 }
 
-/**
- * One-time heal: for each followed team, unsubscribe from every delay bucket
- * that is NOT the user's current bucket.
- *
- * Root cause this targets: reconcileSubscriptions used to delete topics from
- * SUBSCRIBED_TOPICS_KEY regardless of whether the FCM unsubscription call
- * actually succeeded. When it failed (network error, token refresh, iOS
- * background limits), the local record showed the device as clean but FCM
- * still had the old bucket subscription active. Every subsequent reconcile
- * saw current === wanted and did nothing, leaving the stale subscription
- * permanently. Result: two notifications per event — one immediate (stale
- * bucket) and one Modo Estadio–delayed (correct bucket).
- *
- * This runs once on first launch after the fix ships. If some unsubscriptions
- * fail, the flag is NOT set so it retries on the next app launch. Only marks
- * done when all calls succeed, guaranteeing full cleanup.
- */
-async function healStaleBucketSubscriptions(teamIds: string[], currentBucket: DelayBucket): Promise<void> {
-  try {
-    const done = await AsyncStorage.getItem(STALE_BUCKET_HEALED_KEY);
-    if (done) return;
-
-    const topicsToRemove: string[] = [];
-    for (const id of teamIds) {
-      for (const b of ALL_BUCKETS) {
-        if (b === currentBucket) continue;
-        topicsToRemove.push(
-          TopicNames.teamGoals(id, b),
-          TopicNames.teamCards(id, b),
-          TopicNames.teamLive(id, b),
-        );
-      }
-    }
-
-    if (topicsToRemove.length === 0) {
-      await AsyncStorage.setItem(STALE_BUCKET_HEALED_KEY, '1');
-      return;
-    }
-
-    const results = await Promise.all(topicsToRemove.map(t => safeUnsubscribe(t)));
-    const succeeded = results.filter(Boolean).length;
-    addBreadcrumb('fcm', 'stale bucket heal', { total: topicsToRemove.length, succeeded });
-
-    // Only mark done when EVERY unsubscription succeeded — otherwise retry
-    // on next launch until the device is fully clean.
-    if (succeeded === topicsToRemove.length) {
-      await AsyncStorage.setItem(STALE_BUCKET_HEALED_KEY, '1');
-    }
-  } catch {
-    // Non-fatal — will retry on next app launch.
+/** Run an async op over items in small concurrent batches, so cold start never
+ *  fires 100+ simultaneous native FCM topic calls (a heavy user × all buckets
+ *  can be ~135 ops). Keeps the native bridge / FCM SDK from being hammered. */
+async function runInBatches<T>(
+  items: T[],
+  op: (item: T) => Promise<void>,
+  batchSize = 10,
+): Promise<void> {
+  for (let i = 0; i < items.length; i += batchSize) {
+    await Promise.all(items.slice(i, i + batchSize).map(op));
   }
 }
 
-export async function reconcileSubscriptions(args: {
+interface ReconcileArgs {
   teamIds:    string[];
-  leagueIds:  string[];  // kept in signature for call-site compatibility; ignored
+  leagueIds:  string[];  // kept for call-site compatibility; ignored (display-only)
   playerIds:  string[];
   rivalTeamIds?: string[];      // Modo Rival teams
   rivalEvents?:  RivalEvent[];  // enabled rival event classes (defaults to all)
-  delayBucket?: DelayBucket;  // defaults to 'd0' (Modo Estadio OFF)
-}): Promise<void> {
+  delayBucket?: DelayBucket;    // defaults to 'd0' (Modo Estadio OFF)
+}
+
+// ── Coalescing scheduler ────────────────────────────────────────────────────
+// Several triggers (cold start, Modo Estadio toggle, rival-event toggle, app
+// foreground, auth sync) can call reconcile near-simultaneously. Each does a
+// non-atomic read-modify-write of the AsyncStorage subscription record; two
+// overlapping runs read the same `current`, both write at the end, and the last
+// write wins — re-creating duplicate/mixed bucket state. We serialize: if a pass
+// is in-flight, the newest args overwrite a single pending slot and we run
+// exactly once more when the current pass finishes, so the user's latest action
+// always wins without racing the on-disk record.
+let reconcileInFlight: Promise<void> | null = null;
+let reconcilePending: ReconcileArgs | null = null;
+
+export async function reconcileSubscriptions(args: ReconcileArgs): Promise<void> {
+  reconcilePending = args; // newest request wins
+  if (reconcileInFlight) return reconcileInFlight;
+  reconcileInFlight = (async () => {
+    try {
+      while (reconcilePending) {
+        const next = reconcilePending;
+        reconcilePending = null;
+        // Guard each pass so one failure never aborts draining a queued request.
+        try { await doReconcileSubscriptions(next); } catch { /* swallowed */ }
+      }
+    } finally {
+      reconcileInFlight = null;
+    }
+  })();
+  return reconcileInFlight;
+}
+
+async function doReconcileSubscriptions(args: ReconcileArgs): Promise<void> {
   const bucket: DelayBucket = args.delayBucket ?? 'd0';
   const rivalEvents = args.rivalEvents ?? RIVAL_EVENTS;
 
-  // One-time cleanup of v1.0.x legacy topic subscriptions (fire-and-forget).
+  // One-time cleanup of v1.0.x legacy (un-bucketed) topic subscriptions.
   migrateFromLegacyTopics(args.teamIds).catch(() => {});
-  // One-time heal: remove stale bucket subscriptions on devices where a prior
-  // Modo Estadio change had a silent FCM unsubscription failure. Fire-and-forget;
-  // retries on subsequent launches until all calls succeed.
-  healStaleBucketSubscriptions(args.teamIds, bucket).catch(() => {});
 
+  // ── Desired ("wanted") topic set ──────────────────────────────────────────
   const wanted = new Set<string>();
-  for (const id of args.teamIds) {
-    topicsForTeam(id, bucket).forEach(t => wanted.add(t));
-  }
-  // Note: leagueIds intentionally skipped — display-only
-  for (const id of args.playerIds) {
-    topicsForPlayer(id).forEach(t => wanted.add(t));
-  }
-  // Modo Rival — only the enabled event classes for each rival team.
+  for (const id of args.teamIds)   topicsForTeam(id, bucket).forEach(t => wanted.add(t));
+  // leagueIds intentionally skipped — display-only.
+  for (const id of args.playerIds) topicsForPlayer(id).forEach(t => wanted.add(t));
   for (const id of args.rivalTeamIds ?? []) {
     for (const ev of rivalEvents) wanted.add(RIVAL_TOPIC_BY_EVENT[ev](id));
   }
 
   const current = await readSubscribedTopics();
-  const toRemove: string[] = [];
-  const toAdd:    string[] = [];
 
-  for (const t of current) if (!wanted.has(t)) toRemove.push(t);
-  for (const t of wanted)  if (!current.has(t)) toAdd.push(t);
+  // ── Removals — AUTHORITATIVE, not a pure cache diff ───────────────────────
+  // (1) Anything cached that's no longer wanted (unfollowed team/player/rival,
+  //     or a stale delay bucket left in the cache).
+  // (2) CRITICAL FIX: every delay-bucket SIBLING of a still-followed team that
+  //     isn't the target bucket — INCLUDING topics absent from the local cache.
+  //     The cache can diverge from FCM's real membership (an FCM_INIT_VERSION
+  //     wipe cleared the cache WITHOUT unsubscribing server-side, orphaning the
+  //     old _d0 topics). The old `current - wanted` diff could never remove what
+  //     it didn't know about, leaving devices subscribed to BOTH the immediate
+  //     (_d0) and delayed (_dN) bucket → every event arrived twice (spoiler now
+  //     + duplicate after the Modo Estadio delay). Mirrors subscribeTeamTopics's
+  //     defensive sibling cleanup so both paths behave identically.
+  const removeSet = new Set<string>();
+  for (const t of current) if (!wanted.has(t)) removeSet.add(t);
+  for (const id of args.teamIds) {
+    for (const t of allBucketTopicsForTeam(id)) if (!wanted.has(t)) removeSet.add(t);
+  }
+  const toRemove = [...removeSet];
+  const toAdd    = [...wanted].filter(t => !current.has(t));
 
-  if (toAdd.length === 0 && toRemove.length === 0) return;
+  if (toRemove.length === 0 && toAdd.length === 0) return;
 
-  // Unsubscribe first to ensure no brief window with two active buckets.
-  // Only remove from local tracking if the FCM call actually succeeded —
-  // topics where unsubscription failed stay in SUBSCRIBED_TOPICS_KEY so the
-  // next reconcile (next foreground, next Modo Estadio toggle) retries them
-  // instead of losing track and leaving stale server-side subscriptions.
-  if (toRemove.length > 0) {
-    const removeResults = await Promise.all(toRemove.map(t => safeUnsubscribe(t)));
-    toRemove.forEach((t, i) => { if (removeResults[i]) current.delete(t); });
+  // Observability: count removals the local cache didn't know about — the
+  // fingerprint of the dual-subscription bug being healed in production.
+  const orphanRemovals = toRemove.filter(t => !current.has(t)).length;
+  if (orphanRemovals > 0) {
+    addBreadcrumb('fcm', 'reconcile healed orphan subscriptions', { orphanRemovals, bucket });
+    Sentry.setContext('fcm_reconcile', { orphanRemovals, bucket });
   }
 
-  if (toAdd.length > 0) {
-    const results = await Promise.all(toAdd.map(t => safeSubscribe(t)));
-    // Persist only successfully subscribed topics (not the full wanted set)
-    // so a transient network failure doesn't pollute the persisted record.
-    const successSet = new Set(current);
-    toAdd.forEach((t, i) => { if (results[i]) successSet.add(t); });
-    await writeSubscribedTopics(successSet);
-  } else {
-    await writeSubscribedTopics(current);
-  }
+  // Mutated as ops succeed; persisted to AsyncStorage exactly ONCE at the end
+  // (no per-team I/O thrashing). Topics whose FCM call failed stay as-is so the
+  // next reconcile retries them instead of losing track.
+  const nextCache = new Set(current);
+
+  // Unsubscribe FIRST (avoid a dual-bucket window), then subscribe — both in
+  // small batches to spare the native bridge / FCM SDK on cold start.
+  await runInBatches(toRemove, async t => {
+    if (await safeUnsubscribe(t)) nextCache.delete(t);
+  });
+  await runInBatches(toAdd, async t => {
+    if (await safeSubscribe(t)) nextCache.add(t);
+  });
+
+  await writeSubscribedTopics(nextCache);
 }
 
 /**

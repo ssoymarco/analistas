@@ -23,22 +23,18 @@ function formatDate(d: Date): string {
 }
 
 /**
- * Get yesterday, today, and tomorrow date strings.
+ * Get a 15-day window: yesterday + today + next 13 days.
+ * Wide enough to cover full knockout tournament phases (WC R16 → Final).
  */
 function getTargetDates(): string[] {
+  const dates: string[] = [];
   const now = new Date();
-
-  const yesterday = new Date(now);
-  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-
-  const tomorrow = new Date(now);
-  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-
-  return [
-    formatDate(yesterday),
-    formatDate(now),
-    formatDate(tomorrow),
-  ];
+  for (let offset = -1; offset <= 13; offset++) {
+    const d = new Date(now);
+    d.setUTCDate(d.getUTCDate() + offset);
+    dates.push(formatDate(d));
+  }
+  return dates;
 }
 
 /**

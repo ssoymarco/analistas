@@ -4,7 +4,7 @@ import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads'
 import { isAdsReady, onAdsReady } from '../services/adMobService';
 import { Sentry } from '../services/sentry';
 
-const IOS_UNIT_ID = 'ca-app-pub-8947149240597843/9316266162';
+const IOS_UNIT_ID = 'ca-app-pub-8947149240597843/6829998779';
 const ANDROID_UNIT_ID = 'ca-app-pub-8947149240597843/5516917107';
 
 const adUnitId = __DEV__
@@ -29,7 +29,8 @@ export default function AdMobBanner() {
         requestOptions={{ requestNonPersonalizedAdsOnly: true }}
         onAdFailedToLoad={error => {
           const code = String((error as unknown as { code?: string }).code ?? '');
-          if (!code || code.includes('no-fill') || error.message?.includes('No fill')) return;
+          if (!code || code.includes('no-fill') || code.includes('timeout') ||
+              error.message?.includes('No fill') || error.message?.includes('timeout')) return;
           Sentry.captureMessage(`[AdMob ${Platform.OS}] banner failed: ${code}`, {
             level: 'error',
             tags: { platform: Platform.OS, adUnitId },

@@ -80,6 +80,12 @@ const DEFAULT_PREFS: NotificationPrefs = {
 
 interface NotificationPrefsContextType {
   prefs: NotificationPrefs;
+  /** True once prefs have been read from AsyncStorage (the multiGet resolved).
+   *  Until then, `prefs` is DEFAULT_PREFS (estadioMode:false → bucket 'd0').
+   *  SAFETY-CRITICAL for FCM: the authoritative reconcile must NOT run before
+   *  this is true, or it would unsubscribe the user's correct delay-bucket
+   *  topics thinking the default 'd0' is the truth. See FavoritesContext. */
+  isHydrated: boolean;
   togglePref: (key: keyof Pick<NotificationPrefs, 'notificationsEnabled' | 'matchReminder' | 'goals' | 'matchStart' | 'halftime' | 'matchEnd' | 'lineups' | 'yellowCards' | 'redCards' | 'substitutions' | 'var' | 'estadioMode' | 'rivalResult' | 'rivalRedCard' | 'rivalPenMiss'>) => void;
   /** Set the Modo Estadio delay in minutes */
   setEstadioDelay: (minutes: number) => void;
@@ -118,6 +124,7 @@ interface NotificationPrefsContextType {
 
 const NotificationPrefsContext = createContext<NotificationPrefsContextType>({
   prefs: DEFAULT_PREFS,
+  isHydrated: false,
   togglePref: () => {},
   setEstadioDelay: () => {},
   setMatchReminderMinutes: () => {},
@@ -157,6 +164,10 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   const [matchEventOverrides, setMatchEventOverrides] = useState<MatchEventOverrides>({});
   const [pushToken, setPushTokenState] = useState<string | null>(null);
   const [permissionStatus, setPermissionStatusState] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
+  // Flips true once the AsyncStorage multiGet below resolves. Gates the
+  // authoritative FCM reconcile (FavoritesContext) so it never runs with the
+  // pre-hydration default bucket.
+  const [isHydrated, setIsHydrated] = useState(false);
 
   // Stable refs so the cross-device Firestore sync writes the latest values
   // without re-creating the effect on every state change.
@@ -195,8 +206,16 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
         if (savedPerm === 'granted' || savedPerm === 'denied') {
           setPermissionStatusState(savedPerm);
         }
+        // Mark hydrated AFTER all setState calls above so any reconcile that
+        // keys off isHydrated reads the loaded prefs (correct delay bucket),
+        // never the DEFAULT_PREFS 'd0'.
+        setIsHydrated(true);
       },
-    );
+    ).catch(() => {
+      // Even on read failure we must unblock the reconcile; it will use
+      // DEFAULT_PREFS (Modo Estadio off) which is the safe fallback.
+      setIsHydrated(true);
+    });
   }, []);
 
   const togglePref = useCallback((key: keyof NotificationPrefs) => {
@@ -395,7 +414,7 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   return (
     <NotificationPrefsContext.Provider
       value={{
-        prefs, togglePref, setEstadioDelay, setMatchReminderMinutes,
+        prefs, isHydrated, togglePref, setEstadioDelay, setMatchReminderMinutes,
         mutedMatchIds, toggleMatchMute, isMatchMuted,
         estadioMatchIds, toggleMatchEstadio, isMatchEstadio,
         estadioMatchDelays, setMatchEstadioDelay, getMatchEstadioDelay,
