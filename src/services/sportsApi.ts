@@ -2563,10 +2563,16 @@ function resolveBracketPlaceholders(
 // ── getCupBracket cache & dedup ───────────────────────────────────────────────
 const bracketMem = new Map<string, { rounds: CupRound[]; at: number }>();
 const bracketInflight = new Map<string, Promise<CupRound[]>>();
-const BRACKET_MEM_TTL = 30 * 60_000;
+// 5 min during the World Cup: when a knockout match finishes, the next round's
+// "Winner of Match N" slot resolves to the real team — a 30-min cache made that
+// take up to half an hour to appear. The underlying read is one small
+// season_fixtures index doc, so a short TTL is cheap.
+const BRACKET_MEM_TTL = 5 * 60_000;
 
 function bracketCacheKey(seasonId: number, isPlayoffsOnly?: boolean): string {
-  return `bracket_v3_${seasonId}_${isPlayoffsOnly ? 'po' : 'cup'}`;
+  // v4: invalidates brackets cached before the placeholder-resolution + the
+  // server `details`/`placeholder` fields existed.
+  return `bracket_v4_${seasonId}_${isPlayoffsOnly ? 'po' : 'cup'}`;
 }
 
 function applyCurrentFixtureHighlight(rounds: CupRound[], fixtureId?: string): CupRound[] {
@@ -2973,7 +2979,7 @@ export async function getCupBracket(
   const promise = buildCupBracketUncached(seasonId, isPlayoffsOnly)
     .then(rounds => {
       bracketMem.set(key, { rounds, at: Date.now() });
-      AppCache.set(key, rounds, CacheTTL.standings).catch(() => {});
+      AppCache.set(key, rounds, BRACKET_MEM_TTL).catch(() => {});
       bracketInflight.delete(key);
       return rounds;
     })
