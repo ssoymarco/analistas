@@ -2322,8 +2322,11 @@ type PlaceholderRef =
 const PLACEHOLDER_MATCH_RE = /^winner\s+(?:of\s+)?match\s+(\d+)$/i;
 const PLACEHOLDER_LOSER_RE =
   /^loser\s+(semi-?finals?|quarter-?finals?|round\s+of\s+16|(?:8th|16th)\s+finals?)\s*(\d+)$/i;
+// Group 1 captures the WHOLE phase label. The previous version only captured
+// "round of 16"; quarter/semi matched via non-capturing branches → group 1 was
+// undefined → phaseFromSmLabel(undefined) threw and blanked the whole bracket.
 const PLACEHOLDER_ROUND_WINNER_RE =
-  /^winner\s+(?:of\s+)?(?:(round\s+of\s+16)|(?:8th|16th)\s+finals?|quarter-?finals?|semi-?finals?)\s*(\d+)$/i;
+  /^winner\s+(?:of\s+)?((?:round\s+of\s+16)|(?:8th|16th)\s+finals?|quarter-?finals?|semi-?finals?)\s*(\d+)$/i;
 
 function parseTournamentMatchNumber(fixture: SMFixture): number | null {
   const details = (fixture as { details?: string }).details;
@@ -2333,7 +2336,7 @@ function parseTournamentMatchNumber(fixture: SMFixture): number | null {
 }
 
 function phaseFromSmLabel(label: string): KnockoutPhase | null {
-  const l = label.toLowerCase().replace(/\s+/g, ' ');
+  const l = (label ?? '').toLowerCase().replace(/\s+/g, ' ');
   if (l.includes('16th') || l.includes('round of 32') || l.includes('32')) return 'r32';
   if (l.includes('8th') || l.includes('round of 16') || l.includes('16')) return 'r16';
   if (l.includes('quarter')) return 'qf';
