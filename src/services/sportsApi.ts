@@ -87,7 +87,7 @@ import { AVAILABLE_LEAGUES, getLeagueConfig, LEAGUE_IDS } from '../config/league
 import i18n from '../i18n';
 import { normalize } from '../utils/normalize';
 import { resolveTeamLogo } from '../utils/teamLogoOverrides';
-import { translateNationalTeam } from '../utils/nationalTeams';
+import { translateNationalTeam, translateTeamName } from '../utils/nationalTeams';
 
 // ── State Mapping ───────────────────────────────────────────────────────────
 
@@ -2302,13 +2302,271 @@ function mapTie(fixtures: SMFixture[], currentFixtureId?: string): CupTie {
   };
 }
 
+// ── Bracket placeholder resolution ("Winner of Match N" → real teams) ─────────
+//
+// SportMonks pre-creates future knockout fixtures with placeholder participants
+// named "Winner of Match 73". The tournament match number lives in
+// fixture.details ("Match 73"), NOT in result_info or the SM fixture id.
+// This pass resolves those slots to (a) the confirmed winner once the feeder
+// tie is finished, or (b) "Ganador entre A y B" while the feeder is pending.
+// When mapping is uncertain we keep the generic translated label — showing the
+// wrong team in a bracket is worse than "Ganador Partido N".
+
+type KnockoutPhase = 'r32' | 'r16' | 'qf' | 'sf';
+
+type PlaceholderRef =
+  | { kind: 'match'; n: number }
+  | { kind: 'loser'; phase: KnockoutPhase; n: number }
+  | { kind: 'round'; phase: KnockoutPhase; n: number };
+
+const PLACEHOLDER_MATCH_RE = /^winner\s+(?:of\s+)?match\s+(\d+)$/i;
+const PLACEHOLDER_LOSER_RE =
+  /^loser\s+(semi-?finals?|quarter-?finals?|round\s+of\s+16|(?:8th|16th)\s+finals?)\s*(\d+)$/i;
+const PLACEHOLDER_ROUND_WINNER_RE =
+  /^winner\s+(?:of\s+)?(?:(round\s+of\s+16)|(?:8th|16th)\s+finals?|quarter-?finals?|semi-?finals?)\s*(\d+)$/i;
+
+function parseTournamentMatchNumber(fixture: SMFixture): number | null {
+  const details = (fixture as { details?: string }).details;
+  if (!details) return null;
+  const m = String(details).match(/^match\s+(\d+)$/i);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function phaseFromSmLabel(label: string): KnockoutPhase | null {
+  const l = label.toLowerCase().replace(/\s+/g, ' ');
+  if (l.includes('16th') || l.includes('round of 32') || l.includes('32')) return 'r32';
+  if (l.includes('8th') || l.includes('round of 16') || l.includes('16')) return 'r16';
+  if (l.includes('quarter')) return 'qf';
+  if (l.includes('semi')) return 'sf';
+  return null;
+}
+
+function stageNameToPhase(stageName: string): KnockoutPhase | null {
+  return phaseFromSmLabel(stageName);
+}
+
+function parsePlaceholderRef(rawName: string): PlaceholderRef | null {
+  const lower = rawName.toLowerCase().trim();
+
+  const mm = lower.match(PLACEHOLDER_MATCH_RE);
+  if (mm) return { kind: 'match', n: parseInt(mm[1], 10) };
+
+  const lm = lower.match(PLACEHOLDER_LOSER_RE);
+  if (lm) {
+    const phase = phaseFromSmLabel(lm[1]);
+    const n = parseInt(lm[2], 10);
+    if (phase && n > 0) return { kind: 'loser', phase, n };
+  }
+
+  const rw = lower.match(PLACEHOLDER_ROUND_WINNER_RE);
+  if (rw) {
+    const phase = phaseFromSmLabel(rw[1]);
+    const n = parseInt(rw[2], 10);
+    if (phase && n > 0) return { kind: 'round', phase, n };
+  }
+
+  return null;
+}
+
+function isPlaceholderParticipant(p: SMParticipant | undefined, rawName: string): boolean {
+  if (!p) return true;
+  if (p.placeholder === true) return true;
+  if (!p.id || p.id === 0) return true;
+  const lower = rawName.toLowerCase().trim();
+  if (lower === 'tbc' || lower === 'tbd') return true;
+  if (parsePlaceholderRef(rawName)) return true;
+  if (/^winner\s+/i.test(rawName) || /^loser\s+/i.test(rawName)) return true;
+  if (/^\d+(?:st|nd|rd|th)\s+(?:group|ranked|place)/i.test(rawName)) return true;
+  return false;
+}
+
+function isConfirmedBracketTeam(team: Team): boolean {
+  return !!team.id && !team.id.startsWith('tbd') && team.shortName !== 'TBD';
+}
+
+function fallbackPlaceholderTeam(rawName: string): Team {
+  return {
+    id: '0',
+    name: translatePlaceholderName(rawName),
+    shortName: 'TBD',
+    logo: '⚽',
+  };
+}
+
+function winnerBetweenLabel(homeRaw: string, awayRaw: string): Team {
+  const home = abbreviate(translateTeamName(homeRaw));
+  const away = abbreviate(translateTeamName(awayRaw));
+  return {
+    id: `tbd-feeder-${home}-${away}`,
+    name: i18n.t('cup.winnerBetween', { home, away }) as string,
+    shortName: 'TBD',
+    logo: '⚽',
+  };
+}
+
+interface BracketResolveCtx {
+  allFixtures: SMFixture[];
+  matchNumToFixture: Map<number, SMFixture>;
+  fixtureIdToTie: Map<string, CupTie>;
+  phaseToFixtures: Map<KnockoutPhase, SMFixture[]>;
+}
+
+function buildBracketResolveCtx(
+  allFixtures: SMFixture[],
+  knockoutFixtures: SMFixture[],
+  rounds: CupRound[],
+): BracketResolveCtx {
+  const matchNumToFixture = new Map<number, SMFixture>();
+  for (const f of allFixtures) {
+    const n = parseTournamentMatchNumber(f);
+    if (n != null) matchNumToFixture.set(n, f);
+  }
+
+  const fixtureIdToTie = new Map<string, CupTie>();
+  for (const round of rounds) {
+    for (const tie of round.ties) {
+      for (const leg of tie.legs) fixtureIdToTie.set(leg.fixtureId, tie);
+    }
+  }
+
+  const phaseToFixtures = new Map<KnockoutPhase, SMFixture[]>();
+  for (const f of knockoutFixtures) {
+    const stageName = (f as { stage?: { name?: string } }).stage?.name
+      ?? (f as { round?: { name?: string } }).round?.name
+      ?? '';
+    const phase = stageNameToPhase(stageName);
+    if (!phase) continue;
+    if (!phaseToFixtures.has(phase)) phaseToFixtures.set(phase, []);
+    phaseToFixtures.get(phase)!.push(f);
+  }
+  for (const [phase, list] of phaseToFixtures) {
+    list.sort((a, b) => {
+      const na = parseTournamentMatchNumber(a) ?? 9999;
+      const nb = parseTournamentMatchNumber(b) ?? 9999;
+      if (na !== nb) return na - nb;
+      return a.starting_at.localeCompare(b.starting_at) || a.id - b.id;
+    });
+    phaseToFixtures.set(phase, list);
+  }
+
+  return { allFixtures, matchNumToFixture, fixtureIdToTie, phaseToFixtures };
+}
+
+function resolveFeederFixture(ref: PlaceholderRef, ctx: BracketResolveCtx): SMFixture | null {
+  if (ref.kind === 'match') return ctx.matchNumToFixture.get(ref.n) ?? null;
+  const list = ctx.phaseToFixtures.get(ref.phase);
+  if (!list || ref.n < 1 || ref.n > list.length) return null;
+  return list[ref.n - 1];
+}
+
+function tieLoser(tie: CupTie): Team | null {
+  if (!tie.isFinished || !tie.winner) return null;
+  const loser = tie.winner.id === tie.homeTeam.id ? tie.awayTeam : tie.homeTeam;
+  return isConfirmedBracketTeam(loser)
+    ? { ...loser, name: translateNationalTeam(loser.name) }
+    : null;
+}
+
+function resolveFromFeederTie(
+  tie: CupTie,
+  feederFixture: SMFixture,
+  wantLoser: boolean,
+  ctx: BracketResolveCtx,
+  depth: number,
+  fallbackRawName: string,
+): Team {
+  if (wantLoser) {
+    const loser = tieLoser(tie);
+    if (loser) return loser;
+  } else if (tie.isFinished && tie.winner && isConfirmedBracketTeam(tie.winner)) {
+    return { ...tie.winner, name: translateNationalTeam(tie.winner.name) };
+  }
+
+  const homeP = getParticipant(feederFixture, 'home');
+  const awayP = getParticipant(feederFixture, 'away');
+  const homeRaw = homeP?.name ?? '';
+  const awayRaw = awayP?.name ?? '';
+  const homePh = isPlaceholderParticipant(homeP, homeRaw);
+  const awayPh = isPlaceholderParticipant(awayP, awayRaw);
+
+  if (!homePh && !awayPh) return winnerBetweenLabel(homeRaw, awayRaw);
+
+  if (!homePh && awayPh && depth < 4) {
+    const resolved = resolvePlaceholderToTeam(awayRaw, awayP, ctx, depth + 1, false);
+    if (isConfirmedBracketTeam(resolved)) {
+      return winnerBetweenLabel(homeRaw, resolved.name);
+    }
+  }
+  if (homePh && !awayPh && depth < 4) {
+    const resolved = resolvePlaceholderToTeam(homeRaw, homeP, ctx, depth + 1, false);
+    if (isConfirmedBracketTeam(resolved)) {
+      return winnerBetweenLabel(resolved.name, awayRaw);
+    }
+  }
+
+  return fallbackPlaceholderTeam(fallbackRawName);
+}
+
+function resolvePlaceholderToTeam(
+  rawName: string,
+  participant: SMParticipant | undefined,
+  ctx: BracketResolveCtx,
+  depth: number,
+  wantLoser: boolean,
+): Team {
+  if (depth > 4) return fallbackPlaceholderTeam(rawName);
+  if (!isPlaceholderParticipant(participant, rawName)) {
+    return mapParticipantToTeam(participant);
+  }
+
+  const ref = parsePlaceholderRef(rawName);
+  if (!ref) return fallbackPlaceholderTeam(rawName);
+
+  const feeder = resolveFeederFixture(ref, ctx);
+  if (!feeder) return fallbackPlaceholderTeam(rawName);
+
+  const tie = ctx.fixtureIdToTie.get(String(feeder.id)) ?? mapTie([feeder], undefined);
+  const loser = ref.kind === 'loser' || wantLoser;
+  return resolveFromFeederTie(tie, feeder, loser, ctx, depth, rawName);
+}
+
+function resolveBracketPlaceholders(
+  rounds: CupRound[],
+  allFixtures: SMFixture[],
+  knockoutFixtures: SMFixture[],
+): CupRound[] {
+  const ctx = buildBracketResolveCtx(allFixtures, knockoutFixtures, rounds);
+  const fixtureById = new Map(allFixtures.map(f => [String(f.id), f]));
+
+  return rounds.map(round => ({
+    ...round,
+    ties: round.ties.map(tie => {
+      const legFixture = tie.legs[0] ? fixtureById.get(tie.legs[0].fixtureId) : undefined;
+      if (!legFixture) return tie;
+
+      const resolveSlot = (location: 'home' | 'away', team: Team): Team => {
+        const p = getParticipant(legFixture, location);
+        const raw = p?.name ?? team.name;
+        if (!isPlaceholderParticipant(p, raw)) return team;
+        return resolvePlaceholderToTeam(raw, p, ctx, 0, false);
+      };
+
+      return {
+        ...tie,
+        homeTeam: resolveSlot('home', tie.homeTeam),
+        awayTeam: resolveSlot('away', tie.awayTeam),
+      };
+    }),
+  }));
+}
+
 // ── getCupBracket cache & dedup ───────────────────────────────────────────────
 const bracketMem = new Map<string, { rounds: CupRound[]; at: number }>();
 const bracketInflight = new Map<string, Promise<CupRound[]>>();
 const BRACKET_MEM_TTL = 30 * 60_000;
 
 function bracketCacheKey(seasonId: number, isPlayoffsOnly?: boolean): string {
-  return `bracket_v2_${seasonId}_${isPlayoffsOnly ? 'po' : 'cup'}`;
+  return `bracket_v3_${seasonId}_${isPlayoffsOnly ? 'po' : 'cup'}`;
 }
 
 function applyCurrentFixtureHighlight(rounds: CupRound[], fixtureId?: string): CupRound[] {
@@ -2389,8 +2647,30 @@ async function buildCupBracketUncached(
             length: endedInPenalties ? 120 : 90,
             state_id: stateId,
             participants: [
-              { id: homeId, name: m.homeTeam.name, short_code: m.homeTeam.shortName, image_path: m.homeTeam.logo, meta: { location: 'home' } },
-              { id: awayId, name: m.awayTeam.name, short_code: m.awayTeam.shortName, image_path: m.awayTeam.logo, meta: { location: 'away' } },
+              {
+                id: homeId,
+                name: m.homeTeam.name,
+                short_code: m.homeTeam.shortName,
+                image_path: m.homeTeam.logo,
+                placeholder: !!(m as { homePlaceholder?: boolean }).homePlaceholder
+                  || isPlaceholderParticipant(
+                    { id: homeId, name: m.homeTeam.name } as SMParticipant,
+                    m.homeTeam.name,
+                  ),
+                meta: { location: 'home' },
+              },
+              {
+                id: awayId,
+                name: m.awayTeam.name,
+                short_code: m.awayTeam.shortName,
+                image_path: m.awayTeam.logo,
+                placeholder: !!(m as { awayPlaceholder?: boolean }).awayPlaceholder
+                  || isPlaceholderParticipant(
+                    { id: awayId, name: m.awayTeam.name } as SMParticipant,
+                    m.awayTeam.name,
+                  ),
+                meta: { location: 'away' },
+              },
             ],
             scores,
             league: { id: Number(m.leagueId) || 0, name: m.league, image_path: m.leagueLogo ?? '' },
@@ -2405,6 +2685,9 @@ async function buildCupBracketUncached(
             venue: m.venueId
               ? { id: m.venueId, name: m.venueName ?? '', city_name: m.venueCity ?? '' }
               : undefined,
+            // FIFA tournament match number ("Match 73") — maps "Winner of Match 73"
+            // placeholders to their feeder fixture. Populated by syncFixtures mapper.
+            details: (m as { details?: string }).details ?? undefined,
           } as unknown as SMFixture;
         });
       }
@@ -2648,7 +2931,7 @@ async function buildCupBracketUncached(
       }
     }
 
-    return rounds;
+    return resolveBracketPlaceholders(rounds, fixtures, bracketFixtures);
 
   } catch (err) {
     console.warn('[sportsApi] buildCupBracketUncached failed:', err);

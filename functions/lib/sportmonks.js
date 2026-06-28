@@ -101,7 +101,7 @@ async function fetchLivescores() {
  */
 async function fetchFixturesByDate(date, leagueIds) {
     const params = {
-        include: 'participants;scores;league;state',
+        include: 'participants;scores;league;state;stage;round;venue',
     };
     if (leagueIds) {
         params.filters = `fixtureLeagues:${leagueIds}`;

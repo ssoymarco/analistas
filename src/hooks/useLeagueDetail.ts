@@ -155,9 +155,24 @@ function firestoreFixturesToSM(matches: Match[]): SMFixture[] {
       leg: null,
       length: 90,
       state_id: stateId,
+      details: m.details ?? undefined,
       participants: [
-        { id: homeId, name: m.homeTeam.name, short_code: m.homeTeam.shortName, image_path: m.homeTeam.logo, meta: { location: 'home' } },
-        { id: awayId, name: m.awayTeam.name, short_code: m.awayTeam.shortName, image_path: m.awayTeam.logo, meta: { location: 'away' } },
+        {
+          id: homeId,
+          name: m.homeTeam.name,
+          short_code: m.homeTeam.shortName,
+          image_path: m.homeTeam.logo,
+          placeholder: m.homePlaceholder ?? false,
+          meta: { location: 'home' },
+        },
+        {
+          id: awayId,
+          name: m.awayTeam.name,
+          short_code: m.awayTeam.shortName,
+          image_path: m.awayTeam.logo,
+          placeholder: m.awayPlaceholder ?? false,
+          meta: { location: 'away' },
+        },
       ] as SMParticipant[],
       scores: m.status === 'finished' || m.status === 'live' ? [
         { id: 0, fixture_id: Number(m.id) || 0, type_id: 1525, participant_id: homeId, score: { goals: m.homeScore, participant: 'home' }, description: 'CURRENT' },

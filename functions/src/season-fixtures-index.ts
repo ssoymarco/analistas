@@ -41,6 +41,7 @@ export const SEASON_FIXTURE_LIGHT_FIELDS = [
   'stageId', 'roundId', 'groupId',
   'stage', 'round', 'group',
   'venueId', 'venueName', 'venueCity',
+  'details', 'homePlaceholder', 'awayPlaceholder',
 ] as const;
 
 export interface SeasonFixturesDoc {

@@ -26,7 +26,10 @@ export declare const pollLivescores: import("firebase-functions/v2/scheduler").S
  * Sync all fixtures for yesterday, today, and tomorrow.
  * Keeps the matches collection fresh with scheduled/finished matches.
  *
- * Runs every 30 minutes.
+ * Runs every 5 minutes — fast enough that finished knockout results and the
+ * season_fixtures index propagate to the app within minutes during the World
+ * Cup. (Lives in code so it survives function redeploys, which recreate the
+ * Cloud Scheduler job from this schedule string.)
  */
 export declare const syncFixtures: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const backfillFixturesByDates: import("firebase-functions/v2/https").CallableFunction<any, Promise<{

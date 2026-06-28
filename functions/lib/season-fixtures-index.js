@@ -78,6 +78,7 @@ exports.SEASON_FIXTURE_LIGHT_FIELDS = [
     'stageId', 'roundId', 'groupId',
     'stage', 'round', 'group',
     'venueId', 'venueName', 'venueCity',
+    'details', 'homePlaceholder', 'awayPlaceholder',
 ];
 /**
  * Rebuild season_fixtures/{seasonId} from the matches collection using a

@@ -183,6 +183,7 @@ const en: TranslationKeys = {
     firstLeg: 'LEG 1',
     secondLeg: 'LEG 2',
     winner: 'Winner {{teams}}',
+    winnerBetween: 'Winner of {{home}} vs {{away}}',
     groups: 'Groups',
     bracket: 'Bracket',
     groupStage: 'Group Stage',

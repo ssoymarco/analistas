@@ -287,6 +287,28 @@ export function mapFixtureToMatchDoc(fixture: SMFixture): MatchDoc | null {
     updatedAt: Timestamp.now(),
   };
 
+  const smDetails = (fixture as { details?: string }).details;
+  if (typeof smDetails === 'string' && smDetails.length > 0) {
+    doc.details = smDetails;
+  }
+  if (home.placeholder === true) doc.homePlaceholder = true;
+  if (away.placeholder === true) doc.awayPlaceholder = true;
+
+  if (fixture.stage_id) doc.stageId = fixture.stage_id;
+  if (fixture.round_id) doc.roundId = fixture.round_id;
+  const groupId = (fixture as { group_id?: number | null }).group_id;
+  if (groupId != null) doc.groupId = groupId;
+  const stage = (fixture as { stage?: unknown }).stage;
+  if (stage) doc.stage = stage;
+  const round = (fixture as { round?: unknown }).round;
+  if (round) doc.round = round;
+  const group = (fixture as { group?: unknown }).group;
+  if (group) doc.group = group;
+  if (fixture.venue_id) doc.venueId = fixture.venue_id;
+  const venue = (fixture as { venue?: { name?: string; city_name?: string } }).venue;
+  if (venue?.name) doc.venueName = venue.name;
+  if (venue?.city_name) doc.venueCity = venue.city_name;
+
   // Live clock anchor — populated only when a period is actively ticking.
   // Without this the client UI freezes the minute between server polls (15s
   // intervals); with it the displayed minute advances smoothly every second.

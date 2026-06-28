@@ -192,6 +192,7 @@ const es = {
     firstLeg: 'IDA',
     secondLeg: 'VUELTA',
     winner: 'Ganador {{teams}}',
+    winnerBetween: 'Ganador entre {{home}} y {{away}}',
     // Group stage
     groups: 'Grupos',
     bracket: 'Bracket',

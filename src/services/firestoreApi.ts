@@ -356,6 +356,9 @@ function matchFromDoc(d: MatchDoc): Match {
     venueId:        (d as any).venueId ?? undefined,
     venueName:      (d as any).venueName ?? undefined,
     venueCity:      (d as any).venueCity ?? undefined,
+    details:        (d as any).details ?? undefined,
+    homePlaceholder: (d as any).homePlaceholder ?? undefined,
+    awayPlaceholder: (d as any).awayPlaceholder ?? undefined,
   };
 }
 

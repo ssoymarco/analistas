@@ -168,6 +168,7 @@ const it: TranslationKeys = {
     firstLeg: 'ANDATA',
     secondLeg: 'RITORNO',
     winner: 'Vincitore {{teams}}',
+    winnerBetween: 'Vincitore tra {{home}} e {{away}}',
     groups: 'Gironi',
     bracket: 'Tabellone',
     groupStage: 'Fase a Gironi',

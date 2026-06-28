@@ -40,6 +40,22 @@ export interface MatchDoc {
     startingAtUtc: string;
     seasonId: number | null;
     updatedAt: Timestamp;
+    /** FIFA tournament match number label from SM, e.g. "Match 73". Powers bracket
+     *  feeder resolution ("Winner of Match 73" → fixture.details === "Match 73"). */
+    details?: string | null;
+    /** SM participant.placeholder for the home/away slot — lets the client defer
+     *  to SM once a real team is assigned without guessing from the name alone. */
+    homePlaceholder?: boolean;
+    awayPlaceholder?: boolean;
+    stageId?: number | null;
+    roundId?: number | null;
+    groupId?: number | null;
+    stage?: unknown;
+    round?: unknown;
+    group?: unknown;
+    venueId?: number | null;
+    venueName?: string | null;
+    venueCity?: string | null;
     liveClock?: {
         periodStartedAt: number;
         periodMinuteOffset: number;
@@ -216,6 +232,7 @@ export interface SMParticipant {
     name: string;
     short_code: string;
     image_path: string;
+    placeholder?: boolean;
     meta?: {
         location: 'home' | 'away';
         winner?: boolean;
@@ -276,6 +293,7 @@ export interface SMFixture {
     season_id: number;
     stage_id: number;
     round_id: number;
+    group_id?: number | null;
     state_id: number;
     venue_id: number;
     name: string;
@@ -291,6 +309,14 @@ export interface SMFixture {
     scores?: SMScore[];
     state?: SMState;
     league?: SMLeague;
+    stage?: unknown;
+    round?: unknown;
+    group?: unknown;
+    venue?: {
+        id?: number;
+        name?: string;
+        city_name?: string;
+    };
     /** include=periods — required for live clock extrapolation. */
     periods?: SMPeriod[];
     /** include=events — required for red card / scorer detection. */

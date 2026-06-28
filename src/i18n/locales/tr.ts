@@ -165,6 +165,7 @@ const tr: TranslationKeys = {
     firstLeg: 'İLK MAÇ',
     secondLeg: 'RÖVANŞ',
     winner: 'Kazanan {{teams}}',
+    winnerBetween: '{{home}} - {{away}} arası kazanan',
     groups: 'Gruplar',
     bracket: 'Turnuva Tablosu',
     groupStage: 'Grup Aşaması',

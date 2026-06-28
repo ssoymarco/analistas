@@ -168,6 +168,7 @@ const fr: TranslationKeys = {
     firstLeg: 'ALLER',
     secondLeg: 'RETOUR',
     winner: 'Vainqueur {{teams}}',
+    winnerBetween: 'Vainqueur entre {{home}} et {{away}}',
     groups: 'Groupes',
     bracket: 'Tableau',
     groupStage: 'Phase de Groupes',

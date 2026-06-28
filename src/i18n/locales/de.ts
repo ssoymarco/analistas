@@ -168,6 +168,7 @@ const de: TranslationKeys = {
     firstLeg: 'HINSPIEL',
     secondLeg: 'RÜCKSPIEL',
     winner: 'Sieger {{teams}}',
+    winnerBetween: 'Sieger zwischen {{home}} und {{away}}',
     groups: 'Gruppen',
     bracket: 'Tableau',
     groupStage: 'Gruppenphase',

@@ -7,7 +7,7 @@ import { admin } from './admin-init';
  * heavy fields: detail, detailUpdatedAt, h2h, h2hUpdatedAt, sidelinedHome,
  * sidelinedAway, lineupsSent, updatedAt.
  */
-export declare const SEASON_FIXTURE_LIGHT_FIELDS: readonly ["id", "homeTeam", "awayTeam", "homeScore", "awayScore", "homeScoreHT", "awayScoreHT", "homePenScore", "awayPenScore", "status", "stateId", "stateLabel", "minute", "time", "league", "leagueId", "leagueLogo", "date", "startingAtUtc", "seasonId", "liveClock", "stageId", "roundId", "groupId", "stage", "round", "group", "venueId", "venueName", "venueCity"];
+export declare const SEASON_FIXTURE_LIGHT_FIELDS: readonly ["id", "homeTeam", "awayTeam", "homeScore", "awayScore", "homeScoreHT", "awayScoreHT", "homePenScore", "awayPenScore", "status", "stateId", "stateLabel", "minute", "time", "league", "leagueId", "leagueLogo", "date", "startingAtUtc", "seasonId", "liveClock", "stageId", "roundId", "groupId", "stage", "round", "group", "venueId", "venueName", "venueCity", "details", "homePlaceholder", "awayPlaceholder"];
 export interface SeasonFixturesDoc {
     seasonId: number;
     count: number;

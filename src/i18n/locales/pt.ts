@@ -168,6 +168,7 @@ const pt: TranslationKeys = {
     firstLeg: 'IDA',
     secondLeg: 'VOLTA',
     winner: 'Vencedor {{teams}}',
+    winnerBetween: 'Vencedor entre {{home}} e {{away}}',
     groups: 'Grupos',
     bracket: 'Chaveamento',
     groupStage: 'Fase de Grupos',

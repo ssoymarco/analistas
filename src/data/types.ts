@@ -68,6 +68,10 @@ export interface Match {
   stage?: unknown | null;
   round?: unknown | null;
   group?: unknown | null;
+  /** FIFA tournament match number from SM `details`, e.g. "Match 73". */
+  details?: string | null;
+  homePlaceholder?: boolean;
+  awayPlaceholder?: boolean;
 }
 
 export interface LeagueStanding {

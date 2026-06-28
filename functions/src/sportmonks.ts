@@ -113,7 +113,7 @@ export async function fetchFixturesByDate(
   leagueIds?: string,
 ): Promise<SMFixture[]> {
   const params: Record<string, string> = {
-    include: 'participants;scores;league;state',
+    include: 'participants;scores;league;state;stage;round;venue',
   };
   if (leagueIds) {
     params.filters = `fixtureLeagues:${leagueIds}`;
