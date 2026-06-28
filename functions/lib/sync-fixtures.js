@@ -48,6 +48,7 @@ const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
 const sportmonks_1 = require("./sportmonks");
 const mappers_1 = require("./mappers");
+const season_fixtures_index_1 = require("./season-fixtures-index");
 /**
  * Format a Date as 'YYYY-MM-DD' in UTC.
  */
@@ -55,19 +56,18 @@ function formatDate(d) {
     return d.toISOString().slice(0, 10);
 }
 /**
- * Get yesterday, today, and tomorrow date strings.
+ * Get a 15-day window: yesterday + today + next 13 days.
+ * Wide enough to cover full knockout tournament phases (WC R16 → Final).
  */
 function getTargetDates() {
+    const dates = [];
     const now = new Date();
-    const yesterday = new Date(now);
-    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-    const tomorrow = new Date(now);
-    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-    return [
-        formatDate(yesterday),
-        formatDate(now),
-        formatDate(tomorrow),
-    ];
+    for (let offset = -1; offset <= 13; offset++) {
+        const d = new Date(now);
+        d.setUTCDate(d.getUTCDate() + offset);
+        dates.push(formatDate(d));
+    }
+    return dates;
 }
 /**
  * Main handler: fetch all fixtures for 3 dates across ALL leagues SportMonks
@@ -127,5 +127,14 @@ async function syncFixturesHandler(explicitDates) {
         batches.push(currentBatch);
     await Promise.all(batches.map(b => b.commit()));
     logger.info(`✅ syncFixtures: wrote ${allMatchDocs.length} matches across ${dates.join(', ')}`);
+    // Rebuild the lightweight per-season fixtures index for every season touched
+    // in this run. The index powers the league-detail "Partidos" list + cup
+    // bracket with a single small doc read instead of pulling ~104 heavy match
+    // docs client-side (the 3-4s landing hang). Non-fatal: a failure here must
+    // not fail the sync — the client falls back to the heavy query.
+    const touchedSeasonIds = allMatchDocs
+        .map(m => m.seasonId)
+        .filter((id) => typeof id === 'number' && id > 0);
+    await (0, season_fixtures_index_1.rebuildSeasonFixturesForSeasons)(touchedSeasonIds).catch(err => logger.error('season_fixtures rebuild failed (non-fatal):', err));
 }
 //# sourceMappingURL=sync-fixtures.js.map

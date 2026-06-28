@@ -424,13 +424,49 @@ export async function getTopScorersAllCategories(seasonId: number): Promise<{
  */
 // ── Season-fixtures cache & in-flight dedup ──────────────────────────────────
 // On LeagueDetailScreen both useLeagueDetail AND getCupBracket request the same
-// season's fixtures on mount. Without dedup that's the identical ~100-doc query
-// fired twice in parallel on every first visit (the dominant cost of the 3-4s
-// landing hang). A short in-memory TTL also makes same-session re-navigations
-// and the standings/bracket tabs instant.
+// season's fixtures on mount. Without dedup that's the identical query fired
+// twice in parallel on every first visit. A short in-memory TTL also makes
+// same-session re-navigations and the standings/bracket tabs instant.
 const _seasonFixturesMem = new Map<number, { matches: Match[]; at: number }>();
 const _seasonFixturesInflight = new Map<number, Promise<Match[]>>();
 const SEASON_FIXTURES_MEM_TTL = 60_000;
+
+/** Mirror of functions/src/season-fixtures-index.ts SeasonFixturesDoc. */
+interface SeasonFixturesDoc {
+  seasonId: number;
+  count: number;
+  fixtures: MatchDoc[];
+  updatedAt: unknown;
+}
+
+/**
+ * Patch live scores/minute/status onto a fixture list built from the (slightly
+ * stale) season_fixtures index. The index isn't rebuilt per-minute, so for
+ * in-play matches we overlay the fresh values from the small `status == 'live'`
+ * query (~0-15 docs, cheap) — the user taps into MatchDetail for the real-time
+ * ticker, so a list that's fresh-on-open is enough.
+ */
+async function overlayLiveScores(matches: Match[]): Promise<Match[]> {
+  const live = await getLivescoresFromFirestore().catch(() => [] as Match[]);
+  if (!live.length) return matches;
+  const byId = new Map(live.map(m => [m.id, m]));
+  return matches.map(m => {
+    const p = byId.get(m.id);
+    if (!p) return m;
+    return {
+      ...m,
+      homeScore: p.homeScore,
+      awayScore: p.awayScore,
+      homeScoreHT: p.homeScoreHT,
+      awayScoreHT: p.awayScoreHT,
+      status: p.status,
+      minute: p.minute,
+      time: p.time,
+      stateLabel: p.stateLabel,
+      liveClock: p.liveClock,
+    };
+  });
+}
 
 export async function getFixturesBySeasonFromFirestore(seasonId: number): Promise<Match[]> {
   const mem = _seasonFixturesMem.get(seasonId);
@@ -440,14 +476,31 @@ export async function getFixturesBySeasonFromFirestore(seasonId: number): Promis
   if (inflight) return inflight;
 
   const promise = (async () => {
-    const q = query(
-      collection(db, 'matches'),
-      where('seasonId', '==', seasonId),
-      orderBy('startingAtUtc', 'asc'),
-      limit(2000),
-    );
-    const snap = await getDocs(q);
-    const matches = snap.docs.map(d => matchFromDoc(d.data() as MatchDoc));
+    let matches: Match[];
+
+    // Fast path: a single lightweight season_fixtures/{seasonId} index doc
+    // (~26 KB for the World Cup) instead of ~104 heavy match docs (several MB).
+    // The index is built server-side by syncFixtures via an Admin-SDK .select()
+    // that strips the detail/h2h blobs — see functions/src/season-fixtures-index.ts.
+    const indexSnap = await getDoc(doc(db, 'season_fixtures', String(seasonId))).catch(() => null);
+
+    if (indexSnap?.exists()) {
+      const data = indexSnap.data() as SeasonFixturesDoc;
+      const base = (data.fixtures ?? []).map(f => matchFromDoc(f));
+      matches = await overlayLiveScores(base);
+    } else {
+      // Graceful rollout fallback — slow heavy query, but correct. Used until
+      // the server has built the index for this season (≤30 min after deploy).
+      const q = query(
+        collection(db, 'matches'),
+        where('seasonId', '==', seasonId),
+        orderBy('startingAtUtc', 'asc'),
+        limit(2000),
+      );
+      const snap = await getDocs(q);
+      matches = snap.docs.map(d => matchFromDoc(d.data() as MatchDoc));
+    }
+
     _seasonFixturesMem.set(seasonId, { matches, at: Date.now() });
     return matches;
   })();

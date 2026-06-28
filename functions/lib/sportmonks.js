@@ -237,7 +237,7 @@ async function fetchSidelined(seasonId, teamId) {
 }
 async function fetchTeamsForSeason(seasonId) {
     return fetchAllPages(`/teams/seasons/${seasonId}`, {
-        include: 'venue;coaches',
+        include: 'venue;coaches;country',
     });
 }
 async function fetchSquadForSeasonAndTeam(seasonId, teamId) {

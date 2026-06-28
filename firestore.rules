@@ -103,6 +103,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /// season_fixtures/{seasonId} — lightweight per-season fixtures index.
+    /// One compact doc (no detail/h2h blobs) powering the league-detail
+    /// Partidos list + cup bracket with a single read. Written server-side
+    /// by syncFixtures (see functions/src/season-fixtures-index.ts).
+    match /season_fixtures/{seasonId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     /// season_index/{leagueId} — list of available seasons per league
     /// Powers the season picker dropdown in LeagueDetailScreen.
     match /season_index/{leagueId} {

@@ -13,6 +13,7 @@ import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { fetchFixturesByDate } from './sportmonks';
 import { mapFixtureToMatchDoc } from './mappers';
+import { rebuildSeasonFixturesForSeasons } from './season-fixtures-index';
 import type { MatchDoc } from './types';
 
 /**
@@ -102,4 +103,16 @@ export async function syncFixturesHandler(explicitDates?: string[]): Promise<voi
   await Promise.all(batches.map(b => b.commit()));
 
   logger.info(`✅ syncFixtures: wrote ${allMatchDocs.length} matches across ${dates.join(', ')}`);
+
+  // Rebuild the lightweight per-season fixtures index for every season touched
+  // in this run. The index powers the league-detail "Partidos" list + cup
+  // bracket with a single small doc read instead of pulling ~104 heavy match
+  // docs client-side (the 3-4s landing hang). Non-fatal: a failure here must
+  // not fail the sync — the client falls back to the heavy query.
+  const touchedSeasonIds = allMatchDocs
+    .map(m => m.seasonId)
+    .filter((id): id is number => typeof id === 'number' && id > 0);
+  await rebuildSeasonFixturesForSeasons(touchedSeasonIds).catch(err =>
+    logger.error('season_fixtures rebuild failed (non-fatal):', err),
+  );
 }

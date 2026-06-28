@@ -98,7 +98,7 @@ function mapTeamToDoc(team, leagueId, leagueName, seasonId) {
         name: team.name,
         shortName: team.short_code || team.name.slice(0, 3).toUpperCase(),
         logo: team.image_path ?? '',
-        country: '', // SM doesn't include country name on the team payload — left blank
+        country: team.country?.name ?? team.country?.official_name ?? '',
         founded: team.founded ?? 0,
         venueName: isWcNational ? '' : (team.venue?.name ?? ''),
         venueCity: isWcNational ? '' : (team.venue?.city_name ?? ''),

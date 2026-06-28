@@ -45,7 +45,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.sendTestPush = exports.backfillEnrichmentByMatchIds = exports.reportFcmToken = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = exports.deliverDelayedPush = void 0;
+exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.sendTestPush = exports.backfillEnrichmentByMatchIds = exports.reportFcmToken = exports.rebuildSeasonFixtureIndexes = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = exports.deliverDelayedPush = void 0;
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
 // before any other module touches admin.firestore().
 require("./admin-init");
@@ -61,6 +61,7 @@ const sync_squads_1 = require("./sync-squads");
 const sync_match_enrichment_1 = require("./sync-match-enrichment");
 const sync_coaches_1 = require("./sync-coaches");
 const sync_players_1 = require("./sync-players");
+const season_fixtures_index_1 = require("./season-fixtures-index");
 // ── Modo Estadio — delayed push via Cloud Tasks ─────────────────────────────
 var deliver_delayed_push_1 = require("./deliver-delayed-push");
 Object.defineProperty(exports, "deliverDelayedPush", { enumerable: true, get: function () { return deliver_delayed_push_1.deliverDelayedPush; } });
@@ -155,6 +156,48 @@ exports.backfillFixturesByDates = (0, https_1.onCall)({
     }
     await (0, sync_fixtures_1.syncFixturesHandler)(dates);
     return { ok: true, dates };
+});
+/**
+ * Rebuild the lightweight season_fixtures/{seasonId} index on demand. The
+ * scheduled syncFixtures rebuilds touched seasons every 30 min automatically;
+ * this callable makes it immediate for a one-shot (e.g. right after deploying
+ * the feature, to populate the Mundial 2026 index without waiting).
+ *
+ * Input: `{ adminToken: string, seasonIds?: number[] }`. When seasonIds is
+ * omitted it defaults to the World Cup 2026 season (26618).
+ *
+ * Invocation (curl):
+ *   curl -X POST .../rebuildSeasonFixtureIndexes -H "Content-Type: application/json" \
+ *     -d '{"data":{"adminToken":"...","seasonIds":[26618]}}'
+ */
+exports.rebuildSeasonFixtureIndexes = (0, https_1.onCall)({
+    timeoutSeconds: 300,
+    memory: '512MiB',
+    region: 'us-central1',
+    secrets: [BACKFILL_TOKEN],
+    invoker: 'public',
+}, async (req) => {
+    const tokenHeader = req.data?.adminToken ?? '';
+    const expectedToken = BACKFILL_TOKEN.value();
+    if (!expectedToken || tokenHeader !== expectedToken) {
+        throw new https_1.HttpsError('permission-denied', 'Requires matching adminToken.');
+    }
+    const raw = req.data?.seasonIds;
+    let seasonIds;
+    if (raw == null) {
+        seasonIds = [26618]; // Mundial 2026 default
+    }
+    else if (Array.isArray(raw) && raw.every(n => typeof n === 'number' && n > 0)) {
+        seasonIds = raw;
+    }
+    else {
+        throw new https_1.HttpsError('invalid-argument', 'Expected `seasonIds: number[]` (positive numbers).');
+    }
+    if (seasonIds.length > 50) {
+        throw new https_1.HttpsError('invalid-argument', 'At most 50 seasons per call.');
+    }
+    await (0, season_fixtures_index_1.rebuildSeasonFixturesForSeasons)(seasonIds);
+    return { ok: true, seasonIds };
 });
 /**
  * Diagnostic endpoint: send a test FCM push to an arbitrary topic so an

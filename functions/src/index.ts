@@ -27,6 +27,7 @@ import { syncSquadsHandler } from './sync-squads';
 import { syncMatchEnrichmentHandler, enrichMatchesByIds } from './sync-match-enrichment';
 import { syncCoachesHandler } from './sync-coaches';
 import { syncPlayersHandler } from './sync-players';
+import { rebuildSeasonFixturesForSeasons } from './season-fixtures-index';
 
 // ── Modo Estadio — delayed push via Cloud Tasks ─────────────────────────────
 export { deliverDelayedPush } from './deliver-delayed-push';
@@ -137,6 +138,50 @@ export const backfillFixturesByDates = onCall(
 
     await syncFixturesHandler(dates as string[]);
     return { ok: true, dates };
+  },
+);
+
+/**
+ * Rebuild the lightweight season_fixtures/{seasonId} index on demand. The
+ * scheduled syncFixtures rebuilds touched seasons every 30 min automatically;
+ * this callable makes it immediate for a one-shot (e.g. right after deploying
+ * the feature, to populate the Mundial 2026 index without waiting).
+ *
+ * Input: `{ adminToken: string, seasonIds?: number[] }`. When seasonIds is
+ * omitted it defaults to the World Cup 2026 season (26618).
+ *
+ * Invocation (curl):
+ *   curl -X POST .../rebuildSeasonFixtureIndexes -H "Content-Type: application/json" \
+ *     -d '{"data":{"adminToken":"...","seasonIds":[26618]}}'
+ */
+export const rebuildSeasonFixtureIndexes = onCall(
+  {
+    timeoutSeconds: 300,
+    memory: '512MiB',
+    region: 'us-central1',
+    secrets: [BACKFILL_TOKEN],
+    invoker: 'public',
+  },
+  async (req) => {
+    const tokenHeader = (req.data?.adminToken as string | undefined) ?? '';
+    const expectedToken = BACKFILL_TOKEN.value();
+    if (!expectedToken || tokenHeader !== expectedToken) {
+      throw new HttpsError('permission-denied', 'Requires matching adminToken.');
+    }
+    const raw: unknown = req.data?.seasonIds;
+    let seasonIds: number[];
+    if (raw == null) {
+      seasonIds = [26618]; // Mundial 2026 default
+    } else if (Array.isArray(raw) && raw.every(n => typeof n === 'number' && n > 0)) {
+      seasonIds = raw as number[];
+    } else {
+      throw new HttpsError('invalid-argument', 'Expected `seasonIds: number[]` (positive numbers).');
+    }
+    if (seasonIds.length > 50) {
+      throw new HttpsError('invalid-argument', 'At most 50 seasons per call.');
+    }
+    await rebuildSeasonFixturesForSeasons(seasonIds);
+    return { ok: true, seasonIds };
   },
 );
 

@@ -34,6 +34,23 @@ export declare const backfillFixturesByDates: import("firebase-functions/v2/http
     dates: any[];
 }>, unknown>;
 /**
+ * Rebuild the lightweight season_fixtures/{seasonId} index on demand. The
+ * scheduled syncFixtures rebuilds touched seasons every 30 min automatically;
+ * this callable makes it immediate for a one-shot (e.g. right after deploying
+ * the feature, to populate the Mundial 2026 index without waiting).
+ *
+ * Input: `{ adminToken: string, seasonIds?: number[] }`. When seasonIds is
+ * omitted it defaults to the World Cup 2026 season (26618).
+ *
+ * Invocation (curl):
+ *   curl -X POST .../rebuildSeasonFixtureIndexes -H "Content-Type: application/json" \
+ *     -d '{"data":{"adminToken":"...","seasonIds":[26618]}}'
+ */
+export declare const rebuildSeasonFixtureIndexes: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    ok: boolean;
+    seasonIds: number[];
+}>, unknown>;
+/**
  * Diagnostic endpoint: send a test FCM push to an arbitrary topic so an
  * operator can verify that a specific device is subscribed end-to-end.
  *
