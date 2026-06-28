@@ -2302,14 +2302,33 @@ function mapTie(fixtures: SMFixture[], currentFixtureId?: string): CupTie {
   };
 }
 
+// ── getCupBracket cache & dedup ───────────────────────────────────────────────
+const bracketMem = new Map<string, { rounds: CupRound[]; at: number }>();
+const bracketInflight = new Map<string, Promise<CupRound[]>>();
+const BRACKET_MEM_TTL = 30 * 60_000;
+
+function bracketCacheKey(seasonId: number, isPlayoffsOnly?: boolean): string {
+  return `bracket_v2_${seasonId}_${isPlayoffsOnly ? 'po' : 'cup'}`;
+}
+
+function applyCurrentFixtureHighlight(rounds: CupRound[], fixtureId?: string): CupRound[] {
+  if (!fixtureId) return rounds;
+  return rounds.map(r => ({
+    ...r,
+    ties: r.ties.map(t => ({
+      ...t,
+      isCurrentMatch: t.legs.some(l => l.fixtureId === fixtureId),
+    })),
+  }));
+}
+
 /**
  * Fetch the full cup bracket for a season.
  * Returns rounds sorted from earliest (R32) to latest (Final),
  * each containing ties with scores and winners.
  */
-export async function getCupBracket(
+async function buildCupBracketUncached(
   seasonId: number,
-  currentFixtureId?: string,
   isPlayoffsOnly?: boolean,
 ): Promise<CupRound[]> {
   try {
@@ -2482,15 +2501,8 @@ export async function getCupBracket(
             if (m) { tournamentPrefix = m[1].trim().toLowerCase(); break; }
           }
         }
-        // Option B: stage containing the current fixture
-        if (!tournamentPrefix && currentFixtureId) {
-          for (const [, s] of notFinished) {
-            if (s.fixtures.some(f => String(f.id) === currentFixtureId)) {
-              const m = s.name.match(/^(.+?)\s+-\s+/i);
-              if (m) { tournamentPrefix = m[1].trim().toLowerCase(); break; }
-            }
-          }
-        }
+        // Option B: stage containing the current fixture (not applicable in
+        // uncached build — currentFixtureId overlay applied post-cache)
 
         // Step 4 — filter by prefix to keep one tournament only.
         // CRITICAL: filter from `playoffSized` (NOT `notFinished`) so we keep
@@ -2513,7 +2525,7 @@ export async function getCupBracket(
 
     for (const [stageId, { name, sortOrder, isCurrent, isFinished, fixtures: stageFixtures }] of activeMap) {
       const ties = pairFixturesToTies(stageFixtures)
-        .map(f => mapTie(f, currentFixtureId));
+        .map(f => mapTie(f, undefined));
 
       rounds.push({
         id: stageId,
@@ -2639,10 +2651,57 @@ export async function getCupBracket(
     return rounds;
 
   } catch (err) {
-    console.warn('[sportsApi] getCupBracket failed:', err);
+    console.warn('[sportsApi] buildCupBracketUncached failed:', err);
     captureError(err, { fn: 'getCupBracket' });
     return [];
   }
+}
+
+export async function getCupBracket(
+  seasonId: number,
+  currentFixtureId?: string,
+  isPlayoffsOnly?: boolean,
+): Promise<CupRound[]> {
+  const key = bracketCacheKey(seasonId, isPlayoffsOnly);
+
+  // 1. In-memory cache (zero cost — same session navigations)
+  const mem = bracketMem.get(key);
+  if (mem && Date.now() - mem.at < BRACKET_MEM_TTL) {
+    return applyCurrentFixtureHighlight(mem.rounds, currentFixtureId);
+  }
+
+  // 2. AsyncStorage cache (survives app restart, TTL 30 min)
+  try {
+    const cached = await AppCache.get<CupRound[]>(key);
+    if (cached) {
+      bracketMem.set(key, { rounds: cached, at: Date.now() });
+      return applyCurrentFixtureHighlight(cached, currentFixtureId);
+    }
+  } catch { /* ignore cache read errors */ }
+
+  // 3. Dedup: two screens mounting the same season → one Firestore round-trip
+  const existing = bracketInflight.get(key);
+  if (existing) {
+    const rounds = await existing;
+    return applyCurrentFixtureHighlight(rounds, currentFixtureId);
+  }
+
+  // 4. Build fresh + persist to both layers
+  const promise = buildCupBracketUncached(seasonId, isPlayoffsOnly)
+    .then(rounds => {
+      bracketMem.set(key, { rounds, at: Date.now() });
+      AppCache.set(key, rounds, CacheTTL.standings).catch(() => {});
+      bracketInflight.delete(key);
+      return rounds;
+    })
+    .catch(err => {
+      bracketInflight.delete(key);
+      throw err;
+    });
+
+  bracketInflight.set(key, promise);
+  const rounds = await promise;
+  return applyCurrentFixtureHighlight(rounds, currentFixtureId);
 }
 
 /** Abbreviate long team names for bracket path labels */
