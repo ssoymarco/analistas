@@ -1,7 +1,7 @@
 // ── League Detail Screen ──────────────────────────────────────────────────────
 // Full league profile: collapsible header, 4 tabs (Clasificación, Goleadores,
 // Equipos, Calendario). Dark/Light mode responsive. Uses SportMonks data.
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -1126,6 +1126,25 @@ const CalendarioTab: React.FC<{
     navigation.push('MatchDetail', { match: fixtureToMatch(fix, leagueName, leagueLogo) });
   };
 
+  // Group by stage → within each stage, group by date. Memoized on `fixtures`
+  // so progressive hydration (fixtures paint first, standings/scorers merge in
+  // a later setData) doesn't re-run the grouping on every parent re-render.
+  // NOTE: must run before the early return below to satisfy the rules of hooks.
+  const sortedStages = useMemo(() => {
+    const stageMap = new Map<string, { sortOrder: number; byDate: Map<string, LeagueFixture[]> }>();
+    for (const fix of fixtures) {
+      const stageKey = fix.stageName || 'Partidos';
+      if (!stageMap.has(stageKey)) {
+        stageMap.set(stageKey, { sortOrder: fix.stageSortOrder, byDate: new Map() });
+      }
+      const stage = stageMap.get(stageKey)!;
+      const dateKey = fix.date.slice(0, 10); // "YYYY-MM-DD"
+      if (!stage.byDate.has(dateKey)) stage.byDate.set(dateKey, []);
+      stage.byDate.get(dateKey)!.push(fix);
+    }
+    return Array.from(stageMap.entries()).sort(([, a], [, b]) => a.sortOrder - b.sortOrder);
+  }, [fixtures]);
+
   // ── Auto-scroll to current matchday: REMOVED ─────────────────────────────
   // The previous implementation (using View.measure inside a ref callback
   // + requestAnimationFrame) had two recurring bugs:
@@ -1155,23 +1174,6 @@ const CalendarioTab: React.FC<{
       </View>
     );
   }
-
-  // Group by stage → within each stage, group by date
-  const stageMap = new Map<string, { sortOrder: number; byDate: Map<string, LeagueFixture[]> }>();
-  for (const fix of fixtures) {
-    const stageKey = fix.stageName || 'Partidos';
-    if (!stageMap.has(stageKey)) {
-      stageMap.set(stageKey, { sortOrder: fix.stageSortOrder, byDate: new Map() });
-    }
-    const stage = stageMap.get(stageKey)!;
-    const dateKey = fix.date.slice(0, 10); // "YYYY-MM-DD"
-    if (!stage.byDate.has(dateKey)) stage.byDate.set(dateKey, []);
-    stage.byDate.get(dateKey)!.push(fix);
-  }
-
-  // Sort stages by sort_order, then dates within each stage ascending
-  const sortedStages = Array.from(stageMap.entries())
-    .sort(([, a], [, b]) => a.sortOrder - b.sortOrder);
 
   // Today-first date ordering: today's date appears first, then past dates in
   // descending order (most recent first), then future dates ascending. Matches
@@ -1355,8 +1357,14 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   const leagueConfig = getLeagueConfig(leagueId);
   const isCup = leagueConfig?.isCup ?? false;
 
-  // Cup bracket — only fetched when the league is a cup competition
-  const cupSeasonId = isCup
+  // Active tab — declared early so the bracket fetch can be gated on it.
+  const [activeTab, setActiveTab] = useState<Tab>(isCup ? 'partidos' : 'clasificacion');
+
+  // Cup bracket — only fetched when the league is a cup AND the bracket tab is
+  // active. On the Partidos landing this stays null so useCupBracket does NOT
+  // fire its own getFixturesBySeasonFromFirestore in parallel with
+  // useLeagueDetail (that duplicate season query was the bulk of the 3-4s hang).
+  const cupSeasonId = isCup && activeTab === 'clasificacion'
     ? (selectedSeasonId ?? data?.seasonId ?? leagueConfig?.currentSeasonId ?? null)
     : null;
   const { rounds: cupRoundsAll, loading: bracketLoading } = useCupBracket(cupSeasonId);
@@ -1392,7 +1400,6 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
         { key: 'asistencias',   label: t('league.assistsTab') },
         { key: 'equipos',       label: t('league.teamsTab') },
       ];
-  const [activeTab, setActiveTab] = useState<Tab>(isCup ? 'partidos' : 'clasificacion');
 
   // ── Scroll animation ──
   const scrollY = useRef(new Animated.Value(0)).current;

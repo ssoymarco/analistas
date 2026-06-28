@@ -1,5 +1,6 @@
 // ── useLeagueDetail — loads league standings, top scorers, teams & fixtures ──
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { InteractionManager } from 'react-native';
 import {
   fetchStandings,
   fetchTopScorers,
@@ -15,7 +16,8 @@ import {
   type SMScore,
   SM_STATE_IDS,
 } from '../services/sportmonks';
-import { getLeagueConfig } from '../config/leagues';
+import { getLeagueConfig, isCopyrightSensitiveLeague } from '../config/leagues';
+import { AppCache, CacheTTL } from '../services/cache';
 
 // Finished / live state-id sets (verified SportMonks v3 — see sportmonks.ts).
 // FixtureRow keys off these NUMERIC ids instead of the string `short_name`,
@@ -137,10 +139,15 @@ function firestoreFixturesToSM(matches: Match[]): SMFixture[] {
       id: Number(m.id) || 0,
       league_id: Number(m.leagueId) || 0,
       season_id: m.seasonId ?? 0,
-      stage_id: 0,
-      group_id: null,
+      // Preserve stage/round/group metadata from the Match doc so the Partidos
+      // list can separate "Fase de Grupos" from "Octavos", "Cuartos", etc.
+      // Without this every fixture collapsed into a single bucket (mapFixture
+      // read f.stage?.name → undefined). Self-heals on docs synced before the
+      // stage wire-up (fields fall back to 0/null → single bucket, as before).
+      stage_id: m.stageId ?? 0,
+      group_id: m.groupId ?? null,
       aggregate_id: null,
-      round_id: 0,
+      round_id: m.roundId ?? 0,
       round_name: '',
       starting_at: m.startingAtUtc ?? '',
       starting_at_timestamp: m.startingAtUtc ? Math.floor(new Date(m.startingAtUtc).getTime() / 1000) : 0,
@@ -158,7 +165,8 @@ function firestoreFixturesToSM(matches: Match[]): SMFixture[] {
       ] as SMScore[] : [],
       league: { id: Number(m.leagueId) || 0, name: m.league, image_path: m.leagueLogo ?? '' } as any,
       state: { id: stateId, state: m.status, name: m.status } as any,
-      stage: undefined,
+      stage: (m.stage as any) ?? undefined,
+      round: (m.round as any) ?? undefined,
     } as unknown as SMFixture;
   });
 }
@@ -365,6 +373,35 @@ function extractFixtureScore(scores: SMScore[] | undefined, side: 'home' | 'away
   return ft ? ft.score.goals : null;
 }
 
+// Map + today-first sort for a season's fixtures. Extracted so it can run once
+// on the fixtures slice (progressive hydration) instead of inside the monolithic
+// effect. Sort: today/live first, then past (most recent first), then future
+// (soonest first) — device-local day so late-night kickoffs aren't off by one.
+function processFixtures(fixturesRaw: SMFixture[]): LeagueFixture[] {
+  const _now = new Date();
+  const todayLocal = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
+  const localDateOf = (utcStr: string) => {
+    const d = new Date(utcStr.replace(' ', 'T') + 'Z');
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  return fixturesRaw
+    .map(mapFixture)
+    .sort((a, b) => {
+      const dayA = localDateOf(a.date);
+      const dayB = localDateOf(b.date);
+      const isTodayA = dayA === todayLocal;
+      const isTodayB = dayB === todayLocal;
+      const isPastA  = dayA < todayLocal;
+      const isPastB  = dayB < todayLocal;
+      const groupA = isTodayA ? 0 : isPastA ? 1 : 2;
+      const groupB = isTodayB ? 0 : isPastB ? 1 : 2;
+      if (groupA !== groupB) return groupA - groupB;
+      if (isTodayA) return new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (isPastA)  return new Date(b.date).getTime() - new Date(a.date).getTime();
+      return new Date(a.date).getTime() - new Date(b.date).getTime();
+    });
+}
+
 function mapFixture(f: SMFixture): LeagueFixture {
   const home = f.participants?.find(p => p.meta?.location === 'home');
   const away = f.participants?.find(p => p.meta?.location === 'away');
@@ -429,230 +466,222 @@ export function useLeagueDetail(
   const [data, setData] = useState<LeagueDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const mounted = useRef(true);
 
   useEffect(() => {
-    mounted.current = true;
+    let cancelled = false;
     setLoading(true);
     setError(null);
 
-    (async () => {
-      try {
-        // 1. Resolve season ID
-        let resolvedSeasonId = seasonId ?? null;
-        let resolvedSeasonName = '';
-        const config = getLeagueConfig(leagueId);
+    // Defer until navigation animation completes so the transition doesn't
+    // block on Firestore reads + synchronous processing.
+    const task = InteractionManager.runAfterInteractions(() => {
+      (async () => {
+        try {
+          const config = getLeagueConfig(leagueId);
 
-        if (!resolvedSeasonId && config?.currentSeasonId) {
-          resolvedSeasonId = config.currentSeasonId;
-        }
-
-        // If still no season, try fetching from API
-        if (!resolvedSeasonId) {
-          try {
-            const leagueData = await fetchSeasonsByLeagueId(leagueId);
-            if (leagueData.currentSeason) {
-              resolvedSeasonId = leagueData.currentSeason.id;
-              resolvedSeasonName = leagueData.currentSeason.name;
+          // 1. Resolve season ID — sync-first (route param → config). Only hit
+          // the network when we genuinely don't know the season.
+          let resolvedSeasonId = seasonId ?? config?.currentSeasonId ?? null;
+          let resolvedSeasonName = '';
+          if (!resolvedSeasonId) {
+            try {
+              const leagueData = await fetchSeasonsByLeagueId(leagueId);
+              if (leagueData.currentSeason) {
+                resolvedSeasonId = leagueData.currentSeason.id;
+                resolvedSeasonName = leagueData.currentSeason.name;
+              }
+            } catch {
+              // ignore — we'll use what we have
             }
-          } catch {
-            // ignore — we'll use what we have
           }
-        }
 
-        if (!resolvedSeasonId) {
-          if (!mounted.current) return;
-          setError('No se encontró la temporada actual');
-          setLoading(false);
-          return;
-        }
+          if (!resolvedSeasonId) {
+            if (cancelled) return;
+            setError('No se encontró la temporada actual');
+            setLoading(false);
+            return;
+          }
 
-        // 2. Fetch all data in parallel
-        // type_ids: 208=goals, 209=assists, 84=yellow cards
-        // ALWAYS fetch fixtures by seasonId — when the user switches to a past
-        // season via the picker we must show that season's matches, not the
-        // current league fixtures. fetchLeagueFixtures only knows about today
-        // ± a few days, so it would return the current jornada regardless of
-        // which historical season the user picked.
-        // ── Firestore-first: try to satisfy as much as possible from our
-        // own data layer (zero SportMonks calls per user). Fall back to the
-        // proxy only for fields Firestore doesn't have yet.
-        const [fsStandings, fsTopScorers, fsFixturesMatch] = await Promise.all([
-          getStandingsFromFirestore(resolvedSeasonId).catch(() => []),
-          getTopScorersAllCategories(resolvedSeasonId).catch(() => ({ goals: [], assists: [], cards: [] })),
-          getFixturesBySeasonFromFirestore(resolvedSeasonId).catch(() => []),
-        ]);
+          const seasonIdNum = resolvedSeasonId;
+          const defaultSeasonName = resolvedSeasonName
+            || `${new Date().getFullYear() - 1}/${String(new Date().getFullYear()).slice(2)}`;
 
-        // If we have a meaningful Firestore hit (standings present and at
-        // least one of goleadores OR fixtures present), serve everything
-        // from cache and ONLY fetch league metadata (1 call vs 7).
-        const hasFirestoreData =
-          fsStandings.length > 0 &&
-          (fsTopScorers.goals.length > 0 || fsFixturesMatch.length > 0);
-
-        const [standingsRaw, topScorersRaw, topAssistsRaw, topCardsRaw, teamsRaw, fixturesRaw, leagueInfo] = hasFirestoreData
-          ? await Promise.all([
-              // Standings: convert Firestore LeagueStanding[] back to SM group shape
-              // (the downstream mapper expects SMStandingGroup[]).
-              Promise.resolve(firestoreStandingsToSMGroups(fsStandings)),
-              // Top scorers: convert FirestoreTopScorer[] back to SM shape so
-              // buildStatRows below can stay unchanged.
-              Promise.resolve(firestoreTopToSM(fsTopScorers.goals)),
-              Promise.resolve(firestoreTopToSM(fsTopScorers.assists)),
-              Promise.resolve(firestoreTopToSM(fsTopScorers.cards)),
-              // Teams: derive from standings when present (covers most leagues).
-              // Cup competitions with no league table still hit the proxy.
-              Promise.resolve(deriveTeamsFromStandings(fsStandings)),
-              // Fixtures: Firestore Match[] → SMFixture[] shim for the mapper.
-              Promise.resolve(firestoreFixturesToSM(fsFixturesMatch)),
-              // League metadata still needs the proxy for the logo URL —
-              // SM uses sharded folder paths we can't construct. Single call.
-              fetchSeasonsByLeagueId(leagueId).catch(() => null as null | Record<string, unknown>),
-            ])
-          : await Promise.all([
-              fetchStandings(resolvedSeasonId).catch(() => [] as SMStandingGroup[]),
-              fetchTopScorers(resolvedSeasonId, 208).catch(() => [] as SMTopScorer[]),
-              fetchTopScorers(resolvedSeasonId, 209).catch(() => [] as SMTopScorer[]),
-              fetchTopScorers(resolvedSeasonId, 84).catch(() => [] as SMTopScorer[]),
-              fetchTeamsBySeasonId(resolvedSeasonId).catch(() => [] as SMParticipant[]),
-              fetchFixturesBySeasonId(resolvedSeasonId).catch(() => [] as SMFixture[]),
-              fetchSeasonsByLeagueId(leagueId).catch(() => null as null | Record<string, unknown>),
-            ]);
-
-        const apiLeagueLogo = (leagueInfo?.image_path as string | undefined) ?? '';
-
-        if (!mounted.current) return;
-
-        // 3. Map data — dedup standings for multi-stage leagues
-        const standings = deduplicateStandings(standingsRaw);
-
-        // Filter out placeholder entries (e.g. "1st ranked" used in bracket draws)
-        const realTeams = teamsRaw.filter(p => !p.placeholder);
-        // Fall back to deriving teams from standings when the API returns no real teams
-        const mappedTeams: LeagueTeam[] = realTeams.length > 0
-          ? realTeams.map(mapTeam)
-          : standings.map(s => ({
-              id: s.teamId,
-              name: s.teamName,
-              shortCode: s.teamShortCode,
-              logo: s.teamLogo,
-            }));
-        const teams = mappedTeams.sort((a, b) => a.name.localeCompare(b.name));
-
-        // Build team lookup for top scorers
-        const teamLookup = new Map<number, { name: string; logo: string }>();
-        for (const t of teams) teamLookup.set(t.id, { name: t.name, logo: t.logo });
-        // Also add from standings (covers cases where teams tab is empty)
-        for (const s of standings) teamLookup.set(s.teamId, { name: s.teamName, logo: s.teamLogo });
-
-        // Helper to map a raw topscorer array enriched with team lookup
-        const buildStatRows = (raw: SMTopScorer[]): TopScorerRow[] =>
-          raw
-            .map((ts, i) => {
-              const row = mapTopScorer(ts, i);
-              const team = teamLookup.get(ts.participant_id);
-              if (team) { row.teamName = team.name; row.teamLogo = team.logo; }
-              return row;
-            })
-            .sort((a, b) => a.position - b.position)
-            .slice(0, 20);
-
-        // Goals (type_id=208 filtered at API level; fall back to unfiltered if empty)
-        const scorersFallback = topScorersRaw.length === 0
-          ? [] : topScorersRaw;
-        const topScorers = buildStatRows(scorersFallback);
-
-        // Assists (type_id=209) — stored in `goals` field for UI reuse
-        const topAssists = buildStatRows(topAssistsRaw);
-
-        // Cards (type_id=84, yellow cards) — stored in `goals` field for UI reuse
-        const topCards = buildStatRows(topCardsRaw);
-
-        // Sort: today/live first, then past matches (most recent first),
-        // then future matches (soonest first). Matches 365scores' UX where the
-        // current matchday is what the user lands on, scroll up = history,
-        // scroll down = upcoming. Previously this was a flat ascending sort
-        // which forced the user to scroll all the way down past the August
-        // games to find today's match.
-        // Use device-local today so late-evening fixtures (e.g. 19:00 MX = 01:00 UTC
-        // next day) are correctly classified as today/future rather than off by one day.
-        const _now = new Date();
-        const todayLocal = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
-        const localDateOf = (utcStr: string) => {
-          const d = new Date(utcStr.replace(' ', 'T') + 'Z');
-          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        };
-        const fixtures = fixturesRaw
-          .map(mapFixture)
-          .sort((a, b) => {
-            const dayA = localDateOf(a.date);
-            const dayB = localDateOf(b.date);
-            const isTodayA = dayA === todayLocal;
-            const isTodayB = dayB === todayLocal;
-            const isPastA  = dayA < todayLocal;
-            const isPastB  = dayB < todayLocal;
-
-            // Group precedence: today (0) > past (1) > future (2)
-            const groupA = isTodayA ? 0 : isPastA ? 1 : 2;
-            const groupB = isTodayB ? 0 : isPastB ? 1 : 2;
-            if (groupA !== groupB) return groupA - groupB;
-
-            // Within today: chronological (earliest kickoff first)
-            if (isTodayA) return new Date(a.date).getTime() - new Date(b.date).getTime();
-            // Within past: most recent first (descending)
-            if (isPastA)  return new Date(b.date).getTime() - new Date(a.date).getTime();
-            // Within future: soonest first (ascending)
-            return new Date(a.date).getTime() - new Date(b.date).getTime();
+          // Merge a slice onto whatever's already in state (progressive
+          // hydration) → always produces a complete LeagueDetailData.
+          const mergeData = (
+            prev: LeagueDetailData | null,
+            slice: Partial<LeagueDetailData>,
+          ): LeagueDetailData => ({
+            leagueId,
+            leagueName: config?.name || leagueName,
+            leagueLogo: prev?.leagueLogo || leagueLogo || '',
+            country: config?.country || '',
+            countryFlag: config?.flag || '',
+            seasonId: seasonIdNum,
+            seasonName: prev?.seasonName || defaultSeasonName,
+            standings: prev?.standings ?? [],
+            topScorers: prev?.topScorers ?? [],
+            topAssists: prev?.topAssists ?? [],
+            topCards: prev?.topCards ?? [],
+            teams: prev?.teams ?? [],
+            fixtures: prev?.fixtures ?? [],
+            ...slice,
           });
 
-        setData({
-          leagueId,
-          leagueName: config?.name || leagueName,
-          // Prefer the API's real image_path over the constructed URL
-          // (SportMonks uses sharded folder paths like /leagues/2/1122.png).
-          leagueLogo: apiLeagueLogo || leagueLogo || '',
-          country: config?.country || '',
-          countryFlag: config?.flag || '',
-          seasonId: resolvedSeasonId,
-          seasonName: resolvedSeasonName || `${new Date().getFullYear() - 1}/${String(new Date().getFullYear()).slice(2)}`,
-          standings,
-          topScorers,
-          topAssists,
-          topCards,
-          teams,
-          fixtures,
-        });
-      } catch (err: any) {
-        if (!mounted.current) return;
-        // Surface full error info to help debug
-        // eslint-disable-next-line no-console
-        console.warn('useLeagueDetail error for league', leagueId, 'season', seasonId, ':', err?.message, err?.stack?.slice(0, 200));
-        setError(err?.message ?? 'Error loading league');
-        // Even on partial failure, expose a minimal valid data object so the
-        // screen at least renders the league name + a "no data" placeholder
-        // instead of an empty wireframe.
-        const config = getLeagueConfig(leagueId);
-        setData({
-          leagueId,
-          leagueName: config?.name || leagueName,
-          leagueLogo: leagueLogo || '',
-          country: config?.country || '',
-          countryFlag: config?.flag || '',
-          seasonId: seasonId ?? config?.currentSeasonId ?? 0,
-          seasonName: '',
-          standings: [],
-          topScorers: [],
-          topAssists: [],
-          topCards: [],
-          teams: [],
-          fixtures: [],
-        });
-      } finally {
-        if (mounted.current) setLoading(false);
-      }
-    })();
+          // 2. FIXTURES FIRST — all the landing "Partidos" tab needs. Painting
+          // these dismisses the full-screen skeleton (gate is loading && !data).
+          const fixturesKey = `league_fixtures_v2_${seasonIdNum}`;
 
-    return () => { mounted.current = false; };
+          // 2a. Stale-while-revalidate: paint cached fixtures instantly.
+          try {
+            const cachedFixtures = await AppCache.get<LeagueFixture[]>(fixturesKey);
+            if (cachedFixtures?.length && !cancelled) {
+              setData(prev => mergeData(prev, { fixtures: cachedFixtures }));
+              setLoading(false);
+            }
+          } catch {
+            // ignore cache read errors
+          }
+
+          // 2b. Fresh fixtures — Firestore first (deduped at the service layer),
+          // proxy fallback. processFixtures = map + today-first sort.
+          const fsFixturesMatch = await getFixturesBySeasonFromFirestore(seasonIdNum).catch(() => [] as Match[]);
+          let fixtures: LeagueFixture[];
+          if (fsFixturesMatch.length > 0) {
+            fixtures = processFixtures(firestoreFixturesToSM(fsFixturesMatch));
+          } else {
+            const proxyFixtures = await fetchFixturesBySeasonId(seasonIdNum).catch(() => [] as SMFixture[]);
+            fixtures = processFixtures(proxyFixtures);
+          }
+          if (!cancelled) {
+            setData(prev => mergeData(prev, { fixtures }));
+            setLoading(false); // skeleton clears — Partidos renders now
+            if (fixtures.length > 0) {
+              const ttl = fixtures.some(f => f.status === 'live')
+                ? CacheTTL.fixturesLive
+                : CacheTTL.fixturesStatic;
+              AppCache.set(fixturesKey, fixtures, ttl).catch(() => {});
+            }
+          }
+
+          // 3. META (standings + scorers + teams) — background; the
+          // Grupos/Goleadores/Asistencias/Equipos tabs need it.
+          const [fsStandings, fsTopScorers] = await Promise.all([
+            getStandingsFromFirestore(seasonIdNum).catch(() => []),
+            getTopScorersAllCategories(seasonIdNum).catch(() => ({ goals: [], assists: [], cards: [] })),
+          ]);
+          const hasFsMeta =
+            fsStandings.length > 0 &&
+            (fsTopScorers.goals.length > 0 || fsTopScorers.assists.length > 0 || fsTopScorers.cards.length > 0);
+
+          let standingsRaw: SMStandingGroup[];
+          let topScorersRaw: SMTopScorer[];
+          let topAssistsRaw: SMTopScorer[];
+          let topCardsRaw: SMTopScorer[];
+          let teamsRaw: SMParticipant[];
+          if (hasFsMeta) {
+            standingsRaw = firestoreStandingsToSMGroups(fsStandings);
+            topScorersRaw = firestoreTopToSM(fsTopScorers.goals);
+            topAssistsRaw = firestoreTopToSM(fsTopScorers.assists);
+            topCardsRaw = firestoreTopToSM(fsTopScorers.cards);
+            teamsRaw = deriveTeamsFromStandings(fsStandings);
+          } else {
+            [standingsRaw, topScorersRaw, topAssistsRaw, topCardsRaw, teamsRaw] = await Promise.all([
+              fetchStandings(seasonIdNum).catch(() => [] as SMStandingGroup[]),
+              fetchTopScorers(seasonIdNum, 208).catch(() => [] as SMTopScorer[]),
+              fetchTopScorers(seasonIdNum, 209).catch(() => [] as SMTopScorer[]),
+              fetchTopScorers(seasonIdNum, 84).catch(() => [] as SMTopScorer[]),
+              fetchTeamsBySeasonId(seasonIdNum).catch(() => [] as SMParticipant[]),
+            ]);
+          }
+
+          if (cancelled) return;
+
+          // Map meta — dedup standings for multi-stage leagues
+          const standings = deduplicateStandings(standingsRaw);
+
+          // Filter out placeholder entries (e.g. "1st ranked" used in bracket draws)
+          const realTeams = teamsRaw.filter(p => !p.placeholder);
+          const mappedTeams: LeagueTeam[] = realTeams.length > 0
+            ? realTeams.map(mapTeam)
+            : standings.map(s => ({
+                id: s.teamId,
+                name: s.teamName,
+                shortCode: s.teamShortCode,
+                logo: s.teamLogo,
+              }));
+          const teams = mappedTeams.sort((a, b) => a.name.localeCompare(b.name));
+
+          // Build team lookup for top scorers
+          const teamLookup = new Map<number, { name: string; logo: string }>();
+          for (const tm of teams) teamLookup.set(tm.id, { name: tm.name, logo: tm.logo });
+          for (const s of standings) teamLookup.set(s.teamId, { name: s.teamName, logo: s.teamLogo });
+
+          const buildStatRows = (raw: SMTopScorer[]): TopScorerRow[] =>
+            raw
+              .map((ts, i) => {
+                const row = mapTopScorer(ts, i);
+                const team = teamLookup.get(ts.participant_id);
+                if (team) { row.teamName = team.name; row.teamLogo = team.logo; }
+                return row;
+              })
+              .sort((a, b) => a.position - b.position)
+              .slice(0, 20);
+
+          const topScorers = buildStatRows(topScorersRaw.length === 0 ? [] : topScorersRaw);
+          const topAssists = buildStatRows(topAssistsRaw);
+          const topCards = buildStatRows(topCardsRaw);
+
+          if (!cancelled) {
+            setData(prev => mergeData(prev, { standings, topScorers, topAssists, topCards, teams }));
+          }
+
+          // 4. League logo — fire-and-forget, OFF the critical path. Skip for
+          // copyright-sensitive leagues (WC logo suppressed) and when we already
+          // have a logo. This network call previously blocked the whole screen.
+          if (!isCopyrightSensitiveLeague(leagueId) && !leagueLogo) {
+            fetchSeasonsByLeagueId(leagueId)
+              .then(info => {
+                const logo = (info?.image_path as string | undefined) ?? '';
+                if (!cancelled && logo) {
+                  setData(prev => (prev ? { ...prev, leagueLogo: logo } : prev));
+                }
+              })
+              .catch(() => {});
+          }
+        } catch (err: any) {
+          if (cancelled) return;
+          // eslint-disable-next-line no-console
+          console.warn('useLeagueDetail error for league', leagueId, 'season', seasonId, ':', err?.message, err?.stack?.slice(0, 200));
+          setError(err?.message ?? 'Error loading league');
+          // Even on partial failure expose a minimal valid object so the screen
+          // renders the league name + a "no data" placeholder, not a wireframe.
+          const config = getLeagueConfig(leagueId);
+          setData(prev => prev ?? {
+            leagueId,
+            leagueName: config?.name || leagueName,
+            leagueLogo: leagueLogo || '',
+            country: config?.country || '',
+            countryFlag: config?.flag || '',
+            seasonId: seasonId ?? config?.currentSeasonId ?? 0,
+            seasonName: '',
+            standings: [],
+            topScorers: [],
+            topAssists: [],
+            topCards: [],
+            teams: [],
+            fixtures: [],
+          });
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+    });
+
+    return () => {
+      cancelled = true;
+      task.cancel();
+    };
   }, [leagueId, seasonId]);
 
   return { data, loading, error };

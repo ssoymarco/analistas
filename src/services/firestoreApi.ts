@@ -422,15 +422,42 @@ export async function getTopScorersAllCategories(seasonId: number): Promise<{
  * (single-field on `seasonId` is auto-created; combined with orderBy on
  * startingAtUtc requires a composite index — declared in firestore.indexes.json).
  */
+// ── Season-fixtures cache & in-flight dedup ──────────────────────────────────
+// On LeagueDetailScreen both useLeagueDetail AND getCupBracket request the same
+// season's fixtures on mount. Without dedup that's the identical ~100-doc query
+// fired twice in parallel on every first visit (the dominant cost of the 3-4s
+// landing hang). A short in-memory TTL also makes same-session re-navigations
+// and the standings/bracket tabs instant.
+const _seasonFixturesMem = new Map<number, { matches: Match[]; at: number }>();
+const _seasonFixturesInflight = new Map<number, Promise<Match[]>>();
+const SEASON_FIXTURES_MEM_TTL = 60_000;
+
 export async function getFixturesBySeasonFromFirestore(seasonId: number): Promise<Match[]> {
-  const q = query(
-    collection(db, 'matches'),
-    where('seasonId', '==', seasonId),
-    orderBy('startingAtUtc', 'asc'),
-    limit(2000),
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map(d => matchFromDoc(d.data() as MatchDoc));
+  const mem = _seasonFixturesMem.get(seasonId);
+  if (mem && Date.now() - mem.at < SEASON_FIXTURES_MEM_TTL) return mem.matches;
+
+  const inflight = _seasonFixturesInflight.get(seasonId);
+  if (inflight) return inflight;
+
+  const promise = (async () => {
+    const q = query(
+      collection(db, 'matches'),
+      where('seasonId', '==', seasonId),
+      orderBy('startingAtUtc', 'asc'),
+      limit(2000),
+    );
+    const snap = await getDocs(q);
+    const matches = snap.docs.map(d => matchFromDoc(d.data() as MatchDoc));
+    _seasonFixturesMem.set(seasonId, { matches, at: Date.now() });
+    return matches;
+  })();
+
+  _seasonFixturesInflight.set(seasonId, promise);
+  try {
+    return await promise;
+  } finally {
+    _seasonFixturesInflight.delete(seasonId);
+  }
 }
 
 // ── Player profile reader (powered by syncPlayers) ──────────────────────────
