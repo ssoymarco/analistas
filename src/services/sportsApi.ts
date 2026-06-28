@@ -2346,7 +2346,7 @@ function stageNameToPhase(stageName: string): KnockoutPhase | null {
 }
 
 function parsePlaceholderRef(rawName: string): PlaceholderRef | null {
-  const lower = rawName.toLowerCase().trim();
+  const lower = (rawName ?? '').toLowerCase().trim();
 
   const mm = lower.match(PLACEHOLDER_MATCH_RE);
   if (mm) return { kind: 'match', n: parseInt(mm[1], 10) };
@@ -2372,7 +2372,7 @@ function isPlaceholderParticipant(p: SMParticipant | undefined, rawName: string)
   if (!p) return true;
   if (p.placeholder === true) return true;
   if (!p.id || p.id === 0) return true;
-  const lower = rawName.toLowerCase().trim();
+  const lower = (rawName ?? '').toLowerCase().trim();
   if (lower === 'tbc' || lower === 'tbd') return true;
   if (parsePlaceholderRef(rawName)) return true;
   if (/^winner\s+/i.test(rawName) || /^loser\s+/i.test(rawName)) return true;
@@ -2541,21 +2541,31 @@ function resolveBracketPlaceholders(
   return rounds.map(round => ({
     ...round,
     ties: round.ties.map(tie => {
-      const legFixture = tie.legs[0] ? fixtureById.get(tie.legs[0].fixtureId) : undefined;
-      if (!legFixture) return tie;
+      // Per-tie guard: a resolution failure for ONE slot must never blank the
+      // whole bracket — fall back to the original (unresolved) tie instead.
+      try {
+        const legFixture = tie.legs[0] ? fixtureById.get(tie.legs[0].fixtureId) : undefined;
+        if (!legFixture) return tie;
 
-      const resolveSlot = (location: 'home' | 'away', team: Team): Team => {
-        const p = getParticipant(legFixture, location);
-        const raw = p?.name ?? team.name;
-        if (!isPlaceholderParticipant(p, raw)) return team;
-        return resolvePlaceholderToTeam(raw, p, ctx, 0, false);
-      };
+        const resolveSlot = (location: 'home' | 'away', team: Team): Team => {
+          try {
+            const p = getParticipant(legFixture, location);
+            const raw = p?.name ?? team.name;
+            if (!isPlaceholderParticipant(p, raw)) return team;
+            return resolvePlaceholderToTeam(raw, p, ctx, 0, false);
+          } catch {
+            return team;
+          }
+        };
 
-      return {
-        ...tie,
-        homeTeam: resolveSlot('home', tie.homeTeam),
-        awayTeam: resolveSlot('away', tie.awayTeam),
-      };
+        return {
+          ...tie,
+          homeTeam: resolveSlot('home', tie.homeTeam),
+          awayTeam: resolveSlot('away', tie.awayTeam),
+        };
+      } catch {
+        return tie;
+      }
     }),
   }));
 }
@@ -2570,9 +2580,9 @@ const bracketInflight = new Map<string, Promise<CupRound[]>>();
 const BRACKET_MEM_TTL = 5 * 60_000;
 
 function bracketCacheKey(seasonId: number, isPlayoffsOnly?: boolean): string {
-  // v4: invalidates brackets cached before the placeholder-resolution + the
-  // server `details`/`placeholder` fields existed.
-  return `bracket_v4_${seasonId}_${isPlayoffsOnly ? 'po' : 'cup'}`;
+  // v5: invalidates a possibly-cached EMPTY bracket from a transient resolve
+  // throw (now guarded), plus the earlier v4 entries.
+  return `bracket_v5_${seasonId}_${isPlayoffsOnly ? 'po' : 'cup'}`;
 }
 
 function applyCurrentFixtureHighlight(rounds: CupRound[], fixtureId?: string): CupRound[] {
@@ -2937,7 +2947,15 @@ async function buildCupBracketUncached(
       }
     }
 
-    return resolveBracketPlaceholders(rounds, fixtures, bracketFixtures);
+    // Placeholder resolution must NEVER blank the bracket. If anything in the
+    // resolve pass throws, fall back to the unresolved rounds (generic
+    // "Ganador Partido N" labels) instead of letting the outer catch return [].
+    try {
+      return resolveBracketPlaceholders(rounds, fixtures, bracketFixtures);
+    } catch (resolveErr) {
+      captureError(resolveErr, { fn: 'resolveBracketPlaceholders' });
+      return rounds;
+    }
 
   } catch (err) {
     console.warn('[sportsApi] buildCupBracketUncached failed:', err);
@@ -2975,11 +2993,14 @@ export async function getCupBracket(
     return applyCurrentFixtureHighlight(rounds, currentFixtureId);
   }
 
-  // 4. Build fresh + persist to both layers
+  // 4. Build fresh + persist to both layers. NEVER cache an empty result — a
+  // transient build failure must not pin "Bracket no disponible" for the TTL.
   const promise = buildCupBracketUncached(seasonId, isPlayoffsOnly)
     .then(rounds => {
-      bracketMem.set(key, { rounds, at: Date.now() });
-      AppCache.set(key, rounds, BRACKET_MEM_TTL).catch(() => {});
+      if (rounds.length > 0) {
+        bracketMem.set(key, { rounds, at: Date.now() });
+        AppCache.set(key, rounds, BRACKET_MEM_TTL).catch(() => {});
+      }
       bracketInflight.delete(key);
       return rounds;
     })
