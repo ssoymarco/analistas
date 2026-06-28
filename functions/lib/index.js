@@ -89,10 +89,13 @@ exports.pollLivescores = (0, scheduler_1.onSchedule)({
  * Sync all fixtures for yesterday, today, and tomorrow.
  * Keeps the matches collection fresh with scheduled/finished matches.
  *
- * Runs every 30 minutes.
+ * Runs every 5 minutes — fast enough that finished knockout results and the
+ * season_fixtures index propagate to the app within minutes during the World
+ * Cup. (Lives in code so it survives function redeploys, which recreate the
+ * Cloud Scheduler job from this schedule string.)
  */
 exports.syncFixtures = (0, scheduler_1.onSchedule)({
-    schedule: 'every 30 minutes',
+    schedule: 'every 5 minutes',
     timeoutSeconds: 300,
     memory: '512MiB',
     region: 'us-central1',
