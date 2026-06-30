@@ -79,6 +79,7 @@ const en: TranslationKeys = {
     live: 'LIVE',
     halfTime: 'HT',
     halfTimeLong: 'HALF TIME',
+    penalties: 'Penalties',
     scheduled: 'Scheduled',
     postponed: 'Postponed',
     cancelled: 'Cancelled',

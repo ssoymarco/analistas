@@ -87,6 +87,7 @@ const es = {
     live: 'EN VIVO',
     halfTime: 'MT',
     halfTimeLong: 'DESCANSO',
+    penalties: 'Penales',
     scheduled: 'Programado',
     postponed: 'Aplazado',
     cancelled: 'Cancelado',

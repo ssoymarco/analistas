@@ -20,7 +20,9 @@ import { haptics } from '../utils/haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { SkeletonMatchDetail } from '../components/Skeleton';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import AdMobBanner from '../components/AdMobBanner';
+import { ADMOB_ENABLED } from '../config/features';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
@@ -295,6 +297,9 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   // ── Tabs ───────────────────────────────────────────────────────────────────
   // Determine immediately (without waiting for TablaTab to render) whether this
   // league is a knockout cup — so the tab always shows the right label upfront.
+  const [bannerKey, setBannerKey] = useState(0);
+  useFocusEffect(useCallback(() => { setBannerKey(k => k + 1); }, []));
+
   const leagueIsCup = getLeagueConfig(Number(match.leagueId))?.isCup ?? false;
   const tablaLabel  = leagueIsCup ? t('matchTabs.bracket') : t('matchTabs.standings');
   // Keep callback for safety (covers leagues not yet tagged as isCup in config)
@@ -604,6 +609,8 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 <Text style={scr.livePillText}>
                   {displayMatch.stateLabel === 'HT'
                     ? t('matchStatus.halfTimeLong')
+                    : displayMatch.stateLabel === 'PEN'
+                    ? `EN VIVO · ${t('matchStatus.penalties', { defaultValue: 'Penales' })}`
                     : `EN VIVO · ${liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`}`}
                 </Text>
               </View>
@@ -865,6 +872,8 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               {isLive
                 ? displayMatch.stateLabel === 'HT'
                   ? t('matchStatus.halfTimeLong')
+                  : displayMatch.stateLabel === 'PEN'
+                  ? t('matchStatus.penalties', { defaultValue: 'Penales' })
                   : liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`
                 : isFinished
                 ? (typeof displayMatch.homePenScore === 'number' ? '' : 'Finalizado')
@@ -1098,6 +1107,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           </Text>
         </View>
       </Modal>
+      {ADMOB_ENABLED && <AdMobBanner key={`${bannerKey}_${activeTab}`} />}
     </SafeAreaView>
   );
 };

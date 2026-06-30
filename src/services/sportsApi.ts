@@ -318,6 +318,8 @@ function getTimeDisplay(fixture: SMFixture): string {
 
   if (status === 'live') {
     if (fixture.state_id === SM_STATE_IDS.HALF_TIME) return 'HT';
+    // Penalty shootout: the game clock is NOT running — show the phase, not a minute.
+    if (fixture.state_id === SM_STATE_IDS.PENALTIES) return 'PEN';
     // Prefer SportMonks' authoritative in-game clock over wall-time math
     const real = getRealMinute(fixture);
     if (real !== undefined) return `${real}'`;
@@ -336,6 +338,8 @@ function getTimeDisplay(fixture: SMFixture): string {
 function getLiveMinute(fixture: SMFixture): number | undefined {
   if (mapStateToStatus(fixture.state_id, fixture.starting_at) !== 'live') return undefined;
   if (fixture.state_id === SM_STATE_IDS.HALF_TIME) return 45;
+  // Penalty shootout: no game clock — let the UI show "PENALES" instead of a minute.
+  if (fixture.state_id === SM_STATE_IDS.PENALTIES) return undefined;
   // Prefer SportMonks' authoritative in-game clock over wall-time math
   const real = getRealMinute(fixture);
   if (real !== undefined) return real;
@@ -352,6 +356,8 @@ function getLiveClockAnchor(fixture: SMFixture):
   | { periodStartedAt: number; periodMinuteOffset: number }
   | undefined
 {
+  // Penalty shootout: don't advance any clock — the UI shows "PENALES".
+  if (fixture.state_id === SM_STATE_IDS.PENALTIES) return undefined;
   const periods = fixture.periods;
   if (!periods || periods.length === 0) return undefined;
   const ticking = periods.find(p => p.ticking);
