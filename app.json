@@ -98,6 +98,7 @@
           }
         }
       ],
+      "@bacons/apple-targets",
       [
         "expo-dynamic-app-icon",
         {
@@ -119,6 +120,7 @@
     "ios": {
       "bundleIdentifier": "app.analistas",
       "buildNumber": "3",
+      "appleTeamId": "BW7A8F89D2",
       "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": true,
       "entitlements": {
@@ -130,6 +132,7 @@
         ],
         "ITSAppUsesNonExemptEncryption": false,
         "FirebaseAutomaticScreenReportingEnabled": false,
+        "NSSupportsLiveActivities": true,
         "CFBundleURLTypes": [
           {
             "CFBundleURLSchemes": [

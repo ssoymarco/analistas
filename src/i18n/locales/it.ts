@@ -94,6 +94,11 @@ const it: TranslationKeys = {
     unmute: 'Attiva le notifiche per questa partita',
   },
 
+  liveActivity: {
+    follow: 'Segui nella schermata di blocco',
+    following: 'Attivo nella schermata di blocco',
+  },
+
   notifications: {
     title: 'Notifiche',
     introTitle: 'Decidi tu cosa ti interrompe',

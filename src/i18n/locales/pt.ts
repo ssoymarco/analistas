@@ -94,6 +94,11 @@ const pt: TranslationKeys = {
     unmute: 'Ativar notificações deste jogo',
   },
 
+  liveActivity: {
+    follow: 'Acompanhar na tela de bloqueio',
+    following: 'Acompanhando na tela de bloqueio',
+  },
+
   notifications: {
     title: 'Notificações',
     introTitle: 'Você decide o que te interrompe',

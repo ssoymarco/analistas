@@ -23,8 +23,10 @@ export interface MatchActivityAttributes {
 }
 
 /** pre → sin timer · 1H/2H/ET → minuto corriendo (timer local del widget) ·
- *  HT → "MT" · PEN → "PENALES" (nunca avanzar reloj) · FT → "FINAL" + end. */
-export type LiveActivityPhase = 'pre' | '1H' | 'HT' | '2H' | 'ET' | 'PEN' | 'FT';
+ *  HT → "MT" · PEN → "PENALES" (nunca avanzar reloj) · SUSP → "SUSPENDIDO" ·
+ *  FT → "FINAL" + end. Horneado en Swift — cambios = build nuevo.
+ *  Mapa desde state SM: 1T→1H · HT→HT · 2T→2H · ET→ET · PEN→PEN · SUSP/INT→SUSP. */
+export type LiveActivityPhase = 'pre' | '1H' | 'HT' | '2H' | 'ET' | 'PEN' | 'SUSP' | 'FT';
 
 export interface MatchActivityState {
   homeScore: number;

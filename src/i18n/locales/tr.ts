@@ -91,6 +91,11 @@ const tr: TranslationKeys = {
     unmute: 'Bu maç için bildirimleri etkinleştir',
   },
 
+  liveActivity: {
+    follow: 'Kilit ekranında takip et',
+    following: 'Kilit ekranında takip ediliyor',
+  },
+
   notifications: {
     title: 'Bildirimler',
     introTitle: 'Seni neyin böleceğine sen karar ver',

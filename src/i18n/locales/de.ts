@@ -94,6 +94,11 @@ const de: TranslationKeys = {
     unmute: 'Benachrichtigungen für dieses Spiel aktivieren',
   },
 
+  liveActivity: {
+    follow: 'Auf dem Sperrbildschirm folgen',
+    following: 'Auf dem Sperrbildschirm aktiv',
+  },
+
   notifications: {
     title: 'Benachrichtigungen',
     introTitle: 'Du entscheidest, was dich unterbricht',

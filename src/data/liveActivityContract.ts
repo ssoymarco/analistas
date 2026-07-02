@@ -47,8 +47,12 @@ export interface MatchActivityAttributes {
  *  2H   → minuto corriendo
  *  ET   → minuto corriendo (105/120)
  *  PEN  → "PENALES"                (estático — nunca avanzar reloj, ver MEMORY)
- *  FT   → "FINAL"                  (estático; el push event:"end" cierra) */
-export type LiveActivityPhase = 'pre' | '1H' | 'HT' | '2H' | 'ET' | 'PEN' | 'FT';
+ *  SUSP → "SUSPENDIDO"             (estático — partido interrumpido/suspendido)
+ *  FT   → "FINAL"                  (estático; el push event:"end" cierra)
+ *  ⚠️ Este union está HORNEADO en el widget nativo (Swift) — agregar fases
+ *  después requiere build nuevo. Mapea desde Match.stateLabel:
+ *  1T→1H · HT→HT · 2T→2H · ET→ET · PEN→PEN · SUSP/INT→SUSP. */
+export type LiveActivityPhase = 'pre' | '1H' | 'HT' | '2H' | 'ET' | 'PEN' | 'SUSP' | 'FT';
 
 export interface MatchActivityState {
   homeScore: number;

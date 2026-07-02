@@ -94,6 +94,11 @@ const fr: TranslationKeys = {
     unmute: 'Activer les notifications de ce match',
   },
 
+  liveActivity: {
+    follow: "Suivre sur l'écran verrouillé",
+    following: "Suivi sur l'écran verrouillé",
+  },
+
   notifications: {
     title: 'Notifications',
     introTitle: 'À toi de décider ce qui te dérange',

@@ -33,6 +33,7 @@ import { translateCountry } from '../../i18n/countries';
 import { getRefereeProfile, type RefereeProfile } from '../../services/sportsApi';
 import { BETTING_CONTENT_ENABLED, ADMOB_ENABLED } from '../../config/features';
 import MediumRectangleBannerAd from '../../components/MediumRectangleBannerAd';
+import { LiveActivityButton } from '../../components/LiveActivityButton';
 import { useLiveTick, computeLiveMinuteSeconds } from '../../hooks/useLiveTick';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -2589,6 +2590,9 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
 
   return (
     <View style={{ paddingHorizontal: 16, gap: 12 }}>
+
+      {/* ── Live Activity: "Seguir en pantalla de bloqueo" (solo live + módulo presente) ── */}
+      <LiveActivityButton match={match} />
 
       {/* ── SCHEDULED: Previa layout ── */}
       {isScheduled && (

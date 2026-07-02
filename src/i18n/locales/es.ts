@@ -109,6 +109,11 @@ const es = {
     androidNote: 'En Android, cambiar el ícono puede cerrar la app un instante.',
   },
 
+  liveActivity: {
+    follow: 'Seguir en pantalla de bloqueo',
+    following: 'Siguiendo en pantalla de bloqueo',
+  },
+
   notifications: {
     title: 'Notificaciones',
     introTitle: 'Tú decides qué te interrumpe',

@@ -1,0 +1,17 @@
+/**
+ * Widget Extension target para la Live Activity de partidos.
+ * Procesado por @bacons/apple-targets en `expo prebuild` (CNG) — el código
+ * Swift vive aquí (targets/live-activity/) y se linkea al proyecto Xcode
+ * generado sin tocar /ios.
+ *
+ * deploymentTarget 16.2: ActivityKit estable. El módulo puente
+ * (modules/expo-live-activity) hace gating #available(iOS 16.2, *) en runtime,
+ * así el APP sigue soportando iOS < 16.2 (la feature simplemente no aparece).
+ */
+/** @type {import('@bacons/apple-targets/app.plugin').Config} */
+module.exports = {
+  type: 'widget',
+  name: 'AnalistasLiveActivity',
+  deploymentTarget: '16.2',
+  frameworks: ['SwiftUI', 'WidgetKit', 'ActivityKit'],
+};

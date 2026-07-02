@@ -101,6 +101,11 @@ const en: TranslationKeys = {
     androidNote: 'On Android, changing the icon may briefly close the app.',
   },
 
+  liveActivity: {
+    follow: 'Follow on lock screen',
+    following: 'Following on lock screen',
+  },
+
   notifications: {
     title: 'Notifications',
     introTitle: 'You decide what interrupts you',
