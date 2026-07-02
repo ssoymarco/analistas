@@ -141,7 +141,8 @@ export function useLiveActivity(match: Match) {
   useEffect(() => {
     if (!supported || !following) return;
     if (match.status === 'finished') {
-      endMatchActivity(matchId, buildActivityState(match)).catch(() => {});
+      // Fin natural: dejar el marcador final visible un rato (linger 30 min).
+      endMatchActivity(matchId, buildActivityState(match), false).catch(() => {});
       return;
     }
     updateMatchActivity(matchId, buildActivityState(match)).catch(() => {});
@@ -223,7 +224,9 @@ export function useLiveActivity(match: Match) {
 
   const end = useCallback(async () => {
     try {
-      await endMatchActivity(matchId, buildActivityState(match));
+      // Toggle manual del usuario → la Activity desaparece AL INSTANTE de
+      // lock screen e Isla (immediate), no linger.
+      await endMatchActivity(matchId, buildActivityState(match), true);
     } catch {}
     setFollowing(false);
     try {

@@ -26,7 +26,11 @@ interface NativeLiveActivityModule {
   ): Promise<[boolean, boolean]>;
   startMatchActivity(attrsJson: string, stateJson: string): Promise<string>;
   updateMatchActivity(matchId: string, stateJson: string): Promise<void>;
-  endMatchActivity(matchId: string, finalStateJson: string | null): Promise<void>;
+  endMatchActivity(
+    matchId: string,
+    finalStateJson: string | null,
+    immediate: boolean,
+  ): Promise<void>;
   addListener(
     event: 'onActivityPushToken',
     listener: (e: PushTokenEvent) => void,
@@ -104,15 +108,19 @@ export async function updateMatchActivity(
   return native.updateMatchActivity(matchId, JSON.stringify(state));
 }
 
-/** Termina la Activity (marcador final visible 30 min más). */
+/** Termina la Activity.
+ *  immediate=true → desaparece al instante (toggle manual del usuario).
+ *  immediate=false → marcador final visible 30 min más (fin natural, FT). */
 export async function endMatchActivity(
   matchId: string,
   finalState?: MatchActivityState,
+  immediate: boolean = false,
 ): Promise<void> {
   if (!native) return;
   return native.endMatchActivity(
     matchId,
     finalState ? JSON.stringify(finalState) : null,
+    immediate,
   );
 }
 

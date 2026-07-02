@@ -111,12 +111,15 @@ public class LiveActivityModule: Module {
       return false
     }
 
-    /// matchIds con Activity viva — para que el botón refleje estado tras
-    /// reinicios del app.
+    /// matchIds con Activity ACTIVA — para que el botón refleje estado tras
+    /// reinicios del app. Filtra por .active: una Activity terminada que sigue
+    /// visible en lock screen (linger de dismissal) NO cuenta como "siguiendo".
     Function("getActiveMatchIds") { () -> [String] in
       #if canImport(ActivityKit)
       if #available(iOS 16.2, *) {
-        return Activity<MatchActivityAttributes>.activities.map { $0.attributes.matchId }
+        return Activity<MatchActivityAttributes>.activities
+          .filter { $0.activityState == .active }
+          .map { $0.attributes.matchId }
       }
       #endif
       return []
@@ -154,11 +157,18 @@ public class LiveActivityModule: Module {
       let state = try decoder.decode(
         MatchActivityAttributes.ContentState.self, from: Data(stateJson.utf8))
 
-      // Una sola Activity por partido: si ya existe, actualiza y reutiliza.
-      if let existing = Activity<MatchActivityAttributes>.activities
-        .first(where: { $0.attributes.matchId == attrs.matchId }) {
-        Task { await existing.update(ActivityContent(state: state, staleDate: nil)) }
-        return existing.id
+      // Una sola Activity por partido: reutilizar SOLO si sigue .active.
+      // Una Activity terminada (linger de dismissal en lock screen) no se puede
+      // actualizar ni "revivir" — reutilizarla dejaba al usuario sin Dynamic
+      // Island al reactivar (bug #3). Limpieza: cualquier resto no-activo del
+      // mismo partido se descarta de inmediato antes de crear la nueva.
+      for stale in Activity<MatchActivityAttributes>.activities
+      where stale.attributes.matchId == attrs.matchId {
+        if stale.activityState == .active {
+          Task { await stale.update(ActivityContent(state: state, staleDate: nil)) }
+          return stale.id
+        }
+        await stale.end(stale.content, dismissalPolicy: .immediate)
       }
 
       let activity = try Activity.request(
@@ -201,9 +211,12 @@ public class LiveActivityModule: Module {
       #endif
     }
 
-    /// Termina la Activity del partido (estado final opcional). Dismissal a
-    /// los 30 min para que el marcador final se quede un rato en lock screen.
-    AsyncFunction("endMatchActivity") { (matchId: String, finalStateJson: String?) in
+    /// Termina la Activity del partido (estado final opcional).
+    ///   immediate = true  → desaparece YA de lock screen/Isla (toggle manual
+    ///                       del usuario — bug #4: antes se quedaba 30 min).
+    ///   immediate = false → linger de 30 min con el marcador final (fin
+    ///                       natural del partido, FT).
+    AsyncFunction("endMatchActivity") { (matchId: String, finalStateJson: String?, immediate: Bool) in
       #if canImport(ActivityKit)
       guard #available(iOS 16.2, *) else { return }
       var content: ActivityContent<MatchActivityAttributes.ContentState>? = nil
@@ -212,12 +225,12 @@ public class LiveActivityModule: Module {
            MatchActivityAttributes.ContentState.self, from: Data(json.utf8)) {
         content = ActivityContent(state: state, staleDate: nil)
       }
+      let policy: ActivityUIDismissalPolicy = immediate
+        ? .immediate
+        : .after(Date().addingTimeInterval(30 * 60))
       for activity in Activity<MatchActivityAttributes>.activities
       where activity.attributes.matchId == matchId {
-        await activity.end(
-          content ?? activity.content,
-          dismissalPolicy: .after(Date().addingTimeInterval(30 * 60))
-        )
+        await activity.end(content ?? activity.content, dismissalPolicy: policy)
       }
       #endif
     }

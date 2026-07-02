@@ -138,22 +138,26 @@ struct TeamBlock: View {
   }
 }
 
-/// Insignia mínima para la Dynamic Island compacta: escudo → bandera → punto.
+/// Insignia para la Dynamic Island compacta. Prioridad: bandera EMOJI (texto —
+/// renderiza nítido y con color garantizado en la Isla; los bitmaps a 16 px se
+/// veían como cuadros grises) → escudo → punto de color. Tamaño generoso: la
+/// bandera es la protagonista (feedback dueño).
 struct CompactBadge: View {
   let team: MatchActivityAttributes.TeamInfo
   let matchId: String
   let side: String
 
   var body: some View {
-    if let crest = crestImage(matchId: matchId, side: side) {
+    if let flag = team.flagEmoji, !flag.isEmpty {
+      Text(flag).font(.body)
+    } else if let crest = crestImage(matchId: matchId, side: side) {
       Image(uiImage: crest)
         .resizable()
         .scaledToFit()
-        .frame(width: 16, height: 16)
-    } else if let flag = team.flagEmoji, !flag.isEmpty {
-      Text(flag).font(.caption2)
+        .frame(width: 18, height: 18)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     } else {
-      Circle().fill(Color(hex: team.colorHex)).frame(width: 8, height: 8)
+      Circle().fill(Color(hex: team.colorHex)).frame(width: 10, height: 10)
     }
   }
 }
@@ -288,21 +292,25 @@ struct MatchLiveActivity: Widget {
           }
         }
       } compactLeading: {
-        HStack(spacing: 3) {
+        HStack(spacing: 4) {
           CompactBadge(team: context.attributes.home, matchId: context.attributes.matchId, side: "home")
           if context.state.phase != "pre" {
             Text("\(context.state.homeScore)")
-              .font(.caption.weight(.heavy)).monospacedDigit()
+              .font(.subheadline.weight(.heavy)).monospacedDigit()
+              .foregroundStyle(.white)
           }
         }
+        .padding(.leading, 2)
       } compactTrailing: {
-        HStack(spacing: 3) {
+        HStack(spacing: 4) {
           if context.state.phase != "pre" {
             Text("\(context.state.awayScore)")
-              .font(.caption.weight(.heavy)).monospacedDigit()
+              .font(.subheadline.weight(.heavy)).monospacedDigit()
+              .foregroundStyle(.white)
           }
           CompactBadge(team: context.attributes.away, matchId: context.attributes.matchId, side: "away")
         }
+        .padding(.trailing, 2)
       } minimal: {
         if context.state.phase == "pre" {
           Text("VS").font(.system(size: 10, weight: .heavy))
