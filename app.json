@@ -124,7 +124,8 @@
       "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": true,
       "entitlements": {
-        "aps-environment": "production"
+        "aps-environment": "production",
+        "com.apple.security.application-groups": ["group.app.analistas"]
       },
       "infoPlist": {
         "UIBackgroundModes": [

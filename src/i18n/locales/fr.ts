@@ -95,8 +95,9 @@ const fr: TranslationKeys = {
   },
 
   liveActivity: {
-    follow: "Score en direct sur l'écran verrouillé",
-    following: "Score actif sur l'écran verrouillé",
+    title: "Score en direct sur l'écran verrouillé",
+    on: 'Activé',
+    off: 'Désactivé',
   },
 
   notifications: {

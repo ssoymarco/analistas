@@ -102,8 +102,9 @@ const en: TranslationKeys = {
   },
 
   liveActivity: {
-    follow: 'Live score on your lock screen',
-    following: 'Live score active on lock screen',
+    title: 'Live score on your lock screen',
+    on: 'On',
+    off: 'Off',
   },
 
   notifications: {

@@ -17,6 +17,7 @@
 
 import ActivityKit
 import SwiftUI
+import UIKit
 import WidgetKit
 
 // ── Contrato ──────────────────────────────────────────────────────────────────
@@ -90,14 +91,39 @@ private func phaseTicks(_ phase: String) -> Bool {
 
 // ── Sub-vistas compartidas ────────────────────────────────────────────────────
 
-/// Columna de equipo: bandera emoji (o punto de color) + código corto.
+// ── Escudos desde el App Group ────────────────────────────────────────────────
+// El app los descarga a group.app.analistas/crests/crest_{matchId}_{side}.png
+// ANTES de iniciar la Activity (ver modules/expo-live-activity). Aquí solo se
+// leen del disco — WidgetKit no puede hacer red. Convención en sync con el módulo.
+
+private let APP_GROUP_ID = "group.app.analistas"
+
+func crestImage(matchId: String, side: String) -> UIImage? {
+  guard let container = FileManager.default.containerURL(
+    forSecurityApplicationGroupIdentifier: APP_GROUP_ID) else { return nil }
+  let path = container
+    .appendingPathComponent("crests", isDirectory: true)
+    .appendingPathComponent("crest_\(matchId)_\(side).png").path
+  return UIImage(contentsOfFile: path)
+}
+
+/// Columna de equipo. Prioridad visual: escudo real (App Group) → bandera
+/// emoji → punto del color del equipo. Siempre con el código corto debajo.
 struct TeamBlock: View {
   let team: MatchActivityAttributes.TeamInfo
+  let matchId: String
+  /// "home" | "away" — clave del archivo de escudo.
+  let side: String
   var compact: Bool = false
 
   var body: some View {
     VStack(spacing: compact ? 0 : 2) {
-      if let flag = team.flagEmoji, !flag.isEmpty {
+      if let crest = crestImage(matchId: matchId, side: side) {
+        Image(uiImage: crest)
+          .resizable()
+          .scaledToFit()
+          .frame(width: compact ? 16 : 26, height: compact ? 16 : 26)
+      } else if let flag = team.flagEmoji, !flag.isEmpty {
         Text(flag).font(compact ? .body : .title2)
       } else {
         Circle()
@@ -108,6 +134,26 @@ struct TeamBlock: View {
         .font(compact ? .caption2 : .caption)
         .fontWeight(.bold)
         .foregroundStyle(.white.opacity(0.9))
+    }
+  }
+}
+
+/// Insignia mínima para la Dynamic Island compacta: escudo → bandera → punto.
+struct CompactBadge: View {
+  let team: MatchActivityAttributes.TeamInfo
+  let matchId: String
+  let side: String
+
+  var body: some View {
+    if let crest = crestImage(matchId: matchId, side: side) {
+      Image(uiImage: crest)
+        .resizable()
+        .scaledToFit()
+        .frame(width: 16, height: 16)
+    } else if let flag = team.flagEmoji, !flag.isEmpty {
+      Text(flag).font(.caption2)
+    } else {
+      Circle().fill(Color(hex: team.colorHex)).frame(width: 8, height: 8)
     }
   }
 }
@@ -186,14 +232,14 @@ struct LockScreenView: View {
         .foregroundStyle(.white.opacity(0.45))
 
       HStack {
-        TeamBlock(team: context.attributes.home)
+        TeamBlock(team: context.attributes.home, matchId: context.attributes.matchId, side: "home")
         Spacer()
         VStack(spacing: 3) {
           ScoreBlock(state: context.state)
           PhaseTimeline(state: context.state)
         }
         Spacer()
-        TeamBlock(team: context.attributes.away)
+        TeamBlock(team: context.attributes.away, matchId: context.attributes.matchId, side: "away")
       }
       .padding(.horizontal, 18)
 
@@ -220,11 +266,11 @@ struct MatchLiveActivity: Widget {
     } dynamicIsland: { context in
       DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
-          TeamBlock(team: context.attributes.home)
+          TeamBlock(team: context.attributes.home, matchId: context.attributes.matchId, side: "home")
             .padding(.leading, 6)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          TeamBlock(team: context.attributes.away)
+          TeamBlock(team: context.attributes.away, matchId: context.attributes.matchId, side: "away")
             .padding(.trailing, 6)
         }
         DynamicIslandExpandedRegion(.center) {
@@ -243,29 +289,27 @@ struct MatchLiveActivity: Widget {
         }
       } compactLeading: {
         HStack(spacing: 3) {
-          if let flag = context.attributes.home.flagEmoji, !flag.isEmpty {
-            Text(flag).font(.caption2)
-          } else {
-            Circle().fill(Color(hex: context.attributes.home.colorHex))
-              .frame(width: 8, height: 8)
+          CompactBadge(team: context.attributes.home, matchId: context.attributes.matchId, side: "home")
+          if context.state.phase != "pre" {
+            Text("\(context.state.homeScore)")
+              .font(.caption.weight(.heavy)).monospacedDigit()
           }
-          Text("\(context.state.homeScore)")
-            .font(.caption.weight(.heavy)).monospacedDigit()
         }
       } compactTrailing: {
         HStack(spacing: 3) {
-          Text("\(context.state.awayScore)")
-            .font(.caption.weight(.heavy)).monospacedDigit()
-          if let flag = context.attributes.away.flagEmoji, !flag.isEmpty {
-            Text(flag).font(.caption2)
-          } else {
-            Circle().fill(Color(hex: context.attributes.away.colorHex))
-              .frame(width: 8, height: 8)
+          if context.state.phase != "pre" {
+            Text("\(context.state.awayScore)")
+              .font(.caption.weight(.heavy)).monospacedDigit()
           }
+          CompactBadge(team: context.attributes.away, matchId: context.attributes.matchId, side: "away")
         }
       } minimal: {
-        Text("\(context.state.homeScore)-\(context.state.awayScore)")
-          .font(.system(size: 10, weight: .heavy)).monospacedDigit()
+        if context.state.phase == "pre" {
+          Text("VS").font(.system(size: 10, weight: .heavy))
+        } else {
+          Text("\(context.state.homeScore)-\(context.state.awayScore)")
+            .font(.system(size: 10, weight: .heavy)).monospacedDigit()
+        }
       }
       .widgetURL(URL(string: "analistas://match/\(context.attributes.matchId)"))
       .keylineTint(Color(red: 0.0, green: 0.88, blue: 0.59)) // accent #00E096

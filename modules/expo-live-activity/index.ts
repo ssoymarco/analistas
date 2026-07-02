@@ -19,6 +19,11 @@ interface NativeLiveActivityModule {
   isSupported(): boolean;
   areActivitiesEnabled(): boolean;
   getActiveMatchIds(): string[];
+  prepareTeamCrests(
+    matchId: string,
+    homeUrl: string | null,
+    awayUrl: string | null,
+  ): Promise<[boolean, boolean]>;
   startMatchActivity(attrsJson: string, stateJson: string): Promise<string>;
   updateMatchActivity(matchId: string, stateJson: string): Promise<void>;
   endMatchActivity(matchId: string, finalStateJson: string | null): Promise<void>;
@@ -63,6 +68,21 @@ export function getActiveMatchIds(): string[] {
     return native ? native.getActiveMatchIds() : [];
   } catch {
     return [];
+  }
+}
+
+/** Descarga los escudos al App Group (best-effort) ANTES de iniciar la
+ *  Activity — el widget no puede hacer red; los lee del contenedor. */
+export async function prepareTeamCrests(
+  matchId: string,
+  homeUrl: string | null,
+  awayUrl: string | null,
+): Promise<void> {
+  if (!native) return;
+  try {
+    await native.prepareTeamCrests(matchId, homeUrl, awayUrl);
+  } catch {
+    // Sin escudos el widget cae a bandera emoji / punto de color.
   }
 }
 

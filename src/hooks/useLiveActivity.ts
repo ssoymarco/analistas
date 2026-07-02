@@ -23,6 +23,7 @@ import {
   isLiveActivitySupported,
   areActivitiesEnabled,
   getActiveMatchIds,
+  prepareTeamCrests,
   startMatchActivity,
   updateMatchActivity,
   endMatchActivity,
@@ -181,6 +182,16 @@ export function useLiveActivity(match: Match) {
     try {
       const attrs = buildActivityAttributes(match);
       const state = buildActivityState(match);
+
+      // Escudos reales (clubes y selecciones con crest URL): descargarlos al
+      // App Group ANTES de iniciar, para que el widget ya los encuentre en el
+      // primer render. Best-effort — fallback: bandera emoji / punto de color.
+      const homeUrl = isImageUri(match.homeTeam.logo) ? match.homeTeam.logo : null;
+      const awayUrl = isImageUri(match.awayTeam.logo) ? match.awayTeam.logo : null;
+      if (homeUrl || awayUrl) {
+        await prepareTeamCrests(matchId, homeUrl, awayUrl);
+      }
+
       const activityId = await startMatchActivity(attrs, state);
       if (!activityId) return false;
       setFollowing(true);

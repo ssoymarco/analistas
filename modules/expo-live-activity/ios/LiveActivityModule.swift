@@ -15,6 +15,7 @@
 // devuelve false y el botón nunca se muestra.
 
 import ExpoModulesCore
+import UIKit
 
 #if canImport(ActivityKit)
 import ActivityKit
@@ -48,6 +49,42 @@ struct MatchActivityAttributes: ActivityAttributes {
   var leagueName: String
 }
 #endif
+
+// ── Escudos vía App Group ─────────────────────────────────────────────────────
+// WidgetKit NO puede descargar imágenes al renderizar. El app las baja AQUÍ
+// (antes de iniciar la Activity), las reduce a 128 pt y las escribe al
+// contenedor del App Group; el widget las lee por convención de nombre:
+//   crests/crest_{matchId}_{home|away}.png
+// (misma convención en targets/live-activity/index.swift — mantener en sync).
+
+private let APP_GROUP_ID = "group.app.analistas"
+
+private func crestsDirectory() -> URL? {
+  guard let container = FileManager.default.containerURL(
+    forSecurityApplicationGroupIdentifier: APP_GROUP_ID) else { return nil }
+  let dir = container.appendingPathComponent("crests", isDirectory: true)
+  try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+  return dir
+}
+
+/// Descarga → downscale 128pt (límite de memoria de widgets) → PNG al App Group.
+private func downloadCrest(from urlString: String, to fileURL: URL) async -> Bool {
+  guard let url = URL(string: urlString) else { return false }
+  do {
+    let (data, _) = try await URLSession.shared.data(from: url)
+    guard let image = UIImage(data: data) else { return false }
+    let side: CGFloat = 128
+    let scale = min(side / max(image.size.width, 1), side / max(image.size.height, 1), 1)
+    let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+    let renderer = UIGraphicsImageRenderer(size: newSize)
+    let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: newSize)) }
+    guard let png = resized.pngData() else { return false }
+    try png.write(to: fileURL, options: .atomic)
+    return true
+  } catch {
+    return false
+  }
+}
 
 // ── Módulo ────────────────────────────────────────────────────────────────────
 
@@ -83,6 +120,23 @@ public class LiveActivityModule: Module {
       }
       #endif
       return []
+    }
+
+    /// Descarga los escudos al App Group ANTES de iniciar la Activity (el
+    /// widget no puede hacer red). Best-effort: si falla, el widget cae a
+    /// bandera emoji / punto de color. Devuelve [homeOk, awayOk].
+    AsyncFunction("prepareTeamCrests") { (matchId: String, homeUrl: String?, awayUrl: String?) -> [Bool] in
+      guard let dir = crestsDirectory() else { return [false, false] }
+      var results = [false, false]
+      if let home = homeUrl, !home.isEmpty {
+        results[0] = await downloadCrest(
+          from: home, to: dir.appendingPathComponent("crest_\(matchId)_home.png"))
+      }
+      if let away = awayUrl, !away.isEmpty {
+        results[1] = await downloadCrest(
+          from: away, to: dir.appendingPathComponent("crest_\(matchId)_away.png"))
+      }
+      return results
     }
 
     /// Inicia la Activity. attrs/state llegan como JSON strings (contrato TS).

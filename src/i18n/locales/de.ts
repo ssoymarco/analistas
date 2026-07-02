@@ -95,8 +95,9 @@ const de: TranslationKeys = {
   },
 
   liveActivity: {
-    follow: 'Spielstand auf dem Sperrbildschirm',
-    following: 'Spielstand aktiv auf dem Sperrbildschirm',
+    title: 'Spielstand auf dem Sperrbildschirm',
+    on: 'Aktiviert',
+    off: 'Deaktiviert',
   },
 
   notifications: {

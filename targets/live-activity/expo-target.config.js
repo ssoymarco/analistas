@@ -14,4 +14,10 @@ module.exports = {
   name: 'AnalistasLiveActivity',
   deploymentTarget: '16.2',
   frameworks: ['SwiftUI', 'WidgetKit', 'ActivityKit'],
+  // App Group compartido con el app: el módulo escribe los escudos aquí y el
+  // widget los lee (WidgetKit no puede hacer red). Debe coincidir con
+  // app.json → ios.entitlements['com.apple.security.application-groups'].
+  entitlements: {
+    'com.apple.security.application-groups': ['group.app.analistas'],
+  },
 };

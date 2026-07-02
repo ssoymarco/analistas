@@ -95,8 +95,9 @@ const it: TranslationKeys = {
   },
 
   liveActivity: {
-    follow: 'Punteggio nella schermata di blocco',
-    following: 'Punteggio attivo nella schermata di blocco',
+    title: 'Punteggio nella schermata di blocco',
+    on: 'Attivo',
+    off: 'Disattivato',
   },
 
   notifications: {

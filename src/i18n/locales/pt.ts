@@ -95,8 +95,9 @@ const pt: TranslationKeys = {
   },
 
   liveActivity: {
-    follow: 'Placar na sua tela de bloqueio',
-    following: 'Placar ativo na tela de bloqueio',
+    title: 'Placar na sua tela de bloqueio',
+    on: 'Ativado',
+    off: 'Desativado',
   },
 
   notifications: {

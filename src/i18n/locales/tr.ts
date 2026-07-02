@@ -92,8 +92,9 @@ const tr: TranslationKeys = {
   },
 
   liveActivity: {
-    follow: 'Skor kilit ekranında',
-    following: 'Skor kilit ekranında etkin',
+    title: 'Skor kilit ekranında',
+    on: 'Açık',
+    off: 'Kapalı',
   },
 
   notifications: {

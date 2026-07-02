@@ -44,12 +44,22 @@ export const LiveActivityButton: React.FC<{ match: Match }> = ({ match }) => {
     >
       {/* Punto LIVE (rojo) / activo (accent) */}
       <View style={[s.dot, { backgroundColor: following ? c.accent : LIVE_RED }]} />
-      <Text style={[s.label, { color: following ? c.accent : c.textPrimary }]} numberOfLines={1}>
-        {following ? t('liveActivity.following') : t('liveActivity.follow')}
+      {/* Nombre fijo de la feature — el ESTADO va en el chip (feedback dueño:
+          cambiar la frase completa no dejaba claro qué hace el botón). */}
+      <Text style={[s.label, { color: c.textPrimary }]} numberOfLines={1}>
+        {t('liveActivity.title')}
       </Text>
-      {/* Mini "lock screen" glyph con primitivas */}
-      <View style={[s.phone, { borderColor: following ? c.accent : c.textTertiary }]}>
-        <View style={[s.phoneNotch, { backgroundColor: following ? c.accent : c.textTertiary }]} />
+      <View
+        style={[
+          s.chip,
+          following
+            ? { backgroundColor: c.accent + '22', borderColor: c.accent }
+            : { backgroundColor: 'transparent', borderColor: c.border },
+        ]}
+      >
+        <Text style={[s.chipText, { color: following ? c.accent : c.textTertiary }]}>
+          {following ? t('liveActivity.on') : t('liveActivity.off')}
+        </Text>
       </View>
     </TouchableOpacity>
   );
@@ -67,13 +77,11 @@ const s = StyleSheet.create({
   },
   dot: { width: 8, height: 8, borderRadius: 4 },
   label: { flex: 1, fontSize: 13, fontWeight: '700' },
-  phone: {
-    width: 14,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    paddingTop: 2,
+  chip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  phoneNotch: { width: 6, height: 1.5, borderRadius: 1 },
+  chipText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.3 },
 });
