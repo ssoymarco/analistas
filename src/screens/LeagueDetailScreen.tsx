@@ -1,7 +1,7 @@
 // ── League Detail Screen ──────────────────────────────────────────────────────
 // Full league profile: collapsible header, 4 tabs (Clasificación, Goleadores,
 // Equipos, Calendario). Dark/Light mode responsive. Uses SportMonks data.
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,9 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Dimensions,
+  PanResponder,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -29,7 +31,7 @@ import { useFavorites } from '../contexts/FavoritesContext';
 import { useLeagueDetail } from '../hooks/useLeagueDetail';
 import { useCupBracket } from '../hooks/useCupBracket';
 import { useAvailableSeasons } from '../hooks/useAvailableSeasons';
-import { CupBracketView } from '../components/CupBracketView';
+import { CupBracketView, bracketRoundPillsDragging } from '../components/CupBracketView';
 import { SeasonSelector } from '../components/SeasonSelector';
 import type { CupTie } from '../services/sportsApi';
 import type { AvailableSeason } from '../services/firestoreApi';
@@ -442,6 +444,22 @@ const sk = StyleSheet.create({
 // TAB: Goleadores
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Dense ranking ("1223"): players tied on the stat share a rank, and the next
+// distinct value gets the very next integer — NO gaps (two players on 6 goals
+// are both #1, the next distinct value is #2, not #3). Chosen over competition
+// ranking so the list never skips a position number, which reads as a bug to
+// casual users. Input must already be sorted descending by the stat — which the
+// API-fed lists are. Returns a parallel array of 1-based ranks.
+function computeDenseRanks(values: number[]): number[] {
+  const ranks: number[] = [];
+  let rank = 0;
+  values.forEach((v, i) => {
+    if (i === 0 || v !== values[i - 1]) rank += 1;
+    ranks[i] = rank;
+  });
+  return ranks;
+}
+
 const GoleadoresTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
@@ -467,9 +485,12 @@ const GoleadoresTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
           <Text style={[gs.hGoals, { color: c.textTertiary }]}>{t('league.goalsHeader')}</Text>
         </View>
 
-        {topScorers.map((scorer, i) => {
-          const isTop3 = scorer.position <= 3;
-          const posColor = scorer.position === 1 ? '#fbbf24' : scorer.position === 2 ? '#94a3b8' : scorer.position === 3 ? '#d97706' : c.textTertiary;
+        {(() => {
+          const ranks = computeDenseRanks(topScorers.map(s => s.goals));
+          return topScorers.map((scorer, i) => {
+          const position = ranks[i];
+          const isTop3 = position <= 3;
+          const posColor = position === 1 ? '#fbbf24' : position === 2 ? '#94a3b8' : position === 3 ? '#d97706' : c.textTertiary;
 
           return (
             <TouchableOpacity
@@ -485,7 +506,7 @@ const GoleadoresTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
               })}
             >
               <Text style={[gs.pos, { color: posColor, fontWeight: isTop3 ? '900' : '700' }]}>
-                {scorer.position}
+                {position}
               </Text>
               <View style={gs.avatarWrap}>
                 {isImageUri(scorer.playerImage) ? (
@@ -512,7 +533,8 @@ const GoleadoresTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
               </View>
             </TouchableOpacity>
           );
-        })}
+          });
+        })()}
       </View>
 
       <View style={{ height: 16 }} />
@@ -586,9 +608,12 @@ const StatListTab: React.FC<{ data: LeagueDetailData; type: 'assists' | 'cards' 
           <Text style={[gs.hGoals, { color: c.textTertiary }]}>{hStat}</Text>
         </View>
 
-        {rows.map((row, i) => {
-          const isTop3 = row.position <= 3;
-          const posColor = row.position === 1 ? '#fbbf24' : row.position === 2 ? '#94a3b8' : row.position === 3 ? '#d97706' : c.textTertiary;
+        {(() => {
+          const ranks = computeDenseRanks(rows.map(r => r.goals));
+          return rows.map((row, i) => {
+          const position = ranks[i];
+          const isTop3 = position <= 3;
+          const posColor = position === 1 ? '#fbbf24' : position === 2 ? '#94a3b8' : position === 3 ? '#d97706' : c.textTertiary;
 
           return (
             <TouchableOpacity
@@ -604,7 +629,7 @@ const StatListTab: React.FC<{ data: LeagueDetailData; type: 'assists' | 'cards' 
               })}
             >
               <Text style={[gs.pos, { color: posColor, fontWeight: isTop3 ? '900' : '700' }]}>
-                {row.position}
+                {position}
               </Text>
               <View style={gs.avatarWrap}>
                 {isImageUri(row.playerImage) ? (
@@ -631,7 +656,8 @@ const StatListTab: React.FC<{ data: LeagueDetailData; type: 'assists' | 'cards' 
               </View>
             </TouchableOpacity>
           );
-        })}
+          });
+        })()}
       </View>
       <View style={{ height: 16 }} />
     </View>
@@ -1401,6 +1427,37 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
         { key: 'equipos',       label: t('league.teamsTab') },
       ];
 
+  // ── Swipe between tabs (Partidos ↔ Grupos ↔ Bracket ↔ …) ──
+  // Mirrors MatchDetailScreen. Refs keep the once-created PanResponder reading
+  // current state; yields to the bracket's horizontal round-pills scroll.
+  const changeTab = useCallback((key: Tab) => {
+    Haptics.selectionAsync().catch(() => {});
+    setActiveTab(key);
+  }, []);
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const tabsRef = useRef(TABS);
+  tabsRef.current = TABS;
+  const changeTabRef = useRef(changeTab);
+  changeTabRef.current = changeTab;
+  const tabSwipe = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        !bracketRoundPillsDragging.current &&
+        Math.abs(g.dx) > 24 &&
+        Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+      onPanResponderRelease: (_, g) => {
+        if (bracketRoundPillsDragging.current) return;
+        const dir = g.dx <= -55 ? 1 : g.dx >= 55 ? -1 : 0;
+        if (!dir) return;
+        const tabs = tabsRef.current;
+        const cur = tabs.findIndex(tb => tb.key === activeTabRef.current);
+        const next = cur + dir;
+        if (next >= 0 && next < tabs.length) changeTabRef.current(tabs[next].key);
+      },
+    }),
+  ).current;
+
   // ── Scroll animation ──
   const scrollY = useRef(new Animated.Value(0)).current;
   const scrollHostRef = useRef<any>(null);
@@ -1625,7 +1682,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
         </View>
 
         {/* ── Tab content ── */}
-        <View style={s.tabContent}>
+        <View style={s.tabContent} {...tabSwipe.panHandlers}>
           {data ? (
             activeTab === 'clasificacion' ? (
               isCup ? (

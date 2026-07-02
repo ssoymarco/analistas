@@ -1,6 +1,9 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Animated, Platform, PanResponder } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { useFocusEffect } from '@react-navigation/native';
 import AdMobBanner from '../components/AdMobBanner';
+import MediumRectangleBannerAd from '../components/MediumRectangleBannerAd';
 import { ADMOB_ENABLED } from '../config/features';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { SkeletonPartidos } from '../components/Skeleton';
@@ -35,6 +38,13 @@ function todayISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// Shift a "YYYY-MM-DD" date by whole days (handles month/year rollover).
+function shiftISODate(iso: string, deltaDays: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + deltaDays);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 export const PartidosScreen: React.FC = () => {
   const { t } = useTranslation();
@@ -44,6 +54,8 @@ export const PartidosScreen: React.FC = () => {
   const { streakDays } = useUserStats();
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [activeTab, setActiveTab] = useState<FilterTab>('todos');
+  const [bannerKey, setBannerKey] = useState(0);
+  useFocusEffect(useCallback(() => { setBannerKey(k => k + 1); }, []));
   const [showCalendar, setShowCalendar] = useState(false);
 
   // NOTE: App Tracking Transparency (ATT) was removed for v1.0 — the app does
@@ -273,6 +285,25 @@ export const PartidosScreen: React.FC = () => {
     setActiveTab('todos');
   }, []);
 
+  // ── Swipe to change day ────────────────────────────────────────────────────
+  // Swipe right (finger →) = previous day; swipe left (finger ←) = next day.
+  // Only claims clearly-horizontal gestures so the vertical list still scrolls.
+  const changeDay = useCallback((delta: number) => {
+    Haptics.selectionAsync().catch(() => {});
+    setSelectedDate(prev => shiftISODate(prev, delta));
+    setActiveTab('todos');
+  }, []);
+  const daySwipe = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+      onPanResponderRelease: (_, g) => {
+        if (g.dx <= -55) changeDay(1);       // swipe ← : next day
+        else if (g.dx >= 55) changeDay(-1);  // swipe → : previous day
+      },
+    }),
+  ).current;
+
   // ── Tab press → jump to today ──────────────────────────────────────────────
   // When the user taps the "Partidos" tab while already on it (from any date),
   // snap back to today. Uses the parent tab navigator's tabPress event.
@@ -369,6 +400,7 @@ export const PartidosScreen: React.FC = () => {
 
       {/* Live auto-refresh indicator removed */}
 
+      <View style={{ flex: 1 }} {...daySwipe.panHandlers}>
       <ScrollView
         style={{ flex: 1, backgroundColor: c.bg }}
         contentContainerStyle={{ paddingTop: 8 }}
@@ -482,8 +514,7 @@ export const PartidosScreen: React.FC = () => {
                    ───────────────────────────────────────────────────────── */}
                 {hasPersonalContent ? (
                   <>
-                    {/* Caliente banner — gated off for v1.0 (no agreement + Apple 2.3.6) */}
-                    {ADMOB_ENABLED && <AdMobBanner />}
+                    {ADMOB_ENABLED && <MediumRectangleBannerAd key={selectedDate} />}
                     {visibleGlobalLeagues.map((lg, idx) => renderGlobalLeague(lg, idx))}
                   </>
                 ) : (
@@ -493,10 +524,8 @@ export const PartidosScreen: React.FC = () => {
                       renderGlobalLeague(lg, idx)
                     )}
 
-                    {/* Banner only when there's at least one league above — keeps
-                       the rule "banner never alone, never first". Gated off for v1.0. */}
                     {ADMOB_ENABLED && visibleGlobalLeagues.length > 0 && (
-                      <AdMobBanner />
+                      <MediumRectangleBannerAd key={`${selectedDate}_2`} />
                     )}
 
                     {/* Remaining visible leagues (revealed by "Cargar más"). */}
@@ -545,18 +574,21 @@ export const PartidosScreen: React.FC = () => {
         )}
         <View style={{ height: 80 }} />
       </ScrollView>
+      </View>
+
+      <CalendarPicker visible={showCalendar} selectedDate={selectedDate} onSelectDate={handleCalendarSelect} onClose={() => setShowCalendar(false)} onGoToday={() => { handleGoToday(); setShowCalendar(false); }} />
+
+      {ADMOB_ENABLED && <AdMobBanner key={`${bannerKey}_${selectedDate}`} />}
 
       {!isToday(selectedDate) && (
         <TouchableOpacity style={{
-          position: 'absolute', bottom: 24, alignSelf: 'center',
+          position: 'absolute', bottom: ADMOB_ENABLED ? 76 : 24, alignSelf: 'center',
           backgroundColor: c.emerald, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 24,
           shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6,
         }} activeOpacity={0.85} onPress={handleGoToday}>
           <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff', letterSpacing: -0.2 }}>{t('dates.goToToday')}</Text>
         </TouchableOpacity>
       )}
-
-      <CalendarPicker visible={showCalendar} selectedDate={selectedDate} onSelectDate={handleCalendarSelect} onClose={() => setShowCalendar(false)} onGoToday={() => { handleGoToday(); setShowCalendar(false); }} />
 
     </SafeAreaView>
   );

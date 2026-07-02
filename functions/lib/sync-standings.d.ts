@@ -19,6 +19,9 @@ export declare function syncStandingsHandler(): Promise<void>;
  * useLeagueDetail can render all three tabs from Firestore in one read.
  *
  * Cost: 51 leagues × 3 categories = 153 SM calls per run on the
- * `topscorers` entity. ~3.6k/day at the hourly schedule. ~5% of cap.
+ * `topscorers` entity. At the every-15-min schedule that's ~14.7k/day
+ * (~20% of the ~73k/day cap; 612 calls/hour, well under SM's 3k/hour/entity
+ * limit). Bumped from hourly during the 2026 World Cup so the goleadores
+ * table tracks live goals within 15 min instead of up to an hour.
  */
 export declare function syncTopScorersHandler(): Promise<void>;

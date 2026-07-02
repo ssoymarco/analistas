@@ -116,11 +116,14 @@ async function executeSinglePoll(pollIndex: number): Promise<number> {
 }
 
 /**
- * Main polling function — runs 4 polls with 15-second intervals.
- * Called by the scheduled Cloud Function every 1 minute.
+ * Main polling function — runs POLLS_PER_INVOCATION (15) polls spaced
+ * LIVESCORE_POLL_INTERVAL_SEC (4s) apart, so one invocation continuously
+ * covers the full ~60s until the next scheduled trigger. Net effect: an
+ * effective ~4-second livescore poll cadence (goal → push in seconds), not
+ * the 1-minute scheduler heartbeat.
  */
 export async function pollLivescoresHandler(): Promise<void> {
-  logger.info('🔄 pollLivescores: starting 4-poll cycle');
+  logger.info(`🔄 pollLivescores: starting ${POLLS_PER_INVOCATION}-poll cycle (${LIVESCORE_POLL_INTERVAL_SEC}s apart)`);
 
   for (let i = 0; i < POLLS_PER_INVOCATION; i++) {
     try {
@@ -135,5 +138,5 @@ export async function pollLivescoresHandler(): Promise<void> {
     }
   }
 
-  logger.info('✅ pollLivescores: 4-poll cycle complete');
+  logger.info(`✅ pollLivescores: ${POLLS_PER_INVOCATION}-poll cycle complete`);
 }

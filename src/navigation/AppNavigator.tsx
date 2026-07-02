@@ -18,6 +18,7 @@ import { NoticiasScreen } from '../screens/NoticiasScreen';
 import { NewsDetailScreen } from '../screens/NewsDetailScreen';
 import { PerfilScreen } from '../screens/PerfilScreen';
 import { HazteTitularScreen } from '../screens/HazteTitularScreen';
+import { AppIconScreen } from '../screens/AppIconScreen';
 import { MatchDetailScreen } from '../screens/MatchDetailScreen';
 import { TeamDetailScreen } from '../screens/TeamDetailScreen';
 import { PlayerDetailScreen } from '../screens/PlayerDetailScreen';
@@ -97,6 +98,7 @@ export type NoticiasStackParamList = {
 export type PerfilStackParamList = {
   PerfilHome: undefined;
   HazteTitular: { source?: 'icon' | 'momios' | 'promo' | 'level_badge' } | undefined;
+  AppIcon: undefined;
   Streak: undefined;
   NotificationSettings: undefined;
 };
@@ -230,6 +232,7 @@ function PerfilNavigator() {
     <PerfilStack.Navigator screenOptions={{ headerShown: false }}>
       <PerfilStack.Screen name="PerfilHome" component={PerfilScreen} />
       <PerfilStack.Screen name="HazteTitular" component={HazteTitularScreen} options={detailScreenOpts} />
+      <PerfilStack.Screen name="AppIcon" component={AppIconScreen} options={detailScreenOpts} />
       <PerfilStack.Screen
         name="Streak"
         component={StreakScreen}

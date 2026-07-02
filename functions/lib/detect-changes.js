@@ -109,7 +109,8 @@ const TEAMS_ES = {
     'Kenya': 'Kenia', 'Korea DPR': 'Corea del Norte',
     'Korea Republic': 'Corea del Sur', 'Kosovo': 'Kosovo', 'Kuwait': 'Kuwait',
     'Mali': 'Malí', 'Mexico': 'México', 'Morocco': 'Marruecos',
-    'Netherlands': 'Países Bajos', 'New Zealand': 'Nueva Zelanda',
+    'Netherlands': 'Países Bajos', 'The Netherlands': 'Países Bajos', 'Maroc': 'Marruecos',
+    'New Zealand': 'Nueva Zelanda',
     'Nigeria': 'Nigeria', 'Norway': 'Noruega', 'Oman': 'Omán',
     'Panama': 'Panamá', 'Paraguay': 'Paraguay', 'Peru': 'Perú',
     'Poland': 'Polonia', 'Portugal': 'Portugal', 'Qatar': 'Catar',
@@ -376,6 +377,8 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
             league: match.league,
             leagueId: match.leagueId,
             minute: match.minute,
+            homePenScore: match.homePenScore,
+            awayPenScore: match.awayPenScore,
         };
         if (!prev) {
             // Match not in previous snapshot. If it's live now, treat as kickoff.
@@ -654,9 +657,14 @@ function copyForSecondHalfStart(c) {
     };
 }
 function copyForMatchEnd(c) {
+    // When the match was decided on penalties, surface the shootout tally so the
+    // notification doesn't read like a draw (e.g. "1-1 (pen. 3-4)").
+    const pen = c.homePenScore != null && c.awayPenScore != null
+        ? ` (pen. ${c.homePenScore}-${c.awayPenScore})`
+        : '';
     return {
         title: `🏁 Final del partido`,
-        body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
+        body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore}${pen} ${loc(c.awayTeam.name)} · ${c.league}`,
     };
 }
 function copyForRedCard(c) {

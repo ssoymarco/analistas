@@ -3,7 +3,7 @@
     "name": "Analistas",
     "slug": "Analistas",
     "scheme": "analistas",
-    "version": "1.2.3",
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -96,6 +96,23 @@
             "useFrameworks": "static",
             "forceStaticLinking": ["RNFBApp", "RNFBMessaging", "RNFBAnalytics"]
           }
+        }
+      ],
+      [
+        "expo-dynamic-app-icon",
+        {
+          "Mexico":    { "image": "./assets/appIcons/Mexico.png",    "prerendered": true },
+          "Argentina": { "image": "./assets/appIcons/Argentina.png", "prerendered": true },
+          "Portugal":  { "image": "./assets/appIcons/Portugal.png",  "prerendered": true },
+          "America":   { "image": "./assets/appIcons/America.png",   "prerendered": true },
+          "Chivas":    { "image": "./assets/appIcons/Chivas.png",    "prerendered": true },
+          "Barca":     { "image": "./assets/appIcons/Barca.png",     "prerendered": true },
+          "Madrid":    { "image": "./assets/appIcons/Madrid.png",    "prerendered": true },
+          "City":      { "image": "./assets/appIcons/City.png",      "prerendered": true },
+          "Dorado":    { "image": "./assets/appIcons/Dorado.png",    "prerendered": true },
+          "Blanco":    { "image": "./assets/appIcons/Blanco.png",    "prerendered": true },
+          "Futbol":    { "image": "./assets/appIcons/Futbol.png",    "prerendered": true },
+          "Version2":  { "image": "./assets/appIcons/Version2.png",  "prerendered": true }
         }
       ]
     ],

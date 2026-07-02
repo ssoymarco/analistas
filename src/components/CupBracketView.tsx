@@ -19,6 +19,11 @@ import { localizeCityName } from '../utils/cityI18n';
 import { getDisplayVenueName, getDisplayVenueCity } from '../config/worldCupVenues';
 import { isImageUri } from '../utils/imageUri';
 
+// Shared flag: true while the user is dragging the horizontal round pills, so a
+// parent tab-swipe PanResponder (LeagueDetailScreen) can yield and not steal the
+// horizontal gesture. Same pattern as predictionsCarouselDragging in EnVivoTab.
+export const bracketRoundPillsDragging = { current: false };
+
 // ── Date helper: "2026-05-22" → "22/05" (DD/MM, Spanish format) ──────────────
 const formatLegDate = (iso: string): string => {
   const parts = iso.split('-'); // ["2026", "05", "22"]
@@ -117,22 +122,32 @@ const TieCard: React.FC<{ tie: CupTie; onPress?: (tie: CupTie) => void }> = ({ t
   const hasAgg = tie.aggregate !== null;
   const isTwoLeg = tie.legs.length > 1;
   const isInferred = tie.id.startsWith('inferred-');
-  // id '0' means SportMonks returned no participants at all for this fixture
-  const isTBD = tie.homeTeam.id === '0' && tie.awayTeam.id === '0';
+  // A tie is "to be defined" ONLY when neither slot carries a meaningful label.
+  // We compare against the localized "Por definir" text (not id '0') so slots
+  // resolved to a bracket-path label — "Ganador Semifinal 1", "Ganador entre
+  // X y Y", real teams — render as normal rows (with date/venue) instead of
+  // collapsing to a single "Por definir". Both fallbackPlaceholderTeam and a
+  // missing participant produce the toBeDefined text.
+  const TBD_TEXT = t('cup.toBeDefined');
+  const isTBD = tie.homeTeam.name === TBD_TEXT && tie.awayTeam.name === TBD_TEXT;
 
   const homeScore = hasAgg ? tie.aggregate!.home : tie.legs[0]?.homeScore;
   const awayScore = hasAgg ? tie.aggregate!.away : tie.legs[0]?.awayScore;
   const hasScore = homeScore !== null && homeScore !== undefined;
   // Penalty shootout result — populated by mapTie when the leg's scores[]
-  // included a 'PENALTIES' row. The tie is decided in penalties when the
-  // ONLY leg (single-leg knockout) ended in pens; for two-leg ties the
-  // shootout lives on the second leg, but the aggregate label already says
-  // which side advances so we surface the shootout row from whichever leg
-  // carries it.
-  const penLeg = tie.legs.find(l => typeof l.homePenScore === 'number');
-  const penResult = penLeg
-    ? `${penLeg.homePenScore}-${penLeg.awayPenScore} pen`
-    : null;
+  // included a 'PENALTIES' row. Orient the shootout goals to the canonical
+  // home/away perspective (two-leg ties may carry pens on a reversed leg) so
+  // the "(4)" indicator sits next to the right team's score.
+  const penLeg = tie.legs.find(
+    l => typeof l.homePenScore === 'number' && typeof l.awayPenScore === 'number',
+  );
+  let homePen: number | null = null;
+  let awayPen: number | null = null;
+  if (penLeg) {
+    const reversed = penLeg.homeTeam.id !== tie.homeTeam.id;
+    homePen = reversed ? penLeg.awayPenScore! : penLeg.homePenScore!;
+    awayPen = reversed ? penLeg.homePenScore! : penLeg.awayPenScore!;
+  }
 
   if (isTBD) {
     return (
@@ -179,13 +194,18 @@ const TieCard: React.FC<{ tie: CupTie; onPress?: (tie: CupTie) => void }> = ({ t
         >
           {translateTeamName(tie.homeTeam.name)}
         </Text>
-        <Text style={[
-          s.scoreNum,
-          { color: homeWon ? '#00E096' : hasScore ? c.textPrimary : c.textTertiary },
-          homeWon && { fontWeight: '900' },
-        ]}>
-          {hasScore ? homeScore : '–'}
-        </Text>
+        <View style={s.scoreCell}>
+          <Text style={[
+            s.scoreNum,
+            { color: homeWon ? '#00E096' : hasScore ? c.textPrimary : c.textTertiary },
+            homeWon && { fontWeight: '900' },
+          ]}>
+            {hasScore ? homeScore : '–'}
+          </Text>
+          {homePen !== null && (
+            <Text style={[s.penNum, { color: homeWon ? '#00E096' : c.textTertiary }]}>({homePen})</Text>
+          )}
+        </View>
       </View>
 
       {/* Away team row */}
@@ -202,13 +222,18 @@ const TieCard: React.FC<{ tie: CupTie; onPress?: (tie: CupTie) => void }> = ({ t
         >
           {translateTeamName(tie.awayTeam.name)}
         </Text>
-        <Text style={[
-          s.scoreNum,
-          { color: awayWon ? '#00E096' : hasScore ? c.textPrimary : c.textTertiary },
-          awayWon && { fontWeight: '900' },
-        ]}>
-          {hasScore ? awayScore : '–'}
-        </Text>
+        <View style={s.scoreCell}>
+          <Text style={[
+            s.scoreNum,
+            { color: awayWon ? '#00E096' : hasScore ? c.textPrimary : c.textTertiary },
+            awayWon && { fontWeight: '900' },
+          ]}>
+            {hasScore ? awayScore : '–'}
+          </Text>
+          {awayPen !== null && (
+            <Text style={[s.penNum, { color: awayWon ? '#00E096' : c.textTertiary }]}>({awayPen})</Text>
+          )}
+        </View>
       </View>
 
       {/* Date · venue · city — only when we have leg metadata (skip for
@@ -229,10 +254,8 @@ const TieCard: React.FC<{ tie: CupTie; onPress?: (tie: CupTie) => void }> = ({ t
         if (dateLabel) segments.push(dateLabel);
         if (venueLabel) segments.push(venueLabel);
         if (cityLabel && cityLabel !== venueLabel) segments.push(cityLabel);
-        // FotMob-style shootout suffix on the meta line — the score column
-        // already shows the regulation/ET tie ("3 / 3"), so we surface the
-        // shootout result here where it gets more space than in the column.
-        if (penResult) segments.push(penResult);
+        // Shootout result now lives inline next to each team's score
+        // ("1 (4)"), so it's intentionally omitted from this meta line.
         if (segments.length === 0) return null;
         return (
           <Text
@@ -287,6 +310,9 @@ const RoundPills: React.FC<{
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={s.pillsContent}
+      onTouchStart={() => { bracketRoundPillsDragging.current = true; }}
+      onTouchEnd={() => { bracketRoundPillsDragging.current = false; }}
+      onTouchCancel={() => { bracketRoundPillsDragging.current = false; }}
     >
       {rounds.map((round, idx) => {
         const active = selectedIdx === idx;
@@ -472,7 +498,9 @@ const s = StyleSheet.create({
   inferredLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3, marginBottom: 2 },
   teamRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   teamName: { flex: 1, fontSize: 14, fontWeight: '600' },
+  scoreCell: { flexDirection: 'row', alignItems: 'baseline', gap: 3, justifyContent: 'flex-end' },
   scoreNum: { fontSize: 18, fontWeight: '800', minWidth: 24, textAlign: 'right' },
+  penNum: { fontSize: 12, fontWeight: '700' },
   expandHint: { fontSize: 11, textAlign: 'center', marginTop: 4 },
   metaLine:   { fontSize: 11, marginTop: 6, paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.06)' },
 

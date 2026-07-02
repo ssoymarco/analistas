@@ -180,6 +180,13 @@ export interface SMFixtureReferee {
     firstname: string;
     lastname: string;
     image_path: string;
+    country?: {
+      id: number;
+      name: string;
+      fifa_name?: string;
+      iso2?: string;
+      image_path?: string;
+    };
   };
 }
 
@@ -722,7 +729,7 @@ export async function fetchFixturesByDate(date: string, leagueIds?: string): Pro
 export async function fetchFixtureById(id: number): Promise<SMFixture> {
   return fetchApi<SMFixture>(`fixtures/${id}`, {
     // Note: 'odds' causes 403 on Pro plan — omitted. Fetch separately if needed.
-    include: 'participants;scores;events;statistics;lineups.player;expectedLineups.player;coaches.nationality;venue;league;referees.referee;tvstations.tvstation;weatherreport;predictions;periods;aggregate.fixtures.scores;aggregate.fixtures.participants',
+    include: 'participants;scores;events;statistics;lineups.player;expectedLineups.player;coaches.nationality;venue;league;referees.referee.country;tvstations.tvstation;weatherreport;predictions;periods;aggregate.fixtures.scores;aggregate.fixtures.participants',
   });
 }
 
@@ -1062,17 +1069,39 @@ export async function fetchTeamRecentFixtures(teamId: number): Promise<SMFixture
 
 // ── Referee Stats ───────────────────────────────────────────────────────────
 
+// A single stat within a season row. `value` comes in two shapes from SM:
+//   flat    → { count, average }                       (e.g. fouls, matches)
+//   nested  → { all: { count, average }, home, away }  (e.g. cards, penalties)
+export interface SMRefereeStatDetail {
+  type_id: number;
+  value:
+    | number
+    | {
+        count?: number;
+        average?: string | number;
+        all?: { count?: number; average?: number };
+      };
+}
+
+// Each `statistics` entry is one SEASON; the actual numbers live in `details`.
 export interface SMRefereeStats {
   id: number;
   referee_id: number;
   season_id: number;
-  type_id: number;
-  value: { total: number; average: string } | number;
+  details?: SMRefereeStatDetail[];
 }
 
-/** GET /referees/{id}?include=statistics */
-export async function fetchRefereeStats(refereeId: number): Promise<{ id: number; statistics?: SMRefereeStats[] } & Record<string, unknown>> {
-  return fetchApi<{ id: number; statistics?: SMRefereeStats[] } & Record<string, unknown>>(`referees/${refereeId}`, {
-    include: 'statistics',
+interface SMRefereeCountry {
+  id: number;
+  name: string;
+  fifa_name?: string;
+  iso2?: string;
+  image_path?: string;
+}
+
+/** GET /referees/{id}?include=country;statistics.details — country + season numbers. */
+export async function fetchRefereeStats(refereeId: number): Promise<{ id: number; country?: SMRefereeCountry; statistics?: SMRefereeStats[] } & Record<string, unknown>> {
+  return fetchApi<{ id: number; country?: SMRefereeCountry; statistics?: SMRefereeStats[] } & Record<string, unknown>>(`referees/${refereeId}`, {
+    include: 'country;statistics.details',
   });
 }

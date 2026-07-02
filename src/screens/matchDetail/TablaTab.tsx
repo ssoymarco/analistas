@@ -365,6 +365,37 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
     hasPlayoffs && !isCup,
   );
 
+  // Tap a bracket tie → open that fixture's detail. Only ties backed by a real
+  // fixture (a leg with a fixtureId) are navigable; inferred/projected ties
+  // (legs: []) fall through as non-interactive. Mirrors LeagueDetailScreen.
+  const handlePressTie = (tie: CupTie) => {
+    const leg = tie.legs[0];
+    if (!leg?.fixtureId) return;
+    const tieMatch: Match = {
+      id: leg.fixtureId,
+      homeTeam: {
+        id: tie.homeTeam.id,
+        name: tie.homeTeam.name,
+        shortName: tie.homeTeam.name.slice(0, 3).toUpperCase(),
+        logo: tie.homeTeam.logo,
+      },
+      awayTeam: {
+        id: tie.awayTeam.id,
+        name: tie.awayTeam.name,
+        shortName: tie.awayTeam.name.slice(0, 3).toUpperCase(),
+        logo: tie.awayTeam.logo,
+      },
+      homeScore: leg.homeScore ?? 0,
+      awayScore: leg.awayScore ?? 0,
+      status: tie.isFinished ? 'finished' : leg.status,
+      time: tie.isFinished ? 'FT' : '',
+      league: match.league,
+      leagueId: match.leagueId,
+      date: leg.date,
+    };
+    navigation.push('MatchDetail', { match: tieMatch });
+  };
+
   // Group stage (parallel fetch — only meaningful when isCup)
   const { result: groupsResult, loading: groupsLoading } = useCupGroupStandings(
     isCup ? seasonId : null,
@@ -631,6 +662,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
             rounds={rounds}
             leagueName={getLeagueDisplayName(match.leagueId, match.league)}
             seasonStr={seasonStr}
+            onPressTie={handlePressTie}
           />
         )}
 
@@ -640,6 +672,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
             rounds={rounds}
             leagueName={getLeagueDisplayName(match.leagueId, match.league)}
             seasonStr={seasonStr}
+            onPressTie={handlePressTie}
           />
         )}
       </View>

@@ -6,9 +6,9 @@
  *
  * Functions:
  * - pollLivescores:   Every 1 min → 4 polls × 15s = real-time live scores
- * - syncFixtures:     Every 30 min → all matches for yesterday/today/tomorrow
+ * - syncFixtures:     Every 5 min → all matches for yesterday/today/tomorrow
  * - syncStandings:    Every 6 hours → league tables for all configured leagues
- * - syncTopScorers:   Every 12 hours → top scorers for all configured leagues
+ * - syncTopScorers:   Every 15 min → top scorers for all configured leagues
  */
 import './admin-init';
 export { deliverDelayedPush } from './deliver-delayed-push';

@@ -6,9 +6,9 @@
  *
  * Functions:
  * - pollLivescores:   Every 1 min → 4 polls × 15s = real-time live scores
- * - syncFixtures:     Every 30 min → all matches for yesterday/today/tomorrow
+ * - syncFixtures:     Every 5 min → all matches for yesterday/today/tomorrow
  * - syncStandings:    Every 6 hours → league tables for all configured leagues
- * - syncTopScorers:   Every 12 hours → top scorers for all configured leagues
+ * - syncTopScorers:   Every 15 min → top scorers for all configured leagues
  */
 
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
@@ -355,7 +355,7 @@ export const syncStandings = onSchedule(
  */
 export const syncTopScorers = onSchedule(
   {
-    schedule: 'every 1 hours',
+    schedule: 'every 15 minutes',
     timeoutSeconds: 540,
     memory: '256MiB',
     region: 'us-central1',

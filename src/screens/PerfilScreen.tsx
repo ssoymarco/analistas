@@ -32,6 +32,7 @@ import { useTranslation } from 'react-i18next';
 import i18n, { LANGUAGE_STORAGE_KEY } from '../i18n';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { PREMIUM_ENABLED, BETTING_CONTENT_ENABLED, REDEEM_CODE_ENABLED } from '../config/features';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import Constants from 'expo-constants';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -332,6 +333,7 @@ export const PerfilScreen: React.FC = () => {
   const { upgradeWithGoogle, googleAuthReady } = useGoogleAuth();
   const [upgrading, setUpgrading] = useState(false);
   const { resetOnboarding } = useOnboarding();
+  const { isProUser } = useSubscription();
   const { followedTeamIds, followedPlayerIds, followedLeagueIds } = useFavorites();
   const { matchesViewed, newsRead, streakDays } = useUserStats();
   const totalFavorites = followedTeamIds.length + followedPlayerIds.length + followedLeagueIds.length;
@@ -839,7 +841,18 @@ export const PerfilScreen: React.FC = () => {
             </TouchableOpacity>
           } />
           {PREMIUM_ENABLED && (
-            <MenuRow c={c} emoji="📱" label={t('profile.appIcon')} sublabel={t('profile.appIconSub')} iconBg="rgba(168,85,247,0.15)" onPress={() => navigation.navigate('HazteTitular', { source: 'icon' })} />
+            <MenuRow
+              c={c}
+              emoji="📱"
+              label={t('profile.appIcon')}
+              sublabel={t('profile.appIconSub')}
+              iconBg="rgba(168,85,247,0.15)"
+              rightElement={isProUser ? undefined : <Text style={{ fontSize: 15 }}>🔒</Text>}
+              onPress={() => {
+                if (isProUser) navigation.navigate('AppIcon');
+                else navigation.navigate('HazteTitular', { source: 'icon' });
+              }}
+            />
           )}
           {/* Redeem a code — gated off for v1.0 (Apple 3.1.1: promo codes can't unlock digital content) */}
           {REDEEM_CODE_ENABLED && (

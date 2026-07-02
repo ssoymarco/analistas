@@ -1222,6 +1222,8 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
         awayTeamName={match.awayTeam.name}
       />
 
+      {ADMOB_ENABLED && <AdMobBanner />}
+
       <View style={{ height: 20 }} />
 
       {/* ── Coach detail modal ── */}

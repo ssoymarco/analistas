@@ -13,7 +13,10 @@
  * 6. Dispatch notifications for detected changes
  */
 /**
- * Main polling function — runs 4 polls with 15-second intervals.
- * Called by the scheduled Cloud Function every 1 minute.
+ * Main polling function — runs POLLS_PER_INVOCATION (15) polls spaced
+ * LIVESCORE_POLL_INTERVAL_SEC (4s) apart, so one invocation continuously
+ * covers the full ~60s until the next scheduled trigger. Net effect: an
+ * effective ~4-second livescore poll cadence (goal → push in seconds), not
+ * the 1-minute scheduler heartbeat.
  */
 export declare function pollLivescoresHandler(): Promise<void>;

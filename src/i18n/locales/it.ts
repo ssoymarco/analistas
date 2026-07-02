@@ -85,6 +85,8 @@ const it: TranslationKeys = {
     suspended: 'Sospeso',
     interrupted: 'Interrotto',
     interruptedLong: 'INTERROTTO',
+    delayed: 'Posticipato',
+    delayedLong: 'POSTICIPATO',
   },
 
   matchBell: {
@@ -492,8 +494,8 @@ const it: TranslationKeys = {
     },
     iconOptions: {
       classic: 'CLASSICO',
-      white: 'BIANCO',
-      night: 'NOTTE',
+      mexico: 'MÉXICO',
+      aguilas: 'ÁGUILAS',
       gold: 'ORO',
     },
   },
@@ -700,6 +702,12 @@ const it: TranslationKeys = {
 
   // ── Statistics tab ─────────────────────────────────────────────────────────
   stats: {
+    pressureIndex: 'Indice di pressione',
+    corners: "Calci d'angolo",
+    fouls: 'Falli',
+    saves: 'Parate',
+    bigChances: 'Grandi occasioni',
+    axisHT: 'INT',
     noStats: 'Nessuna statistica disponibile',
     showMore: 'Mostra altro ▾',
     showLess: 'Mostra meno ▴',

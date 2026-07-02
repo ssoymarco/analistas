@@ -93,6 +93,9 @@ function calculateLiveMinute(fixture) {
     // so the UI shows the 'SUSP'/'INT' label instead of a bogus elapsed minute.
     if (PAUSED_LIVE_STATE_IDS.has(fixture.state_id))
         return null;
+    // Penalty shootout: the game clock is NOT running — no minute (UI shows "PEN").
+    if (fixture.state_id === types_1.SM_STATE_IDS.PENALTIES)
+        return null;
     if (fixture.state_id === types_1.SM_STATE_IDS.HALF_TIME)
         return 45;
     // Prefer the ticking-period anchor (started + counts_from). SportMonks resets
@@ -125,6 +128,8 @@ function formatTimeDisplay(fixture, status, minute) {
         return 'FT';
     if (status === 'live' && fixture.state_id === types_1.SM_STATE_IDS.HALF_TIME)
         return 'HT';
+    if (status === 'live' && fixture.state_id === types_1.SM_STATE_IDS.PENALTIES)
+        return 'PEN';
     // Suspended/interrupted: legacy clients (≤ v1.1.x) render this `time` string
     // verbatim and have no i18n key for the state, so we write the full word here.
     // Newer clients derive 'interrupted' from stateId and localise via i18n,
@@ -186,6 +191,9 @@ function extractScores(fixture) {
 // pipeline use the same logic. Returns undefined for HT (no period ticking),
 // scheduled, and finished matches — the client falls back to `minute` then.
 function getLiveClockAnchor(fixture) {
+    // Penalty shootout: don't advance any clock — the UI shows "PEN".
+    if (fixture.state_id === types_1.SM_STATE_IDS.PENALTIES)
+        return undefined;
     const periods = fixture.periods;
     if (!periods || periods.length === 0)
         return undefined;

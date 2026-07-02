@@ -10,10 +10,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import type { ColorPalette } from '../theme/colors';
 
 // ── Brand palette ─────────────────────────────────────────────────────────────
@@ -33,11 +35,22 @@ const BENEFIT_ICON_BG = [
   'rgba(168,85,247,0.15)', // 📱 purple
 ];
 
+// Teaser grid for the paywall — ALL 12 real bundled icon designs so users see
+// exactly what they'd unlock (the interactive picker lives in AppIconScreen).
+// First is shown "unlocked", the rest locked.
 const APP_ICONS_META = [
-  { id: 'clasico', nameKey: 'classic', color: '#16A34A', emoji: '⚽' },
-  { id: 'blanco',  nameKey: 'white',   color: '#9CA3AF', emoji: '⚽' },
-  { id: 'noche',   nameKey: 'night',   color: '#1E1B4B', emoji: '⚽' },
-  { id: 'oro',     nameKey: 'gold',    color: '#D97706', emoji: '⚽' },
+  { id: 'clasico',   label: 'Clásico',   image: require('../../assets/appIcons/Version2.png') },
+  { id: 'mexico',    label: 'México',    image: require('../../assets/appIcons/Mexico.png') },
+  { id: 'argentina', label: 'Argentina', image: require('../../assets/appIcons/Argentina.png') },
+  { id: 'portugal',  label: 'Portugal',  image: require('../../assets/appIcons/Portugal.png') },
+  { id: 'aguilas',   label: 'Águilas',   image: require('../../assets/appIcons/America.png') },
+  { id: 'rebano',    label: 'Rebaño',    image: require('../../assets/appIcons/Chivas.png') },
+  { id: 'blaugrana', label: 'Blaugrana', image: require('../../assets/appIcons/Barca.png') },
+  { id: 'madrid',    label: 'Madrid',    image: require('../../assets/appIcons/Madrid.png') },
+  { id: 'city',      label: 'City',      image: require('../../assets/appIcons/City.png') },
+  { id: 'dorado',    label: 'Dorado',    image: require('../../assets/appIcons/Dorado.png') },
+  { id: 'blanco',    label: 'Blanco',    image: require('../../assets/appIcons/Blanco.png') },
+  { id: 'futbol',    label: 'Fútbol',    image: require('../../assets/appIcons/Futbol.png') },
 ];
 
 // ── Tiny sub-components ───────────────────────────────────────────────────────
@@ -79,9 +92,14 @@ export const HazteTitularScreen: React.FC = () => {
   const { isDark } = useDarkMode();
   const navigation = useNavigation();
   const { t } = useTranslation();
+  const {
+    monthlyPackage,
+    yearlyPackage,
+    purchasePackage: rcPurchase,
+    restorePurchases: rcRestore,
+  } = useSubscription();
 
   const [selectedPlan, setSelectedPlan] = useState<PlanId>('titular');
-  const [selectedIcon, setSelectedIcon] = useState(0);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
 
@@ -91,9 +109,7 @@ export const HazteTitularScreen: React.FC = () => {
   const borderCol  = isDark ? 'rgba(255,255,255,0.06)' : '#E5E7EB';
   const borderMid  = isDark ? 'rgba(255,255,255,0.10)' : '#D1D5DB';
 
-  const APP_ICONS = APP_ICONS_META.map(m => ({
-    ...m, name: t(`subscription.iconOptions.${m.nameKey}`),
-  }));
+  const APP_ICONS = APP_ICONS_META;
 
   const BENEFITS = [
     { emoji: '🚫', iconBg: BENEFIT_ICON_BG[0], title: t('subscription.benefits.noAds'),      desc: t('subscription.benefits.noAdsDesc') },
@@ -101,6 +117,34 @@ export const HazteTitularScreen: React.FC = () => {
     { emoji: '📊', iconBg: BENEFIT_ICON_BG[2], title: t('subscription.benefits.detailedStats'), desc: t('subscription.benefits.statsDesc') },
     { emoji: '📱', iconBg: BENEFIT_ICON_BG[3], title: t('subscription.benefits.ownIcon'),    desc: t('subscription.benefits.ownIconDesc') },
   ];
+
+  // Dynamic prices from RevenueCat (fall back to the ASC-configured amounts).
+  // Kept dynamic so the CTA, "al año" note and savings never drift from the
+  // real store prices again (the old hardcoded $80/$10/$120/$40 were stale).
+  // priceString is already localized per storefront (MXN/USD/CAD/EUR/…); the
+  // derived amounts (12-month equivalent + savings) are computed, so we format
+  // them ourselves in the SAME currency via Intl + the product's currencyCode
+  // — never a hardcoded "$" (which was wrong for €/other markets).
+  const yearlyPriceStr  = yearlyPackage?.product.priceString ?? '$149';
+  const monthlyPriceStr = monthlyPackage?.product.priceString ?? '$19';
+  const monthlyNum      = monthlyPackage?.product.price ?? 19;
+  const yearlyNum       = yearlyPackage?.product.price ?? 149;
+  const currencyCode    = (monthlyPackage ?? yearlyPackage)?.product.currencyCode ?? 'MXN';
+  const fmtMoney = (amount: number): string => {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: currencyCode,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+      }).format(amount);
+    } catch {
+      return `$${Math.round(amount)}`;
+    }
+  };
+  const monthlyYearlyEquiv = fmtMoney(monthlyNum * 12);
+  const annualSavings      = fmtMoney(Math.max(0, monthlyNum * 12 - yearlyNum));
+  const annualPerMonth     = fmtMoney(yearlyNum / 12); // "≈ X/mes" del plan anual
 
   const heroOp = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -112,21 +156,35 @@ export const HazteTitularScreen: React.FC = () => {
     setSelectedPlan(id);
   }, []);
 
-  const handleSubscribe = useCallback(() => {
+  const handleSubscribe = useCallback(async () => {
     if (selectedPlan === 'banca') {
       navigation.goBack();
       return;
     }
+    const pkg = selectedPlan === 'titular' ? yearlyPackage : monthlyPackage;
+    if (!pkg) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setLoading(true);
-    // TODO: replace with RevenueCat purchase flow
-    setTimeout(() => { setLoading(false); setSuccess(true); }, 1400);
-  }, [selectedPlan, navigation]);
+    try {
+      const purchased = await rcPurchase(pkg);
+      if (purchased) setSuccess(true);
+    } catch {
+      // usuario canceló o error de tienda — no hacer nada
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedPlan, yearlyPackage, monthlyPackage, rcPurchase, navigation]);
 
-  const handleRestore = useCallback(() => {
-    // TODO: RevenueCat restore
+  const handleRestore = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-  }, []);
+    setLoading(true);
+    try {
+      const restored = await rcRestore();
+      if (restored) setSuccess(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [rcRestore]);
 
   // ── Success screen ──────────────────────────────────────────────────────────
   if (success) {
@@ -187,9 +245,9 @@ export const HazteTitularScreen: React.FC = () => {
   const ctaText = loading
     ? t('subscription.processing')
     : selectedPlan === 'titular'
-      ? t('subscription.ctaAnnual')
+      ? t('subscription.ctaAnnual', { price: yearlyPriceStr })
       : selectedPlan === 'suplente'
-        ? t('subscription.ctaMonthly')
+        ? t('subscription.ctaMonthly', { price: monthlyPriceStr })
         : t('subscription.ctaBanca');
 
   return (
@@ -353,57 +411,43 @@ export const HazteTitularScreen: React.FC = () => {
               {t('subscription.iconCardDesc')}
             </Text>
 
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              {APP_ICONS.map((icon, i) => {
-                const isSelected = selectedIcon === i;
-                const isLocked   = i > 0;
-                return (
-                  <TouchableOpacity
-                    key={icon.id}
-                    style={{ alignItems: 'center', gap: 7 }}
-                    onPress={() => {
-                      if (!isLocked) {
-                        setSelectedIcon(i);
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                      } else {
-                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-                      }
-                    }}
-                    activeOpacity={0.75}
-                  >
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between' }}>
+              {APP_ICONS.map((icon) => (
+                <TouchableOpacity
+                  key={icon.id}
+                  style={{ alignItems: 'center', gap: 5, width: 64 }}
+                  onPress={() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {})}
+                  activeOpacity={0.75}
+                >
+                  {/* Relative wrapper (NOT clipped) so the lock can protrude past the corner */}
+                  <View>
                     <View style={{
-                      width: 56, height: 56, borderRadius: 14,
-                      backgroundColor: isLocked ? surface2Bg : icon.color,
-                      borderWidth: isSelected ? 2.5 : 2,
-                      borderColor: isSelected ? BLUE : borderMid,
-                      alignItems: 'center', justifyContent: 'center',
-                      opacity: isLocked ? 0.55 : 1,
+                      width: 62, height: 62, borderRadius: 14,
+                      backgroundColor: surface2Bg,
+                      borderWidth: 2, borderColor: borderMid,
+                      overflow: 'hidden',
                     }}>
-                      {isLocked
-                        ? <Text style={{ fontSize: 18 }}>🔒</Text>
-                        : <Text style={{ fontSize: 24 }}>{icon.emoji}</Text>
-                      }
-                      {isSelected && (
-                        <View style={{
-                          position: 'absolute', top: -7, right: -7,
-                          width: 18, height: 18, borderRadius: 9,
-                          backgroundColor: BLUE,
-                          alignItems: 'center', justifyContent: 'center',
-                        }}>
-                          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>✓</Text>
-                        </View>
-                      )}
+                      <Image source={icon.image} style={{ width: '100%', height: '100%' }} contentFit="cover" />
                     </View>
-                    <Text style={{
-                      fontSize: 9, fontWeight: '800', letterSpacing: 0.8,
-                      textTransform: 'uppercase',
-                      color: isLocked ? c.textTertiary : c.textSecondary,
+                    {/* Small PRO lock — cornered + protruding, never covers the design */}
+                    <View style={{
+                      position: 'absolute', top: -5, right: -5,
+                      width: 20, height: 20, borderRadius: 10,
+                      backgroundColor: 'rgba(0,0,0,0.6)',
+                      borderWidth: 1.5, borderColor: surfaceBg,
+                      alignItems: 'center', justifyContent: 'center',
                     }}>
-                      {icon.name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+                      <Text style={{ fontSize: 9 }}>🔒</Text>
+                    </View>
+                  </View>
+                  <Text
+                    style={{ fontSize: 9.5, fontWeight: '700', textAlign: 'center', color: c.textTertiary }}
+                    numberOfLines={1}
+                  >
+                    {icon.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
@@ -449,13 +493,15 @@ export const HazteTitularScreen: React.FC = () => {
                     </Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4 }}>
-                    <Text style={{ fontSize: 58, fontWeight: '900', color: c.textPrimary, lineHeight: 60 }}>$80</Text>
+                    <Text adjustsFontSizeToFit numberOfLines={1} style={{ fontSize: 58, fontWeight: '900', color: c.textPrimary, lineHeight: 60, maxWidth: 180 }}>
+                      {yearlyPackage?.product.priceString ?? '$149'}
+                    </Text>
                     <Text style={{ fontSize: 22, fontWeight: '400', color: c.textSecondary, paddingBottom: 7 }}>
                       {t('subscription.perYear')}
                     </Text>
                   </View>
                   <Text style={{ fontSize: 13, color: c.textTertiary, marginTop: 2 }}>
-                    {t('subscription.monthlyPrice')}
+                    {t('subscription.monthlyPrice', { price: annualPerMonth })}
                   </Text>
                 </View>
                 {/* Radio */}
@@ -491,7 +537,7 @@ export const HazteTitularScreen: React.FC = () => {
               }}>
                 <Text style={{ fontSize: 12, color: c.textTertiary }}>vs plan mensual</Text>
                 <Text style={{ fontSize: 13, fontWeight: '600', color: GOLD }}>
-                  {t('subscription.savingsText')}
+                  {t('subscription.savingsText', { amount: annualSavings })}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -515,13 +561,15 @@ export const HazteTitularScreen: React.FC = () => {
                     </Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4 }}>
-                    <Text style={{ fontSize: 38, fontWeight: '900', color: c.textPrimary, lineHeight: 40 }}>$10</Text>
+                    <Text adjustsFontSizeToFit numberOfLines={1} style={{ fontSize: 38, fontWeight: '900', color: c.textPrimary, lineHeight: 40, maxWidth: 160 }}>
+                      {monthlyPackage?.product.priceString ?? '$19'}
+                    </Text>
                     <Text style={{ fontSize: 18, fontWeight: '400', color: c.textSecondary, paddingBottom: 4 }}>
                       {t('subscription.perMonth')}
                     </Text>
                   </View>
                   <Text style={{ fontSize: 12, color: c.textTertiary, marginTop: 2 }}>
-                    {t('subscription.monthlyCostNote')}
+                    {t('subscription.monthlyCostNote', { yearly: monthlyYearlyEquiv })}
                   </Text>
                 </View>
                 {/* Radio */}
@@ -537,10 +585,26 @@ export const HazteTitularScreen: React.FC = () => {
                   )}
                 </View>
               </View>
+
+              {/* Divider + benefits — same perks as Titular (both grant `pro`) */}
+              <View style={{ height: 1, backgroundColor: borderCol, marginTop: 16, marginBottom: 14 }} />
+              <View style={{ gap: 4 }}>
+                {[
+                  t('subscription.benefits.noAds'),
+                  t('subscription.benefits.detailedStats'),
+                  t('subscription.benefits.customIcon'),
+                  t('subscription.benefits.exclusiveContent'),
+                ].map((b, i) => <CheckRow key={i} text={b} c={c} />)}
+              </View>
             </TouchableOpacity>
           </View>
 
           {/* ═══ TRIAL BANNER ════════════════════════════════════════════════ */}
+          {/* Only shown when the annual product actually carries a free-trial
+              introductory offer (RevenueCat `introPrice`). Prevents promising a
+              trial that isn't configured in App Store Connect — misleading and a
+              guaranteed App Review rejection. */}
+          {!!yearlyPackage?.product.introPrice && (
           <View style={{
             flexDirection: 'row', alignItems: 'flex-start', gap: 12,
             backgroundColor: BLUE_DIM,
@@ -561,6 +625,7 @@ export const HazteTitularScreen: React.FC = () => {
               </Text>
             </View>
           </View>
+          )}
 
           {/* ═══ CTA ═════════════════════════════════════════════════════════ */}
           <TouchableOpacity

@@ -1,0 +1,11 @@
+name = "analistas-download"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+[observability]
+enabled = true
+
+# Una vez que agregues el CNAME en Cloudflare, descomenta esto:
+# [[routes]]
+# pattern = "get.analistas.app/*"
+# zone_name = "analistas.app"

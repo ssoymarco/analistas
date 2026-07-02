@@ -8,7 +8,7 @@ import { haptics } from '../utils/haptics';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
@@ -194,6 +194,8 @@ export const NoticiasScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('para-ti');
   const [searchQuery, setSearchQuery] = useState('');
+  const [bannerKey, setBannerKey] = useState(0);
+  useFocusEffect(useCallback(() => { setBannerKey(k => k + 1); }, []));
   // showSearch removed — search bar is always visible below tabs
 
   const loadNews = useCallback(async () => {
@@ -343,6 +345,7 @@ export const NoticiasScreen: React.FC = () => {
         )}
         <View style={{ height: 24 }} />
       </ScrollView>
+      {ADMOB_ENABLED && <AdMobBanner key={bannerKey} />}
     </SafeAreaView>
   );
 };

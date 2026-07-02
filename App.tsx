@@ -18,6 +18,7 @@ import { OnboardingProvider } from './src/contexts/OnboardingContext';
 import { UserStatsProvider } from './src/contexts/UserStatsContext';
 import { NetworkProvider } from './src/contexts/NetworkContext';
 import { TimeFormatProvider } from './src/contexts/TimeFormatContext';
+import { SubscriptionProvider } from './src/contexts/SubscriptionContext';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import UpdateModal from './src/components/UpdateModal';
 import { useVersionCheck } from './src/hooks/useVersionCheck';
@@ -139,7 +140,9 @@ function App() {
                     <NotificationPrefsProvider>
                       <FavoritesProvider>
                         <UserStatsProvider>
-                          <AppInner />
+                          <SubscriptionProvider>
+                            <AppInner />
+                          </SubscriptionProvider>
                         </UserStatsProvider>
                       </FavoritesProvider>
                     </NotificationPrefsProvider>

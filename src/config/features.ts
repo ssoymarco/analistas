@@ -2,6 +2,7 @@
  * Feature flags — compile-time switches for gating features that aren't ready
  * for a given release.
  */
+import { Platform } from 'react-native';
 
 /**
  * Master switch for the premium / subscription feature (the HazteTitular
@@ -21,7 +22,17 @@
  * premium row, the "Es hora del cambio" promo banner, and the odds-lock upsell
  * (odds become a free toggle). HazteTitular becomes unreachable from the UI.
  */
-export const PREMIUM_ENABLED = false;
+// Master intent for premium. The publish "dance" toggles THIS per runtime —
+// set false for the 1.2.x public builds that lack the native purchases module.
+export const PREMIUM_MASTER_ENABLED = true;
+
+// Effective flag used across the app. Premium is live on iOS (StoreKit +
+// RevenueCat wired). On Android it stays OFF until Play Billing + RevenueCat
+// Android (RC_ANDROID_KEY) are configured — otherwise the SHARED 1.3.0 OTA
+// bundle would surface a non-purchasable paywall on Android (Google rejection,
+// same reason 1.2.x ships premium off). When Android billing is ready, extend
+// the platform check here.
+export const PREMIUM_ENABLED = PREMIUM_MASTER_ENABLED && Platform.OS === 'ios';
 
 /**
  * Master switch for betting / gambling content: the Caliente.mx banner ads, the

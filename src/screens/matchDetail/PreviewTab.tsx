@@ -13,6 +13,7 @@ import type { Match, MatchDetail, TeamFormEntry, MissingPlayer } from '../../dat
 import { PredictionsCarousel, AIPredictionsSection } from './EnVivoTab';
 import { PlaceholderBannerAd } from '../../components/PlaceholderBannerAd';
 import AdMobBanner from '../../components/AdMobBanner';
+import MediumRectangleBannerAd from '../../components/MediumRectangleBannerAd';
 import { BETTING_CONTENT_ENABLED, ADMOB_ENABLED } from '../../config/features';
 import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupVenues';
 
@@ -125,14 +126,18 @@ function MatchInfoCard({ match, detail }: { match: Match; detail: MatchDetail })
           </View>
           {rs && (
             <View style={styles.infoRefStats}>
-              <Text style={[styles.infoRefStat, { color: c.textSecondary }]}>🟡 {rs.yellowCardsPerMatch.toFixed(1)}</Text>
-              <Text style={[styles.infoRefDot, { color: c.textTertiary }]}> · </Text>
-              <Text style={[styles.infoRefStat, { color: c.textSecondary }]}>🔴 {rs.redCardsPerMatch.toFixed(1)}</Text>
-              <Text style={[styles.infoRefDot, { color: c.textTertiary }]}> · </Text>
-              <Text style={[styles.infoRefStat, { color: c.textSecondary }]}>🦵 {rs.foulsPerMatch.toFixed(0)}</Text>
-              <Text style={[styles.infoRefDot, { color: c.textTertiary }]}> · </Text>
-              <Text style={[styles.infoRefStat, { color: c.textSecondary }]}>⚽ {rs.penaltiesPerMatch.toFixed(1)}</Text>
-              <Text style={[styles.infoRefDot, { color: c.textTertiary }]}> /partido</Text>
+              {[
+                { icon: '🟡', value: rs.yellowCardsPerMatch.toFixed(1), label: t('matchInfo.yellowCardsPerMatch') },
+                { icon: '🔴', value: rs.redCardsPerMatch.toFixed(1),    label: t('matchInfo.redCardsPerMatch') },
+                { icon: '🦵', value: rs.foulsPerMatch.toFixed(1),       label: t('matchInfo.foulsPerMatch') },
+                { icon: '🎯', value: rs.penaltiesPerMatch.toFixed(1),   label: t('matchInfo.penaltiesPerMatch') },
+              ].map(s => (
+                <View key={s.label} style={styles.infoRefStatRow}>
+                  <Text style={styles.infoRefStatIcon}>{s.icon}</Text>
+                  <Text style={[styles.infoRefStatVal, { color: c.textPrimary }]}>{s.value}</Text>
+                  <Text style={[styles.infoRefStatLabel, { color: c.textTertiary }]} numberOfLines={1}>{s.label}</Text>
+                </View>
+              ))}
             </View>
           )}
         </View>
@@ -517,11 +522,7 @@ export const PreviewTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
       )}
       {/* SportMonks-powered pre-match insights (Spanish-translated) */}
       <MatchFactsCard     match={match} detail={detail} />
-      {ADMOB_ENABLED && <AdMobBanner />}
-      {/* Caliente ad — gated off for v1.0 (no agreement yet + Apple 2.3.6) */}
-      {BETTING_CONTENT_ENABLED && (
-        <PlaceholderBannerAd variant="caliente-mrec" />
-      )}
+      {ADMOB_ENABLED && <MediumRectangleBannerAd />}
       <H2HCard            match={match} detail={detail} />
       <FormCard           match={match} detail={detail} />
       <MissingPlayersCard match={match} detail={detail} />
@@ -595,17 +596,26 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   infoRefStats: {
+    marginTop: 6,
+    gap: 4,
+  },
+  infoRefStatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    marginTop: 3,
   },
-  infoRefStat: {
-    fontSize: 11,
+  infoRefStatIcon: {
+    fontSize: 12,
+    width: 20,
+  },
+  infoRefStatVal: {
+    fontSize: 13,
+    fontWeight: '800',
+    width: 40,
+  },
+  infoRefStatLabel: {
+    fontSize: 12,
     fontWeight: '500',
-  },
-  infoRefDot: {
-    fontSize: 11,
+    flex: 1,
   },
   infoRowDivider: {
     height: StyleSheet.hairlineWidth,

@@ -82,6 +82,8 @@ const tr: TranslationKeys = {
     suspended: 'Askıya Alındı',
     interrupted: 'Kesildi',
     interruptedLong: 'KESİLDİ',
+    delayed: 'Gecikmeli',
+    delayedLong: 'GECİKMELİ',
   },
 
   matchBell: {
@@ -489,8 +491,8 @@ const tr: TranslationKeys = {
     },
     iconOptions: {
       classic: 'KLASİK',
-      white: 'BEYAZ',
-      night: 'GECE',
+      mexico: 'MÉXICO',
+      aguilas: 'ÁGUILAS',
       gold: 'ALTIN',
     },
   },
@@ -697,6 +699,12 @@ const tr: TranslationKeys = {
 
   // ── Statistics tab ─────────────────────────────────────────────────────────
   stats: {
+    pressureIndex: 'Baskı endeksi',
+    corners: 'Kornerler',
+    fouls: 'Fauller',
+    saves: 'Kurtarışlar',
+    bigChances: 'Büyük fırsatlar',
+    axisHT: 'DA',
     noStats: 'İstatistik mevcut değil',
     showMore: 'Daha fazla göster ▾',
     showLess: 'Daha az göster ▴',

@@ -376,8 +376,14 @@ function getParticipant(fixture: SMFixture, location: 'home' | 'away'): SMPartic
   return fixture.participants?.find(p => p.meta?.location === location);
 }
 
+// Emoji shown for a bracket slot whose team isn't decided yet ("Ganador entre
+// X y Y", "Por definir", inferred future rounds). A clock reads as "pending"
+// far better than a generic soccer ball. Real teams missing a crest still
+// fall back to ⚽ (a ball fits a team; a clock would look like an error).
+const PENDING_LOGO = '🕐';
+
 function mapParticipantToTeam(p: SMParticipant | undefined): Team {
-  if (!p) return { id: '0', name: i18n.t('cup.toBeDefined'), shortName: 'TBD', logo: '⚽' };
+  if (!p) return { id: '0', name: i18n.t('cup.toBeDefined'), shortName: 'TBD', logo: PENDING_LOGO };
   const name = translatePlaceholderName(p.name);
   return {
     id: String(p.id),
@@ -1070,6 +1076,13 @@ export async function fetchLatestLivescoreUpdates(): Promise<Map<number, Livesco
 
 // ── Referee Mapper ──────────────────────────────────────────────────────────
 
+/** ISO2 code (e.g. "HN") → flag emoji (🇭🇳). Returns '👔' when unavailable. */
+function iso2ToFlag(iso2: string | undefined): string {
+  if (!iso2 || iso2.length !== 2) return '👔';
+  const cps = iso2.toUpperCase().split('').map(ch => 0x1f1e6 + ch.charCodeAt(0) - 65);
+  return String.fromCodePoint(...cps);
+}
+
 function mapReferee(refs: SMFixtureReferee[] | undefined) {
   if (!refs || refs.length === 0) return { referee: { name: '', nationality: '', flag: '' }, assistants: [] as string[], fourthOfficial: undefined as string | undefined };
 
@@ -1078,12 +1091,16 @@ function mapReferee(refs: SMFixtureReferee[] | undefined) {
   const fourth = refs.find(r => r.type_id === 9);
 
   const refImg = main?.referee?.image_path;
+  const country = main?.referee?.country;
   return {
     referee: {
       id: main?.referee_id,
       name: main?.referee?.display_name ?? main?.referee?.common_name ?? '',
-      nationality: '',
-      flag: '👔',
+      // Store the raw English country name + ISO2; the UI localizes via
+      // translateCountry and derives the flag emoji from the code.
+      nationality: country?.name ?? '',
+      nationalityCode: country?.iso2 ?? undefined,
+      flag: iso2ToFlag(country?.iso2),
       imageUrl: refImg && !refImg.includes('placeholder') ? refImg : undefined,
     },
     assistants: assistants.map(a => a.referee?.display_name ?? a.referee?.common_name ?? ''),
@@ -1237,41 +1254,98 @@ function mapSidelined(sidelined: SMSidelined[]): MissingPlayer[] {
 // ── Referee Stats mapping ───────────────────────────────────────────────────
 
 function mapRefereeStats(raw: { statistics?: SMRefereeStats[] }): RefereeStats | undefined {
-  const stats = raw.statistics;
-  if (!stats || stats.length === 0) return undefined;
+  const seasons = raw.statistics;
+  if (!seasons || seasons.length === 0) return undefined;
 
-  // SM referee stat type_ids: 83=yellowcards, 84=redcards, 56=fouls, 42=penalties
-  // Values can be { total, average } or just a number
-  const extract = (typeId: number): { total: number; avg: number } => {
-    const found = stats.filter(s => s.type_id === typeId);
-    let total = 0, avg = 0;
-    for (const s of found) {
-      if (typeof s.value === 'number') {
-        total += s.value;
-      } else if (s.value && typeof s.value === 'object') {
-        total += s.value.total ?? 0;
-        avg = parseFloat(s.value.average ?? '0') || avg;
-      }
+  // Verified SM referee stat type_ids (vs /core/types + live data):
+  //   188 = matches officiated · 56 = fouls · 84 = yellow cards ·
+  //   83 = red cards · 47 = penalties awarded.
+  // (The previous mapper had yellow/red SWAPPED and used 42/155, which never
+  //  matched, so the card always fell back to the empty "nationality" state.)
+  const T = { MATCHES: 188, FOULS: 56, YELLOW: 84, RED: 83, PENALTY: 47 } as const;
+
+  // Detail `value` is flat ({count, average}) or nested ({all:{count,...}}).
+  // We sum COUNTS across every season and divide by total matches — averaging
+  // the per-season averages would be statistically wrong.
+  const count = (v: unknown): number => {
+    if (typeof v === 'number') return v;
+    if (v && typeof v === 'object') {
+      const obj = v as { count?: number; all?: { count?: number } };
+      const node = obj.all ?? obj;
+      return typeof node.count === 'number' ? node.count : 0;
     }
-    return { total, avg };
+    return 0;
   };
 
-  const yellows = extract(83);
-  const reds = extract(84);
-  const fouls = extract(56);
-  const penalties = extract(42);
-  const matches = stats.find(s => s.type_id === 155); // matches officiated
-  const totalMatches = matches ? (typeof matches.value === 'number' ? matches.value : matches.value?.total ?? 0) : 0;
+  // Per-stat denominators: SM records some stats (e.g. fouls) for only a subset
+  // of a referee's seasons. Dividing a stat's career total by the referee's
+  // ENTIRE match count underestimates it (a season with no foul data still adds
+  // matches). So each stat tracks its own matches — only seasons that actually
+  // carry that stat count toward its per-match average.
+  let totalMatches = 0;
+  const acc: Record<number, { sum: number; m: number }> = {
+    [T.FOULS]: { sum: 0, m: 0 },
+    [T.YELLOW]: { sum: 0, m: 0 },
+    [T.RED]: { sum: 0, m: 0 },
+    [T.PENALTY]: { sum: 0, m: 0 },
+  };
+  for (const season of seasons) {
+    const details = season.details ?? [];
+    const seasonMatches = count(details.find(d => d.type_id === T.MATCHES)?.value);
+    if (seasonMatches <= 0) continue; // can't derive a per-match rate without a denominator
+    totalMatches += seasonMatches;
+    for (const d of details) {
+      const bucket = acc[d.type_id];
+      if (bucket) { bucket.sum += count(d.value); bucket.m += seasonMatches; }
+    }
+  }
 
-  if (totalMatches === 0 && yellows.total === 0) return undefined;
-
+  if (totalMatches === 0) return undefined;
+  const per = (typeId: number, digits = 2) => {
+    const b = acc[typeId];
+    return b && b.m > 0 ? +(b.sum / b.m).toFixed(digits) : 0;
+  };
   return {
-    yellowCardsPerMatch: yellows.avg || (totalMatches ? +(yellows.total / totalMatches).toFixed(2) : 0),
-    redCardsPerMatch: reds.avg || (totalMatches ? +(reds.total / totalMatches).toFixed(2) : 0),
-    foulsPerMatch: fouls.avg || (totalMatches ? +(fouls.total / totalMatches).toFixed(2) : 0),
-    penaltiesPerMatch: penalties.avg || (totalMatches ? +(penalties.total / totalMatches).toFixed(2) : 0),
     totalMatches,
+    yellowCardsPerMatch: per(T.YELLOW),
+    redCardsPerMatch: per(T.RED),
+    foulsPerMatch: per(T.FOULS, 1),
+    penaltiesPerMatch: per(T.PENALTY),
   };
+}
+
+// ── On-demand referee profile ─────────────────────────────────────────────────
+// The Firestore `detail` blob only carries the referee's name/photo (the Cloud
+// Function's include lacks `.country` and never fetches stats). Rather than
+// require a Functions deploy + full re-sync, the RefereeDetailModal fetches the
+// full profile (country + career stats) on demand when the user opens it —
+// keyed by referee_id. Cached per session so re-opening the same ref is free.
+// Only fires on an explicit modal open (a rare, deliberate action), so it does
+// not undermine the Firestore-first "≈0 SM calls per user" goal for the main
+// browsing flow.
+export interface RefereeProfile {
+  nationality: string;      // English country name (localize via nationalityCode)
+  nationalityCode?: string; // ISO2
+  flag: string;             // flag emoji from ISO2
+  stats?: RefereeStats;
+}
+
+const refereeProfileCache = new Map<number, RefereeProfile>();
+
+export async function getRefereeProfile(refereeId: number): Promise<RefereeProfile> {
+  const cached = refereeProfileCache.get(refereeId);
+  if (cached) return cached;
+
+  const raw = await fetchRefereeStats(refereeId);
+  const country = raw.country;
+  const profile: RefereeProfile = {
+    nationality: country?.name ?? '',
+    nationalityCode: country?.iso2,
+    flag: iso2ToFlag(country?.iso2),
+    stats: mapRefereeStats(raw as { statistics?: SMRefereeStats[] }),
+  };
+  refereeProfileCache.set(refereeId, profile);
+  return profile;
 }
 
 // ── Team Form mapping ───────────────────────────────────────────────────────
@@ -2172,9 +2246,15 @@ function translatePlaceholderName(name: string): string {
   // "Winner Round of 16 X" → i18n
   const winnerR16M = lower.match(/^winner\s+(?:of\s+)?round\s+of\s+16\s*(\d*)$/);
   if (winnerR16M) return i18n.t('cup.winnerRoundOf16', { n: winnerR16M[1] }).trim();
+  // "Loser Semi-final N" → i18n (feeds the 3rd-place final)
+  const loserSemiM = lower.match(/^loser\s+semi-?finals?\s*(\d*)$/);
+  if (loserSemiM) return i18n.t('cup.loserSemifinal', { n: loserSemiM[1] || '' }).trimEnd();
   // Generic "Winner X" / "Winner of X" fallback
   const winnerGenM = lower.match(/^winner\s+(?:of\s+)?(.+)$/);
   if (winnerGenM) return i18n.t('cup.winnerOf', { name: winnerGenM[1] });
+  // Generic "Loser X" / "Loser of X" fallback
+  const loserGenM = lower.match(/^loser\s+(?:of\s+)?(.+)$/);
+  if (loserGenM) return i18n.t('cup.loserOf', { name: loserGenM[1] });
   return name;
 }
 
@@ -2283,7 +2363,24 @@ function mapTie(fixtures: SMFixture[], currentFixtureId?: string): CupTie {
   if (allLegsFinished && aggregate) {
     if (aggregate.home > aggregate.away) winner = homeTeam;
     else if (aggregate.away > aggregate.home) winner = awayTeam;
-    // Equal aggregate → could be pens/ET; also check meta.winner on last fixture
+    // Equal aggregate → decided in a penalty shootout. The Firestore-fed path
+    // (the one actually used in prod) does NOT carry meta.winner on the
+    // participants, so derive the winner from the shootout score we already
+    // extracted onto the leg. Orient the leg's pens back to the canonical
+    // home/away perspective before comparing.
+    if (!winner) {
+      const penDecider = [...legs].reverse().find(
+        l => typeof l.homePenScore === 'number' && typeof l.awayPenScore === 'number',
+      );
+      if (penDecider) {
+        const reversed = penDecider.homeTeam.id !== homeTeam.id;
+        const hPen = reversed ? penDecider.awayPenScore! : penDecider.homePenScore!;
+        const aPen = reversed ? penDecider.homePenScore! : penDecider.awayPenScore!;
+        if (hPen > aPen) winner = homeTeam;
+        else if (aPen > hPen) winner = awayTeam;
+      }
+    }
+    // Secondary fallback: SM's meta.winner (present on the proxy path).
     if (!winner) {
       for (const fixture of [...fixtures].reverse()) {
         const homeP = getParticipant(fixture, 'home');
@@ -2381,7 +2478,19 @@ function isPlaceholderParticipant(p: SMParticipant | undefined, rawName: string)
   if (!p) return true;
   if (p.placeholder === true) return true;
   if (!p.id || p.id === 0) return true;
+  return isPatternPlaceholderName(rawName);
+}
+
+// Name-only placeholder test (ignores SM's `placeholder` flag). SportMonks
+// sets placeholder:true on EVERY future-round participant — including teams it
+// has already filled in from a finished feeder (e.g. Belgium, Canada in the
+// Round of 16). So the flag can't tell a confirmed team from an unresolved
+// slot; only the NAME can. A name is a real team unless it matches one of the
+// pre-draw patterns: "Winner/Loser Match/Round/Quarter/Semi N", "TBC/TBD", or
+// "Nth ranked/place/group".
+function isPatternPlaceholderName(rawName: string): boolean {
   const lower = (rawName ?? '').toLowerCase().trim();
+  if (!lower) return true;
   if (lower === 'tbc' || lower === 'tbd') return true;
   if (parsePlaceholderRef(rawName)) return true;
   if (/^winner\s+/i.test(rawName) || /^loser\s+/i.test(rawName)) return true;
@@ -2398,7 +2507,7 @@ function fallbackPlaceholderTeam(rawName: string): Team {
     id: '0',
     name: translatePlaceholderName(rawName),
     shortName: 'TBD',
-    logo: '⚽',
+    logo: PENDING_LOGO,
   };
 }
 
@@ -2409,7 +2518,7 @@ function winnerBetweenLabel(homeRaw: string, awayRaw: string): Team {
     id: `tbd-feeder-${home}-${away}`,
     name: i18n.t('cup.winnerBetween', { home, away }) as string,
     shortName: 'TBD',
-    logo: '⚽',
+    logo: PENDING_LOGO,
   };
 }
 
@@ -2529,7 +2638,17 @@ function resolvePlaceholderToTeam(
   }
 
   const ref = parsePlaceholderRef(rawName);
-  if (!ref) return fallbackPlaceholderTeam(rawName);
+  if (!ref) {
+    // The name isn't a "Winner Match N"-style ref we can chase to a feeder.
+    // If SM nonetheless gave a real team here (numeric id + a real country
+    // name, not a TBC/ranked pattern) it means the feeder already resolved
+    // and SM filled the slot — keep that team with its real crest instead of
+    // blanking it to the ⚽ fallback (the Belgium / Canada bug).
+    if (participant?.id && participant.id > 0 && !isPatternPlaceholderName(rawName)) {
+      return mapParticipantToTeam(participant);
+    }
+    return fallbackPlaceholderTeam(rawName);
+  }
 
   const feeder = resolveFeederFixture(ref, ctx);
   if (!feeder) return fallbackPlaceholderTeam(rawName);
@@ -2589,9 +2708,9 @@ const bracketInflight = new Map<string, Promise<CupRound[]>>();
 const BRACKET_MEM_TTL = 5 * 60_000;
 
 function bracketCacheKey(seasonId: number, isPlayoffsOnly?: boolean): string {
-  // v5: invalidates a possibly-cached EMPTY bracket from a transient resolve
-  // throw (now guarded), plus the earlier v4 entries.
-  return `bracket_v5_${seasonId}_${isPlayoffsOnly ? 'po' : 'cup'}`;
+  // v7: pending slots now use the 🕐 clock logo instead of ⚽ — invalidate
+  // brackets cached with the old ball placeholder.
+  return `bracket_v7_${seasonId}_${isPlayoffsOnly ? 'po' : 'cup'}`;
 }
 
 function applyCurrentFixtureHighlight(rounds: CupRound[], fixtureId?: string): CupRound[] {
@@ -2870,7 +2989,7 @@ async function buildCupBracketUncached(
           id: `tbd-${prevRound.id}-${ti}`,
           name: i18n.t('cup.winner', { teams: `${homeLabel} vs ${awayLabel}` }) as string,
           shortName: 'TBD',
-          logo: '⚽',
+          logo: PENDING_LOGO,
         };
       });
 
@@ -2914,7 +3033,7 @@ async function buildCupBracketUncached(
           const t1Away = abbreviate(translateNationalTeam(t1.awayTeam.name));
           const homeTeam = confirmedHome
             ? { ...confirmedHome }
-            : { id: `tbd-${order}-${i}`, name: i18n.t('cup.winner', { teams: `${t1Home} vs ${t1Away}` }) as string, shortName: 'TBD', logo: '⚽' };
+            : { id: `tbd-${order}-${i}`, name: i18n.t('cup.winner', { teams: `${t1Home} vs ${t1Away}` }) as string, shortName: 'TBD', logo: PENDING_LOGO };
 
           const confirmedAway = t2 && t2.isFinished && t2.winner ? t2.winner : null;
           const t2Home = t2 ? abbreviate(translateNationalTeam(t2.homeTeam.name)) : '';
@@ -2922,8 +3041,8 @@ async function buildCupBracketUncached(
           const awayTeam = t2
             ? (confirmedAway
               ? { ...confirmedAway }
-              : { id: `tbd-${order}-${i + 1}`, name: i18n.t('cup.winner', { teams: `${t2Home} vs ${t2Away}` }) as string, shortName: 'TBD', logo: '⚽' })
-            : { id: `tbd-${order}-bye`, name: 'TBD', shortName: 'TBD', logo: '⚽' };
+              : { id: `tbd-${order}-${i + 1}`, name: i18n.t('cup.winner', { teams: `${t2Home} vs ${t2Away}` }) as string, shortName: 'TBD', logo: PENDING_LOGO })
+            : { id: `tbd-${order}-bye`, name: 'TBD', shortName: 'TBD', logo: PENDING_LOGO };
 
           nextTies.push({
             id: `inferred-${order}-${i}`,

@@ -137,11 +137,14 @@ async function executeSinglePoll(pollIndex) {
     return matchDocs.length;
 }
 /**
- * Main polling function — runs 4 polls with 15-second intervals.
- * Called by the scheduled Cloud Function every 1 minute.
+ * Main polling function — runs POLLS_PER_INVOCATION (15) polls spaced
+ * LIVESCORE_POLL_INTERVAL_SEC (4s) apart, so one invocation continuously
+ * covers the full ~60s until the next scheduled trigger. Net effect: an
+ * effective ~4-second livescore poll cadence (goal → push in seconds), not
+ * the 1-minute scheduler heartbeat.
  */
 async function pollLivescoresHandler() {
-    logger.info('🔄 pollLivescores: starting 4-poll cycle');
+    logger.info(`🔄 pollLivescores: starting ${config_1.POLLS_PER_INVOCATION}-poll cycle (${config_1.LIVESCORE_POLL_INTERVAL_SEC}s apart)`);
     for (let i = 0; i < config_1.POLLS_PER_INVOCATION; i++) {
         try {
             await executeSinglePoll(i + 1);
@@ -154,6 +157,6 @@ async function pollLivescoresHandler() {
             await sleep(config_1.LIVESCORE_POLL_INTERVAL_SEC * 1000);
         }
     }
-    logger.info('✅ pollLivescores: 4-poll cycle complete');
+    logger.info(`✅ pollLivescores: ${config_1.POLLS_PER_INVOCATION}-poll cycle complete`);
 }
 //# sourceMappingURL=poll-livescores.js.map

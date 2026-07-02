@@ -101,11 +101,19 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
         {/* Score / Time (center) */}
         <View style={[s.center, timeFormat === '12h' && { width: 94 }]}>
           {isScheduled ? (
-            <View style={[s.timePill, { backgroundColor: c.surface }]}>
-              <Text style={[s.timePillText, { color: c.textSecondary }]} numberOfLines={1}>
-                {formatMatchTime(match.time, timeFormat)}
-              </Text>
-            </View>
+            match.stateId === 16 ? (
+              <View style={[s.timePill, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
+                <Text style={[s.timePillText, { color: '#F59E0B' }]} numberOfLines={1}>
+                  {t('matchStatus.delayed')}
+                </Text>
+              </View>
+            ) : (
+              <View style={[s.timePill, { backgroundColor: c.surface }]}>
+                <Text style={[s.timePillText, { color: c.textSecondary }]} numberOfLines={1}>
+                  {formatMatchTime(match.time, timeFormat)}
+                </Text>
+              </View>
+            )
           ) : (
             <View style={s.scoreRow}>
               <Text style={[s.scoreNum, { color: c.textPrimary }, (!homeWon && !isLive && !isInterrupted) && { color: c.textTertiary }]}>

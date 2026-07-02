@@ -215,6 +215,9 @@ export interface DetectedChange {
     relatedPlayerName?: string;
     /** Match minute when the event occurred. */
     minute?: number | null;
+    /** Penalty shootout final tally (null/undefined when no shootout took place). */
+    homePenScore?: number | null;
+    awayPenScore?: number | null;
 }
 export interface SMPagination {
     count: number;

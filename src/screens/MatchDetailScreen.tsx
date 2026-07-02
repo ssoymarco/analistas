@@ -13,6 +13,7 @@ import {
   Switch,
   Modal,
   Pressable,
+  PanResponder,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
@@ -37,7 +38,7 @@ import { useFavorites } from '../contexts/FavoritesContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { getLeagueConfig, getLeagueDisplayName }  from '../config/leagues';
 import { translateNationalTeam } from '../utils/nationalTeams';
-import { EnVivoTab }        from './matchDetail/EnVivoTab';
+import { EnVivoTab, predictionsCarouselDragging } from './matchDetail/EnVivoTab';
 import { PreviewTab }      from './matchDetail/PreviewTab';
 import { AlineacionTab }    from './matchDetail/AlineacionTab';
 import { TablaTab }         from './matchDetail/TablaTab';
@@ -316,11 +317,17 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
 
   // ── Scrollable tab indicator ───────────────────────────────────────────────
   const screenWidth  = Dimensions.get('window').width;
+  const screenHeight = Dimensions.get('window').height;
   const INDICATOR_W  = 28;
   const indicatorX   = useRef(new Animated.Value(0)).current;
   const tabScrollRef = useRef<ScrollView>(null);
   // Measured positions for each tab (set via onLayout)
   const tabPositions = useRef<Array<{ x: number; width: number }>>([]);
+  // One-time guard: seed the indicator under tab 0 on the FIRST layout only.
+  // Re-seeding on every re-layout snapped the underline back to tab 0 whenever
+  // the previously-active tab lost its bold weight (and thus re-measured) —
+  // which read as the indicator "sticking" until a second tap.
+  const indicatorSeeded = useRef(false);
 
   const handleTabSwitch = useCallback((key: Tab, idx: number) => {
     haptics.selection();
@@ -341,6 +348,35 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
       });
     }
   }, [indicatorX, screenWidth]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Swipe left/right to change tab ─────────────────────────────────────────
+  // Same gesture as the Partidos day-switch: swipe ← next tab, → previous tab.
+  // Refs keep the once-created PanResponder reading the CURRENT tab list +
+  // active tab (no stale closure). Only claims clearly-horizontal swipes, so
+  // vertical scrolling — and inner horizontal scrollers like the predictions
+  // carousel, which keep their own drag — still work.
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const tabsRef = useRef(TABS);
+  tabsRef.current = TABS;
+  const handleTabSwitchRef = useRef(handleTabSwitch);
+  handleTabSwitchRef.current = handleTabSwitch;
+  const tabSwipe = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        !predictionsCarouselDragging.current &&
+        Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+      onPanResponderRelease: (_, g) => {
+        if (predictionsCarouselDragging.current) return;
+        const dir = g.dx <= -55 ? 1 : g.dx >= 55 ? -1 : 0;
+        if (!dir) return;
+        const tabs = tabsRef.current;
+        const cur = tabs.findIndex(tb => tb.key === activeTabRef.current);
+        const next = cur + dir;
+        if (next >= 0 && next < tabs.length) handleTabSwitchRef.current(tabs[next].key, next);
+      },
+    }),
+  ).current;
 
   // ── Animated hero ──────────────────────────────────────────────────────────
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -627,10 +663,19 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
 
             {/* Time capsule (scheduled) */}
             {isScheduled && (
-              <View style={[scr.timeCapsule, { backgroundColor: hCapsuleBg }]}>
-                <ClockIcon color={hTextSoft} size={14} />
-                <Text style={[scr.timeText, { color: isDark ? 'rgba(255,255,255,0.85)' : '#374151' }]}>{displayTime} · {displayDate}</Text>
-              </View>
+              displayMatch.stateId === 16 ? (
+                <View style={[scr.livePill, { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
+                  <View style={[scr.liveDot, { backgroundColor: '#F59E0B' }]} />
+                  <Text style={[scr.livePillText, { color: '#F59E0B' }]}>
+                    {t('matchStatus.delayedLong')}
+                  </Text>
+                </View>
+              ) : (
+                <View style={[scr.timeCapsule, { backgroundColor: hCapsuleBg }]}>
+                  <ClockIcon color={hTextSoft} size={14} />
+                  <Text style={[scr.timeText, { color: isDark ? 'rgba(255,255,255,0.85)' : '#374151' }]}>{displayTime} · {displayDate}</Text>
+                </View>
+              )
             )}
 
             {/* Finished label */}
@@ -903,11 +948,13 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                       x: e.nativeEvent.layout.x,
                       width: e.nativeEvent.layout.width,
                     };
-                    // Position indicator under the default active tab (index 0)
-                    if (idx === 0) {
+                    // Seed indicator under the default active tab (index 0) ONCE.
+                    // Never re-seed, or a tab re-measure snaps the underline back.
+                    if (idx === 0 && !indicatorSeeded.current) {
                       indicatorX.setValue(
                         e.nativeEvent.layout.x + (e.nativeEvent.layout.width - INDICATOR_W) / 2,
                       );
+                      indicatorSeeded.current = true;
                     }
                   }}
                   activeOpacity={0.7}
@@ -932,10 +979,11 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
       {/* ══════════════════════════════════════════════════════════════════
           SCROLLABLE CONTENT
       ══════════════════════════════════════════════════════════════════ */}
+      <View style={{ flex: 1 }} {...tabSwipe.panHandlers}>
       <Animated.ScrollView
         ref={scrollRef}
         style={{ flex: 1, backgroundColor: c.bg }}
-        contentContainerStyle={{ paddingTop: 12, paddingBottom: 40 }}
+        contentContainerStyle={{ paddingTop: 12, paddingBottom: 40, minHeight: screenHeight }}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
         onScroll={Animated.event(
@@ -963,6 +1011,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           </>
         )}
       </Animated.ScrollView>
+      </View>
 
       {/* ── Modo Estadio toast ── */}
       <Animated.View

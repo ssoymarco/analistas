@@ -2,7 +2,7 @@
 // Adapts to match status: Previa (scheduled), En Vivo (live), Resumen (finished).
 // Scheduled: Predictions carousel, Momios, H2H, Form, Match Info.
 // Live/Finished: Quick stats, Events, Pressure, Odds, H2H, Form, Info.
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, Dimensions, Modal, Pressable, Animated, Easing,
@@ -14,7 +14,7 @@ import { useThemeColors } from '../../theme/useTheme';
 import { useDarkMode } from '../../contexts/DarkModeContext';
 import { haptics } from '../../utils/haptics';
 import { AnimatedPressable } from '../../components/AnimatedPressable';
-import { GoalPicker, GOAL_OPTIONS } from '../../components/GoalPicker';
+import { GOAL_OPTIONS } from '../../components/GoalPicker';
 import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupVenues';
 import { getLeagueDisplayName } from '../../config/leagues';
 import type {
@@ -28,7 +28,11 @@ import {
   runningScoreAt, cumulativeScoreAtMinute,
 } from '../../utils/matchPhases';
 import { translateNationalTeam } from '../../utils/nationalTeams';
-import { BETTING_CONTENT_ENABLED } from '../../config/features';
+import { resolveMatchColors } from '../../utils/teamColors';
+import { translateCountry } from '../../i18n/countries';
+import { getRefereeProfile, type RefereeProfile } from '../../services/sportsApi';
+import { BETTING_CONTENT_ENABLED, ADMOB_ENABLED } from '../../config/features';
+import MediumRectangleBannerAd from '../../components/MediumRectangleBannerAd';
 import { useLiveTick, computeLiveMinuteSeconds } from '../../hooks/useLiveTick';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -323,8 +327,6 @@ const VOTE_STORAGE_PREFIX = '@prediction_votes_';
 const VOTE_COUNTS_PREFIX  = '@prediction_counts_';
 
 type PollKey = 'winner' | 'goals' | 'corners' | 'bothScore' | 'redCard' | 'firstScorer';
-const ALL_POLL_KEYS: PollKey[] = ['winner', 'goals', 'corners', 'bothScore', 'redCard', 'firstScorer'];
-const TOTAL_POLLS = ALL_POLL_KEYS.length;
 
 interface VoteState {
   winner?: string;       // '1' | 'X' | '2'
@@ -351,6 +353,61 @@ function defaultCounts(): VoteCounts {
     bothScore: { si: 0, no: 0 },
     redCard: { si: 0, no: 0 },
     firstScorer: { home: 0, away: 0 },
+  };
+}
+
+// ── Placeholder vote counts (real backend TBD) ───────────────────────────────
+// Until we track real community votes, show believable, STABLE numbers so the
+// poll doesn't read "1 voto / 100%-0%-0%". Seeded by matchId+poll so a given
+// match always shows the same figures (no flicker across renders). Each poll's
+// total lands between 4,800 and 12,000, split across options with light random
+// weighting. The user's own real vote (+1) is negligible and not added here.
+function seededRand(seed: string): () => number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (Math.imul(h, 31) + seed.charCodeAt(i)) >>> 0;
+  return () => {
+    h = (Math.imul(h, 1103515245) + 12345) >>> 0;
+    return h / 0x100000000;
+  };
+}
+function distribute(total: number, opts: string[], rnd: () => number): Record<string, number> {
+  const weights = opts.map(() => 0.2 + rnd());
+  const sum = weights.reduce((a, b) => a + b, 0);
+  const out: Record<string, number> = {};
+  let acc = 0;
+  opts.forEach((o, i) => {
+    const v = i === opts.length - 1 ? total - acc : Math.round((total * weights[i]) / sum);
+    out[o] = Math.max(0, v);
+    acc += out[o];
+  });
+  return out;
+}
+// Rescale an existing option split to a new total, preserving proportions.
+function scaleToTotal(counts: Record<string, number>, target: number): Record<string, number> {
+  const cur = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+  const keys = Object.keys(counts);
+  const out: Record<string, number> = {};
+  let acc = 0;
+  keys.forEach((k, i) => {
+    const v = i === keys.length - 1 ? target - acc : Math.round((counts[k] * target) / cur);
+    out[k] = Math.max(0, v);
+    acc += out[k];
+  });
+  return out;
+}
+function makeFakeCounts(matchId: string): VoteCounts {
+  const mk = (poll: string, opts: string[]) => {
+    const rnd = seededRand(`${matchId}_${poll}`);
+    const total = 4800 + Math.floor(rnd() * (12000 - 4800 + 1));
+    return distribute(total, opts, rnd);
+  };
+  return {
+    winner:      mk('winner', ['1', 'X', '2']),
+    goals:       mk('goals', GOAL_OPTIONS),
+    corners:     mk('corners', ['+8.5', '-8.5']),
+    bothScore:   mk('bothScore', ['si', 'no']),
+    redCard:     mk('redCard', ['si', 'no']),
+    firstScorer: mk('firstScorer', ['home', 'away']),
   };
 }
 
@@ -401,6 +458,11 @@ async function saveVote(
 }
 
 // ── Predictions carousel (6 interactive polls) ─────────────────────────────
+// Shared flag: true while the user is actively touching the predictions
+// carousel. MatchDetailScreen's tab-swipe gesture checks this and yields, so
+// dragging the carousel never accidentally switches tabs.
+export const predictionsCarouselDragging = { current: false };
+
 export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
@@ -411,6 +473,34 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
   const [votes, setVotes] = useState<VoteState>({});
   const [counts, setCounts] = useState<VoteCounts>(defaultCounts);
   const [loaded, setLoaded] = useState(false);
+
+  // Which polls to show: the winner poll (always) + 2 others chosen
+  // deterministically per match. "¿Cuántos goles?" is intentionally excluded.
+  const shownPolls = useMemo<PollKey[]>(() => {
+    const pool: PollKey[] = ['corners', 'bothScore', 'redCard', 'firstScorer'];
+    const rnd = seededRand(`${match.id}_polls`);
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return ['winner', pool[0], pool[1]];
+  }, [match.id]);
+
+  // Believable placeholder vote counts (real backend TBD). Stable per match.
+  // Totals DECREASE by carousel position — engagement drops on later questions,
+  // so Q1 (winner) > Q2 > Q3 — while each poll keeps its own option split.
+  const displayCounts = useMemo<VoteCounts>(() => {
+    const base = makeFakeCounts(match.id);
+    const rnd = seededRand(`${match.id}_totals`);
+    const q1 = 10000 + Math.floor(rnd() * 2001);   // 10,000–12,000 for the main poll
+    const drop = 0.72 + rnd() * 0.13;              // each step keeps ~72–85%
+    const scaled: VoteCounts = { ...base };
+    shownPolls.forEach((pk, i) => {
+      const target = Math.round(q1 * Math.pow(drop, i));
+      scaled[pk] = scaleToTotal(base[pk], target);
+    });
+    return scaled;
+  }, [match.id, shownPolls]);
 
   useEffect(() => {
     loadVotes(match.id).then(({ votes: v, counts: ct }) => {
@@ -433,7 +523,7 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
     if (idx !== activeDot) setActiveDot(idx);
   };
 
-  const answeredCount = ALL_POLL_KEYS.filter(k => votes[k] != null).length;
+  const answeredCount = shownPolls.filter(k => votes[k] != null).length;
 
   // Helper: get percentage
   const pct = (n: number, total: number) => total > 0 ? Math.round((n / total) * 100) : 0;
@@ -447,8 +537,8 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
   }) => {
     const voted = votes[pollKey] != null;
     const isSelected = votes[pollKey] === optKey;
-    const total = Object.values(counts[pollKey]).reduce((a, b) => a + b, 0);
-    const percentage = pct(counts[pollKey][optKey] || 0, total);
+    const total = Object.values(displayCounts[pollKey]).reduce((a, b) => a + b, 0);
+    const percentage = pct(displayCounts[pollKey][optKey] || 0, total);
 
     return (
       <TouchableOpacity
@@ -469,8 +559,8 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
     );
   };
 
-  // Helper: total votes for a poll
-  const pollTotal = (key: PollKey) => Object.values(counts[key]).reduce((a, b) => a + b, 0);
+  // Helper: total votes for a poll (uses placeholder counts for display)
+  const pollTotal = (key: PollKey) => Object.values(displayCounts[key]).reduce((a, b) => a + b, 0);
 
   // Helper: vote count text
   const VoteCountText = ({ pollKey }: { pollKey: PollKey }) => {
@@ -479,8 +569,9 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
     return <Text style={[pc.totalVotes, { color: c.textTertiary }]}>{t('predictions.vote', { count: total })}</Text>;
   };
 
-  const cards = [
-    // ── Card 1: ¿Quién ganará? ──────────────────────────────────────────────
+  // All available poll cards, keyed by PollKey. Only `shownPolls` are rendered.
+  const allCards: React.ReactElement[] = [
+    // ── Card: ¿Quién ganará? ────────────────────────────────────────────────
     <View key="winner" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.whoWillWin')}</Text>
       <View style={pc.optionsRow}>
@@ -492,7 +583,7 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
           const voted = votes.winner != null;
           const isSelected = votes.winner === opt.key;
           const total = pollTotal('winner');
-          const percentage = pct(counts.winner[opt.key] || 0, total);
+          const percentage = pct(displayCounts.winner[opt.key] || 0, total);
           return (
             <TouchableOpacity
               key={opt.key}
@@ -516,18 +607,7 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
       <VoteCountText pollKey="winner" />
     </View>,
 
-    // ── Card 2: ¿Cuántos goles? ─────────────────────────────────────────────
-    <View key="goals" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.howManyGoals')}</Text>
-      <GoalPicker
-        selected={votes.goals}
-        onSelect={(val) => handleVote('goals', val)}
-        counts={counts.goals}
-        cardWidth={CARD_WIDTH}
-      />
-    </View>,
-
-    // ── Card 3: Corners ─────────────────────────────────────────────────────
+    // ── Card: Corners ───────────────────────────────────────────────────────
     <View key="corners" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.cornersQuestion')}</Text>
       <View style={pc.optionsRow}>
@@ -538,7 +618,7 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
     </View>,
 
     // ── Card 4: Ambos anotan ────────────────────────────────────────────────
-    <View key="btts" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
+    <View key="bothScore" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.bothScore')}</Text>
       <View style={pc.optionsRow}>
         <BinaryBtn pollKey="bothScore" optKey="si" label={t('predictions.yes')} sub={t('predictions.bothScoreYes')} />
@@ -548,7 +628,7 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
     </View>,
 
     // ── Card 5: Tarjeta roja ────────────────────────────────────────────────
-    <View key="red" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
+    <View key="redCard" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.redCard')}</Text>
       <View style={pc.optionsRow}>
         <BinaryBtn pollKey="redCard" optKey="si" label={t('predictions.yes')} sub={t('predictions.redCardYes')} />
@@ -558,7 +638,7 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
     </View>,
 
     // ── Card 6: Primer gol ──────────────────────────────────────────────────
-    <View key="first" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
+    <View key="firstScorer" style={[pc.card, { backgroundColor: c.card, borderColor: c.border }]}>
       <Text style={[pc.question, { color: c.textPrimary }]}>{t('predictions.firstScorer')}</Text>
       <View style={pc.optionsRow}>
         <BinaryBtn pollKey="firstScorer" optKey="home" label={match.homeTeam.shortName} sub={t('predictions.home')} />
@@ -567,6 +647,11 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
       <VoteCountText pollKey="firstScorer" />
     </View>,
   ];
+
+  // Render only the winner poll + the 2 deterministically-chosen optional polls.
+  const cards = shownPolls
+    .map(pk => allCards.find(el => el.key === pk))
+    .filter((el): el is React.ReactElement => el != null);
 
   return (
     <View style={pc.outer}>
@@ -585,7 +670,7 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
             ]} />
           ))}
         </View>
-        <Text style={[pc.counter, { color: c.textTertiary }]}>{answeredCount}/{TOTAL_POLLS}</Text>
+        <Text style={[pc.counter, { color: c.textTertiary }]}>{answeredCount}/{shownPolls.length}</Text>
       </View>
       <Text style={[pc.hintText, { color: c.textTertiary }]}>{t('predictions.swipeForMore')}</Text>
 
@@ -600,6 +685,10 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
         contentContainerStyle={{ paddingRight: 32 }}
         onScroll={handleCarouselScroll}
         scrollEventThrottle={16}
+        // While the carousel is touched, tell the tab-swipe gesture to stand down.
+        onTouchStart={() => { predictionsCarouselDragging.current = true; }}
+        onTouchEnd={() => { predictionsCarouselDragging.current = false; }}
+        onTouchCancel={() => { predictionsCarouselDragging.current = false; }}
       >
         {cards.map((card, i) => (
           <View key={i} style={{ width: CARD_WIDTH, marginRight: CARD_GAP }}>
@@ -1354,9 +1443,26 @@ const RefereeDetailModal: React.FC<{
   const c = useThemeColors();
   const { t } = useTranslation();
   const { isDark } = useDarkMode();
+
+  // Fetch the full referee profile (country + career stats) on open. The
+  // Firestore blob only has name/photo, so this is what fills the card.
+  const [profile, setProfile] = useState<RefereeProfile | null>(null);
+  useEffect(() => {
+    if (!visible || !referee?.id) { setProfile(null); return; }
+    let alive = true;
+    getRefereeProfile(referee.id).then(p => { if (alive) setProfile(p); }).catch(() => {});
+    return () => { alive = false; };
+  }, [visible, referee?.id]);
+
   if (!referee) return null;
   const sheetBg = isDark ? '#1c1c1e' : '#f2f2f7';
   const overlayBg = isDark ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.55)';
+
+  // Prefer the freshly-fetched profile; fall back to whatever the blob had.
+  const natName  = profile?.nationality || referee.nationality;
+  const natCode  = profile?.nationalityCode ?? referee.nationalityCode;
+  const flag     = (profile?.flag && profile.flag !== '👔') ? profile.flag : referee.flag;
+  const refStats = profile?.stats ?? stats;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -1377,9 +1483,10 @@ const RefereeDetailModal: React.FC<{
             <Text style={[rdm.refName, { color: c.textPrimary }]} numberOfLines={2}>
               {referee.name}
             </Text>
-            {!!referee.nationality && (
+            {!!natName && (
               <Text style={[rdm.refNat, { color: c.textSecondary }]}>
-                {referee.flag ? `${referee.flag} ` : ''}{referee.nationality}
+                {flag ? `${flag} ` : ''}
+                {translateCountry(natCode, natName)}
               </Text>
             )}
           </View>
@@ -1390,22 +1497,22 @@ const RefereeDetailModal: React.FC<{
           {t('matchInfo.refereeDetail').toUpperCase()}
         </Text>
 
-        {stats ? (
+        {refStats ? (
           <View style={rdm.statsGrid}>
             <View style={[rdm.statCell, { backgroundColor: c.card, borderColor: c.border }]}>
-              <Text style={[rdm.statValue, { color: c.textPrimary }]}>{stats.totalMatches}</Text>
+              <Text style={[rdm.statValue, { color: c.textPrimary }]}>{refStats.totalMatches}</Text>
               <Text style={[rdm.statLabel, { color: c.textTertiary }]}>{t('matchInfo.totalMatches')}</Text>
             </View>
             <View style={[rdm.statCell, { backgroundColor: c.card, borderColor: c.border }]}>
-              <Text style={[rdm.statValue, { color: '#facc15' }]}>{stats.yellowCardsPerMatch.toFixed(1)}</Text>
+              <Text style={[rdm.statValue, { color: '#facc15' }]}>{refStats.yellowCardsPerMatch.toFixed(1)}</Text>
               <Text style={[rdm.statLabel, { color: c.textTertiary }]}>{t('matchInfo.yellowCardsPerMatch')}</Text>
             </View>
             <View style={[rdm.statCell, { backgroundColor: c.card, borderColor: c.border }]}>
-              <Text style={[rdm.statValue, { color: '#ef4444' }]}>{stats.redCardsPerMatch.toFixed(1)}</Text>
+              <Text style={[rdm.statValue, { color: '#ef4444' }]}>{refStats.redCardsPerMatch.toFixed(1)}</Text>
               <Text style={[rdm.statLabel, { color: c.textTertiary }]}>{t('matchInfo.redCardsPerMatch')}</Text>
             </View>
             <View style={[rdm.statCell, { backgroundColor: c.card, borderColor: c.border }]}>
-              <Text style={[rdm.statValue, { color: c.textPrimary }]}>{stats.foulsPerMatch.toFixed(1)}</Text>
+              <Text style={[rdm.statValue, { color: c.textPrimary }]}>{refStats.foulsPerMatch.toFixed(1)}</Text>
               <Text style={[rdm.statLabel, { color: c.textTertiary }]}>{t('matchInfo.foulsPerMatch')}</Text>
             </View>
           </View>
@@ -1414,7 +1521,9 @@ const RefereeDetailModal: React.FC<{
             <View style={rdm.infoRow}>
               <Text style={[rdm.infoLabel, { color: c.textTertiary }]}>{t('matchInfo.nationality')}</Text>
               <Text style={[rdm.infoValue, { color: c.textPrimary }]}>
-                {referee.flag ? `${referee.flag} ` : ''}{referee.nationality || '—'}
+                {natName
+                  ? `${flag ? `${flag} ` : ''}${translateCountry(natCode, natName)}`
+                  : '—'}
               </Text>
             </View>
           </View>
@@ -1640,6 +1749,11 @@ const CHART_H    = 120;
 const MARKER_H   = 22;   // height of goal/card marker rows
 const Y_AXIS_W   = 28;
 const CHART_PAD_R = 14;
+// Left origin of the plot area (minute 0) inside the card, measured from the
+// card content edge: chartWrap.paddingLeft (4) + yAxis width. The X-axis labels
+// are absolutely positioned from the card edge, so they add this to reach the
+// same origin the curve/halftime-line use.
+const X_AXIS_INSET = Y_AXIS_W + 4;
 const PI_HOME    = '#ef4444';
 const PI_AWAY    = '#10b981';
 
@@ -1720,32 +1834,37 @@ function buildPressureCurve(
     const min    = Math.min(ev.minute, elapsed);
     const isHome = ev.team === 'home';
     if (ev.type === 'goal' || ev.type === 'penalty-goal' || ev.type === 'own-goal') {
-      impulse[min] += isHome ? 15 : -15;
+      impulse[min] += isHome ? 26 : -26;
     } else if (ev.type === 'yellow' || ev.type === 'second-yellow') {
-      impulse[min] += isHome ? -4 : 4;
+      impulse[min] += isHome ? -6 : 6;
     } else if (ev.type === 'red') {
-      impulse[min] += isHome ? -12 : 12;
+      impulse[min] += isHome ? -20 : 20;
     }
   }
 
   // Walk momentum + bias + jitter ONLY through the elapsed window.
   // Beyond `elapsed` we keep the neutral 50 fill — the chart will visually
   // show an empty flat line for time the match hasn't reached yet.
+  //
+  // Dynamics tuned (2026-07) for a bolder, FotMob-style shape: momentum decays
+  // more slowly (0.94) so swings persist and stack; the sine "flow" blend is
+  // dialed WAY down (was 40% → 22%) so the curve is driven by real momentum
+  // rather than a cosmetic wave that flattens everything toward 50.
   let momentum = 0;
   const bias   = homePressure - 50;
   for (let i = 0; i <= elapsed; i++) {
-    momentum  = momentum * 0.91 + impulse[i];
+    momentum  = momentum * 0.94 + impulse[i];
     points[i] = 50 + momentum;
   }
   for (let i = 0; i <= elapsed; i++) {
-    // Normalize t against the elapsed window so the sine wave shape feels
+    // Normalize t against the elapsed window so the flow shape feels
     // proportional to how much of the match has played out so far. Guard
     // against divide-by-zero when elapsed is 0.
     const t     = elapsed > 0 ? i / elapsed : 0;
     const blend = 50 + bias * (0.5 + 0.5 * Math.sin(t * Math.PI * 3 + bias * 0.05));
-    points[i]   = points[i] * 0.6 + blend * 0.4;
-    points[i]  += Math.sin(i * 0.31) * 3.5 + Math.cos(i * 0.68) * 2.5;
-    points[i]   = Math.max(5, Math.min(95, points[i]));
+    points[i]   = points[i] * 0.78 + blend * 0.22;
+    points[i]  += Math.sin(i * 0.31) * 5 + Math.cos(i * 0.68) * 3.5;
+    points[i]   = Math.max(3, Math.min(97, points[i]));
   }
 
   return points;
@@ -1789,7 +1908,7 @@ function extractMarkers(
 
 // ── PressureSection component ─────────────────────────────────────────────────
 
-const UPSAMPLE_POINTS = 300; // upsampled resolution → smooth bezier-like curve
+const UPSAMPLE_POINTS = 640; // upsampled resolution → smooth bezier-like curve
 
 const PressureSection: React.FC<{
   pressure: PressureIndex;
@@ -1804,6 +1923,15 @@ const PressureSection: React.FC<{
 }> = ({ pressure, match, events = [], statistics = [] }) => {
   const c           = useThemeColors();
   const { isDark }  = useDarkMode();
+  const { t }       = useTranslation();
+
+  // Per-team chart colors: World Cup national teams get their own vibrant color
+  // (keyed by FIFA short code); clubs / unknown teams fall back to the classic
+  // red/green. resolveMatchColors guarantees the two are visually distinct.
+  const { home: homeColor, away: awayColor } = resolveMatchColors(
+    match.homeTeam.shortName,
+    match.awayTeam.shortName,
+  );
 
   // Accurate current minute from the SportMonks period anchor (`liveClock`) —
   // the SAME source the header clock uses. We deliberately do NOT use
@@ -1852,7 +1980,25 @@ const PressureSection: React.FC<{
   // Catmull-Rom upsample → Gaussian smooth → final smooth wave
   const smoothCurve = React.useMemo(() => {
     const up = upsampleCurve(rawCurve, UPSAMPLE_POINTS);
-    return gaussianSmooth(up, 6);
+    // Lighter blur (radius 3, was 6) keeps the spikes sharp instead of melting
+    // them into gentle hills, then a gain expansion pushes the peaks toward the
+    // top/bottom of the chart so the swings read like FotMob's rather than
+    // hugging the 50 midline.
+    // The jagged "pixelated" outline is HIGH-frequency noise (per-minute jitter
+    // + upsampling steps); the bold swings the user liked are LOW-frequency
+    // (minute-scale momentum). A wider Gaussian (radius 9) erases the jaggies
+    // while the big mountains survive, and a slightly higher gain recovers the
+    // peak height that the extra blur shaves off.
+    const sm   = gaussianSmooth(up, 9);
+    const GAIN = 1.65;
+    // Soft saturation instead of a hard clamp. A hard Math.min/max let very
+    // one-sided spells (e.g. a dominant team) pile many points onto the exact
+    // ceiling/floor → a flat, "cut-off" plateau at the chart edge. tanh
+    // asymptotically approaches 50±HALF without ever flatlining, so tall peaks
+    // stay tall but round off gracefully near the top/bottom. HALF = 46 leaves
+    // a ~4px breathing gap inside the chart's 0/100 bounds.
+    const HALF = 46;
+    return sm.map(v => 50 + HALF * Math.tanh(((v - 50) * GAIN) / HALF));
   }, [rawCurve]);
 
   // `totalMin` declared above (~line 1741) — drives both buildPressureCurve
@@ -1922,11 +2068,14 @@ const PressureSection: React.FC<{
   const extraStats = React.useMemo(() => {
     const all = statistics.flatMap(c => c.stats);
     const pick = (label: string) => all.find(s => s.label === label);
+    // `lookup` must stay in Spanish — it matches STAT_TYPE_NAMES in the mapper,
+    // which always labels stats in Spanish regardless of app language. Only the
+    // displayed text is translated, via `i18nKey`.
     return [
-      { key: 'corners', label: 'Saques de esquina',  stat: pick('Saques de esquina') },
-      { key: 'fouls',   label: 'Faltas',             stat: pick('Faltas') },
-      { key: 'saves',   label: 'Salvadas de portero',stat: pick('Salvadas de portero') },
-      { key: 'chances', label: 'Grandes chances',    stat: pick('Grandes chances') },
+      { key: 'corners', i18nKey: 'stats.corners',    stat: pick('Saques de esquina') },
+      { key: 'fouls',   i18nKey: 'stats.fouls',      stat: pick('Faltas') },
+      { key: 'saves',   i18nKey: 'stats.saves',      stat: pick('Salvadas de portero') },
+      { key: 'chances', i18nKey: 'stats.bigChances', stat: pick('Grandes chances') },
     ].filter(row => row.stat !== undefined);
   }, [statistics]);
 
@@ -1934,13 +2083,17 @@ const PressureSection: React.FC<{
     <View style={[pi.card, { backgroundColor: c.card, borderColor: c.border }]}>
       {/* ── Header ── */}
       <View style={pi.header}>
-        <Text style={[pi.title, { color: c.textTertiary }]}>ÍNDICE DE PRESIÓN</Text>
-        <View style={{ flex: 1 }} />
+        <Text style={[pi.title, { color: c.textTertiary }]} numberOfLines={1}>{t('stats.pressureIndex')}</Text>
+        <View style={{ flex: 1, minWidth: 8 }} />
         <View style={pi.legend}>
-          <View style={[pi.legendDot, { backgroundColor: PI_HOME }]} />
-          <Text style={[pi.legendLabel, { color: c.textTertiary }]}>{match.homeTeam.shortName}</Text>
-          <View style={[pi.legendDot, { backgroundColor: PI_AWAY, marginLeft: 8 }]} />
-          <Text style={[pi.legendLabel, { color: c.textTertiary }]}>{match.awayTeam.shortName}</Text>
+          <View style={[pi.legendDot, { backgroundColor: homeColor }]} />
+          <Text style={[pi.legendLabel, { color: c.textTertiary }]} numberOfLines={1}>
+            {translateNationalTeam(match.homeTeam.name)}
+          </Text>
+          <View style={[pi.legendDot, { backgroundColor: awayColor, marginLeft: 8 }]} />
+          <Text style={[pi.legendLabel, { color: c.textTertiary }]} numberOfLines={1}>
+            {translateNationalTeam(match.awayTeam.name)}
+          </Text>
         </View>
       </View>
 
@@ -2053,11 +2206,17 @@ const PressureSection: React.FC<{
                   style={{
                     position: 'absolute',
                     left: i * barW,
-                    width: Math.ceil(barW) + 0.5,  // +0.5 closes sub-pixel gaps
+                    // Fractional width (not ceil'd to whole px) lets iOS
+                    // anti-alias each column edge, softening the stair-step
+                    // outline. +0.6 overlap still closes any sub-pixel gap.
+                    width: barW + 0.6,
                     height: barH,
                     top: isHome ? CHART_H / 2 - barH : CHART_H / 2,
-                    backgroundColor: isHome ? PI_HOME : PI_AWAY,
-                    opacity: 0.55,
+                    backgroundColor: isHome ? homeColor : awayColor,
+                    // Full opacity: the old 0.55 made every 0.5px column overlap
+                    // blend darker at its neighbour → the "striped / pixelated"
+                    // moiré the user reported. Solid fill = clean FotMob look.
+                    opacity: 1,
                   }}
                 />
               );
@@ -2082,43 +2241,46 @@ const PressureSection: React.FC<{
       </View>
 
       {/* ── X-axis labels ── */}
+      {/* Each label is positioned ABSOLUTELY at its exact minute fraction of the
+          chart — the same coordinate system the halftime dashed line uses
+          (left = minute/totalMin · chartW). Flexbox space-between anchored
+          labels by their edges, so variable-width labels ("MT" vs "0'") drifted
+          off their tick — notably "MT" no longer sitting on the halftime line.
+          Absolute positioning fixes both regulation and ET (where 0/MT/TC/AET
+          are NOT evenly spaced). First label is left-aligned, last is
+          right-aligned, the rest are centered on their tick. */}
       <View style={pi.xAxis}>
-        {/* X-axis labels adapt to whether the chart extends into extra time.
-            Regulation matches: 7 anchors evenly spaced 0'..90' with "MT"
-            (medio tiempo) at the halftime position. ET matches: collapse
-            to 4 anchors (0', MT=45', TC=90', AET=120') — mirrors the FotMob
-            "Inercia" pattern so users get a clear visual cue that the chart
-            covers ET. We use the same flexbox container so spacing stays
-            even regardless of label count. */}
-        {totalMin === 120 ? (
-          <>
-            <Text style={[pi.xLabel, { color: c.textTertiary }]}>0'</Text>
-            <Text style={[pi.xLabel, { color: c.textTertiary }]}>MT</Text>
-            <Text style={[pi.xLabel, { color: c.textTertiary }]}>TC</Text>
-            <Text style={[pi.xLabel, { color: c.textTertiary }]}>AET</Text>
-          </>
-        ) : (
-          <>
-            <Text style={[pi.xLabel, { color: c.textTertiary }]}>0'</Text>
-            <Text style={[pi.xLabel, { color: c.textTertiary }]}>15'</Text>
-            <Text style={[pi.xLabel, { color: c.textTertiary }]}>30'</Text>
-            <Text style={[pi.xLabel, { color: c.textTertiary }]}>MT</Text>
-            <Text style={[pi.xLabel, { color: c.textTertiary }]}>60'</Text>
-            <Text style={[pi.xLabel, { color: c.textTertiary }]}>75'</Text>
-            <Text style={[pi.xLabel, { color: c.textTertiary }]}>90'</Text>
-          </>
-        )}
+        {(totalMin === 120
+          ? [{ m: 0, l: "0'" }, { m: 45, l: t('stats.axisHT') }, { m: 90, l: "90'" }, { m: 120, l: "120'" }]
+          : [{ m: 0, l: "0'" }, { m: 15, l: "15'" }, { m: 30, l: "30'" }, { m: 45, l: t('stats.axisHT') },
+             { m: 60, l: "60'" }, { m: 75, l: "75'" }, { m: 90, l: "90'" }]
+        ).map((a, i, arr) => {
+          const pos     = X_AXIS_INSET + (a.m / totalMin) * chartW;
+          const isFirst = i === 0;
+          const isLast  = i === arr.length - 1;
+          const HALF_W  = 22;
+          const boxStyle = isFirst
+            ? { left: pos, alignItems: 'flex-start' as const }
+            : isLast
+              ? { left: pos - HALF_W * 2, width: HALF_W * 2, alignItems: 'flex-end' as const }
+              : { left: pos - HALF_W, width: HALF_W * 2, alignItems: 'center' as const };
+          return (
+            <View key={a.l} style={[{ position: 'absolute', top: 6 }, boxStyle]}>
+              <Text style={[pi.xLabel, { color: c.textTertiary }]}>{a.l}</Text>
+            </View>
+          );
+        })}
       </View>
 
       {/* ── Summary bar ── */}
       <View style={[pi.summary, { borderTopColor: borderColor }]}>
-        <Text style={[pi.summaryValue, { color: PI_HOME }]}>{pressure.home}%</Text>
+        <Text style={[pi.summaryValue, { color: homeColor }]}>{pressure.home}%</Text>
         <View style={pi.summaryBarWrap}>
           <View style={[pi.summaryBarBg, { backgroundColor: c.surface }]}>
-            <View style={[pi.summaryBarHome, { width: `${pressure.home}%` }]} />
+            <View style={[pi.summaryBarHome, { width: `${pressure.home}%`, backgroundColor: homeColor }]} />
           </View>
         </View>
-        <Text style={[pi.summaryValue, { color: PI_AWAY, textAlign: 'right' }]}>{pressure.away}%</Text>
+        <Text style={[pi.summaryValue, { color: awayColor, textAlign: 'right' }]}>{pressure.away}%</Text>
       </View>
 
       {/* ── Extra stats strip (corners / fouls / saves / big chances) ── */}
@@ -2137,11 +2299,11 @@ const PressureSection: React.FC<{
                   },
                 ]}
               >
-                <Text style={[pi.extraStatVal, { color: PI_HOME }]}>{stat.home}</Text>
+                <Text style={[pi.extraStatVal, { color: homeColor }]}>{stat.home}</Text>
                 <Text style={[pi.extraStatLabel, { color: c.textSecondary }]} numberOfLines={1}>
-                  {row.label}
+                  {t(row.i18nKey)}
                 </Text>
-                <Text style={[pi.extraStatVal, { color: PI_AWAY, textAlign: 'right' }]}>{stat.away}</Text>
+                <Text style={[pi.extraStatVal, { color: awayColor, textAlign: 'right' }]}>{stat.away}</Text>
               </View>
             );
           })}
@@ -2178,7 +2340,10 @@ const pi = StyleSheet.create({
   //   • Right: CHART_PAD_R = 14 (was previously 32, which pushed the "90'"
   //     label 18 px inward and threw the MT label out of line with the
   //     dashed half-time marker by 9 px).
-  xAxis:  { flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 32, paddingRight: CHART_PAD_R, paddingVertical: 6 },
+  // Relative container spanning the full card width; labels inside are absolute
+  // (positioned per-minute via X_AXIS_INSET + fraction·chartW). Fixed height
+  // since absolute children don't contribute to layout.
+  xAxis:  { position: 'relative', height: 22 },
   xLabel: { fontSize: 8, fontWeight: '500' },
 
   summary:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, gap: 10, borderTopWidth: 1 },
@@ -2468,6 +2633,9 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
           {/* Quick stats (possession bar + key numbers) */}
           <QuickStats match={match} detail={detail} />
 
+          {/* MREC above Índice de Presión for finished matches */}
+          {isFinished && ADMOB_ENABLED && <MediumRectangleBannerAd />}
+
           {/* Pressure index */}
           {detail.pressureIndex && <PressureSection pressure={detail.pressureIndex} match={match} events={detail.events} statistics={detail.statistics} />}
 
@@ -2478,6 +2646,9 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
           {BETTING_CONTENT_ENABLED && detail.odds && detail.odds.length > 0 && (
             <MomiosSection odds={detail.odds} match={match} />
           )}
+
+          {/* MREC after poll results for live matches */}
+          {!isFinished && ADMOB_ENABLED && <MediumRectangleBannerAd />}
 
           {/* ── Cronología — for live matches (after stats) ── */}
           {!isFinished && hasEvents && <TimelineBlock />}

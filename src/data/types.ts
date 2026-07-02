@@ -40,6 +40,7 @@ export interface Match {
   homeRedCards?: number;  // number of players sent off (red/second-yellow)
   awayRedCards?: number;
   stateLabel?: string;    // "1T" | "HT" | "2T" | "ET" | "PEN" — live state
+  stateId?: number;       // raw SM state_id — used for DELAYED (16) and other pre-match states
   /** Server anchor for client-side live-clock extrapolation (only while ticking).
    *  Lets the UI advance the minute/seconds smoothly between 10-s poll updates
    *  instead of showing a frozen "41'" until the next server tick. */
@@ -196,8 +197,9 @@ export interface MatchVenue {
 export interface MatchReferee {
   id?: number;          // referee_id — used to link to extended stats/profile
   name: string;
-  nationality: string;
-  flag: string;
+  nationality: string;  // English country name from SM — localize via nationalityCode
+  nationalityCode?: string; // ISO2 (e.g. "HN") — feeds translateCountry + flag emoji
+  flag: string;         // flag emoji derived from the ISO2 code (else '👔')
   imageUrl?: string;    // referee photo from SM fixture include
 }
 

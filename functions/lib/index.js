@@ -7,9 +7,9 @@
  *
  * Functions:
  * - pollLivescores:   Every 1 min → 4 polls × 15s = real-time live scores
- * - syncFixtures:     Every 30 min → all matches for yesterday/today/tomorrow
+ * - syncFixtures:     Every 5 min → all matches for yesterday/today/tomorrow
  * - syncStandings:    Every 6 hours → league tables for all configured leagues
- * - syncTopScorers:   Every 12 hours → top scorers for all configured leagues
+ * - syncTopScorers:   Every 15 min → top scorers for all configured leagues
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -352,7 +352,7 @@ exports.syncStandings = (0, scheduler_1.onSchedule)({
  * Future improvement: switch to event-driven sync from pollLivescores matchEnd.
  */
 exports.syncTopScorers = (0, scheduler_1.onSchedule)({
-    schedule: 'every 1 hours',
+    schedule: 'every 15 minutes',
     timeoutSeconds: 540,
     memory: '256MiB',
     region: 'us-central1',
