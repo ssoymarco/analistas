@@ -34,7 +34,7 @@ import type {
   MatchActivityState,
 } from '../data/liveActivityContract';
 import type { Match, Team } from '../data/types';
-import { resolveMatchColors } from '../utils/teamColors';
+import { resolveMatchColors, teamFlagEmoji } from '../utils/teamColors';
 import { translateTeamName } from '../utils/nationalTeams';
 import { isImageUri } from '../utils/imageUri';
 
@@ -60,14 +60,15 @@ export function phaseFromMatch(match: Match): LiveActivityPhase {
 const TICKING: ReadonlySet<LiveActivityPhase> = new Set(['1H', '2H', 'ET']);
 
 function teamToContract(team: Team, colorHex: string) {
-  // flagEmoji solo si el "logo" es un emoji real (no URL, no placeholders).
+  // Bandera emoji: primero por código FIFA (selecciones — WidgetKit no baja
+  // imágenes, pero los emoji son texto); fallback al logo si ya es emoji.
   const logo = team.logo ?? '';
-  const isEmoji = !!logo && !isImageUri(logo) && logo !== '⚽' && logo !== '🕐';
+  const logoIsEmoji = !!logo && !isImageUri(logo) && logo !== '⚽' && logo !== '🕐';
   return {
     name: translateTeamName(team.name),
     shortName: team.shortName,
     colorHex,
-    flagEmoji: isEmoji ? logo : undefined,
+    flagEmoji: teamFlagEmoji(team.shortName) ?? (logoIsEmoji ? logo : undefined),
   };
 }
 

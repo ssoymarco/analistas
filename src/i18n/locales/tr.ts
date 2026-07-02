@@ -92,8 +92,8 @@ const tr: TranslationKeys = {
   },
 
   liveActivity: {
-    follow: 'Kilit ekranında takip et',
-    following: 'Kilit ekranında takip ediliyor',
+    follow: 'Skor kilit ekranında',
+    following: 'Skor kilit ekranında etkin',
   },
 
   notifications: {

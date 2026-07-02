@@ -95,8 +95,8 @@ const pt: TranslationKeys = {
   },
 
   liveActivity: {
-    follow: 'Acompanhar na tela de bloqueio',
-    following: 'Acompanhando na tela de bloqueio',
+    follow: 'Placar na sua tela de bloqueio',
+    following: 'Placar ativo na tela de bloqueio',
   },
 
   notifications: {

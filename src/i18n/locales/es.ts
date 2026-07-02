@@ -110,8 +110,8 @@ const es = {
   },
 
   liveActivity: {
-    follow: 'Seguir en pantalla de bloqueo',
-    following: 'Siguiendo en pantalla de bloqueo',
+    follow: 'Marcador en tu pantalla de bloqueo',
+    following: 'Marcador activo en pantalla de bloqueo',
   },
 
   notifications: {
