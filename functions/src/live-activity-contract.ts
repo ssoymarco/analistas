@@ -37,6 +37,8 @@ export interface MatchActivityState {
    *  fase no corre (pre/HT/PEN/FT). */
   periodStartedAt?: number;
   periodMinuteOffset?: number;
+  /** Unix seconds del kickoff — countdown del widget en phase 'pre'. */
+  kickoffAt?: number;
   lastEventText?: string;
 }
 

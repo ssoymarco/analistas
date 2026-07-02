@@ -31,6 +31,8 @@ struct MatchActivityAttributes: ActivityAttributes {
     var periodStartedAt: Double?
     /// 0 (1T) | 45 (2T) | 90 (TE1) | 105 (TE2)
     var periodMinuteOffset: Int?
+    /// Unix seconds del kickoff — countdown en phase 'pre'.
+    var kickoffAt: Double?
     /// "⚽ Oyarzabal 36'" — ya localizado por el app al enviarlo.
     var lastEventText: String?
   }
@@ -69,7 +71,7 @@ extension Color {
 
 private func phaseLabel(_ phase: String) -> String {
   switch phase {
-  case "pre":  return "POR COMENZAR"
+  case "pre":  return "EMPIEZA EN"
   case "1H":   return "1T"
   case "HT":   return "MT"
   case "2H":   return "2T"
@@ -116,25 +118,42 @@ struct PhaseTimeline: View {
 
   var body: some View {
     HStack(spacing: 4) {
-      Text(phaseLabel(state.phase))
-        .font(.caption2)
-        .fontWeight(.heavy)
-        .foregroundStyle(Color(red: 1.0, green: 0.27, blue: 0.23)) // live red
-
-      if phaseTicks(state.phase), let startedAt = state.periodStartedAt {
-        Text("·").font(.caption2).foregroundStyle(.white.opacity(0.5))
-        // Timer local del período — sin pushes por segundo. Rango generoso
-        // hacia adelante; el push de cambio de fase reemplaza el estado.
+      if state.phase == "pre", let kickoff = state.kickoffAt,
+         kickoff > Date().timeIntervalSince1970 {
+        // ── Previa: CUENTA REGRESIVA al kickoff (countsDown, local) ──────────
+        Text(phaseLabel("pre"))
+          .font(.caption2)
+          .fontWeight(.heavy)
+          .foregroundStyle(Color(red: 0.0, green: 0.88, blue: 0.59)) // accent
         Text(
-          timerInterval: Date(timeIntervalSince1970: startedAt)...Date(
-            timeIntervalSince1970: startedAt + 4 * 3600),
-          countsDown: false,
-          showsHours: false
+          timerInterval: Date()...Date(timeIntervalSince1970: kickoff),
+          countsDown: true
         )
         .font(.caption2.monospacedDigit())
         .fontWeight(.bold)
         .foregroundStyle(.white.opacity(0.85))
-        .frame(maxWidth: 44)
+        .frame(maxWidth: 64)
+      } else {
+        Text(phaseLabel(state.phase == "pre" ? "1H" : state.phase))
+          .font(.caption2)
+          .fontWeight(.heavy)
+          .foregroundStyle(Color(red: 1.0, green: 0.27, blue: 0.23)) // live red
+
+        if phaseTicks(state.phase), let startedAt = state.periodStartedAt {
+          Text("·").font(.caption2).foregroundStyle(.white.opacity(0.5))
+          // Timer local del período — sin pushes por segundo. Rango generoso
+          // hacia adelante; el push de cambio de fase reemplaza el estado.
+          Text(
+            timerInterval: Date(timeIntervalSince1970: startedAt)...Date(
+              timeIntervalSince1970: startedAt + 4 * 3600),
+            countsDown: false,
+            showsHours: false
+          )
+          .font(.caption2.monospacedDigit())
+          .fontWeight(.bold)
+          .foregroundStyle(.white.opacity(0.85))
+          .frame(maxWidth: 44)
+        }
       }
     }
   }
@@ -146,9 +165,10 @@ struct ScoreBlock: View {
   var big: Bool = true
 
   var body: some View {
-    Text("\(state.homeScore) – \(state.awayScore)")
+    // Previa: "VS" en lugar de un 0–0 engañoso.
+    Text(state.phase == "pre" ? "VS" : "\(state.homeScore) – \(state.awayScore)")
       .font(big ? .title.weight(.heavy) : .headline.weight(.heavy))
-      .foregroundStyle(.white)
+      .foregroundStyle(state.phase == "pre" ? .white.opacity(0.6) : .white)
       .monospacedDigit()
   }
 }

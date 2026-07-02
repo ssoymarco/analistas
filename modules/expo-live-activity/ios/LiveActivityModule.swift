@@ -31,6 +31,7 @@ struct MatchActivityAttributes: ActivityAttributes {
     var phase: String
     var periodStartedAt: Double?
     var periodMinuteOffset: Int?
+    var kickoffAt: Double?
     var lastEventText: String?
   }
 

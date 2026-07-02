@@ -24,6 +24,7 @@ import {
   areActivitiesEnabled,
   getActiveMatchIds,
   startMatchActivity,
+  updateMatchActivity,
   endMatchActivity,
   addPushTokenListener,
 } from '../../modules/expo-live-activity';
@@ -83,6 +84,24 @@ export function buildActivityAttributes(match: Match): MatchActivityAttributes {
   };
 }
 
+/** Kickoff en unix seconds desde startingAtUtc ("YYYY-MM-DD HH:MM:SS" UTC). */
+export function kickoffUnixSeconds(match: Match): number | undefined {
+  if (!match.startingAtUtc) return undefined;
+  const ms = new Date(match.startingAtUtc.replace(' ', 'T') + 'Z').getTime();
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
+}
+
+/** Ventana del botón: en vivo, o por comenzar dentro de ≤4 h (el presupuesto
+ *  de ~8 h de una Live Activity cubre previa + partido completo de sobra). */
+export function canFollowMatch(match: Match): boolean {
+  if (match.status === 'live') return true;
+  if (match.status !== 'scheduled') return false;
+  const kickoff = kickoffUnixSeconds(match);
+  if (!kickoff) return false;
+  const secsToKickoff = kickoff - Date.now() / 1000;
+  return secsToKickoff > -30 * 60 && secsToKickoff < 4 * 3600;
+}
+
 export function buildActivityState(match: Match): MatchActivityState {
   const phase = phaseFromMatch(match);
   const anchor = match.liveClock;
@@ -93,6 +112,7 @@ export function buildActivityState(match: Match): MatchActivityState {
     phase,
     periodStartedAt: ticks ? anchor!.periodStartedAt : undefined,
     periodMinuteOffset: ticks ? anchor!.periodMinuteOffset : undefined,
+    kickoffAt: phase === 'pre' ? kickoffUnixSeconds(match) : undefined,
   };
 }
 
@@ -110,6 +130,29 @@ export function useLiveActivity(match: Match) {
     if (!supported) return;
     setFollowing(getActiveMatchIds().includes(matchId));
   }, [supported, matchId]);
+
+  // Auto-sync en FOREGROUND: la pantalla del partido está suscrita a Firestore,
+  // así que `match` se refresca solo; si estamos siguiendo, replicamos cada
+  // cambio (pre→1H, gol, MT, FT…) a la Activity. Con la app CERRADA esto lo
+  // hará el push del backend (Fase 2). Al FT terminamos (marcador final visible
+  // 30 min más por la dismissal policy del módulo).
+  useEffect(() => {
+    if (!supported || !following) return;
+    if (match.status === 'finished') {
+      endMatchActivity(matchId, buildActivityState(match)).catch(() => {});
+      return;
+    }
+    updateMatchActivity(matchId, buildActivityState(match)).catch(() => {});
+  }, [
+    supported,
+    following,
+    matchId,
+    match.status,
+    match.stateLabel,
+    match.homeScore,
+    match.awayScore,
+    match.liveClock?.periodStartedAt,
+  ]);
 
   // Push token de la Activity → upsert del registro en Firestore. El token
   // puede llegar tarde o rotar, por eso el doc se upsertea con merge cada vez.

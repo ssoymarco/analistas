@@ -10,7 +10,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
-import { useLiveActivity } from '../hooks/useLiveActivity';
+import { useLiveActivity, canFollowMatch } from '../hooks/useLiveActivity';
 import { haptics } from '../utils/haptics';
 import type { Match } from '../data/types';
 
@@ -21,7 +21,8 @@ export const LiveActivityButton: React.FC<{ match: Match }> = ({ match }) => {
   const { t } = useTranslation();
   const { supported, following, start, end } = useLiveActivity(match);
 
-  if (!supported || match.status !== 'live') return null;
+  // En vivo, o por comenzar dentro de ≤4 h (previa con cuenta regresiva).
+  if (!supported || !canFollowMatch(match)) return null;
 
   const onPress = async () => {
     haptics.selection();
