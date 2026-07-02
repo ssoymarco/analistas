@@ -14,6 +14,7 @@ import { PredictionsCarousel, AIPredictionsSection } from './EnVivoTab';
 import { PlaceholderBannerAd } from '../../components/PlaceholderBannerAd';
 import AdMobBanner from '../../components/AdMobBanner';
 import MediumRectangleBannerAd from '../../components/MediumRectangleBannerAd';
+import { LiveActivityButton } from '../../components/LiveActivityButton';
 import { BETTING_CONTENT_ENABLED, ADMOB_ENABLED } from '../../config/features';
 import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupVenues';
 
@@ -514,6 +515,8 @@ export const PreviewTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
 }) => {
   return (
     <View style={styles.container}>
+      {/* Live Activity: seguir desde la previa (cuenta regresiva → marcador) */}
+      <LiveActivityButton match={match} />
       {/* User polls — interactive, most engaging first (free community poll, not gambling) */}
       <PredictionsCarousel match={match} />
       {/* AI predictions — gated: includes betting markets (Doble Oportunidad). Off for v1.0 (Apple 2.3.6) */}
