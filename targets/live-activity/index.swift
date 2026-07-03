@@ -211,12 +211,14 @@ struct PhaseTimeline: View {
           // Minuto ACUMULADO estilo 90'/120' (mismo formato que el app:
           // "102:59", no "2T 57:59") — anclado a periodStartedAt − offset.
           // showsHours:false mantiene los minutos corriendo más allá de 60.
-          // El rango TERMINA en tope nominal + 15' de stoppage máximo: si el
+          // El rango TERMINA en tope nominal + 25' de stoppage máximo: si el
           // push de cambio de fase no llegara, el timer se CONGELA ahí en vez
           // de correr al infinito (el "196:58" reportado por el dueño).
+          // 25' y no 15': el POR-CRO del 2 jul 2026 jugó 90+18 REALES — con
+          // +15 el paracaídas habría congelado el reloj en pleno agregado.
           let offsetMin = state.periodMinuteOffset ?? 0
           let anchor = startedAt - Double(offsetMin) * 60
-          let freezeAt = anchor + Double(periodNominalCap(offsetMin) + 15) * 60
+          let freezeAt = anchor + Double(periodNominalCap(offsetMin) + 25) * 60
           Text("·").font(.caption2).foregroundStyle(.white.opacity(0.5))
           Text(
             timerInterval: Date(timeIntervalSince1970: anchor)...Date(
