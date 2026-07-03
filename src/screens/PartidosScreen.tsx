@@ -24,6 +24,7 @@ import { CategoryTabs, type CategoryTab as PillTab } from '../components/Categor
  *  active tab (e.g. analytics, persisted state). */
 export type FilterTab = 'todos' | 'vivo' | 'finalizados' | 'proximos';
 import { LeagueSection } from '../components/LeagueSection';
+import { PromoBanner } from '../components/PromoBanner';
 import { CalendarPicker } from '../components/CalendarPicker';
 import { useFixtures } from '../hooks/useFixtures';
 import type { LeagueWithMatches } from '../services/sportsApi';
@@ -473,6 +474,10 @@ export const PartidosScreen: React.FC = () => {
 
             return (
               <>
+                {/* ── Banner promocional (interruptor remoto _meta/promoBanner).
+                    CTA → búsqueda global para seguir selecciones. ─────────── */}
+                <PromoBanner onPress={() => navigation.navigate('GlobalSearch')} />
+
                 {/* ── A. Mis equipos (cross-league highlight) ─────────────── */}
                 {hasPersonalization && myTeamMatches.length > 0 && (
                   <LeagueSection

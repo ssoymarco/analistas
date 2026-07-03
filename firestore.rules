@@ -180,6 +180,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /// _meta/promoBanner — interruptor remoto del banner promocional in-app
+    /// (Mundial etc.). Shape: { enabled: bool, id: string }. El cliente lo lee
+    /// al abrir Partidos; cambiar `id` re-muestra el banner a quien ya lo
+    /// descartó; `enabled:false` lo apaga sin OTA. Escritura solo por consola.
+    match /_meta/promoBanner {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // ── liveActivities/{regId} ──────────────────────────────────────────────────
     // Registro de tokens de Live Activity (doc id = `${matchId}_${uid}`).
     // El cliente crea/actualiza SU registro (incluye invitados — anonymous auth

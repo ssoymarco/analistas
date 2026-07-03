@@ -174,7 +174,26 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   // without re-creating the effect on every state change.
   const prefsRef = useRef<NotificationPrefs>(DEFAULT_PREFS);
   const uidRef   = useRef<string | null>(null);
+  const tokenRef = useRef<string | null>(null);
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
+  useEffect(() => { tokenRef.current = pushToken; }, [pushToken]);
+
+  /** Guarda el token FCM del dispositivo en users/{uid}.pushToken (solo
+   *  usuarios logueados). Habilita pushes dirigidos/masivos desde el backend —
+   *  la key ya estaba permitida en las rules pero NUNCA se escribía, por eso
+   *  el 3 jul 2026 no hubo forma de avisar a los usuarios afectados por el bug
+   *  de favoritos. Fire-and-forget con retry (ventana de creación del doc). */
+  const syncPushTokenToCloud = useCallback((token: string) => {
+    const uid = uidRef.current;
+    if (!uid) return;
+    const write = () =>
+      setDoc(doc(db, 'users', uid), { pushToken: token }, { merge: true });
+    write().catch(() => {
+      setTimeout(() => {
+        write().catch(e2 => captureFirestoreRejection('pushToken.persist', e2));
+      }, 2500);
+    });
+  }, []);
 
   /** Persist the full prefs object to Firestore under users/{uid}.notificationPrefs.
    *  Fire-and-forget — UI must never block on cloud sync. */
@@ -284,6 +303,9 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
           // setup survives a reinstall / cross-device sign-in.
           syncPrefsToCloud(prefsRef.current);
         }
+        // El token puede haberse obtenido ANTES del sign-in (arranque como
+        // invitado) — subirlo ahora que hay uid.
+        if (tokenRef.current) syncPushTokenToCloud(tokenRef.current);
       } catch {/* offline — keep local prefs */}
     });
     return unsub;
@@ -412,10 +434,14 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
 
   const setPushToken = useCallback((token: string | null) => {
     setPushTokenState(token);
+    tokenRef.current = token;
     // AsyncStorage persistence is handled by requestPermissionsAndGetToken in the service.
     // This setter just syncs reactive state so components can read the token.
-    if (token) AsyncStorage.setItem(PUSH_TOKEN_KEY, token).catch(() => {});
-  }, []);
+    if (token) {
+      AsyncStorage.setItem(PUSH_TOKEN_KEY, token).catch(() => {});
+      syncPushTokenToCloud(token);
+    }
+  }, [syncPushTokenToCloud]);
 
   const setPermissionStatus = useCallback((status: 'undetermined' | 'granted' | 'denied') => {
     setPermissionStatusState(status);

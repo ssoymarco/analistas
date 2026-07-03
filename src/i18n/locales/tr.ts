@@ -98,6 +98,12 @@ const tr: TranslationKeys = {
     channelName: 'Canlı skor',
   },
 
+  promoBanner: {
+    title: 'Dünya Kupası son 32 turu başlıyor!',
+    body: 'Favori millî takımlarını takip et; goller, kadrolar ve sonuçlar sana gelsin.',
+    cta: 'Takımlarımı takip et',
+  },
+
   notifications: {
     title: 'Bildirimler',
     introTitle: 'Seni neyin böleceğine sen karar ver',

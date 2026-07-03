@@ -101,6 +101,12 @@ const pt: TranslationKeys = {
     channelName: 'Placar ao vivo',
   },
 
+  promoBanner: {
+    title: 'Começam os dezesseis avos da Copa!',
+    body: 'Siga suas seleções favoritas para receber gols, escalações e resultados.',
+    cta: 'Seguir minhas seleções',
+  },
+
   notifications: {
     title: 'Notificações',
     introTitle: 'Você decide o que te interrompe',

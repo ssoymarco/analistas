@@ -101,6 +101,12 @@ const it: TranslationKeys = {
     channelName: 'Punteggio in diretta',
   },
 
+  promoBanner: {
+    title: 'Iniziano i sedicesimi del Mondiale!',
+    body: 'Segui le tue nazionali preferite per ricevere gol, formazioni e risultati.',
+    cta: 'Segui le mie squadre',
+  },
+
   notifications: {
     title: 'Notifiche',
     introTitle: 'Decidi tu cosa ti interrompe',

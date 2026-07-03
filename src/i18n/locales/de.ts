@@ -101,6 +101,12 @@ const de: TranslationKeys = {
     channelName: 'Live-Spielstand',
   },
 
+  promoBanner: {
+    title: 'Das WM-Sechzehntelfinale beginnt!',
+    body: 'Folge deinen Lieblings-Nationalteams, um ihre Tore, Aufstellungen und Ergebnisse zu erhalten.',
+    cta: 'Meinen Teams folgen',
+  },
+
   notifications: {
     title: 'Benachrichtigungen',
     introTitle: 'Du entscheidest, was dich unterbricht',

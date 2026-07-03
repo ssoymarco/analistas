@@ -108,6 +108,12 @@ const en: TranslationKeys = {
     channelName: 'Live score',
   },
 
+  promoBanner: {
+    title: 'The World Cup Round of 32 is here!',
+    body: 'Make sure you follow your favorite national teams to get their goals, lineups and results.',
+    cta: 'Follow my teams',
+  },
+
   notifications: {
     title: 'Notifications',
     introTitle: 'You decide what interrupts you',

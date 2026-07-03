@@ -101,6 +101,12 @@ const fr: TranslationKeys = {
     channelName: 'Score en direct',
   },
 
+  promoBanner: {
+    title: 'Les seizièmes de finale du Mondial commencent !',
+    body: 'Suivez vos sélections favorites pour recevoir leurs buts, compositions et résultats.',
+    cta: 'Suivre mes équipes',
+  },
+
   notifications: {
     title: 'Notifications',
     introTitle: 'À toi de décider ce qui te dérange',

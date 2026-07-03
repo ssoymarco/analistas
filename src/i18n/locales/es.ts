@@ -116,6 +116,12 @@ const es = {
     channelName: 'Marcador en vivo',
   },
 
+  promoBanner: {
+    title: '¡Arrancan los dieciseisavos del Mundial!',
+    body: 'Asegúrate de seguir a tus selecciones favoritas para recibir sus goles, alineaciones y resultados.',
+    cta: 'Seguir a mis selecciones',
+  },
+
   notifications: {
     title: 'Notificaciones',
     introTitle: 'Tú decides qué te interrumpe',
