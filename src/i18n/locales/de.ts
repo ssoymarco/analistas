@@ -98,6 +98,7 @@ const de: TranslationKeys = {
     title: 'Spielstand auf dem Sperrbildschirm',
     on: 'Aktiviert',
     off: 'Deaktiviert',
+    channelName: 'Live-Spielstand',
   },
 
   notifications: {

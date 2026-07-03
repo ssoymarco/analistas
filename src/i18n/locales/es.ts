@@ -113,6 +113,7 @@ const es = {
     title: 'Marcador en tu pantalla de bloqueo',
     on: 'Activado',
     off: 'Desactivado',
+    channelName: 'Marcador en vivo',
   },
 
   notifications: {

@@ -98,6 +98,7 @@ const fr: TranslationKeys = {
     title: "Score en direct sur l'écran verrouillé",
     on: 'Activé',
     off: 'Désactivé',
+    channelName: 'Score en direct',
   },
 
   notifications: {

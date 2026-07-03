@@ -15,9 +15,17 @@
 // y el botón nunca se renderiza.
 
 import { useCallback, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { getSavedFCMToken } from '../services/fcmInit';
+import {
+  isAndroidLiveScoreSupported,
+  showOrUpdateLiveScore,
+  cancelLiveScore,
+  isLiveScoreDisplayed,
+  type LiveScoreAttributes,
+} from '../services/liveScoreNotification';
 import {
   isLiveActivitySupported,
   areActivitiesEnabled,
@@ -103,6 +111,25 @@ export function canFollowMatch(match: Match): boolean {
   return secsToKickoff > -30 * 60 && secsToKickoff < 4 * 3600;
 }
 
+/** Attributes para la notificación Android (subset con logos URL — la
+ *  notificación sí puede cargar imágenes remotas, a diferencia de WidgetKit). */
+export function buildLiveScoreAttributes(match: Match): LiveScoreAttributes {
+  return {
+    matchId: String(match.id),
+    home: {
+      name: match.homeTeam.name,
+      shortName: match.homeTeam.shortName,
+      logo: match.homeTeam.logo,
+    },
+    away: {
+      name: match.awayTeam.name,
+      shortName: match.awayTeam.shortName,
+      logo: match.awayTeam.logo,
+    },
+    leagueName: match.league,
+  };
+}
+
 export function buildActivityState(match: Match): MatchActivityState {
   const phase = phaseFromMatch(match);
   const anchor = match.liveClock;
@@ -128,13 +155,25 @@ export function useLiveActivity(match: Match) {
   // registro remoto (la Activity funciona local igualmente).
   const uid = auth.currentUser?.uid ?? null;
 
-  const supported = isLiveActivitySupported();
+  // iOS → ActivityKit (Live Activity real). Android → notificación ongoing
+  // con cronómetro (notifee). Ambos requieren binario 1.4.0+ (guards OTA).
+  const supported =
+    Platform.OS === 'ios' ? isLiveActivitySupported() : isAndroidLiveScoreSupported();
   const [following, setFollowing] = useState(false);
 
-  // Estado inicial desde ActivityKit (persiste entre reinicios del app).
+  // Estado inicial (persiste entre reinicios del app): iOS pregunta a
+  // ActivityKit; Android busca la notificación desplegada.
   useEffect(() => {
     if (!supported) return;
-    setFollowing(getActiveMatchIds().includes(matchId));
+    if (Platform.OS === 'ios') {
+      setFollowing(getActiveMatchIds().includes(matchId));
+      return;
+    }
+    let alive = true;
+    isLiveScoreDisplayed(matchId).then(shown => {
+      if (alive) setFollowing(shown);
+    });
+    return () => { alive = false; };
   }, [supported, matchId]);
 
   // Auto-sync en FOREGROUND: la pantalla del partido está suscrita a Firestore,
@@ -144,8 +183,17 @@ export function useLiveActivity(match: Match) {
   // 30 min más por la dismissal policy del módulo).
   useEffect(() => {
     if (!supported || !following) return;
+    if (Platform.OS === 'android') {
+      // Android: la notificación se actualiza con el mismo estado; en FT el
+      // servicio la vuelve descartable (equivalente del linger de iOS).
+      showOrUpdateLiveScore(
+        buildLiveScoreAttributes(match),
+        buildActivityState(match),
+      ).catch(() => {});
+      return;
+    }
     if (match.status === 'finished') {
-      // Fin natural: dejar el marcador final visible un rato (linger 30 min).
+      // Fin natural: dejar el marcador final visible un rato (linger 10 min).
       endMatchActivity(matchId, buildActivityState(match), false).catch(() => {});
       return;
     }
@@ -163,8 +211,9 @@ export function useLiveActivity(match: Match) {
 
   // Push token de la Activity → upsert del registro en Firestore. El token
   // puede llegar tarde o rotar, por eso el doc se upsertea con merge cada vez.
+  // Solo iOS: en Android el único token es el FCM del device (va en start()).
   useEffect(() => {
-    if (!supported) return;
+    if (!supported || Platform.OS !== 'ios') return;
     const sub = addPushTokenListener(async ({ matchId: tokenMatchId, token }) => {
       if (tokenMatchId !== matchId || !uid) return;
       try {
@@ -181,11 +230,45 @@ export function useLiveActivity(match: Match) {
     return () => sub.remove();
   }, [supported, matchId, uid]);
 
-  const start = useCallback(async (): Promise<boolean> => {
-    if (!supported || !areActivitiesEnabled()) return false;
+  /** Registro en Firestore para los pushes con app cerrada (ambas plataformas). */
+  const registerForRemoteUpdates = useCallback(async (platform: 'ios' | 'android') => {
     try {
-      const attrs = buildActivityAttributes(match);
+      if (!uid) return;
+      const fcmToken = await getSavedFCMToken();
+      await setDoc(
+        doc(db, 'liveActivities', `${matchId}_${uid}`),
+        {
+          fcmToken: fcmToken ?? null,
+          matchId,
+          platform,
+          userId: uid,
+          createdAt: serverTimestamp(),
+          ended: false,
+        },
+        { merge: true },
+      );
+    } catch {
+      // Best-effort: sin registro remoto el marcador sigue vivo localmente
+      // (solo no recibiría updates con el app cerrada).
+    }
+  }, [matchId, uid]);
+
+  const start = useCallback(async (): Promise<boolean> => {
+    if (!supported) return false;
+    try {
       const state = buildActivityState(match);
+
+      // ── ANDROID: notificación ongoing con cronómetro ──
+      if (Platform.OS === 'android') {
+        await showOrUpdateLiveScore(buildLiveScoreAttributes(match), state);
+        setFollowing(true);
+        await registerForRemoteUpdates('android');
+        return true;
+      }
+
+      // ── iOS: Live Activity (ActivityKit) ──
+      if (!areActivitiesEnabled()) return false;
+      const attrs = buildActivityAttributes(match);
 
       // Escudos reales (clubes y selecciones con crest URL): descargarlos al
       // App Group ANTES de iniciar, para que el widget ya los encuentre en el
@@ -199,38 +282,24 @@ export function useLiveActivity(match: Match) {
       const activityId = await startMatchActivity(attrs, state);
       if (!activityId) return false;
       setFollowing(true);
-
-      // Registro base (el activityPushToken llega por el listener).
-      try {
-        if (uid) {
-          const fcmToken = await getSavedFCMToken();
-          await setDoc(
-            doc(db, 'liveActivities', `${matchId}_${uid}`),
-            {
-              fcmToken: fcmToken ?? null,
-              matchId,
-              platform: 'ios',
-              userId: uid,
-              createdAt: serverTimestamp(),
-              ended: false,
-            },
-            { merge: true },
-          );
-        }
-      } catch {
-        // Best-effort (ver arriba).
-      }
+      // El activityPushToken llega por el listener; el registro base va ya.
+      await registerForRemoteUpdates('ios');
       return true;
     } catch {
       return false;
     }
-  }, [supported, match, matchId, uid]);
+  }, [supported, match, matchId, registerForRemoteUpdates]);
 
   const end = useCallback(async () => {
     try {
-      // Toggle manual del usuario → la Activity desaparece AL INSTANTE de
-      // lock screen e Isla (immediate), no linger.
-      await endMatchActivity(matchId, buildActivityState(match), true);
+      if (Platform.OS === 'android') {
+        // Toggle manual → la notificación se retira al instante.
+        await cancelLiveScore(matchId);
+      } else {
+        // Toggle manual del usuario → la Activity desaparece AL INSTANTE de
+        // lock screen e Isla (immediate), no linger.
+        await endMatchActivity(matchId, buildActivityState(match), true);
+      }
     } catch {}
     setFollowing(false);
     try {

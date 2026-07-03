@@ -171,15 +171,33 @@ async function sendIos(reg, state, isEnd, alert) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await admin_init_1.admin.messaging().send(message);
 }
-async function sendAndroid(reg, state, isEnd) {
+async function sendAndroid(reg, state, isEnd, match) {
     if (!reg.fcmToken)
         return;
+    // `attributes` viaja en CADA data message: el handler headless de Android
+    // pinta la notificación sin depender de estado local (la app puede llevar
+    // horas muerta cuando llega el push). Espejo de MatchActivityAttributes.
+    const attributes = {
+        matchId: reg.matchId,
+        home: {
+            name: match.homeTeam?.name ?? '',
+            shortName: match.homeTeam?.shortName ?? '',
+            logo: match.homeTeam?.logo ?? '',
+        },
+        away: {
+            name: match.awayTeam?.name ?? '',
+            shortName: match.awayTeam?.shortName ?? '',
+            logo: match.awayTeam?.logo ?? '',
+        },
+        leagueName: match.league ?? '',
+    };
     await admin_init_1.admin.messaging().send({
         token: reg.fcmToken,
         data: {
             type: isEnd ? 'live_activity_end' : 'live_activity_update',
             matchId: reg.matchId,
             state: JSON.stringify(state),
+            attributes: JSON.stringify(attributes),
         },
         android: { priority: 'high' },
     });
@@ -229,7 +247,7 @@ async function sendLiveActivityUpdates(matchDocs) {
                     await sendIos(data, state, isEnd, alertForTransition(data.lastState, state, match));
                 }
                 else {
-                    await sendAndroid(data, state, isEnd);
+                    await sendAndroid(data, state, isEnd, match);
                 }
                 sent++;
                 await ref.set({ lastState: key, ...(isEnd ? { ended: true } : {}) }, { merge: true });

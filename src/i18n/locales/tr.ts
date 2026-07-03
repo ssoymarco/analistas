@@ -95,6 +95,7 @@ const tr: TranslationKeys = {
     title: 'Skor kilit ekranında',
     on: 'Açık',
     off: 'Kapalı',
+    channelName: 'Canlı skor',
   },
 
   notifications: {

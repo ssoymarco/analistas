@@ -105,6 +105,7 @@ const en: TranslationKeys = {
     title: 'Live score on your lock screen',
     on: 'On',
     off: 'Off',
+    channelName: 'Live score',
   },
 
   notifications: {

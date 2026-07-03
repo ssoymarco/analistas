@@ -98,6 +98,7 @@ const pt: TranslationKeys = {
     title: 'Placar na sua tela de bloqueio',
     on: 'Ativado',
     off: 'Desativado',
+    channelName: 'Placar ao vivo',
   },
 
   notifications: {

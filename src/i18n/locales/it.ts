@@ -98,6 +98,7 @@ const it: TranslationKeys = {
     title: 'Punteggio nella schermata di blocco',
     on: 'Attivo',
     off: 'Disattivato',
+    channelName: 'Punteggio in diretta',
   },
 
   notifications: {
