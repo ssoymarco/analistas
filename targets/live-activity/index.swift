@@ -120,32 +120,38 @@ func crestImage(matchId: String, side: String) -> UIImage? {
 }
 
 /// Columna de equipo. Prioridad visual: escudo real (App Group) → bandera
-/// emoji → punto del color del equipo. Siempre con el código corto debajo.
+/// emoji → punto del color del equipo. `fullName` (lock screen, hay espacio)
+/// muestra el nombre completo traducido; si no, el código corto.
 struct TeamBlock: View {
   let team: MatchActivityAttributes.TeamInfo
   let matchId: String
   /// "home" | "away" — clave del archivo de escudo.
   let side: String
   var compact: Bool = false
+  var fullName: Bool = false
 
   var body: some View {
-    VStack(spacing: compact ? 0 : 2) {
+    VStack(spacing: compact ? 0 : 3) {
       if let crest = crestImage(matchId: matchId, side: side) {
         Image(uiImage: crest)
           .resizable()
           .scaledToFit()
-          .frame(width: compact ? 16 : 26, height: compact ? 16 : 26)
+          .frame(width: compact ? 16 : 34, height: compact ? 16 : 34)
+          .clipShape(RoundedRectangle(cornerRadius: 4))
       } else if let flag = team.flagEmoji, !flag.isEmpty {
-        Text(flag).font(compact ? .body : .title2)
+        Text(flag).font(compact ? .body : .system(size: 32))
       } else {
         Circle()
           .fill(Color(hex: team.colorHex))
-          .frame(width: compact ? 12 : 18, height: compact ? 12 : 18)
+          .frame(width: compact ? 12 : 22, height: compact ? 12 : 22)
       }
-      Text(team.shortName)
+      Text(fullName ? team.name : team.shortName)
         .font(compact ? .caption2 : .caption)
         .fontWeight(.bold)
         .foregroundStyle(.white.opacity(0.9))
+        .lineLimit(1)
+        .minimumScaleFactor(0.65)
+        .frame(maxWidth: fullName ? 100 : 60)
     }
   }
 }
@@ -263,16 +269,18 @@ struct LockScreenView: View {
         .foregroundStyle(.white.opacity(0.45))
 
       HStack {
-        TeamBlock(team: context.attributes.home, matchId: context.attributes.matchId, side: "home")
+        TeamBlock(team: context.attributes.home, matchId: context.attributes.matchId,
+                  side: "home", fullName: true)
         Spacer()
         VStack(spacing: 3) {
           ScoreBlock(state: context.state)
           PhaseTimeline(state: context.state)
         }
         Spacer()
-        TeamBlock(team: context.attributes.away, matchId: context.attributes.matchId, side: "away")
+        TeamBlock(team: context.attributes.away, matchId: context.attributes.matchId,
+                  side: "away", fullName: true)
       }
-      .padding(.horizontal, 18)
+      .padding(.horizontal, 14)
 
       if let event = context.state.lastEventText, !event.isEmpty {
         Text(event)
@@ -297,12 +305,16 @@ struct MatchLiveActivity: Widget {
     } dynamicIsland: { context in
       DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
+          // Alineado hacia el CENTRO (junto al marcador) — pegados a los
+          // bordes se veían "muy separados" (feedback dueño).
           TeamBlock(team: context.attributes.home, matchId: context.attributes.matchId, side: "home")
-            .padding(.leading, 6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            .padding(.trailing, 6)
         }
         DynamicIslandExpandedRegion(.trailing) {
           TeamBlock(team: context.attributes.away, matchId: context.attributes.matchId, side: "away")
-            .padding(.trailing, 6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .padding(.leading, 6)
         }
         DynamicIslandExpandedRegion(.center) {
           VStack(spacing: 3) {
