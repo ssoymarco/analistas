@@ -16,13 +16,17 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { getSavedFCMToken } from '../services/fcmInit';
 import {
   isAndroidLiveScoreSupported,
+  requestLiveScorePermission,
   showOrUpdateLiveScore,
   cancelLiveScore,
+  clearCanceledMarker,
   isLiveScoreDisplayed,
   type LiveScoreAttributes,
 } from '../services/liveScoreNotification';
@@ -66,6 +70,52 @@ export function phaseFromMatch(match: Match): LiveActivityPhase {
 }
 
 const TICKING: ReadonlySet<LiveActivityPhase> = new Set(['1H', '2H', 'ET']);
+
+/** uid al MOMENTO de la acción, esperando (acotado) la restauración de sesión.
+ *  En arranque en frío auth.currentUser puede ser null unos segundos aunque
+ *  haya sesión (anónima o real) — sin esto, un tap temprano en "Seguir"
+ *  mostraba el marcador pero jamás creaba el registro remoto (UI viva pero
+ *  congelada con la app cerrada). */
+function getUidEventually(timeoutMs = 8000): Promise<string | null> {
+  const now = auth.currentUser?.uid;
+  if (now) return Promise.resolve(now);
+  return new Promise(resolve => {
+    const timer = setTimeout(() => { unsub(); resolve(null); }, timeoutMs);
+    const unsub = onAuthStateChanged(auth, user => {
+      if (user) { clearTimeout(timer); unsub(); resolve(user.uid); }
+    });
+  });
+}
+
+/** Id estable por INSTALACIÓN — el doc de registro es matchId_uid_deviceId.
+ *  Sin el sufijo, dos dispositivos del mismo usuario siguiendo el mismo
+ *  partido se robaban los tokens entre sí (el último write ganaba y el otro
+ *  dispositivo dejaba de recibir updates). */
+let cachedDeviceId: string | null = null;
+async function getDeviceId(): Promise<string> {
+  if (cachedDeviceId) return cachedDeviceId;
+  const KEY = 'liveActivity.deviceId';
+  try {
+    let id = await AsyncStorage.getItem(KEY);
+    if (!id) {
+      id = Math.random().toString(36).slice(2, 10);
+      await AsyncStorage.setItem(KEY, id);
+    }
+    cachedDeviceId = id;
+    return id;
+  } catch {
+    cachedDeviceId = 'dev0';
+    return cachedDeviceId;
+  }
+}
+
+/** Ruta del doc de registro para este usuario+dispositivo. null sin sesión. */
+async function registrationRef(matchId: string) {
+  const uid = await getUidEventually();
+  if (!uid) return null;
+  const deviceId = await getDeviceId();
+  return { ref: doc(db, 'liveActivities', `${matchId}_${uid}_${deviceId}`), uid };
+}
 
 function teamToContract(team: Team, colorHex: string) {
   // Bandera emoji: primero por código FIFA (selecciones — WidgetKit no baja
@@ -150,10 +200,6 @@ export function buildActivityState(match: Match): MatchActivityState {
 
 export function useLiveActivity(match: Match) {
   const matchId = String(match.id);
-  // uid REAL de Firebase Auth — los invitados también lo tienen (anonymous
-  // auth). Las reglas exigen userId == request.auth.uid; sin uid no hay
-  // registro remoto (la Activity funciona local igualmente).
-  const uid = auth.currentUser?.uid ?? null;
 
   // iOS → ActivityKit (Live Activity real). Android → notificación ongoing
   // con cronómetro (notifee). Ambos requieren binario 1.4.0+ (guards OTA).
@@ -206,6 +252,9 @@ export function useLiveActivity(match: Match) {
     match.stateLabel,
     match.homeScore,
     match.awayScore,
+    // Penales: sin estas deps la tanda no se replicaba por el path local.
+    match.homePenScore,
+    match.awayPenScore,
     match.liveClock?.periodStartedAt,
   ]);
 
@@ -215,11 +264,21 @@ export function useLiveActivity(match: Match) {
   useEffect(() => {
     if (!supported || Platform.OS !== 'ios') return;
     const sub = addPushTokenListener(async ({ matchId: tokenMatchId, token }) => {
-      if (tokenMatchId !== matchId || !uid) return;
+      if (tokenMatchId !== matchId) return;
       try {
+        // uid al momento del evento (el token inicial puede llegar dentro de
+        // la ventana de arranque en frío, antes de que la sesión restaure).
+        const reg = await registrationRef(tokenMatchId);
+        if (!reg) return;
         await setDoc(
-          doc(db, 'liveActivities', `${tokenMatchId}_${uid}`),
-          { activityPushToken: token, userId: uid, matchId: tokenMatchId },
+          reg.ref,
+          {
+            activityPushToken: token,
+            userId: reg.uid,
+            matchId: tokenMatchId,
+            platform: 'ios',
+            ended: false,
+          },
           { merge: true },
         );
       } catch {
@@ -228,20 +287,23 @@ export function useLiveActivity(match: Match) {
       }
     });
     return () => sub.remove();
-  }, [supported, matchId, uid]);
+  }, [supported, matchId]);
 
-  /** Registro en Firestore para los pushes con app cerrada (ambas plataformas). */
+  /** Registro en Firestore para los pushes con app cerrada (ambas plataformas).
+   *  uid al momento de la llamada (espera acotada de la sesión) + doc por
+   *  dispositivo — ver getUidEventually/getDeviceId arriba. */
   const registerForRemoteUpdates = useCallback(async (platform: 'ios' | 'android') => {
     try {
-      if (!uid) return;
+      const reg = await registrationRef(matchId);
+      if (!reg) return;
       const fcmToken = await getSavedFCMToken();
       await setDoc(
-        doc(db, 'liveActivities', `${matchId}_${uid}`),
+        reg.ref,
         {
           fcmToken: fcmToken ?? null,
           matchId,
           platform,
-          userId: uid,
+          userId: reg.uid,
           createdAt: serverTimestamp(),
           ended: false,
         },
@@ -251,7 +313,7 @@ export function useLiveActivity(match: Match) {
       // Best-effort: sin registro remoto el marcador sigue vivo localmente
       // (solo no recibiría updates con el app cerrada).
     }
-  }, [matchId, uid]);
+  }, [matchId]);
 
   const start = useCallback(async (): Promise<boolean> => {
     if (!supported) return false;
@@ -260,9 +322,17 @@ export function useLiveActivity(match: Match) {
 
       // ── ANDROID: notificación ongoing con cronómetro ──
       if (Platform.OS === 'android') {
+        // Android 13+: sin permiso de notificaciones no hay marcador — pedirlo
+        // (no-op si ya está concedido); negado → botón regresa a Desactivado.
+        const granted = await requestLiveScorePermission();
+        if (!granted) return false;
+        // Re-follow: volver a aceptar pushes remotos de este partido.
+        await clearCanceledMarker(matchId);
         await showOrUpdateLiveScore(buildLiveScoreAttributes(match), state);
         setFollowing(true);
-        await registerForRemoteUpdates('android');
+        // Fire-and-forget: el registro espera (acotado) la sesión en cold
+        // start; no bloquear el botón por ello.
+        registerForRemoteUpdates('android').catch(() => {});
         return true;
       }
 
@@ -282,8 +352,9 @@ export function useLiveActivity(match: Match) {
       const activityId = await startMatchActivity(attrs, state);
       if (!activityId) return false;
       setFollowing(true);
-      // El activityPushToken llega por el listener; el registro base va ya.
-      await registerForRemoteUpdates('ios');
+      // El activityPushToken llega por el listener; el registro base va
+      // fire-and-forget (espera acotada de sesión en cold start).
+      registerForRemoteUpdates('ios').catch(() => {});
       return true;
     } catch {
       return false;
@@ -303,15 +374,16 @@ export function useLiveActivity(match: Match) {
     } catch {}
     setFollowing(false);
     try {
-      if (uid) {
+      const reg = await registrationRef(matchId);
+      if (reg) {
         await setDoc(
-          doc(db, 'liveActivities', `${matchId}_${uid}`),
-          { ended: true, userId: uid, matchId },
+          reg.ref,
+          { ended: true, userId: reg.uid, matchId },
           { merge: true },
         );
       }
     } catch {}
-  }, [matchId, match, uid]);
+  }, [matchId, match]);
 
   return { supported, following, start, end };
 }

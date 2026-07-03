@@ -13,31 +13,24 @@ try {
   const { Platform } = require('react-native');
   if (Platform.OS === 'android') {
     const messaging = require('@react-native-firebase/messaging').default;
-    messaging().setBackgroundMessageHandler(async (remoteMessage: {
-      data?: Record<string, string>;
-    }) => {
+    const dispatch = async (remoteMessage: { data?: Record<string, string> }) => {
       try {
         const data = remoteMessage?.data;
         if (!data?.type?.startsWith('live_activity_')) return; // no es nuestro
         const {
-          showOrUpdateLiveScore,
-          cancelLiveScore,
+          handleLiveScoreDataMessage,
         } = require('./src/services/liveScoreNotification');
-        if (data.type === 'live_activity_update' && data.attributes && data.state) {
-          await showOrUpdateLiveScore(JSON.parse(data.attributes), JSON.parse(data.state));
-        } else if (data.type === 'live_activity_end') {
-          // El 'end' llega CON estado final → mostrar FINAL descartable
-          // (equivalente del linger de iOS); sin estado → retirar sin más.
-          if (data.attributes && data.state) {
-            await showOrUpdateLiveScore(JSON.parse(data.attributes), JSON.parse(data.state));
-          } else if (data.matchId) {
-            await cancelLiveScore(data.matchId);
-          }
-        }
+        await handleLiveScoreDataMessage(data);
       } catch {
-        // swallow — headless no debe crashear por un payload inesperado
+        // swallow — jamás crashear por un payload inesperado
       }
-    });
+    };
+    // App cerrada / en background → headless.
+    messaging().setBackgroundMessageHandler(dispatch);
+    // App en FOREGROUND pero en otra pantalla: el hook solo vive en la
+    // pantalla del partido — sin esto, la notificación se congelaba mientras
+    // el usuario navegaba en el resto del app.
+    messaging().onMessage(dispatch);
   }
 } catch {
   // messaging ausente/instalación parcial — arrancar el app igual

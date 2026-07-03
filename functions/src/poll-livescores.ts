@@ -51,8 +51,16 @@ async function executeSinglePoll(pollIndex: number): Promise<number> {
   //     We only add each match once (live matches take precedence if somehow
   //     both appear).
   try {
-    const nowIso  = new Date(startMs).toISOString();
-    const soonIso = new Date(startMs + 20 * 60 * 1000).toISOString();
+    // ⚠️ startingAtUtc se guarda en formato SM "YYYY-MM-DD HH:MM:SS" (espacio,
+    // sin sufijo). Los bounds DEBEN usar el mismo formato: un ISO con 'T'
+    // ordena lexicográficamente DESPUÉS del espacio (0x20 < 0x54), así que
+    // `startingAtUtc >= nowISO` jamás matcheaba partidos del mismo día — los
+    // recordatorios pre-partido y la fase 'pre' de Live Activities nunca
+    // recibían candidatos. (Hallazgo de la revisión adversarial, 3 jul 2026.)
+    const toSmUtc = (ms: number) =>
+      new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+    const nowIso  = toSmUtc(startMs);
+    const soonIso = toSmUtc(startMs + 20 * 60 * 1000);
     const liveIds = new Set(matchDocs.map(m => m.id));
     const upcomingSnap = await db.collection('matches')
       .where('status', '==', 'scheduled')

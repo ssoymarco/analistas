@@ -109,22 +109,28 @@ function stateKey(s) {
     ]);
 }
 // ── Alert (vibración/pantalla) por transición ─────────────────────────────────
-// Cada push ES un cambio real (dedup) → todos llevan alert para que el iPhone
-// vibre/encienda pantalla en gol, MT, 2T, penales y final (petición del dueño).
-// El estado previo viene del lastState guardado (mismo formato de stateKey).
+// Los push de TRANSICIÓN real llevan alert para que el iPhone vibre/encienda
+// pantalla en gol, MT, 2T, penales y final (petición del dueño). Devuelve null
+// (sin alert) en: (a) el PRIMER push de un registro — es solo sincronización
+// inicial, no un evento; (b) la fase 'pre' — no hay nada que anunciar antes
+// del kickoff. El estado previo viene del lastState (formato de stateKey).
 function alertForTransition(prevKey, s, m) {
-    const score = `${m.homeTeam?.shortName ?? ''} ${s.homeScore} - ${s.awayScore} ${m.awayTeam?.shortName ?? ''}`;
     let prev = null;
     try {
         const arr = prevKey ? JSON.parse(prevKey) : null;
         if (Array.isArray(arr))
             prev = [Number(arr[0]), Number(arr[1]), String(arr[2])];
     }
-    catch { /* primer push del registro */ }
-    if (prev && (s.homeScore > prev[0] || s.awayScore > prev[1])) {
+    catch { /* lastState ilegible → tratar como primer push */ }
+    if (!prev)
+        return null; // sync inicial: silencioso
+    if (s.phase === 'pre')
+        return null; // previa: nada que anunciar
+    const score = `${m.homeTeam?.shortName ?? ''} ${s.homeScore} - ${s.awayScore} ${m.awayTeam?.shortName ?? ''}`;
+    if (s.homeScore > prev[0] || s.awayScore > prev[1]) {
         return { title: '⚽ ¡GOOOL!', body: score };
     }
-    if (prev && (s.homeScore < prev[0] || s.awayScore < prev[1])) {
+    if (s.homeScore < prev[0] || s.awayScore < prev[1]) {
         return { title: 'Gol anulado', body: score }; // VAR / corrección de SM
     }
     switch (s.phase) {
@@ -138,21 +144,27 @@ function alertForTransition(prevKey, s, m) {
                 ? ` (${s.penHome}-${s.penAway} pen)` : '';
             return { title: 'Final del partido', body: score + pens };
         }
-        default: return { title: 'Partido en vivo', body: score };
+        // Cambio de anchor sin cambio de fase/marcador (raro): sin alert.
+        default: return null;
     }
 }
+/** @returns true solo si hubo entrega real a FCM (false = sin token aún —
+ *  el caller NO debe estampar lastState, para que el próximo poll reintente
+ *  y haga catch-up en cuanto el token llegue). */
 async function sendIos(reg, state, isEnd, alert) {
     if (!reg.fcmToken || !reg.activityPushToken)
-        return; // token de Activity aún no llega
+        return false; // token aún no llega
     const nowSec = Math.floor(Date.now() / 1000);
     const aps = {
         timestamp: nowSec,
         event: isEnd ? 'end' : 'update',
         'content-state': state,
-        // Alert = la Activity "avisa": vibración + pantalla encendida en el
-        // evento (gol/MT/2T/PEN/final). Cada push es un cambio real (dedup).
-        alert: { title: alert.title, body: alert.body, sound: 'default' },
     };
+    // Alert = la Activity "avisa" (vibración + pantalla) SOLO en transiciones
+    // reales; el sync inicial y la previa van silenciosos (alert null).
+    if (alert) {
+        aps.alert = { title: alert.title, body: alert.body, sound: 'default' };
+    }
     if (isEnd)
         aps['dismissal-date'] = nowSec + END_LINGER_SEC;
     const message = {
@@ -170,10 +182,12 @@ async function sendIos(reg, state, isEnd, alert) {
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await admin_init_1.admin.messaging().send(message);
+    return true;
 }
+/** @returns true solo si hubo entrega real (ver sendIos). */
 async function sendAndroid(reg, state, isEnd, match) {
     if (!reg.fcmToken)
-        return;
+        return false;
     // `attributes` viaja en CADA data message: el handler headless de Android
     // pinta la notificación sin depender de estado local (la app puede llevar
     // horas muerta cuando llega el push). Espejo de MatchActivityAttributes.
@@ -201,6 +215,7 @@ async function sendAndroid(reg, state, isEnd, match) {
         },
         android: { priority: 'high' },
     });
+    return true;
 }
 /**
  * Punto de entrada — llamado desde executeSinglePoll tras el batch write.
@@ -233,22 +248,35 @@ async function sendLiveActivityUpdates(matchDocs) {
                     await ref.delete();
                     return;
                 }
-                if (data.ended)
-                    return;
                 const match = byId.get(data.matchId);
                 if (!match)
                     return;
                 const state = buildStateFromMatchDoc(match);
                 const key = stateKey(state);
+                if (data.ended) {
+                    // Flapping de SM (FT→live, visto en producción con syncFixtures):
+                    // si el partido "revivió", reabrir el registro para que ANDROID
+                    // retome updates. iOS no puede (una Activity terminada está muerta
+                    // hasta que el usuario re-siga) — limitación de ActivityKit.
+                    if (state.phase !== 'FT' && data.platform === 'android') {
+                        await ref.set({ ended: false, lastState: '' }, { merge: true });
+                        data.ended = false;
+                        data.lastState = '';
+                    }
+                    else {
+                        return;
+                    }
+                }
                 if (data.lastState === key)
                     return; // sin cambios → sin push
                 const isEnd = state.phase === 'FT';
-                if (data.platform === 'ios') {
-                    await sendIos(data, state, isEnd, alertForTransition(data.lastState, state, match));
-                }
-                else {
-                    await sendAndroid(data, state, isEnd, match);
-                }
+                const delivered = data.platform === 'ios'
+                    ? await sendIos(data, state, isEnd, alertForTransition(data.lastState, state, match))
+                    : await sendAndroid(data, state, isEnd, match);
+                // Sin token todavía → NO estampar lastState: el próximo poll reintenta
+                // y entrega el estado vigente en cuanto el token llegue (catch-up).
+                if (!delivered)
+                    return;
                 sent++;
                 await ref.set({ lastState: key, ...(isEnd ? { ended: true } : {}) }, { merge: true });
             }
@@ -274,6 +302,23 @@ async function sendLiveActivityUpdates(matchDocs) {
         }));
         if (sent > 0)
             logger.info(`liveActivities: ${sent} push(es) enviados`);
+        // Sweep global de TTL: la purga del loop solo alcanza registros cuyos
+        // partidos están en el ciclo actual — los de partidos ya fuera del poll
+        // crecerían sin límite. Barrido barato (≤50/ciclo, index automático).
+        try {
+            const cutoff = admin_init_1.admin.firestore.Timestamp.fromMillis(now - REGISTRATION_TTL_MS);
+            const stale = await admin_init_1.db.collection(COLLECTION)
+                .where('createdAt', '<', cutoff)
+                .limit(50)
+                .get();
+            if (!stale.empty) {
+                await Promise.all(stale.docs.map(d => d.ref.delete().catch(() => { })));
+                logger.info(`liveActivities: sweep purgó ${stale.size} registro(s) viejos`);
+            }
+        }
+        catch {
+            // best-effort — el sweep jamás debe afectar el poll
+        }
     }
     catch (err) {
         // Blindaje total: esto corre dentro del poll de producción.
