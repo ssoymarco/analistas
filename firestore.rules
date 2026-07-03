@@ -161,6 +161,23 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── liveActivities/{regId} ──────────────────────────────────────────────────
+    // Registro de tokens de Live Activity (doc id = `${matchId}_${uid}`).
+    // El cliente crea/actualiza SU registro (incluye invitados — anonymous auth
+    // les da uid real); nadie lee desde el cliente (pollLivescores lee con
+    // admin y empuja los updates por FCM/APNs).
+    match /liveActivities/{regId} {
+      allow read: if false;
+      allow create, update: if request.auth != null
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.matchId is string
+          && request.resource.data.keys().hasOnly([
+               'fcmToken', 'activityPushToken', 'matchId', 'platform',
+               'userId', 'createdAt', 'ended', 'lastState'
+             ]);
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
     // ── Deny everything else (including the rest of _meta) ────────────────────
     // _meta/livescoresSnapshot is internal diff state for Cloud Functions only —
     // no client should ever need to read it.

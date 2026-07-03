@@ -19,6 +19,7 @@ import { LIVESCORE_POLL_INTERVAL_SEC, POLLS_PER_INVOCATION } from './config';
 import { fetchLivescores } from './sportmonks';
 import { mapFixtureToMatchDoc } from './mappers';
 import { loadSnapshot, saveSnapshot, detectChanges, dispatchNotifications } from './detect-changes';
+import { sendLiveActivityUpdates } from './live-activities';
 import type { MatchDoc } from './types';
 
 /** Utility: sleep for N milliseconds */
@@ -108,6 +109,11 @@ async function executeSinglePoll(pollIndex: number): Promise<number> {
   if (changes.length > 0) {
     await dispatchNotifications(changes);
   }
+
+  // 6b. Live Activities: empujar estado a lock screen / Dynamic Island de
+  //     quien sigue estos partidos. Autoblindada (nunca lanza) y solo envía
+  //     cuando el estado cambió — ver live-activities.ts.
+  await sendLiveActivityUpdates(matchDocs);
 
   const elapsed = Date.now() - startMs;
   logger.debug(`Poll ${pollIndex}: ${matchDocs.length} matches, ${changes.length} changes, ${elapsed}ms`);

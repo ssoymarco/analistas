@@ -54,6 +54,7 @@ const config_1 = require("./config");
 const sportmonks_1 = require("./sportmonks");
 const mappers_1 = require("./mappers");
 const detect_changes_1 = require("./detect-changes");
+const live_activities_1 = require("./live-activities");
 /** Utility: sleep for N milliseconds */
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -132,6 +133,10 @@ async function executeSinglePoll(pollIndex) {
     if (changes.length > 0) {
         await (0, detect_changes_1.dispatchNotifications)(changes);
     }
+    // 6b. Live Activities: empujar estado a lock screen / Dynamic Island de
+    //     quien sigue estos partidos. Autoblindada (nunca lanza) y solo envía
+    //     cuando el estado cambió — ver live-activities.ts.
+    await (0, live_activities_1.sendLiveActivityUpdates)(matchDocs);
     const elapsed = Date.now() - startMs;
     logger.debug(`Poll ${pollIndex}: ${matchDocs.length} matches, ${changes.length} changes, ${elapsed}ms`);
     return matchDocs.length;

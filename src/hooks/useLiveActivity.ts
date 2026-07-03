@@ -16,9 +16,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../services/firebase';
+import { auth, db } from '../services/firebase';
 import { getSavedFCMToken } from '../services/fcmInit';
-import { useAuth } from '../contexts/AuthContext';
 import {
   isLiveActivitySupported,
   areActivitiesEnabled,
@@ -121,8 +120,11 @@ export function buildActivityState(match: Match): MatchActivityState {
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useLiveActivity(match: Match) {
-  const { user } = useAuth();
   const matchId = String(match.id);
+  // uid REAL de Firebase Auth — los invitados también lo tienen (anonymous
+  // auth). Las reglas exigen userId == request.auth.uid; sin uid no hay
+  // registro remoto (la Activity funciona local igualmente).
+  const uid = auth.currentUser?.uid ?? null;
 
   const supported = isLiveActivitySupported();
   const [following, setFollowing] = useState(false);
@@ -162,12 +164,11 @@ export function useLiveActivity(match: Match) {
   useEffect(() => {
     if (!supported) return;
     const sub = addPushTokenListener(async ({ matchId: tokenMatchId, token }) => {
-      if (tokenMatchId !== matchId) return;
+      if (tokenMatchId !== matchId || !uid) return;
       try {
-        const userId = user?.id ?? 'guest';
         await setDoc(
-          doc(db, 'liveActivities', `${tokenMatchId}_${userId}`),
-          { activityPushToken: token },
+          doc(db, 'liveActivities', `${tokenMatchId}_${uid}`),
+          { activityPushToken: token, userId: uid, matchId: tokenMatchId },
           { merge: true },
         );
       } catch {
@@ -176,7 +177,7 @@ export function useLiveActivity(match: Match) {
       }
     });
     return () => sub.remove();
-  }, [supported, matchId, user?.id]);
+  }, [supported, matchId, uid]);
 
   const start = useCallback(async (): Promise<boolean> => {
     if (!supported || !areActivitiesEnabled()) return false;
@@ -199,20 +200,21 @@ export function useLiveActivity(match: Match) {
 
       // Registro base (el activityPushToken llega por el listener).
       try {
-        const userId = user?.id ?? 'guest';
-        const fcmToken = await getSavedFCMToken();
-        await setDoc(
-          doc(db, 'liveActivities', `${matchId}_${userId}`),
-          {
-            fcmToken: fcmToken ?? null,
-            matchId,
-            platform: 'ios',
-            userId,
-            createdAt: serverTimestamp(),
-            ended: false,
-          },
-          { merge: true },
-        );
+        if (uid) {
+          const fcmToken = await getSavedFCMToken();
+          await setDoc(
+            doc(db, 'liveActivities', `${matchId}_${uid}`),
+            {
+              fcmToken: fcmToken ?? null,
+              matchId,
+              platform: 'ios',
+              userId: uid,
+              createdAt: serverTimestamp(),
+              ended: false,
+            },
+            { merge: true },
+          );
+        }
       } catch {
         // Best-effort (ver arriba).
       }
@@ -220,7 +222,7 @@ export function useLiveActivity(match: Match) {
     } catch {
       return false;
     }
-  }, [supported, match, matchId, user?.id]);
+  }, [supported, match, matchId, uid]);
 
   const end = useCallback(async () => {
     try {
@@ -230,14 +232,15 @@ export function useLiveActivity(match: Match) {
     } catch {}
     setFollowing(false);
     try {
-      const userId = user?.id ?? 'guest';
-      await setDoc(
-        doc(db, 'liveActivities', `${matchId}_${userId}`),
-        { ended: true },
-        { merge: true },
-      );
+      if (uid) {
+        await setDoc(
+          doc(db, 'liveActivities', `${matchId}_${uid}`),
+          { ended: true, userId: uid, matchId },
+          { merge: true },
+        );
+      }
     } catch {}
-  }, [matchId, match, user?.id]);
+  }, [matchId, match, uid]);
 
   return { supported, following, start, end };
 }
