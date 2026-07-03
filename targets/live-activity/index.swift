@@ -34,6 +34,9 @@ struct MatchActivityAttributes: ActivityAttributes {
     var periodMinuteOffset: Int?
     /// Unix seconds del kickoff — countdown en phase 'pre'.
     var kickoffAt: Double?
+    /// Tanda de penales — "PENALES · 4-2" (en vivo) / "FINAL · 4-2 pen".
+    var penHome: Int?
+    var penAway: Int?
     /// "⚽ Oyarzabal 36'" — ya localizado por el app al enviarlo.
     var lastEventText: String?
   }
@@ -87,6 +90,15 @@ private func phaseLabel(_ phase: String) -> String {
 /// ¿La fase lleva reloj corriendo?
 private func phaseTicks(_ phase: String) -> Bool {
   return phase == "1H" || phase == "2H" || phase == "ET"
+}
+
+/// Tope nominal del período según su offset (espejo de getPeriodNominalCap en
+/// src/hooks/useLiveTick.ts): 1T→45' · 2T→90' · TE1→105' · TE2→120'.
+private func periodNominalCap(_ offsetMinutes: Int) -> Int {
+  if offsetMinutes >= 105 { return 120 }
+  if offsetMinutes >= 90 { return 105 }
+  if offsetMinutes >= 45 { return 90 }
+  return 45
 }
 
 // ── Sub-vistas compartidas ────────────────────────────────────────────────────
@@ -190,19 +202,34 @@ struct PhaseTimeline: View {
           .foregroundStyle(Color(red: 1.0, green: 0.27, blue: 0.23)) // live red
 
         if phaseTicks(state.phase), let startedAt = state.periodStartedAt {
+          // Minuto ACUMULADO estilo 90'/120' (mismo formato que el app:
+          // "102:59", no "2T 57:59") — anclado a periodStartedAt − offset.
+          // showsHours:false mantiene los minutos corriendo más allá de 60.
+          // El rango TERMINA en tope nominal + 15' de stoppage máximo: si el
+          // push de cambio de fase no llegara, el timer se CONGELA ahí en vez
+          // de correr al infinito (el "196:58" reportado por el dueño).
+          let offsetMin = state.periodMinuteOffset ?? 0
+          let anchor = startedAt - Double(offsetMin) * 60
+          let freezeAt = anchor + Double(periodNominalCap(offsetMin) + 15) * 60
           Text("·").font(.caption2).foregroundStyle(.white.opacity(0.5))
-          // Timer local del período — sin pushes por segundo. Rango generoso
-          // hacia adelante; el push de cambio de fase reemplaza el estado.
           Text(
-            timerInterval: Date(timeIntervalSince1970: startedAt)...Date(
-              timeIntervalSince1970: startedAt + 4 * 3600),
+            timerInterval: Date(timeIntervalSince1970: anchor)...Date(
+              timeIntervalSince1970: freezeAt),
             countsDown: false,
             showsHours: false
           )
           .font(.caption2.monospacedDigit())
           .fontWeight(.bold)
           .foregroundStyle(.white.opacity(0.85))
-          .frame(maxWidth: 44)
+          .frame(maxWidth: 56)
+        }
+
+        // Tanda de penales: "PENALES · 4-2" (en vivo) / "FINAL · 4-2 pen".
+        if let ph = state.penHome, let pa = state.penAway {
+          Text(state.phase == "FT" ? "· \(ph)-\(pa) pen" : "· \(ph)-\(pa)")
+            .font(.caption2.monospacedDigit())
+            .fontWeight(.bold)
+            .foregroundStyle(.white.opacity(0.85))
         }
       }
     }

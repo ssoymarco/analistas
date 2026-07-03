@@ -33,6 +33,8 @@ struct MatchActivityAttributes: ActivityAttributes {
     var periodStartedAt: Double?
     var periodMinuteOffset: Int?
     var kickoffAt: Double?
+    var penHome: Int?
+    var penAway: Int?
     var lastEventText: String?
   }
 
@@ -227,7 +229,7 @@ public class LiveActivityModule: Module {
       }
       let policy: ActivityUIDismissalPolicy = immediate
         ? .immediate
-        : .after(Date().addingTimeInterval(30 * 60))
+        : .after(Date().addingTimeInterval(10 * 60))
       for activity in Activity<MatchActivityAttributes>.activities
       where activity.attributes.matchId == matchId {
         await activity.end(content ?? activity.content, dismissalPolicy: policy)

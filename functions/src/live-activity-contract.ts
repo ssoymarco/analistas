@@ -39,6 +39,9 @@ export interface MatchActivityState {
   periodMinuteOffset?: number;
   /** Unix seconds del kickoff — countdown del widget en phase 'pre'. */
   kickoffAt?: number;
+  /** Tanda de penales (solo cuando aplica) → "PENALES · 4-2" / "FINAL · 4-2 pen". */
+  penHome?: number;
+  penAway?: number;
   lastEventText?: string;
 }
 

@@ -64,7 +64,20 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
       return;
     }
 
-    if (__DEV__ && LOG_LEVEL) Purchases.setLogLevel(LOG_LEVEL.DEBUG);
+    if (__DEV__ && LOG_LEVEL) {
+      Purchases.setLogLevel(LOG_LEVEL.DEBUG);
+      // En dev, RevenueCat loguea errores vía console.error → LogBox pinta un
+      // full-screen rojo en cada arranque ("Error fetching offerings" — ruido
+      // de sandbox/StoreKit en dev builds). Ruteamos su log a console.log:
+      // misma visibilidad en Metro, sin pantalla roja. Solo afecta __DEV__.
+      try {
+        (Purchases as unknown as {
+          setLogHandler?: (h: (level: string, msg: string) => void) => void;
+        }).setLogHandler?.((level, msg) => {
+          console.log(`[RevenueCat:${level}] ${msg}`);
+        });
+      } catch {}
+    }
     Purchases.configure({ apiKey });
 
     const init = async () => {

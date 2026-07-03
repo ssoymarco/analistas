@@ -114,6 +114,8 @@ export function buildActivityState(match: Match): MatchActivityState {
     periodStartedAt: ticks ? anchor!.periodStartedAt : undefined,
     periodMinuteOffset: ticks ? anchor!.periodMinuteOffset : undefined,
     kickoffAt: phase === 'pre' ? kickoffUnixSeconds(match) : undefined,
+    penHome: typeof match.homePenScore === 'number' ? match.homePenScore : undefined,
+    penAway: typeof match.awayPenScore === 'number' ? match.awayPenScore : undefined,
   };
 }
 

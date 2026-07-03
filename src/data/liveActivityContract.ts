@@ -72,6 +72,11 @@ export interface MatchActivityState {
    *  se queda en 0:00 hasta que el push (Fase 2) o el update en foreground
    *  cambie la fase a 1H. */
   kickoffAt?: number;
+  /** Marcador de la tanda de penales (Match.homePenScore/awayPenScore) —
+   *  presente solo cuando hubo/hay tanda. El widget lo muestra como
+   *  "PENALES · 4-2" (en vivo) o "FINAL · 4-2 pen". */
+  penHome?: number;
+  penAway?: number;
   /** Última jugada relevante, ya localizada: "⚽ Oyarzabal 36'". Opcional. */
   lastEventText?: string;
 }
