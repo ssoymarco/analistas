@@ -45,6 +45,18 @@ function shiftISODate(iso: string, deltaDays: number): string {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 }
 
+// Amistosos: detectados por NOMBRE, no por ID — syncFixtures no filtra ligas,
+// así que los IDs de friendlies son abiertos (1101/2451/2452/...). OJO: usar
+// "friendl" y no "friendly" — "Club Friendlies" NO contiene el substring
+// "friendly" (singular).
+const FRIENDLIES_RE = /friendl|amistoso/i;
+
+// Mundial 2026 (id 732): anclado ARRIBA del feed durante el torneo. La sección
+// solo existe los días con partidos del Mundial (el filter sobre
+// filteredLeagues lo hace no-op el resto de días) — quitar tras la final
+// (19-20 jul 2026).
+const WORLD_CUP_LEAGUE_ID = '732';
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 export const PartidosScreen: React.FC = () => {
   const { t } = useTranslation();
@@ -162,7 +174,14 @@ export const PartidosScreen: React.FC = () => {
       lg.matches.forEach(m => {
         if (teamSet.has(m.homeTeam.id) || teamSet.has(m.awayTeam.id)) {
           myTeamMatches.push(m);
-          inferredLeagueIds.add(lg.id); // mark whole league as relevant
+          // Los AMISTOSOS no infieren liga: que Monterrey juegue un "Club
+          // Friendlies" no significa que esa "liga" le importe al usuario —
+          // promovía la sección completa de amistosos ARRIBA del Mundial
+          // (reporte del 3 jul 2026). El partido del equipo seguido sigue
+          // visible en "Mis equipos" (myTeamMatches es independiente).
+          if (!FRIENDLIES_RE.test(lg.name)) {
+            inferredLeagueIds.add(lg.id); // mark whole league as relevant
+          }
         }
       });
     });
@@ -173,6 +192,11 @@ export const PartidosScreen: React.FC = () => {
 
     // ── Priority leagues = inferred (from teams) ∪ explicitly followed ────────
     const priorityIds = new Set([...inferredLeagueIds, ...leagueSet]);
+    // Mundial 2026 SIEMPRE en el bloque prioritario durante el torneo — sin
+    // esto quedaba hasta abajo del feed para cualquier usuario que siguiera
+    // equipos de liga (sus ligas inferidas iban antes que todo el queue
+    // global). No-op los días sin partidos del Mundial.
+    priorityIds.add(WORLD_CUP_LEAGUE_ID);
     const myTeamMatchIds = new Set(myTeamMatches.map(m => m.id));
     const priorityLeagueGroups = filteredLeagues
       .filter(lg => priorityIds.has(lg.id))

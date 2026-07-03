@@ -5,9 +5,10 @@ import {
 import { AppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { logEvent, ANALYTICS_EVENTS } from '../services/analytics';
+import { captureFirestoreRejection } from '../services/sentry';
 import {
   subscribeTeamTopics, unsubscribeTeamTopics,
   subscribeLeagueTopics, unsubscribeLeagueTopics,
@@ -209,25 +210,82 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async fbUser => {
       const newUid = (fbUser && !fbUser.isAnonymous) ? fbUser.uid : null;
 
-      if (newUid === uidRef.current) return;
+      const prevUid = uidRef.current;
+      if (newUid === prevUid) return;
       uidRef.current = newUid;
 
-      if (!newUid) return; // guest or logged out — AsyncStorage is enough
+      if (!newUid) {
+        // Transición logueado → sign-out: limpiar los favoritos locales para
+        // que el siguiente usuario del dispositivo no los herede (la rama de
+        // migración los subiría a SU cuenta). Los invitados y el arranque en
+        // frío nunca pasan por aquí (prevUid es null en ambos).
+        if (prevUid) {
+          setFavoriteIds([]); setFollowedTeamIds([]); setFollowedPlayerIds([]);
+          setFollowedLeagueIds([]); setRivalTeamIds([]);
+          matchRef.current = []; teamRef.current = []; playerRef.current = [];
+          leagueRef.current = []; rivalRef.current = [];
+          Promise.all([
+            AsyncStorage.removeItem(MATCH_STORAGE_KEY),
+            AsyncStorage.removeItem(TEAM_STORAGE_KEY),
+            AsyncStorage.removeItem(PLAYER_STORAGE_KEY),
+            AsyncStorage.removeItem(LEAGUE_STORAGE_KEY),
+            AsyncStorage.removeItem(RIVAL_STORAGE_KEY),
+          ]).catch(() => {});
+        }
+        return; // guest or logged out — AsyncStorage is enough
+      }
 
       setIsSyncing(true);
       try {
         const snap = await getDoc(doc(db, 'users', newUid));
         const remote = (snap.exists() ? snap.data().favorites : null) as FirestoreFavorites | null;
 
+        // Caché local leído DIRECTO de AsyncStorage — no de los refs: este
+        // handler puede disparar antes de que la hidratación de arranque
+        // resuelva, cuando los refs aún están vacíos (usarlos aquí haría ver
+        // "local vacío" y adoptar un remoto rancio aunque el teléfono sí
+        // tuviera datos).
+        const parse = (raw: string | null): string[] => {
+          try { const v = JSON.parse(raw ?? '[]'); return Array.isArray(v) ? v.map(String) : []; }
+          catch { return []; }
+        };
+        const [lm, lt, lp, ll, lr] = await Promise.all([
+          AsyncStorage.getItem(MATCH_STORAGE_KEY),
+          AsyncStorage.getItem(TEAM_STORAGE_KEY),
+          AsyncStorage.getItem(PLAYER_STORAGE_KEY),
+          AsyncStorage.getItem(LEAGUE_STORAGE_KEY),
+          AsyncStorage.getItem(RIVAL_STORAGE_KEY),
+        ]);
+        const local = { m: parse(lm), t: parse(lt), p: parse(lp), l: parse(ll), rv: parse(lr) };
+
         if (remote && (remote.matchIds?.length || remote.teamIds?.length ||
                        remote.playerIds?.length || remote.leagueIds?.length ||
                        remote.rivalTeamIds?.length)) {
-          // Firestore is authoritative — replace local state
-          const m = remote.matchIds  ?? [];
-          const t = remote.teamIds   ?? [];
-          const p = remote.playerIds ?? [];
-          const l = remote.leagueIds ?? [];
-          const rv = remote.rivalTeamIds ?? [];
+          // Unión local ∪ remoto por lista. Si lo local tiene elementos que el
+          // remoto no (cambios que nunca llegaron a la nube: el bug de rules
+          // del 3 jul 2026, escrituras offline, la carrera pre-auth), NO se
+          // adopta el remoto rancio: se SANA la nube con la unión. Trade-off
+          // aceptado y acotado: un unfollow hecho en otro device puede
+          // resucitar desde este — preferible mil veces a borrar favoritos
+          // legítimos en silencio.
+          const union = (a: string[], b: string[]) => Array.from(new Set([...b, ...a]));
+          const m  = union(local.m,  (remote.matchIds  ?? []).map(String));
+          const t  = union(local.t,  (remote.teamIds   ?? []).map(String));
+          const p  = union(local.p,  (remote.playerIds ?? []).map(String));
+          const l  = union(local.l,  (remote.leagueIds ?? []).map(String));
+          const rv = union(local.rv, (remote.rivalTeamIds ?? []).map(String));
+
+          const grew =
+            m.length  > (remote.matchIds?.length  ?? 0) ||
+            t.length  > (remote.teamIds?.length   ?? 0) ||
+            p.length  > (remote.playerIds?.length ?? 0) ||
+            l.length  > (remote.leagueIds?.length ?? 0) ||
+            rv.length > (remote.rivalTeamIds?.length ?? 0);
+          if (grew) {
+            updateDoc(doc(db, 'users', newUid), {
+              favorites: { matchIds: m, teamIds: t, playerIds: p, leagueIds: l, rivalTeamIds: rv },
+            }).catch(err => captureFirestoreRejection('favorites.heal', err));
+          }
 
           setFavoriteIds(m);
           setFollowedTeamIds(t);
@@ -256,21 +314,41 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
         } else {
           // First login (or empty cloud) — migrate local favorites to Firestore
           const favs: FirestoreFavorites = {
-            matchIds:  matchRef.current,
-            teamIds:   teamRef.current,
-            playerIds: playerRef.current,
-            leagueIds: leagueRef.current,
-            rivalTeamIds: rivalRef.current,
+            matchIds:  local.m,
+            teamIds:   local.t,
+            playerIds: local.p,
+            leagueIds: local.l,
+            rivalTeamIds: local.rv,
           };
           const userRef = doc(db, 'users', newUid);
           if (snap.exists()) {
             await updateDoc(userRef, { favorites: favs });
           } else {
-            await setDoc(userRef, { favorites: favs }, { merge: true });
+            // users/{uid} aún NO existe: ensureUserProfile (AuthContext) lo
+            // está creando en paralelo con displayName/createdAt — que la
+            // rule de create EXIGE, así que escribir aquí un create con solo
+            // {favorites} sería rechazado (setDoc+merge sobre doc inexistente
+            // ES un create para las rules — bug de primer login, 3 jul 2026).
+            // Esperar a que exista y entonces update; si el timeout vence, el
+            // siguiente arranque auto-repara por la rama updateDoc.
+            await new Promise<void>(resolve => {
+              const timer = setTimeout(() => { unsub(); resolve(); }, 15000);
+              const unsub = onSnapshot(userRef, s => {
+                if (s.exists()) {
+                  clearTimeout(timer); unsub();
+                  updateDoc(userRef, { favorites: favs })
+                    .catch(err => captureFirestoreRejection('favorites.migrate', err));
+                  resolve();
+                }
+              }, () => { clearTimeout(timer); resolve(); });
+            });
           }
         }
-      } catch {
-        // Firestore unavailable — continue offline with local data
+      } catch (err) {
+        // Firestore unavailable — continue offline with local data. Reportar
+        // (filtro-safe) para que un fallo sistémico nunca vuelva a ser
+        // invisible como el bug de rules.
+        captureFirestoreRejection('favorites.reconcile', err);
       } finally {
         setIsSyncing(false);
       }
@@ -284,7 +362,12 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   // every list), missing fields fall back to the current ref value. `?? ref`
   // only triggers on null/undefined — an explicit empty array is preserved.
   function persistToFirestore(favs: FirestoreFavorites) {
-    const uid = uidRef.current;
+    // uid al momento de la llamada, con fallback a auth.currentUser: cubre el
+    // upgrade invitado→Google/Apple vía linkWithCredential, que puede no
+    // re-disparar onAuthStateChanged (uidRef se quedaría null toda la sesión).
+    const uid =
+      uidRef.current ??
+      ((auth.currentUser && !auth.currentUser.isAnonymous) ? auth.currentUser.uid : null);
     if (!uid) return;
     const full: FirestoreFavorites = {
       matchIds:     favs.matchIds     ?? matchRef.current,
@@ -293,7 +376,21 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       leagueIds:    favs.leagueIds    ?? leagueRef.current,
       rivalTeamIds: favs.rivalTeamIds ?? rivalRef.current,
     };
-    updateDoc(doc(db, 'users', uid), { favorites: full }).catch(() => {});
+    const write = () => updateDoc(doc(db, 'users', uid), { favorites: full });
+    write().catch(err => {
+      const code = (err as { code?: string })?.code;
+      if (code === 'not-found') {
+        // users/{uid} aún no existe (ensureUserProfile en vuelo durante el
+        // primer sign-in) — reintentar una vez cuando ya debería existir.
+        setTimeout(() => {
+          write().catch(e2 => captureFirestoreRejection('favorites.persist.retry', e2));
+        }, 2500);
+        return;
+      }
+      // NUNCA tragar esto en silencio: así fue invisible durante semanas el
+      // bug de rules que borraba favoritos (3 jul 2026).
+      captureFirestoreRejection('favorites.persist', err);
+    });
   }
 
   // ── Match favorites ──────────────────────────────────────────────────────────

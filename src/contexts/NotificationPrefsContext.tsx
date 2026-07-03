@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
+import { captureFirestoreRejection } from '../services/sentry';
 import { cancelAllNotificationsForMatch, PUSH_TOKEN_KEY } from '../services/notifications';
 
 export interface NotificationPrefs {
@@ -180,8 +181,18 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   const syncPrefsToCloud = useCallback((next: NotificationPrefs) => {
     const uid = uidRef.current;
     if (!uid) return;
-    setDoc(doc(db, 'users', uid), { notificationPrefs: next }, { merge: true })
-      .catch(() => {/* offline / permission — local AsyncStorage is the source of truth */});
+    const write = () =>
+      setDoc(doc(db, 'users', uid), { notificationPrefs: next }, { merge: true });
+    write().catch(() => {
+      // setDoc(merge) sobre un users/{uid} que aún NO existe ES un create para
+      // las rules (exigen displayName/createdAt) → rechazado durante la
+      // ventana del primer sign-in mientras ensureUserProfile crea el doc.
+      // Reintentar una vez ya creado; si vuelve a fallar, reportarlo
+      // (filtro-safe) — jamás tragarlo en silencio (bug de rules, 3 jul 2026).
+      setTimeout(() => {
+        write().catch(e2 => captureFirestoreRejection('notifPrefs.persist', e2));
+      }, 2500);
+    });
   }, []);
 
   useEffect(() => {

@@ -2,7 +2,7 @@
  * Feature flags — compile-time switches for gating features that aren't ready
  * for a given release.
  */
-import { NativeModules } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 
 /**
  * Master switch for the premium / subscription feature (the HazteTitular
@@ -26,17 +26,25 @@ import { NativeModules } from 'react-native';
 // set false for the 1.2.x public builds that lack the native purchases module.
 export const PREMIUM_MASTER_ENABLED = true;
 
+// Deliberate per-platform launch switch. Android's 1.3.0 binary DOES contain
+// the native purchases module (built from the shared codebase), so the
+// native-presence guard alone would turn premium ON in Android production the
+// moment this bundle ships via OTA — before a single Play Billing purchase has
+// ever been tested and with the Play payments profile still incomplete (KYC).
+// Flip to true as a conscious launch decision (it's OTA-able anytime).
+const PREMIUM_ANDROID_LAUNCHED = false;
+
 // Effective flag used across the app. This JS bundle is shared via OTA across
-// EVERY runtime (iOS 1.2.3/1.3.0, Android 1.2.2, future Android 1.4.0) — a
-// platform check alone would surface a non-purchasable paywall on the old
-// Android 1.2.2 public binary (no native purchases module), the exact Google
-// rejection this flag exists to prevent. Instead we key off the NATIVE MODULE
-// actually being present in the binary (same guard as SubscriptionContext's
-// PURCHASES_AVAILABLE): true only on builds compiled with
-// `react-native-purchases` — iOS 1.2.3+/1.3.0 today, Android automatically
-// once 1.4.0 ships. No flag flip needed per runtime.
+// EVERY runtime — a platform check alone would surface a non-purchasable
+// paywall on old binaries without the native purchases module (the exact
+// store-rejection this flag exists to prevent), so we key off the NATIVE
+// MODULE actually being present (same guard as SubscriptionContext's
+// PURCHASES_AVAILABLE). On Android, the additional launch switch above must
+// also be flipped — presence of the module isn't a launch decision.
 export const PREMIUM_ENABLED =
-  PREMIUM_MASTER_ENABLED && !!(NativeModules as { RNPurchases?: unknown }).RNPurchases;
+  PREMIUM_MASTER_ENABLED &&
+  !!(NativeModules as { RNPurchases?: unknown }).RNPurchases &&
+  (Platform.OS === 'ios' || PREMIUM_ANDROID_LAUNCHED);
 
 /**
  * Master switch for betting / gambling content: the Caliente.mx banner ads, the

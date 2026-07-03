@@ -15,13 +15,20 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
 
-    // Validates that a favorites map only contains the allowed fields and types
+    // Validates that a favorites map only contains the allowed fields and types.
+    // ⚠️ rivalTeamIds (Modo Rival, en el cliente desde v1.2.1) FALTABA aquí — el
+    // cliente lo incluye en CADA escritura de favoritos, así que estas reglas
+    // rechazaban TODAS las escrituras de favoritos de usuarios logueados en
+    // silencio, y el reconcile de arranque las "deshacía" (bug de favoritos
+    // borrados, reportado 3 jul 2026). Si el cliente agrega un campo nuevo a
+    // FirestoreFavorites, AGREGARLO AQUÍ EN EL MISMO CAMBIO.
     function validFavorites(fav) {
-      return fav.keys().hasOnly(['matchIds', 'teamIds', 'playerIds', 'leagueIds'])
-          && (!('matchIds'  in fav) || fav.matchIds  is list)
-          && (!('teamIds'   in fav) || fav.teamIds   is list)
-          && (!('playerIds' in fav) || fav.playerIds is list)
-          && (!('leagueIds' in fav) || fav.leagueIds is list);
+      return fav.keys().hasOnly(['matchIds', 'teamIds', 'playerIds', 'leagueIds', 'rivalTeamIds'])
+          && (!('matchIds'     in fav) || fav.matchIds     is list)
+          && (!('teamIds'      in fav) || fav.teamIds      is list)
+          && (!('playerIds'    in fav) || fav.playerIds    is list)
+          && (!('leagueIds'    in fav) || fav.leagueIds    is list)
+          && (!('rivalTeamIds' in fav) || fav.rivalTeamIds is list);
     }
 
     // ── users/{uid} ─────────────────────────────────────────────────────────────
@@ -38,10 +45,18 @@ service cloud.firestore {
           && request.resource.data.displayName.size() <= 50;
 
       // Update: owner only; enforce field-level rules
+      // ⚠️ notificationPrefs FALTABA aquí — NotificationPrefsContext lo escribe
+      // (Modo Estadio/Rival) y era rechazado en silencio, mismo bug de clase
+      // que rivalTeamIds en validFavorites (3 jul 2026). Toda key nueva que el
+      // cliente escriba a users/{uid} DEBE agregarse aquí en el mismo cambio.
       allow update: if isOwner(uid)
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['displayName', 'username', 'email', 'favorites',
-                         'pushToken', 'updatedAt', 'authMethod'])
+                         'pushToken', 'updatedAt', 'authMethod',
+                         'notificationPrefs'])
+          // notificationPrefs must be a map if changed
+          && (!('notificationPrefs' in request.resource.data.diff(resource.data).changedKeys())
+              || request.resource.data.notificationPrefs is map)
           // displayName max 50 chars if changed
           && (!('displayName' in request.resource.data.diff(resource.data).changedKeys())
               || request.resource.data.displayName.size() <= 50)
@@ -52,7 +67,11 @@ service cloud.firestore {
           && (!('favorites' in request.resource.data.diff(resource.data).changedKeys())
               || validFavorites(request.resource.data.favorites));
 
-      allow delete: if false; // soft-delete only (handle in Cloud Function later)
+      // El dueño puede borrar su propio doc — deleteAccount (AuthContext) lo
+      // intenta ANTES de deleteUser y con 'if false' era rechazado en silencio
+      // (catch vacío): el perfil con email/nombre quedaba huérfano PARA SIEMPRE
+      // tras borrar la cuenta (Apple 5.1.1(v)). Auditoría 3 jul 2026.
+      allow delete: if isOwner(uid);
     }
 
     // ── usernames/{username} ────────────────────────────────────────────────────
