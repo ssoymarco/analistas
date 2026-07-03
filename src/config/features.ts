@@ -2,7 +2,7 @@
  * Feature flags — compile-time switches for gating features that aren't ready
  * for a given release.
  */
-import { Platform } from 'react-native';
+import { NativeModules } from 'react-native';
 
 /**
  * Master switch for the premium / subscription feature (the HazteTitular
@@ -26,13 +26,17 @@ import { Platform } from 'react-native';
 // set false for the 1.2.x public builds that lack the native purchases module.
 export const PREMIUM_MASTER_ENABLED = true;
 
-// Effective flag used across the app. Premium is live on iOS (StoreKit +
-// RevenueCat wired). On Android it stays OFF until Play Billing + RevenueCat
-// Android (RC_ANDROID_KEY) are configured — otherwise the SHARED 1.3.0 OTA
-// bundle would surface a non-purchasable paywall on Android (Google rejection,
-// same reason 1.2.x ships premium off). When Android billing is ready, extend
-// the platform check here.
-export const PREMIUM_ENABLED = PREMIUM_MASTER_ENABLED && Platform.OS === 'ios';
+// Effective flag used across the app. This JS bundle is shared via OTA across
+// EVERY runtime (iOS 1.2.3/1.3.0, Android 1.2.2, future Android 1.4.0) — a
+// platform check alone would surface a non-purchasable paywall on the old
+// Android 1.2.2 public binary (no native purchases module), the exact Google
+// rejection this flag exists to prevent. Instead we key off the NATIVE MODULE
+// actually being present in the binary (same guard as SubscriptionContext's
+// PURCHASES_AVAILABLE): true only on builds compiled with
+// `react-native-purchases` — iOS 1.2.3+/1.3.0 today, Android automatically
+// once 1.4.0 ships. No flag flip needed per runtime.
+export const PREMIUM_ENABLED =
+  PREMIUM_MASTER_ENABLED && !!(NativeModules as { RNPurchases?: unknown }).RNPurchases;
 
 /**
  * Master switch for betting / gambling content: the Caliente.mx banner ads, the

@@ -3,7 +3,7 @@ import { Platform, NativeModules } from 'react-native';
 import type { PurchasesPackage, CustomerInfo } from 'react-native-purchases';
 
 const RC_IOS_KEY = 'appl_KztCtepDGxgNLhSoRNPuWKuFvHc';
-const RC_ANDROID_KEY = ''; // TODO: agregar cuando se conecte Google Play
+const RC_ANDROID_KEY = 'goog_eDySEBlsPgJVVfOnOWtmwIomDEj';
 
 // ── Native-module guard (OTA cross-runtime safety) ───────────────────────────
 // `react-native-purchases` is a NATIVE module — it only exists in binaries
