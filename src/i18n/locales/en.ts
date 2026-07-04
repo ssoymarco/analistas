@@ -708,6 +708,8 @@ const en: TranslationKeys = {
     noTeams: 'No teams available',
     teamsTitle: 'Teams ({{count}})',
     noFixtures: 'No recent or upcoming matches',
+    friendlies: 'Friendlies',
+    showMoreMatches: 'Show more matches ({{count}})',
     upcomingFixtures: 'Upcoming matches',
     recentResults: 'Recent results',
     live: 'LIVE',

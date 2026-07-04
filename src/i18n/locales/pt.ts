@@ -650,6 +650,8 @@ const pt: TranslationKeys = {
     noTeams: 'Sem times disponíveis',
     teamsTitle: 'Times ({{count}})',
     noFixtures: 'Sem jogos recentes ou próximos',
+    friendlies: 'Amistosos',
+    showMoreMatches: 'Ver mais jogos ({{count}})',
     upcomingFixtures: 'Próximos jogos',
     recentResults: 'Resultados recentes',
     live: 'AO VIVO',

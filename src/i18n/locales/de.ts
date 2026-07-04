@@ -649,6 +649,8 @@ const de: TranslationKeys = {
     noTeams: 'Keine Teams verfügbar',
     teamsTitle: 'Teams ({{count}})',
     noFixtures: 'Keine aktuellen oder bevorstehenden Spiele',
+    friendlies: 'Freundschaftsspiele',
+    showMoreMatches: 'Mehr Spiele anzeigen ({{count}})',
     upcomingFixtures: 'Bevorstehende Spiele',
     recentResults: 'Aktuelle Ergebnisse',
     live: 'LIVE',

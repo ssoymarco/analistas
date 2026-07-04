@@ -46,6 +46,7 @@ import type {
   MatchActivityState,
 } from '../data/liveActivityContract';
 import type { Match, Team } from '../data/types';
+import { getLeagueDisplayName } from '../config/leagues';
 import { resolveMatchColors, teamFlagEmoji } from '../utils/teamColors';
 import { translateTeamName } from '../utils/nationalTeams';
 import { isImageUri } from '../utils/imageUri';
@@ -139,7 +140,7 @@ export function buildActivityAttributes(match: Match): MatchActivityAttributes {
     matchId: String(match.id),
     home: teamToContract(match.homeTeam, home),
     away: teamToContract(match.awayTeam, away),
-    leagueName: match.league,
+    leagueName: getLeagueDisplayName(match.leagueId ?? '', match.league ?? ''),
   };
 }
 
@@ -185,7 +186,7 @@ export function buildLiveScoreAttributes(match: Match): LiveScoreAttributes {
       shortName: match.awayTeam.shortName,
       logo: match.awayTeam.logo,
     },
-    leagueName: match.league,
+    leagueName: getLeagueDisplayName(match.leagueId ?? '', match.league ?? ''),
   };
 }
 

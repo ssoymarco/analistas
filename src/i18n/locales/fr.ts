@@ -649,6 +649,8 @@ const fr: TranslationKeys = {
     noTeams: 'Aucune équipe disponible',
     teamsTitle: 'Équipes ({{count}})',
     noFixtures: 'Aucun match récent ou à venir',
+    friendlies: 'Matchs amicaux',
+    showMoreMatches: 'Voir plus de matchs ({{count}})',
     upcomingFixtures: 'Prochains matchs',
     recentResults: 'Résultats récents',
     live: 'EN DIRECT',

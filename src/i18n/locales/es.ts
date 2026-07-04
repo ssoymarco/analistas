@@ -724,6 +724,8 @@ const es = {
     noTeams: 'Sin equipos disponibles',
     teamsTitle: 'Equipos ({{count}})',
     noFixtures: 'Sin partidos recientes o próximos',
+    friendlies: 'Amistosos',
+    showMoreMatches: 'Ver más partidos ({{count}})',
     upcomingFixtures: 'Próximos partidos',
     recentResults: 'Resultados recientes',
     live: 'EN VIVO',

@@ -36,6 +36,13 @@ const OVERRIDE_ASSETS: Record<string, number | string> = {
   // — or when we have a reliable remote host for the new crest — we can put
   // the entry back. The override system itself stays in place so other teams
   // (or Cruz Azul again later) can be plugged in here with one line.
+
+  // Jaiba Brava (277158): entrada DUPLICADA de SM sin escudo (sirve
+  // team_placeholder.png) usada en amistosos — la entrada real del club es
+  // Tampico Madero (12852), que sí tiene escudo. Apuntamos el duplicado al
+  // escudo real vía URL remota (no asset local — ver nota de Cruz Azul).
+  // Detectado 4 jul 2026 (amistoso vs América).
+  '277158': 'https://cdn.sportmonks.com/images/soccer/teams/20/12852.png',
 };
 
 // ── Resolved URI cache ──────────────────────────────────────────────────────

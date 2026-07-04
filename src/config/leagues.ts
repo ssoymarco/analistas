@@ -4,6 +4,8 @@
 //
 // Organized by region for easy navigation. Flags use emoji for cross-platform compat.
 
+import i18n from '../i18n';
+
 /** A colored zone band in the standings table */
 export interface LeagueZone {
   /** Label shown in the legend (proper noun — same in all languages) */
@@ -418,7 +420,20 @@ export function isCopyrightSensitiveLeague(id: number | string): boolean {
  * already produced for everything else). Pass the SportMonks-supplied
  * `fallback` so non-sensitive leagues render exactly as before.
  */
+/** Amistosos: SM los parte en varias "ligas" internas ("Club Friendlies 1-4",
+ *  "Friendlies", "Amistosos Internacionales"...) — detalle de su modelo de
+ *  datos que el usuario no debe ver (reporte del dueño, 4 jul 2026). Detectar
+ *  por NOMBRE, no por id (los ids de friendlies son abiertos). OJO: "friendl"
+ *  y no "friendly" — "Friendlies" (plural) no contiene "friendly". */
+export const FRIENDLIES_RE = /friendl|amistoso/i;
+
+export function isFriendliesLeague(name: string | null | undefined): boolean {
+  return !!name && FRIENDLIES_RE.test(name);
+}
+
 export function getLeagueDisplayName(id: number | string, fallback: string): string {
+  // "Club Friendlies 3" → "Amistosos" (fuera de componentes React: i18n.t()).
+  if (isFriendliesLeague(fallback)) return i18n.t('league.friendlies');
   if (!isCopyrightSensitiveLeague(id)) return fallback;
   const numId = typeof id === 'string' ? Number(id) : id;
   return getLeagueConfig(numId)?.name ?? fallback;

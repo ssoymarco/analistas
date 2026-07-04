@@ -1,4 +1,5 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { View, Text, TouchableOpacity, StyleSheet, Animated, Easing } from 'react-native';
 import { Image } from 'expo-image';
 import { useThemeColors } from '../theme/useTheme';
@@ -42,9 +43,16 @@ const LEAGUE_FLAGS: Record<string, string> = {
   'champions-league': '🏆',
 };
 
+// Tope de revelado progresivo por sección (ver comentario en el render).
+const CAP_THRESHOLD = 15; // más de esto → se corta
+const CAP_INITIAL = 10;   // primeras visibles
+const CAP_STEP = 20;      // cuánto agrega cada "Ver más"
+
 export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPress, onLeaguePress, index = 0 }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
   const hasLive = league.matches.some(m => m.status === 'live');
+  const [visibleCount, setVisibleCount] = useState(CAP_INITIAL);
 
   // Resolve display name + flag using the centralised helpers. For
   // trademark-sensitive leagues (e.g. WC 2026) these return the curated
@@ -99,10 +107,27 @@ export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPre
         <ChevronRight />
       </TouchableOpacity>
 
-      {/* Matches */}
-      {league.matches.map((match) => (
+      {/* Matches — secciones gigantes (amistosos: 100+ partidos el mismo día)
+          se revelan por partes: primeras 10, botón "Ver más" suma 20 por tap.
+          Solo aplica cuando la sección pasa de 15 (reporte del dueño, 4 jul
+          2026: la lista inmensa "se llega a ver mal"). */}
+      {(league.matches.length > CAP_THRESHOLD
+        ? league.matches.slice(0, visibleCount)
+        : league.matches
+      ).map((match) => (
         <MatchCard key={match.id} match={match} onPress={onMatchPress} />
       ))}
+      {league.matches.length > CAP_THRESHOLD && visibleCount < league.matches.length && (
+        <TouchableOpacity
+          style={[s.showMoreBtn, { borderTopColor: c.border }]}
+          activeOpacity={0.7}
+          onPress={() => setVisibleCount(n => n + CAP_STEP)}
+        >
+          <Text style={[s.showMoreText, { color: c.accent }]}>
+            {t('league.showMoreMatches', { count: league.matches.length - visibleCount })}
+          </Text>
+        </TouchableOpacity>
+      )}
     </Animated.View>
   );
 };
@@ -123,6 +148,15 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
   },
   flag: { fontSize: 16 },
+  showMoreBtn: {
+    borderTopWidth: 1,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  showMoreText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
   leagueName: {
     fontSize: 12,
     fontWeight: '600',

@@ -646,6 +646,8 @@ const tr: TranslationKeys = {
     noTeams: 'Mevcut takım yok',
     teamsTitle: 'Takımlar ({{count}})',
     noFixtures: 'Son veya yaklaşan maç yok',
+    friendlies: 'Hazırlık maçları',
+    showMoreMatches: 'Daha fazla maç göster ({{count}})',
     upcomingFixtures: 'Yaklaşan maçlar',
     recentResults: 'Son sonuçlar',
     live: 'CANLI',
