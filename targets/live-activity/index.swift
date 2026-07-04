@@ -157,23 +157,25 @@ struct TeamBlock: View {
 }
 
 /// Insignia para la Dynamic Island compacta. Prioridad: bandera EMOJI (texto —
-/// renderiza nítido y con color garantizado en la Isla; los bitmaps a 16 px se
-/// veían como cuadros grises) → escudo → punto de color. Tamaño generoso: la
-/// bandera es la protagonista (feedback dueño).
+/// renderiza nítido y con color garantizado en la Isla) → SIGLAS del equipo
+/// (texto — igual de nítido; solo para clubes, sin bandera) → punto de color.
+/// El escudo bitmap se DESCARTA aquí a propósito: a 18px se ve como un cuadro
+/// gris ilegible (confirmado en vivo con clubes reales, 4 jul 2026 — el mismo
+/// problema que ya habíamos resuelto para selecciones con la bandera). El
+/// bitmap SÍ se usa en TeamBlock (lock screen / isla expandida), donde hay
+/// espacio de sobra para que se vea bien.
 struct CompactBadge: View {
   let team: MatchActivityAttributes.TeamInfo
-  let matchId: String
-  let side: String
 
   var body: some View {
     if let flag = team.flagEmoji, !flag.isEmpty {
       Text(flag).font(.body)
-    } else if let crest = crestImage(matchId: matchId, side: side) {
-      Image(uiImage: crest)
-        .resizable()
-        .scaledToFit()
-        .frame(width: 18, height: 18)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+    } else if !team.shortName.isEmpty {
+      Text(team.shortName.prefix(3).uppercased())
+        .font(.system(size: 11, weight: .heavy))
+        .foregroundStyle(Color(hex: team.colorHex))
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
     } else {
       Circle().fill(Color(hex: team.colorHex)).frame(width: 10, height: 10)
     }
@@ -334,7 +336,7 @@ struct MatchLiveActivity: Widget {
         }
       } compactLeading: {
         HStack(spacing: 4) {
-          CompactBadge(team: context.attributes.home, matchId: context.attributes.matchId, side: "home")
+          CompactBadge(team: context.attributes.home)
           if context.state.phase != "pre" {
             Text("\(context.state.homeScore)")
               .font(.subheadline.weight(.heavy)).monospacedDigit()
@@ -349,7 +351,7 @@ struct MatchLiveActivity: Widget {
               .font(.subheadline.weight(.heavy)).monospacedDigit()
               .foregroundStyle(.white)
           }
-          CompactBadge(team: context.attributes.away, matchId: context.attributes.matchId, side: "away")
+          CompactBadge(team: context.attributes.away)
         }
         .padding(.trailing, 2)
       } minimal: {
