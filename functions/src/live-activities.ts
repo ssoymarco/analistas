@@ -20,6 +20,7 @@
 
 import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
+import { displayLeague } from './league-display';
 import type { MatchDoc } from './types';
 import type {
   LiveActivityPhase,
@@ -198,7 +199,7 @@ async function sendAndroid(
       shortName: match.awayTeam?.shortName ?? '',
       logo: match.awayTeam?.logo ?? '',
     },
-    leagueName: match.league ?? '',
+    leagueName: displayLeague(match.league),
   };
   await admin.messaging().send({
     token: reg.fcmToken,

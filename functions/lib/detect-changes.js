@@ -75,6 +75,7 @@ exports.saveSnapshot = saveSnapshot;
 exports.detectChanges = detectChanges;
 exports.dispatchNotifications = dispatchNotifications;
 const admin_init_1 = require("./admin-init");
+const league_display_1 = require("./league-display");
 const functions_1 = require("firebase-admin/functions");
 const logger = __importStar(require("firebase-functions/logger"));
 const sync_league_data_1 = require("./sync-league-data");
@@ -641,7 +642,7 @@ function copyForGoalCancelled(c) {
 function copyForMatchStart(c) {
     return {
         title: `⚽ ¡Empieza el partido!`,
-        body: `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league}`,
+        body: `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${(0, league_display_1.displayLeague)(c.league)}`,
     };
 }
 function copyForHalftime(c) {
@@ -653,7 +654,7 @@ function copyForHalftime(c) {
 function copyForSecondHalfStart(c) {
     return {
         title: `¡Arranca el segundo tiempo!`,
-        body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
+        body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${(0, league_display_1.displayLeague)(c.league)}`,
     };
 }
 function copyForMatchEnd(c) {
@@ -664,7 +665,7 @@ function copyForMatchEnd(c) {
         : '';
     return {
         title: `🏁 Final del partido`,
-        body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore}${pen} ${loc(c.awayTeam.name)} · ${c.league}`,
+        body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore}${pen} ${loc(c.awayTeam.name)} · ${(0, league_display_1.displayLeague)(c.league)}`,
     };
 }
 function copyForRedCard(c) {
@@ -701,13 +702,13 @@ function copyForSubstitution(c) {
 function copyForExtraTimeStart(c) {
     return {
         title: `⏱️ ¡Prórroga!`,
-        body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
+        body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${(0, league_display_1.displayLeague)(c.league)}`,
     };
 }
 function copyForPenaltiesStart(c) {
     return {
         title: `🥅 ¡Tanda de penaltis!`,
-        body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
+        body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${(0, league_display_1.displayLeague)(c.league)}`,
     };
 }
 function copyForMatchSuspended(c) {
@@ -719,13 +720,13 @@ function copyForMatchSuspended(c) {
 function copyForMatchReminder(c) {
     return {
         title: `⏰ ¡El partido comienza pronto!`,
-        body: `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league} · en ~15 min`,
+        body: `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${(0, league_display_1.displayLeague)(c.league)} · en ~15 min`,
     };
 }
 function copyForLineups(c) {
     return {
         title: `📋 Alineaciones confirmadas`,
-        body: `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league}`,
+        body: `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${(0, league_display_1.displayLeague)(c.league)}`,
     };
 }
 // ── FCM topic taxonomy (Modo Estadio) ─────────────────────────────────────────

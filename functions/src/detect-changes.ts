@@ -36,6 +36,7 @@
  */
 
 import { admin, db } from './admin-init';
+import { displayLeague } from './league-display';
 import { getFunctions } from 'firebase-admin/functions';
 import * as logger from 'firebase-functions/logger';
 import { triggerLeagueSyncForChanges } from './sync-league-data';
@@ -674,7 +675,7 @@ function copyForGoalCancelled(c: DetectedChange): FcmCopy {
 function copyForMatchStart(c: DetectedChange): FcmCopy {
   return {
     title: `⚽ ¡Empieza el partido!`,
-    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 
@@ -688,7 +689,7 @@ function copyForHalftime(c: DetectedChange): FcmCopy {
 function copyForSecondHalfStart(c: DetectedChange): FcmCopy {
   return {
     title: `¡Arranca el segundo tiempo!`,
-    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 
@@ -701,7 +702,7 @@ function copyForMatchEnd(c: DetectedChange): FcmCopy {
       : '';
   return {
     title: `🏁 Final del partido`,
-    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore}${pen} ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore}${pen} ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 
@@ -742,14 +743,14 @@ function copyForSubstitution(c: DetectedChange): FcmCopy {
 function copyForExtraTimeStart(c: DetectedChange): FcmCopy {
   return {
     title: `⏱️ ¡Prórroga!`,
-    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 
 function copyForPenaltiesStart(c: DetectedChange): FcmCopy {
   return {
     title: `🥅 ¡Tanda de penaltis!`,
-    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 
@@ -763,14 +764,14 @@ function copyForMatchSuspended(c: DetectedChange): FcmCopy {
 function copyForMatchReminder(c: DetectedChange): FcmCopy {
   return {
     title: `⏰ ¡El partido comienza pronto!`,
-    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league} · en ~15 min`,
+    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${displayLeague(c.league)} · en ~15 min`,
   };
 }
 
 function copyForLineups(c: DetectedChange): FcmCopy {
   return {
     title: `📋 Alineaciones confirmadas`,
-    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 

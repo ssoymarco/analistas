@@ -56,6 +56,7 @@ exports.buildStateFromMatchDoc = buildStateFromMatchDoc;
 exports.sendLiveActivityUpdates = sendLiveActivityUpdates;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
+const league_display_1 = require("./league-display");
 const COLLECTION = 'liveActivities';
 /** Registros más viejos que esto se purgan (previa 4h + partido + linger). */
 const REGISTRATION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -203,7 +204,7 @@ async function sendAndroid(reg, state, isEnd, match) {
             shortName: match.awayTeam?.shortName ?? '',
             logo: match.awayTeam?.logo ?? '',
         },
-        leagueName: match.league ?? '',
+        leagueName: (0, league_display_1.displayLeague)(match.league),
     };
     await admin_init_1.admin.messaging().send({
         token: reg.fcmToken,
