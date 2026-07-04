@@ -48,7 +48,7 @@ import type {
 import type { Match, Team } from '../data/types';
 import { getLeagueDisplayName } from '../config/leagues';
 import { resolveMatchColors, teamFlagEmoji } from '../utils/teamColors';
-import { translateTeamName } from '../utils/nationalTeams';
+import { translateTeamName, isNationalTeam } from '../utils/nationalTeams';
 import { isImageUri } from '../utils/imageUri';
 
 // ── Mapeos Match → contrato ───────────────────────────────────────────────────
@@ -119,15 +119,17 @@ async function registrationRef(matchId: string) {
 }
 
 function teamToContract(team: Team, colorHex: string) {
-  // Bandera emoji: primero por código FIFA (selecciones — WidgetKit no baja
-  // imágenes, pero los emoji son texto); fallback al logo si ya es emoji.
+  // Bandera emoji: SOLO para selecciones nacionales (los códigos cortos de
+  // CLUBES colisionan con códigos FIFA — Cancún FC = "CAN" = Canadá 🇨🇦,
+  // reporte del dueño 4 jul 2026); fallback al logo si ya es emoji.
   const logo = team.logo ?? '';
   const logoIsEmoji = !!logo && !isImageUri(logo) && logo !== '⚽' && logo !== '🕐';
+  const flag = isNationalTeam(team.name) ? teamFlagEmoji(team.shortName) : undefined;
   return {
     name: translateTeamName(team.name),
     shortName: team.shortName,
     colorHex,
-    flagEmoji: teamFlagEmoji(team.shortName) ?? (logoIsEmoji ? logo : undefined),
+    flagEmoji: flag ?? (logoIsEmoji ? logo : undefined),
   };
 }
 
