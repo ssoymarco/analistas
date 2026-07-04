@@ -150,15 +150,24 @@ export function kickoffUnixSeconds(match: Match): number | undefined {
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
 }
 
-/** Ventana del botón: en vivo, o por comenzar dentro de ≤4 h (el presupuesto
- *  de ~8 h de una Live Activity cubre previa + partido completo de sobra). */
+/** Ventana del botón: en vivo, o por comenzar dentro de ≤2 h.
+ *
+ *  Presupuesto ActivityKit: 8 h "activa" (reloj + pushes) + 4 h "terminada"
+ *  (resultado visible, sin updates). El peor caso ACTIVO — eliminatoria con
+ *  prórroga + penales exagerados — es ~3h17m desde el kickoff (el linger de 30'
+ *  post-final corre en la ventana "terminada", no gasta las 8 h). Con la
+ *  ventana en 2 h: 2h + 3h17m = 5h17m ≪ 8h → ~2h43m de colchón. Antes eran 4 h
+ *  (sobrevivía, pero con solo 43' de margen) y además era estorbo en el lock
+ *  screen. Un solo valor cubre TODO: un partido de liga sin prórroga/penales
+ *  termina en ~100' — el sistema se adapta solo porque el reloj y su tope se
+ *  manejan con los períodos reales de SportMonks, no con lógica "es copa". */
 export function canFollowMatch(match: Match): boolean {
   if (match.status === 'live') return true;
   if (match.status !== 'scheduled') return false;
   const kickoff = kickoffUnixSeconds(match);
   if (!kickoff) return false;
   const secsToKickoff = kickoff - Date.now() / 1000;
-  return secsToKickoff > -30 * 60 && secsToKickoff < 4 * 3600;
+  return secsToKickoff > -30 * 60 && secsToKickoff < 2 * 3600;
 }
 
 /** Attributes para la notificación Android (subset con logos URL — la
