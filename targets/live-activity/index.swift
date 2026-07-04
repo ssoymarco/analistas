@@ -92,6 +92,29 @@ private func phaseTicks(_ phase: String) -> Bool {
   return phase == "1H" || phase == "2H" || phase == "ET"
 }
 
+/// Deep link del tap: `analistas://match/{id}?home=..&away=..&hs=..&as=..&phase=..`
+/// El lado JS (src/utils/deepLinks.ts) lo traduce a navegación directa al
+/// partido; los query params pintan el primer frame del header mientras
+/// MatchDetail carga el fixture real (el JS también acepta el path pelón que
+/// mandaba el build 44).
+private func deepLinkURL(
+  _ attrs: MatchActivityAttributes,
+  _ state: MatchActivityAttributes.ContentState
+) -> URL? {
+  var comps = URLComponents()
+  comps.scheme = "analistas"
+  comps.host = "match"
+  comps.path = "/\(attrs.matchId)"
+  comps.queryItems = [
+    URLQueryItem(name: "home", value: attrs.home.name),
+    URLQueryItem(name: "away", value: attrs.away.name),
+    URLQueryItem(name: "hs", value: String(state.homeScore)),
+    URLQueryItem(name: "as", value: String(state.awayScore)),
+    URLQueryItem(name: "phase", value: state.phase),
+  ]
+  return comps.url
+}
+
 /// Tope nominal del período según su offset (espejo de getPeriodNominalCap en
 /// src/hooks/useLiveTick.ts): 1T→45' · 2T→90' · TE1→105' · TE2→120'.
 private func periodNominalCap(_ offsetMinutes: Int) -> Int {
@@ -156,20 +179,30 @@ struct TeamBlock: View {
   }
 }
 
-/// Insignia para la Dynamic Island compacta. Prioridad: bandera EMOJI (texto —
-/// renderiza nítido y con color garantizado en la Isla) → SIGLAS del equipo
-/// (texto — igual de nítido; solo para clubes, sin bandera) → punto de color.
-/// El escudo bitmap se DESCARTA aquí a propósito: a 18px se ve como un cuadro
-/// gris ilegible (confirmado en vivo con clubes reales, 4 jul 2026 — el mismo
-/// problema que ya habíamos resuelto para selecciones con la bandera). El
-/// bitmap SÍ se usa en TeamBlock (lock screen / isla expandida), donde hay
-/// espacio de sobra para que se vea bien.
+/// Insignia para la Dynamic Island compacta. Prioridad: bandera EMOJI
+/// (selecciones — texto, nítido y con color garantizado) → ESCUDO mini sobre
+/// chip circular claro (clubes — el chip garantiza contraste: un escudo
+/// oscuro directo sobre la Isla negra desaparecía, los "cuadros grises" del
+/// 2 jul 2026; con fondo claro cualquier escudo se ve, estilo FotMob.
+/// Petición del dueño 4 jul 2026) → siglas → punto de color.
 struct CompactBadge: View {
   let team: MatchActivityAttributes.TeamInfo
+  let matchId: String
+  let side: String
 
   var body: some View {
     if let flag = team.flagEmoji, !flag.isEmpty {
       Text(flag).font(.body)
+    } else if let crest = crestImage(matchId: matchId, side: side) {
+      ZStack {
+        Circle()
+          .fill(Color.white.opacity(0.92))
+          .frame(width: 19, height: 19)
+        Image(uiImage: crest)
+          .resizable()
+          .scaledToFit()
+          .frame(width: 14, height: 14)
+      }
     } else if !team.shortName.isEmpty {
       Text(team.shortName.prefix(3).uppercased())
         .font(.system(size: 11, weight: .heavy))
@@ -309,7 +342,7 @@ struct LockScreenView: View {
     .padding(.vertical, 12)
     .activityBackgroundTint(Color(red: 0.05, green: 0.05, blue: 0.05).opacity(0.85))
     .activitySystemActionForegroundColor(.white)
-    .widgetURL(URL(string: "analistas://match/\(context.attributes.matchId)"))
+    .widgetURL(deepLinkURL(context.attributes, context.state))
   }
 }
 
@@ -349,7 +382,7 @@ struct MatchLiveActivity: Widget {
         }
       } compactLeading: {
         HStack(spacing: 4) {
-          CompactBadge(team: context.attributes.home)
+          CompactBadge(team: context.attributes.home, matchId: context.attributes.matchId, side: "home")
           if context.state.phase != "pre" {
             Text("\(context.state.homeScore)")
               .font(.subheadline.weight(.heavy)).monospacedDigit()
@@ -364,7 +397,7 @@ struct MatchLiveActivity: Widget {
               .font(.subheadline.weight(.heavy)).monospacedDigit()
               .foregroundStyle(.white)
           }
-          CompactBadge(team: context.attributes.away)
+          CompactBadge(team: context.attributes.away, matchId: context.attributes.matchId, side: "away")
         }
         .padding(.trailing, 2)
       } minimal: {
@@ -375,7 +408,7 @@ struct MatchLiveActivity: Widget {
             .font(.system(size: 10, weight: .heavy)).monospacedDigit()
         }
       }
-      .widgetURL(URL(string: "analistas://match/\(context.attributes.matchId)"))
+      .widgetURL(deepLinkURL(context.attributes, context.state))
       .keylineTint(Color(red: 0.0, green: 0.88, blue: 0.59)) // accent #00E096
     }
   }

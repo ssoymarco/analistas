@@ -25,6 +25,7 @@ import { useVersionCheck } from './src/hooks/useVersionCheck';
 import { initialize } from './src/services/notifications';
 import { initializeFCM, initializeFCMAtStartup, attachFCMHandlers } from './src/services/fcmInit';
 import { navigateToMatch, buildMatchStubFromPayload } from './src/utils/navigationRef';
+import { initDeepLinks } from './src/utils/deepLinks';
 import { initializeAdMob } from './src/services/adMobService';
 // ── Sentry user sync ──────────────────────────────────────────────────────────
 // Sits inside AuthProvider so it can read the current user and tag Sentry
@@ -121,9 +122,15 @@ function App() {
       },
     );
 
+    // Deep links del Live Activity (analistas://match/{id}): el widgetURL del
+    // widget siempre existió, pero sin este handler el tap abría la app en el
+    // inicio en vez del partido (reporte del dueño, 4 jul 2026).
+    const removeDeepLinks = initDeepLinks();
+
     return () => {
       notifResponseListener.current?.remove();
       detachFcmHandlers.current?.();
+      removeDeepLinks();
     };
   }, []);
 
