@@ -203,36 +203,49 @@ struct PhaseTimeline: View {
         .fontWeight(.bold)
         .foregroundStyle(.white.opacity(0.85))
         .frame(maxWidth: 64)
+      } else if phaseTicks(state.phase), let startedAt = state.periodStartedAt {
+        // ── Fase con reloj corriendo (1T/2T/TE): SOLO el minuto acumulado,
+        //    sin prefijo "1T/2T" (petición del dueño 4 jul 2026, estilo
+        //    FotMob). El punto rojo del reloj es la señal de "en vivo". ──
+        // Minuto ACUMULADO estilo 90'/120' ("102:59", NO reinicia a 0 en el
+        // 2T) — anclado a periodStartedAt − offset. showsHours:false mantiene
+        // los minutos corriendo más allá de 60. El rango TERMINA en tope
+        // nominal + 25' de stoppage máximo: si el push de cambio de fase no
+        // llegara, el timer se CONGELA ahí en vez de correr al infinito (el
+        // "196:58" reportado por el dueño). 25' y no 15': el POR-CRO del 2 jul
+        // 2026 jugó 90+18 REALES — con +15 el paracaídas habría congelado el
+        // reloj en pleno agregado.
+        let offsetMin = state.periodMinuteOffset ?? 0
+        let anchor = startedAt - Double(offsetMin) * 60
+        let freezeAt = anchor + Double(periodNominalCap(offsetMin) + 25) * 60
+        Circle()
+          .fill(Color(red: 1.0, green: 0.27, blue: 0.23)) // live red dot
+          .frame(width: 6, height: 6)
+        Text(
+          timerInterval: Date(timeIntervalSince1970: anchor)...Date(
+            timeIntervalSince1970: freezeAt),
+          countsDown: false,
+          showsHours: false
+        )
+        .font(.caption2.monospacedDigit())
+        .fontWeight(.bold)
+        .foregroundStyle(.white.opacity(0.9))
+        .frame(maxWidth: 56)
+
+        // Tanda de penales durante el juego (raro, pero por consistencia).
+        if let ph = state.penHome, let pa = state.penAway {
+          Text("· \(ph)-\(pa)")
+            .font(.caption2.monospacedDigit())
+            .fontWeight(.bold)
+            .foregroundStyle(.white.opacity(0.85))
+        }
       } else {
-        Text(phaseLabel(state.phase == "pre" ? "1H" : state.phase))
+        // ── Fase SIN reloj (MT/FINAL/PENALES/SUSPENDIDO): solo la etiqueta,
+        //    porque no hay minuto que mostrar. ──
+        Text(phaseLabel(state.phase))
           .font(.caption2)
           .fontWeight(.heavy)
           .foregroundStyle(Color(red: 1.0, green: 0.27, blue: 0.23)) // live red
-
-        if phaseTicks(state.phase), let startedAt = state.periodStartedAt {
-          // Minuto ACUMULADO estilo 90'/120' (mismo formato que el app:
-          // "102:59", no "2T 57:59") — anclado a periodStartedAt − offset.
-          // showsHours:false mantiene los minutos corriendo más allá de 60.
-          // El rango TERMINA en tope nominal + 25' de stoppage máximo: si el
-          // push de cambio de fase no llegara, el timer se CONGELA ahí en vez
-          // de correr al infinito (el "196:58" reportado por el dueño).
-          // 25' y no 15': el POR-CRO del 2 jul 2026 jugó 90+18 REALES — con
-          // +15 el paracaídas habría congelado el reloj en pleno agregado.
-          let offsetMin = state.periodMinuteOffset ?? 0
-          let anchor = startedAt - Double(offsetMin) * 60
-          let freezeAt = anchor + Double(periodNominalCap(offsetMin) + 25) * 60
-          Text("·").font(.caption2).foregroundStyle(.white.opacity(0.5))
-          Text(
-            timerInterval: Date(timeIntervalSince1970: anchor)...Date(
-              timeIntervalSince1970: freezeAt),
-            countsDown: false,
-            showsHours: false
-          )
-          .font(.caption2.monospacedDigit())
-          .fontWeight(.bold)
-          .foregroundStyle(.white.opacity(0.85))
-          .frame(maxWidth: 56)
-        }
 
         // Tanda de penales: "PENALES · 4-2" (en vivo) / "FINAL · 4-2 pen".
         if let ph = state.penHome, let pa = state.penAway {
