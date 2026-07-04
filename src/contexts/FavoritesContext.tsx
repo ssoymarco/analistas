@@ -376,15 +376,23 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       leagueIds:    favs.leagueIds    ?? leagueRef.current,
       rivalTeamIds: favs.rivalTeamIds ?? rivalRef.current,
     };
-    const write = () => updateDoc(doc(db, 'users', uid), { favorites: full });
+    const userRef = doc(db, 'users', uid);
+    const write = () => updateDoc(userRef, { favorites: full });
     write().catch(err => {
       const code = (err as { code?: string })?.code;
       if (code === 'not-found') {
         // users/{uid} aún no existe (ensureUserProfile en vuelo durante el
-        // primer sign-in) — reintentar una vez cuando ya debería existir.
-        setTimeout(() => {
-          write().catch(e2 => captureFirestoreRejection('favorites.persist.retry', e2));
-        }, 2500);
+        // primer sign-in — el token de Auth tarda en propagarse a Firestore).
+        // Un timeout fijo de 2.5s no alcanzaba a cubrir esta carrera (infló
+        // Sentry con pushToken.persist el 4 jul 2026) — esperar a que el doc
+        // EXISTA (onSnapshot, hasta 20s) en vez de adivinar un tiempo fijo.
+        const timer = setTimeout(() => { unsub(); }, 20000);
+        const unsub = onSnapshot(userRef, snap => {
+          if (snap.exists()) {
+            clearTimeout(timer); unsub();
+            write().catch(e2 => captureFirestoreRejection('favorites.persist.retry', e2));
+          }
+        }, () => clearTimeout(timer));
         return;
       }
       // NUNCA tragar esto en silencio: así fue invisible durante semanas el

@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { captureFirestoreRejection } from '../services/sentry';
 import { cancelAllNotificationsForMatch, PUSH_TOKEN_KEY } from '../services/notifications';
@@ -182,16 +182,33 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
    *  usuarios logueados). Habilita pushes dirigidos/masivos desde el backend —
    *  la key ya estaba permitida en las rules pero NUNCA se escribía, por eso
    *  el 3 jul 2026 no hubo forma de avisar a los usuarios afectados por el bug
-   *  de favoritos. Fire-and-forget con retry (ventana de creación del doc). */
+   *  de favoritos. Fire-and-forget, con espera al doc (ver nota abajo). */
   const syncPushTokenToCloud = useCallback((token: string) => {
     const uid = uidRef.current;
     if (!uid) return;
-    const write = () =>
-      setDoc(doc(db, 'users', uid), { pushToken: token }, { merge: true });
-    write().catch(() => {
-      setTimeout(() => {
-        write().catch(e2 => captureFirestoreRejection('pushToken.persist', e2));
-      }, 2500);
+    const userRef = doc(db, 'users', uid);
+    const write = () => setDoc(userRef, { pushToken: token }, { merge: true });
+    write().catch(err => {
+      // ⚠️ El 4 jul 2026 esto infló Sentry con ~1.5K "permission-denied" en un
+      // día: un solo retry a 2.5s fijos no alcanzaba a cubrir la MISMA carrera
+      // que AuthContext.ensureUserProfile YA documenta como esperada — el
+      // token de Auth tarda en propagarse a Firestore en el primer login, y
+      // el doc users/{uid} genuinamente no existe todavía (setDoc+merge sobre
+      // un doc inexistente ES un create, que las rules rechazan sin
+      // displayName/createdAt). Fix: esperar a que el doc EXISTA (onSnapshot,
+      // hasta 20s) en vez de un timeout fijo — igual que la migración de
+      // favoritos. Solo se reporta si de verdad nunca llegó a existir.
+      if ((err as { code?: string })?.code !== 'permission-denied') {
+        captureFirestoreRejection('pushToken.persist', err);
+        return;
+      }
+      const timer = setTimeout(() => { unsub(); }, 20000);
+      const unsub = onSnapshot(userRef, snap => {
+        if (snap.exists()) {
+          clearTimeout(timer); unsub();
+          write().catch(e2 => captureFirestoreRejection('pushToken.persist', e2));
+        }
+      }, () => clearTimeout(timer));
     });
   }, []);
 
@@ -200,17 +217,27 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   const syncPrefsToCloud = useCallback((next: NotificationPrefs) => {
     const uid = uidRef.current;
     if (!uid) return;
-    const write = () =>
-      setDoc(doc(db, 'users', uid), { notificationPrefs: next }, { merge: true });
-    write().catch(() => {
+    const userRef = doc(db, 'users', uid);
+    const write = () => setDoc(userRef, { notificationPrefs: next }, { merge: true });
+    write().catch(err => {
       // setDoc(merge) sobre un users/{uid} que aún NO existe ES un create para
       // las rules (exigen displayName/createdAt) → rechazado durante la
       // ventana del primer sign-in mientras ensureUserProfile crea el doc.
-      // Reintentar una vez ya creado; si vuelve a fallar, reportarlo
-      // (filtro-safe) — jamás tragarlo en silencio (bug de rules, 3 jul 2026).
-      setTimeout(() => {
-        write().catch(e2 => captureFirestoreRejection('notifPrefs.persist', e2));
-      }, 2500);
+      // Un timeout fijo de 2.5s no alcanzaba a cubrir esta carrera (infló
+      // Sentry con pushToken.persist el 4 jul 2026, mismo patrón) — esperar
+      // a que el doc EXISTA (onSnapshot, hasta 20s) en vez de adivinar un
+      // tiempo fijo. Solo se reporta si de verdad nunca llegó a existir.
+      if ((err as { code?: string })?.code !== 'permission-denied') {
+        captureFirestoreRejection('notifPrefs.persist', err);
+        return;
+      }
+      const timer = setTimeout(() => { unsub(); }, 20000);
+      const unsub = onSnapshot(userRef, snap => {
+        if (snap.exists()) {
+          clearTimeout(timer); unsub();
+          write().catch(e2 => captureFirestoreRejection('notifPrefs.persist', e2));
+        }
+      }, () => clearTimeout(timer));
     });
   }, []);
 

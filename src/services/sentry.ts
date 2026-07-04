@@ -179,6 +179,10 @@ export function captureError(error: unknown, context?: Record<string, unknown>):
 export function captureFirestoreRejection(op: string, error: unknown): void {
   try {
     const code = (error as { code?: string })?.code ?? 'unknown';
+    // 'unavailable' = el SDK está offline (sin red) — esperado y no accionable,
+    // NO un bug de reglas. Reportarlo solo infla Sentry sin ayudar (visto el
+    // 4 jul 2026: favorites.reconcile [unavailable], ruido puro).
+    if (code === 'unavailable') return;
     Sentry.withScope(scope => {
       scope.setTag('firestore_op', op);
       scope.setExtra('code', code);
