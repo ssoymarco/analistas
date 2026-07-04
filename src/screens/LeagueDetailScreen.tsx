@@ -98,6 +98,18 @@ function formatDate(dateStr: string, t: (key: string, opts?: any) => any): strin
   return `${day} ${months[d.getMonth()]}`;
 }
 
+/** Día LOCAL ("YYYY-MM-DD") del kickoff de un fixture cuyo `date` viene en
+ *  formato SM UTC ("YYYY-MM-DD HH:MM:SS"). ⚠️ Agrupar con el string UTC crudo
+ *  ponía partidos en el día equivocado para el usuario: México-Inglaterra
+ *  (5 jul 18:00 CDMX = 6 jul 00:00 UTC) aparecía el "6 Jul" (reporte del
+ *  dueño, 4 jul 2026). El feed de Partidos (home) ya era timezone-correcto —
+ *  este helper alinea el calendario de liga con ese comportamiento. */
+function localDayKey(utcDateStr: string): string {
+  const d = new Date(utcDateStr.replace(' ', 'T') + 'Z');
+  if (Number.isNaN(d.getTime())) return utcDateStr.slice(0, 10); // malformado → UTC
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TAB: Clasificación
@@ -1141,7 +1153,11 @@ function useTranslateStage() {
 
 const CalendarioTab: React.FC<{
   data: LeagueDetailData;
-}> = ({ data }) => {
+  /** Ancla FotMob: pide al padre hacer scroll hasta `innerY` (coordenada
+   *  relativa a la raíz de este tab) donde vive el primer día de HOY o el
+   *  siguiente por venir. */
+  onAnchor?: (innerY: number) => void;
+}> = ({ data, onAnchor }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
   const translateStage = useTranslateStage();
@@ -1152,11 +1168,14 @@ const CalendarioTab: React.FC<{
     navigation.push('MatchDetail', { match: fixtureToMatch(fix, leagueName, leagueLogo) });
   };
 
-  // Group by stage → within each stage, group by date. Memoized on `fixtures`
-  // so progressive hydration (fixtures paint first, standings/scorers merge in
-  // a later setData) doesn't re-run the grouping on every parent re-render.
+  // Group by stage → within each stage, group by LOCAL date (fix del 4 jul
+  // 2026: agrupar por día UTC ponía México-Inglaterra, 5 jul 18:00 CDMX =
+  // 6 jul UTC, en el día equivocado y desordenaba las horas dentro del día).
+  // Orden CRONOLÓGICO puro (estilo FotMob): inaugural arriba → final abajo;
+  // el "aterrizaje" en hoy lo hace el anclaje de abajo, no el orden.
+  // Memoized so progressive hydration doesn't re-run grouping per re-render.
   // NOTE: must run before the early return below to satisfy the rules of hooks.
-  const sortedStages = useMemo(() => {
+  const { sortedStages, anchorTarget } = useMemo(() => {
     const stageMap = new Map<string, { sortOrder: number; byDate: Map<string, LeagueFixture[]> }>();
     for (const fix of fixtures) {
       const stageKey = fix.stageName || 'Partidos';
@@ -1164,32 +1183,50 @@ const CalendarioTab: React.FC<{
         stageMap.set(stageKey, { sortOrder: fix.stageSortOrder, byDate: new Map() });
       }
       const stage = stageMap.get(stageKey)!;
-      const dateKey = fix.date.slice(0, 10); // "YYYY-MM-DD"
+      const dateKey = localDayKey(fix.date);
       if (!stage.byDate.has(dateKey)) stage.byDate.set(dateKey, []);
       stage.byDate.get(dateKey)!.push(fix);
     }
-    return Array.from(stageMap.entries()).sort(([, a], [, b]) => a.sortOrder - b.sortOrder);
+    const stages = Array.from(stageMap.entries()).sort(([, a], [, b]) => a.sortOrder - b.sortOrder);
+
+    // Objetivo del ancla: primer día ≥ hoy (local) siguiendo el orden de
+    // render. Si la temporada ya terminó (todo pasado) → null, abre arriba.
+    const todayLocal = localDayKey(new Date().toISOString().replace('T', ' ').slice(0, 19));
+    let target: { stageName: string; dateKey: string } | null = null;
+    outer: for (const [stageName, { byDate }] of stages) {
+      for (const dateKey of Array.from(byDate.keys()).sort()) {
+        if (dateKey >= todayLocal) { target = { stageName, dateKey }; break outer; }
+      }
+    }
+    return { sortedStages: stages, anchorTarget: target };
   }, [fixtures]);
 
-  // ── Auto-scroll to current matchday: REMOVED ─────────────────────────────
-  // The previous implementation (using View.measure inside a ref callback
-  // + requestAnimationFrame) had two recurring bugs:
-  //
-  //   1. measureLayout crash on Fabric when refs got stale on season switch
-  //   2. Visible "bounce" on first render: the ScrollView would jump down
-  //      to the target Y, then snap back to 0 once the final layout settled
-  //      (safe area + image loads + sticky header recomputed bounds), AND
-  //      the compact top bar would flash "🏆 Mundial 2026" briefly during
-  //      that bounce.
-  //
-  // Both came from the same root cause — we're trying to measure layout
-  // before it has fully stabilised. A robust implementation would need to
-  // pre-compute the contentOffset prop before the ScrollView renders, which
-  // requires knowing the height of every prior section without measuring
-  // them. Not worth the complexity for a nice-to-have.
-  //
-  // Current behaviour: page opens at the top. The user scrolls manually to
-  // find today's matches. Matches FotMob / Sofascore / ESPN default.
+  // ── Ancla en HOY (reimplementación segura) ─────────────────────────────────
+  // La versión anterior usaba View.measure/measureLayout y se quitó por (1)
+  // crash en Fabric con refs viejos al cambiar temporada y (2) "rebote"
+  // visual. Esta versión NO mide nada imperativo: acumula las `y` que los
+  // propios onLayout reportan (card del stage objetivo + grupo de fecha
+  // objetivo, ambas relativas a ancestros estables) y avisa al padre UNA vez
+  // por dataset. El padre decide si el scroll procede (p.ej. usuario ya
+  // scrolleó → no molestar). Sin refs imperativos → sin crash posible; sin
+  // medir-antes-de-tiempo → los onLayout llegan cuando el layout ya existe.
+  const cardYRef = useRef<number | null>(null);
+  const dateYRef = useRef<number | null>(null);
+  const firedRef = useRef(false);
+  useEffect(() => {
+    // Re-armar el ancla SOLO al cambiar de temporada — no con cada snapshot
+    // en vivo (los goles refrescan `fixtures` cada poll; re-anclar ahí
+    // jalaría de vuelta a "hoy" a un usuario que subió a leer el pasado).
+    cardYRef.current = null;
+    dateYRef.current = null;
+    firedRef.current = false;
+  }, [data.seasonName]);
+  const tryFireAnchor = () => {
+    if (firedRef.current || !onAnchor) return;
+    if (cardYRef.current == null || dateYRef.current == null) return;
+    firedRef.current = true;
+    onAnchor(cardYRef.current + dateYRef.current);
+  };
 
   if (fixtures.length === 0) {
     return (
@@ -1201,33 +1238,23 @@ const CalendarioTab: React.FC<{
     );
   }
 
-  // Today-first date ordering: today's date appears first, then past dates in
-  // descending order (most recent first), then future dates ascending. Matches
-  // the sort applied by useLeagueDetail at the fixtures level — needed here too
-  // because the byDate map groups by date and we have to choose the date order
-  // when rendering. Pure ascending here would land the user on the August
-  // opening jornada (season start) regardless of where in the season we are.
-  const todayUTC = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
-  const compareDates = (a: string, b: string): number => {
-    const isTodayA = a === todayUTC;
-    const isTodayB = b === todayUTC;
-    const isPastA  = a < todayUTC;
-    const isPastB  = b < todayUTC;
-    const groupA = isTodayA ? 0 : isPastA ? 1 : 2;
-    const groupB = isTodayB ? 0 : isPastB ? 1 : 2;
-    if (groupA !== groupB) return groupA - groupB;
-    if (isPastA) return b.localeCompare(a); // past: most recent first
-    return a.localeCompare(b);              // today + future: ascending
-  };
-
   return (
     <View style={ca.outer}>
       {sortedStages.map(([stageName, { byDate }]) => {
         const stageLabel = translateStage(stageName);
-        const sortedDates = Array.from(byDate.entries()).sort(([a], [b]) => compareDates(a, b));
+        // Cronológico ascendente — el ancla se encarga de aterrizar en hoy.
+        const sortedDates = Array.from(byDate.entries()).sort(([a], [b]) => a.localeCompare(b));
         const totalInStage = sortedDates.reduce((sum, [, fs]) => sum + fs.length, 0);
+        const isAnchorStage = anchorTarget?.stageName === stageName;
         return (
-          <View key={stageName} style={[ca.card, { backgroundColor: c.card, borderColor: c.border }]}>
+          <View
+            key={stageName}
+            style={[ca.card, { backgroundColor: c.card, borderColor: c.border }]}
+            onLayout={isAnchorStage ? e => {
+              cardYRef.current = e.nativeEvent.layout.y;
+              tryFireAnchor();
+            } : undefined}
+          >
             {/* Stage header */}
             <View style={ca.stageHeader}>
               <Text style={[ca.sectionTitle, { color: c.textPrimary }]}>{stageLabel}</Text>
@@ -1240,12 +1267,19 @@ const CalendarioTab: React.FC<{
 
             {/* Fixtures grouped by date */}
             {sortedDates.map(([dateKey, dayFixtures]) => {
-              // Parse date for display: "Jun 11"
+              // Parse date for display: "Jun 11" (dateKey ya es día LOCAL)
               const [, mm, dd] = dateKey.split('-');
               const months = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
               const dateLabel = `${parseInt(dd, 10)} ${months[parseInt(mm, 10) - 1]}`;
+              const isAnchorDate = isAnchorStage && anchorTarget?.dateKey === dateKey;
               return (
-                <View key={dateKey}>
+                <View
+                  key={dateKey}
+                  onLayout={isAnchorDate ? e => {
+                    dateYRef.current = e.nativeEvent.layout.y;
+                    tryFireAnchor();
+                  } : undefined}
+                >
                   {/* Date divider */}
                   <View style={[ca.dateDivider, { borderTopColor: c.border }]}>
                     <Text style={[ca.dateDividerText, { color: c.accent }]}>{dateLabel}</Text>
@@ -1461,6 +1495,23 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   // ── Scroll animation ──
   const scrollY = useRef(new Animated.Value(0)).current;
   const scrollHostRef = useRef<any>(null);
+  // Ancla FotMob del calendario: y del contenedor de tabs dentro del scroll +
+  // último y de scroll del usuario (si ya scrolleó, no lo interrumpimos).
+  const tabContentYRef = useRef(0);
+  const lastScrollYRef = useRef(0);
+  const handleCalendarAnchor = useCallback((innerY: number) => {
+    // Usuario ya navegando → no robarle el scroll.
+    if (lastScrollYRef.current > 40) return;
+    // Objetivo prácticamente arriba → dejar la vista donde está (sin saltito).
+    if (innerY < 120) return;
+    const STICKY_TABS_OFFSET = 64; // barra de tabs pegajosa + respiro
+    const y = Math.max(0, tabContentYRef.current + innerY - STICKY_TABS_OFFSET);
+    requestAnimationFrame(() => {
+      try {
+        scrollHostRef.current?.scrollTo?.({ y, animated: false });
+      } catch { /* jamás romper la pantalla por el ancla */ }
+    });
+  }, []);
   const [showCompact, setShowCompact] = useState(false);
 
   // ── Header theme colors ──
@@ -1575,6 +1626,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
         onScroll={(e: any) => {
           const y = e.nativeEvent.contentOffset.y;
           scrollY.setValue(y);
+          lastScrollYRef.current = y;
           setShowCompact(y > 80);
         }}
         scrollEventThrottle={16}
@@ -1682,7 +1734,11 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
         </View>
 
         {/* ── Tab content ── */}
-        <View style={s.tabContent} {...tabSwipe.panHandlers}>
+        <View
+          style={s.tabContent}
+          {...tabSwipe.panHandlers}
+          onLayout={e => { tabContentYRef.current = e.nativeEvent.layout.y; }}
+        >
           {data ? (
             activeTab === 'clasificacion' ? (
               isCup ? (
@@ -1700,7 +1756,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
                       </View>
               ) : <ClasificacionTab data={data} />
             ) :
-            activeTab === 'partidos'      ? <CalendarioTab data={data} /> :
+            activeTab === 'partidos'      ? <CalendarioTab data={data} onAnchor={handleCalendarAnchor} /> :
             activeTab === 'grupos'        ? <ClasificacionTab data={data} /> :
             activeTab === 'goleadores'    ? <GoleadoresTab data={data} /> :
             activeTab === 'asistencias'   ? <StatListTab data={data} type="assists" /> :
