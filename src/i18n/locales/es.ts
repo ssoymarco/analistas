@@ -514,6 +514,7 @@ const es = {
     trialBannerBold: 'Prueba 7 días sin cargo',
     trialBannerBody: 'con el plan anual — cancela antes y no se cobra nada.',
     cancelAnytime: 'Cancela en cualquier momento · Sin permanencia',
+    storeUnavailable: 'Las suscripciones no están disponibles por el momento. Inténtalo más tarde.',
     restore: '¿Ya eras titular? Restaura tu compra',
     termsPrivacy: 'Términos de uso · Política de privacidad',
     iconCardTitle: 'Personaliza tu ícono',

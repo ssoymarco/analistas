@@ -31,6 +31,12 @@ interface SubscriptionContextValue {
   isLoading: boolean;
   monthlyPackage: PurchasesPackage | null;
   yearlyPackage: PurchasesPackage | null;
+  /** true solo cuando la tienda ENTREGÓ productos comprables. Si Apple/Google
+   *  no devuelven offerings (suscripciones sin aprobar, acuerdo de pagos
+   *  incompleto, outage), toda la UI de premium debe ocultarse — un paywall
+   *  con botón muerto es lo que vieron los usuarios de 1.3.0 el 4 jul 2026.
+   *  Auto-sana: en cuanto la tienda responda, premium aparece sin OTA. */
+  storeReady: boolean;
   purchasePackage: (pkg: PurchasesPackage) => Promise<boolean>;
   restorePurchases: () => Promise<boolean>;
 }
@@ -40,6 +46,7 @@ const SubscriptionContext = createContext<SubscriptionContextValue>({
   isLoading: true,
   monthlyPackage: null,
   yearlyPackage: null,
+  storeReady: false,
   purchasePackage: async () => false,
   restorePurchases: async () => false,
 });
@@ -135,7 +142,11 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   return (
     <SubscriptionContext.Provider
-      value={{ isProUser, isLoading, monthlyPackage, yearlyPackage, purchasePackage, restorePurchases }}
+      value={{
+        isProUser, isLoading, monthlyPackage, yearlyPackage,
+        storeReady: !!(monthlyPackage || yearlyPackage),
+        purchasePackage, restorePurchases,
+      }}
     >
       {children}
     </SubscriptionContext.Provider>

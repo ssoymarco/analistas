@@ -469,6 +469,7 @@ const de: TranslationKeys = {
     trialBannerBold: '7 Tage kostenlos testen',
     trialBannerBody: 'im Jahresplan — kündige vor Tag 7 und zahle nichts.',
     cancelAnytime: 'Jederzeit kündbar · Keine Bindung',
+    storeUnavailable: 'Abos sind derzeit nicht verfügbar. Bitte versuche es später erneut.',
     restore: 'Bereits Stammspieler? Kauf wiederherstellen',
     termsPrivacy: 'Nutzungsbedingungen · Datenschutz',
     iconCardTitle: 'Dein Symbol anpassen',

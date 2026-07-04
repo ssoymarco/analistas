@@ -466,6 +466,7 @@ const tr: TranslationKeys = {
     trialBannerBold: '7 gün ücretsiz dene',
     trialBannerBody: 'yıllık planda — 7. günden önce iptal et ve hiçbir şey ödemezsin.',
     cancelAnytime: 'İstediğin zaman iptal et · Bağlayıcılık yok',
+    storeUnavailable: 'Abonelikler şu anda kullanılamıyor. Lütfen daha sonra tekrar dene.',
     restore: 'Zaten üyeydin mi? Satın alımını geri yükle',
     termsPrivacy: 'Kullanım şartları · Gizlilik politikası',
     iconCardTitle: 'İkonunu özelleştir',

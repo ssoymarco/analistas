@@ -333,7 +333,7 @@ export const PerfilScreen: React.FC = () => {
   const { upgradeWithGoogle, googleAuthReady } = useGoogleAuth();
   const [upgrading, setUpgrading] = useState(false);
   const { resetOnboarding } = useOnboarding();
-  const { isProUser } = useSubscription();
+  const { isProUser, storeReady } = useSubscription();
   const { followedTeamIds, followedPlayerIds, followedLeagueIds } = useFavorites();
   const { matchesViewed, newsRead, streakDays } = useUserStats();
   const totalFavorites = followedTeamIds.length + followedPlayerIds.length + followedLeagueIds.length;
@@ -643,7 +643,7 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 16, fontWeight: '700', color: c.textPrimary }}>{displayName}</Text>
               {isAuthenticated && <Text style={{ fontSize: 14, fontWeight: '500', color: '#60a5fa', marginTop: 1 }}>{displayUsername}</Text>}
               {!isAuthenticated && <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 2 }}>{t('profile.loginPrompt')}</Text>}
-              {isAuthenticated && PREMIUM_ENABLED && (
+              {isAuthenticated && PREMIUM_ENABLED && (isProUser || storeReady) && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
                   <TouchableOpacity
                     onPress={() => { haptics.light(); setLevelSheetVisible(true); }}
@@ -840,7 +840,7 @@ export const PerfilScreen: React.FC = () => {
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#06b6d4' }}>{timeFormat}</Text>
             </TouchableOpacity>
           } />
-          {PREMIUM_ENABLED && (
+          {PREMIUM_ENABLED && (isProUser || storeReady) && (
             <MenuRow
               c={c}
               emoji="📱"
@@ -864,19 +864,22 @@ export const PerfilScreen: React.FC = () => {
           <MenuRow c={c} emoji="📊" label={t('profile.odds')} sublabel={momiosEnabled ? t('profile.oddsVisible') : t('profile.oddsHidden')} iconBg="rgba(16,185,129,0.15)" rightElement={<CustomToggle value={momiosEnabled} onToggle={() => {
             // v1.0: odds are a free toggle. When premium ships, turning them OFF
             // becomes a premium perk again (gated by PREMIUM_ENABLED).
-            if (PREMIUM_ENABLED && momiosEnabled) {
+            if (PREMIUM_ENABLED && storeReady && !isProUser && momiosEnabled) {
               navigation.navigate('HazteTitular', { source: 'momios' });
             } else {
               setMomiosEnabled(!momiosEnabled);
             }
-          }} activeColor="#10b981" icon={momiosEnabled ? '📊' : (PREMIUM_ENABLED ? '🔒' : '📊')} />} />
+          }} activeColor="#10b981" icon={momiosEnabled ? '📊' : (PREMIUM_ENABLED && storeReady && !isProUser ? '🔒' : '📊')} />} />
           )}
           <MenuRow c={c} emoji="🗑️" label={t('profile.clearCache')} sublabel={t('profile.freeSpace')} iconBg="rgba(239,68,68,0.1)" isLast onPress={handleClearCache} />
         </View>
 
         <ModoEstadioCard c={c} isDark={isDark} />
 
-        {PREMIUM_ENABLED && (
+        {/* Solo cuando la tienda ENTREGA productos: un paywall con botón
+            muerto (suscripciones sin aprobar en ASC) es lo que vieron los
+            usuarios de 1.3.0 el 4 jul 2026. Auto-sana al aprobarse. */}
+        {PREMIUM_ENABLED && !isProUser && storeReady && (
           <PromoBanner onPress={() => navigation.navigate('HazteTitular', { source: 'promo' })} />
         )}
 

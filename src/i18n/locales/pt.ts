@@ -470,6 +470,7 @@ const pt: TranslationKeys = {
     trialBannerBold: 'Experimente 7 dias grátis',
     trialBannerBody: 'no plano anual — cancele antes do 7º dia e não paga nada.',
     cancelAnytime: 'Cancele a qualquer momento · Sem compromisso',
+    storeUnavailable: 'As assinaturas não estão disponíveis no momento. Tente novamente mais tarde.',
     restore: 'Já é titular? Restaure sua compra',
     termsPrivacy: 'Termos de uso · Política de privacidade',
     iconCardTitle: 'Personalize seu ícone',

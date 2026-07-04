@@ -502,6 +502,7 @@ const en: TranslationKeys = {
     trialBannerBold: 'Try 7 days for free',
     trialBannerBody: 'on the annual plan — cancel before day 7 and pay nothing.',
     cancelAnytime: 'Cancel anytime · No commitment',
+    storeUnavailable: 'Subscriptions are unavailable right now. Please try again later.',
     restore: 'Already a Starter? Restore your purchase',
     termsPrivacy: 'Terms of use · Privacy policy',
     iconCardTitle: 'Customize your icon',

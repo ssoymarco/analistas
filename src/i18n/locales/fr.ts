@@ -469,6 +469,7 @@ const fr: TranslationKeys = {
     trialBannerBold: 'Essayez 7 jours gratuitement',
     trialBannerBody: 'avec le plan annuel — résiliez avant le 7e jour et ne payez rien.',
     cancelAnytime: 'Résiliez à tout moment · Sans engagement',
+    storeUnavailable: 'Les abonnements sont indisponibles pour le moment. Réessayez plus tard.',
     restore: 'Déjà titulaire ? Restaurez votre achat',
     termsPrivacy: "Conditions d'utilisation · Politique de confidentialité",
     iconCardTitle: 'Personnalisez votre icône',
