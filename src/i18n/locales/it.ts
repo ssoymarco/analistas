@@ -703,6 +703,14 @@ const it: TranslationKeys = {
     sidelinedOther: 'Non disponibile',
   },
 
+  // ── Low data coverage ───────────────
+  dataCoverage: {
+    limitedFriendly: 'Amichevole precampionato — copertura dati limitata',
+    limitedGeneric: 'Copertura dati limitata',
+    lineupBody: 'Il fornitore di dati non ha pubblicato le formazioni di questa partita. Il punteggio resta aggiornato.',
+    statsBody: 'Il fornitore di dati non ha registrato statistiche dettagliate per questa partita. Il punteggio resta aggiornato.',
+  },
+
   // ── Match info tab ─────────────────────────────────────────────────────────
   matchInfo: {
     coachDetail: 'Profilo dell\'allenatore',

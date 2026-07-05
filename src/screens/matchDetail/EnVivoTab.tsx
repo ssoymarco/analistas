@@ -16,7 +16,7 @@ import { haptics } from '../../utils/haptics';
 import { AnimatedPressable } from '../../components/AnimatedPressable';
 import { GOAL_OPTIONS } from '../../components/GoalPicker';
 import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupVenues';
-import { getLeagueDisplayName } from '../../config/leagues';
+import { getLeagueDisplayName, isFriendliesLeague } from '../../config/leagues';
 import type {
   Match, MatchDetail, MatchEvent, H2HResult, TeamFormEntry,
   OddsMarket, MatchPrediction, MissingPlayer, PressureIndex, MatchStatCategory,
@@ -470,6 +470,12 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
   const [activeDot, setActiveDot] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
 
+  // Pre-season friendlies: no poll. These matches draw few voters and usually
+  // have limited data coverage; a dead poll makes the app look worse than no
+  // poll. (Pre-match we can't yet know if data will arrive, so the league name
+  // is the only available signal — decisión del dueño, 5 jul 2026.)
+  const isFriendly = isFriendliesLeague(match.league ?? '');
+
   // ── Vote state ──
   const [votes, setVotes] = useState<VoteState>({});
   const [counts, setCounts] = useState<VoteCounts>(defaultCounts);
@@ -653,6 +659,9 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
   const cards = shownPolls
     .map(pk => allCards.find(el => el.key === pk))
     .filter((el): el is React.ReactElement => el != null);
+
+  // After all hooks (league name can hydrate late; hook count must not change)
+  if (isFriendly) return null;
 
   return (
     <View style={pc.outer}>

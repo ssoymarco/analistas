@@ -703,6 +703,14 @@ const fr: TranslationKeys = {
     sidelinedOther: 'Indisponible',
   },
 
+  // ── Low data coverage ───────────────
+  dataCoverage: {
+    limitedFriendly: 'Match de pré-saison — couverture de données limitée',
+    limitedGeneric: 'Couverture de données limitée',
+    lineupBody: "Le fournisseur de données n'a pas publié les compositions de ce match. Le score reste à jour.",
+    statsBody: "Le fournisseur de données n'a pas enregistré de statistiques détaillées pour ce match. Le score reste à jour.",
+  },
+
   // ── Match info tab ─────────────────────────────────────────────────────────
   matchInfo: {
     coachDetail: 'Profil de l\'entraîneur',

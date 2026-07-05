@@ -801,6 +801,14 @@ const es = {
     sidelinedOther: 'No disponible',
   },
 
+  // ── Low data coverage (pre-season friendlies, minor leagues) ───────────────
+  dataCoverage: {
+    limitedFriendly: 'Partido de pretemporada — cobertura de datos limitada',
+    limitedGeneric: 'Cobertura de datos limitada',
+    lineupBody: 'El proveedor de datos no publicó las alineaciones de este partido. El marcador se mantiene actualizado.',
+    statsBody: 'El proveedor de datos no registró estadísticas detalladas de este partido. El marcador se mantiene actualizado.',
+  },
+
   // ── Match info detail modals ──────────────────────────────────────────────
   matchInfo: {
     coachDetail: 'Perfil del Entrenador',

@@ -24,6 +24,7 @@ import type { Match, MatchDetail, LineupPlayer, MatchLineup, MissingPlayer } fro
 import { getCoachProfile, type CoachProfile } from '../../services/sportsApi';
 import { translateCountry } from '../../i18n/countries';
 import { translateNationalTeam } from '../../utils/nationalTeams';
+import { isFriendliesLeague } from '../../config/leagues';
 import { isImageUri } from '../../utils/imageUri';
 import AdMobBanner from '../../components/AdMobBanner';
 import { ADMOB_ENABLED } from '../../config/features';
@@ -259,13 +260,19 @@ const GhostPlayerDot: React.FC<{ theme: PitchTheme; pulse: Animated.Value }> = (
   );
 };
 
-/** Empty-state skeleton — pitch + 4-3-3 ghosts per side + notice banner. */
-const LineupSkeleton: React.FC<{ theme: PitchTheme }> = ({ theme }) => {
+/** Empty-state skeleton — pitch + 4-3-3 ghosts per side + notice banner.
+ *
+ * `limited` = the match already kicked off (or ended) and the lineup never
+ * arrived — the "1 hour before" promise is broken, so we stop promising and
+ * say honestly that the provider has limited coverage for this match
+ * (typical of pre-season friendlies). No pulse either: pulsing = "arriving". */
+const LineupSkeleton: React.FC<{ theme: PitchTheme; limited?: boolean; friendly?: boolean }> = ({ theme, limited, friendly }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
-  const pulse = useRef(new Animated.Value(0.6)).current;
+  const pulse = useRef(new Animated.Value(limited ? 0.4 : 0.6)).current;
 
   useEffect(() => {
+    if (limited) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1, duration: 1100, useNativeDriver: true }),
@@ -274,7 +281,7 @@ const LineupSkeleton: React.FC<{ theme: PitchTheme }> = ({ theme }) => {
     );
     loop.start();
     return () => loop.stop();
-  }, [pulse]);
+  }, [pulse, limited]);
 
   // 4-3-3 — visible row order from each goal line forward.
   // Home: GK is closest to top edge; Away: GK is closest to bottom edge.
@@ -283,12 +290,24 @@ const LineupSkeleton: React.FC<{ theme: PitchTheme }> = ({ theme }) => {
 
   return (
     <View>
-      {/* Notice banner — sets expectations about when lineups arrive */}
-      <View style={[lsk.notice, { backgroundColor: c.accent + '14', borderColor: c.accent + '30' }]}>
-        <Text style={lsk.noticeIcon}>🏟️</Text>
+      {/* Notice banner — sets expectations about when lineups arrive.
+          `limited` variant: neutral colors, no promise of arrival. */}
+      <View style={[
+        lsk.notice,
+        limited
+          ? { backgroundColor: 'rgba(142,142,147,0.10)', borderColor: c.border }
+          : { backgroundColor: c.accent + '14', borderColor: c.accent + '30' },
+      ]}>
+        <Text style={lsk.noticeIcon}>{limited ? '📡' : '🏟️'}</Text>
         <View style={{ flex: 1 }}>
-          <Text style={[lsk.noticeTitle, { color: c.textPrimary }]}>{t('lineup.noLineup')}</Text>
-          <Text style={[lsk.noticeBody, { color: c.textSecondary }]}>{t('lineup.availableSoon')}</Text>
+          <Text style={[lsk.noticeTitle, { color: c.textPrimary }]}>
+            {limited
+              ? t(friendly ? 'dataCoverage.limitedFriendly' : 'dataCoverage.limitedGeneric')
+              : t('lineup.noLineup')}
+          </Text>
+          <Text style={[lsk.noticeBody, { color: c.textSecondary }]}>
+            {limited ? t('dataCoverage.lineupBody') : t('lineup.availableSoon')}
+          </Text>
         </View>
       </View>
 
@@ -912,7 +931,13 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   };
 
   if (!hasLineups) {
-    return <LineupSkeleton theme={theme} />;
+    return (
+      <LineupSkeleton
+        theme={theme}
+        limited={match.status !== 'scheduled'}
+        friendly={isFriendliesLeague(match.league ?? '')}
+      />
+    );
   }
 
   // ── Pitch block ──────────────────────────────────────────────────────────

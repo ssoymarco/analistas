@@ -782,6 +782,14 @@ const en: TranslationKeys = {
     sidelinedOther: 'Unavailable',
   },
 
+  // ── Low data coverage (pre-season friendlies, minor leagues) ───────────────
+  dataCoverage: {
+    limitedFriendly: 'Pre-season friendly — limited data coverage',
+    limitedGeneric: 'Limited data coverage',
+    lineupBody: 'The data provider did not publish lineups for this match. The score stays up to date.',
+    statsBody: 'The data provider did not record detailed statistics for this match. The score stays up to date.',
+  },
+
   // ── Match info detail modals ──────────────────────────────────────────────
   matchInfo: {
     coachDetail: 'Coach Profile',

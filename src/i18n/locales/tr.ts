@@ -700,6 +700,14 @@ const tr: TranslationKeys = {
     sidelinedOther: 'Mevcut değil',
   },
 
+  // ── Low data coverage ───────────────
+  dataCoverage: {
+    limitedFriendly: 'Hazırlık maçı — sınırlı veri kapsamı',
+    limitedGeneric: 'Sınırlı veri kapsamı',
+    lineupBody: 'Veri sağlayıcı bu maç için kadroları yayınlamadı. Skor güncel kalır.',
+    statsBody: 'Veri sağlayıcı bu maç için ayrıntılı istatistik kaydetmedi. Skor güncel kalır.',
+  },
+
   // ── Match info tab ─────────────────────────────────────────────────────────
   matchInfo: {
     coachDetail: 'Teknik Direktör Profili',

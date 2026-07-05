@@ -704,6 +704,14 @@ const pt: TranslationKeys = {
     sidelinedOther: 'Indisponível',
   },
 
+  // ── Low data coverage ───────────────
+  dataCoverage: {
+    limitedFriendly: 'Amistoso de pré-temporada — cobertura de dados limitada',
+    limitedGeneric: 'Cobertura de dados limitada',
+    lineupBody: 'O provedor de dados não publicou as escalações desta partida. O placar continua atualizado.',
+    statsBody: 'O provedor de dados não registrou estatísticas detalhadas desta partida. O placar continua atualizado.',
+  },
+
   // ── Match info tab ─────────────────────────────────────────────────────────
   matchInfo: {
     coachDetail: 'Perfil do Técnico',

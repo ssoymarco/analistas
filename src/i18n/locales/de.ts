@@ -703,6 +703,14 @@ const de: TranslationKeys = {
     sidelinedOther: 'Nicht verfügbar',
   },
 
+  // ── Low data coverage ───────────────
+  dataCoverage: {
+    limitedFriendly: 'Vorbereitungsspiel — eingeschränkte Datenabdeckung',
+    limitedGeneric: 'Eingeschränkte Datenabdeckung',
+    lineupBody: 'Der Datenanbieter hat für dieses Spiel keine Aufstellungen veröffentlicht. Der Spielstand bleibt aktuell.',
+    statsBody: 'Der Datenanbieter hat für dieses Spiel keine detaillierten Statistiken erfasst. Der Spielstand bleibt aktuell.',
+  },
+
   // ── Match info tab ─────────────────────────────────────────────────────────
   matchInfo: {
     coachDetail: 'Trainerprofil',
