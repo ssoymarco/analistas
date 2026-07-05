@@ -113,7 +113,9 @@ export const TopicNames = {
   teamRivalPenMiss:    (teamId: string) => `team_${teamId}_rival_penmiss`,
   teamRivalEliminated: (teamId: string) => `team_${teamId}_rival_eliminated`,
 
-  // ── Player topics (server currently dispatches nothing here — future use) ──
+  // ── Player topics (server dispatches goles y rojas desde el 5 jul 2026) ────
+  // El servidor excluye con condición FCM a quienes ya siguen al equipo del
+  // jugador — no hay dobles. Ver functions/src/detect-changes.ts.
   playerGoals:  (playerId: string)  => `player_${playerId}_goals`,
   playerCards:  (playerId: string)  => `player_${playerId}_cards`,
 
@@ -159,7 +161,7 @@ function allBucketTopicsForTeam(teamId: string): string[] {
   return topics;
 }
 
-/** Topics for a player (no bucket — server doesn't dispatch here yet). */
+/** Topics for a player (no bucket — el servidor envía inmediato, como Modo Rival). */
 function topicsForPlayer(playerId: string): string[] {
   return [
     TopicNames.playerGoals(playerId),
