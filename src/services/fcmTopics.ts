@@ -113,11 +113,13 @@ export const TopicNames = {
   teamRivalPenMiss:    (teamId: string) => `team_${teamId}_rival_penmiss`,
   teamRivalEliminated: (teamId: string) => `team_${teamId}_rival_eliminated`,
 
-  // ── Player topics (server dispatches goles y rojas desde el 5 jul 2026) ────
-  // El servidor excluye con condición FCM a quienes ya siguen al equipo del
-  // jugador — no hay dobles. Ver functions/src/detect-changes.ts.
-  playerGoals:  (playerId: string)  => `player_${playerId}_goals`,
-  playerCards:  (playerId: string)  => `player_${playerId}_cards`,
+  // ── Player topics (server dispatches goles y rojas desde el 5 jul 2026,
+  // alineación titular desde Fase 2). El servidor excluye con condición FCM
+  // a quienes ya siguen al equipo del jugador — no hay dobles. Ver
+  // functions/src/detect-changes.ts y sync-match-enrichment.ts.
+  playerGoals:   (playerId: string)  => `player_${playerId}_goals`,
+  playerCards:   (playerId: string)  => `player_${playerId}_cards`,
+  playerLineups: (playerId: string)  => `player_${playerId}_lineups`,
 
   // ── Legacy topic builders (for reference / dual-send awareness) ────────────
   // NOTE: do NOT subscribe to these on new builds. The server dual-sends to them
@@ -166,6 +168,7 @@ function topicsForPlayer(playerId: string): string[] {
   return [
     TopicNames.playerGoals(playerId),
     TopicNames.playerCards(playerId),
+    TopicNames.playerLineups(playerId),
   ];
 }
 
