@@ -332,6 +332,7 @@ function findRecentGoalEvent(fixture, scoringSide) {
                 'normal';
         return {
             scorerName: ev.player_name ?? undefined,
+            scorerPlayerId: ev.player_id ?? null,
             goalKind,
         };
     }
@@ -353,6 +354,7 @@ function findRecentRedCard(fixture, side) {
         if (ev.type_id === types_1.SM_EVENT_TYPES.RED_CARD || ev.type_id === types_1.SM_EVENT_TYPES.SECOND_YELLOW) {
             return {
                 playerName: ev.player_name ?? undefined,
+                playerId: ev.player_id ?? null,
                 minute: ev.minute ?? null,
             };
         }
@@ -402,6 +404,7 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
                     scoringTeamSide: 'home',
                     goalKind: ev?.goalKind ?? 'normal',
                     scorerName: ev?.scorerName,
+                    playerId: ev?.scorerPlayerId ?? null,
                 });
             }
             if (awayScored) {
@@ -412,6 +415,7 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
                     scoringTeamSide: 'away',
                     goalKind: ev?.goalKind ?? 'normal',
                     scorerName: ev?.scorerName,
+                    playerId: ev?.scorerPlayerId ?? null,
                 });
             }
         }
@@ -535,13 +539,13 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
         }
         if (redHome > prev.redCardsHome) {
             const ev = findRecentRedCard(fixture, 'home');
-            const base = { ...baseEvent, scoringTeamSide: 'home', playerName: ev?.playerName, minute: ev?.minute ?? match.minute };
+            const base = { ...baseEvent, scoringTeamSide: 'home', playerName: ev?.playerName, playerId: ev?.playerId ?? null, minute: ev?.minute ?? match.minute };
             changes.push({ ...base, type: 'redCard' });
             changes.push({ ...base, type: 'rivalRedCard' }); // Modo Rival: rival player sent off
         }
         if (redAway > prev.redCardsAway) {
             const ev = findRecentRedCard(fixture, 'away');
-            const base = { ...baseEvent, scoringTeamSide: 'away', playerName: ev?.playerName, minute: ev?.minute ?? match.minute };
+            const base = { ...baseEvent, scoringTeamSide: 'away', playerName: ev?.playerName, playerId: ev?.playerId ?? null, minute: ev?.minute ?? match.minute };
             changes.push({ ...base, type: 'redCard' });
             changes.push({ ...base, type: 'rivalRedCard' });
         }
@@ -1052,6 +1056,42 @@ async function dispatchNotifications(changes) {
             sendPromises.push(sendWithCondition(messaging, `'team_${change.homeTeam.id}_goals_d0' in topics || 'team_${change.awayTeam.id}_goals_d0' in topics`, title, body, data, dedupId));
             logger.info(`📣 GOALCANCELLED (VAR) — ${title}`, { matchId: change.matchId });
             continue;
+        }
+        // ── Seguidores del JUGADOR (goles y rojas) ─────────────────────────────
+        // Topics player_{id}_goals / player_{id}_cards: el cliente los suscribe
+        // desde 1.2.x pero el servidor nunca despachó a ellos hasta hoy (5 jul
+        // 2026). La condición FCM excluye a quienes ya siguen al EQUIPO del
+        // jugador (cualquier bucket de Modo Estadio) — ellos ya reciben la
+        // notificación del equipo, que trae el nombre del anotador. Límite FCM:
+        // 5 topics por condición → exactamente player + 4 buckets del equipo.
+        // Decisiones (dueño, 5 jul 2026):
+        //  · Autogoles NO notifican al seguidor del jugador.
+        //  · Solo rojas (incluye doble amarilla), no amarillas.
+        //  · Envío inmediato sin buckets (mismo trato que Modo Rival). Trade-off:
+        //    un usuario en Modo Estadio que siga a un jugador del equipo RIVAL
+        //    al suyo recibe este push sin retraso (población minúscula).
+        //  · Builds legacy (pre-buckets) que sigan equipo+jugador pueden recibir
+        //    doble notificación — la condición no alcanza para excluir también
+        //    los topics legacy (límite de 5).
+        if (change.playerId &&
+            ((change.type === 'goal' && change.goalKind !== 'own') || change.type === 'redCard')) {
+            const playerTeamId = change.scoringTeamSide === 'home' ? change.homeTeam.id : change.awayTeam.id;
+            const kind = change.type === 'goal' ? 'goals' : 'cards';
+            const playerTopic = `player_${change.playerId}_${kind}`;
+            const teamBase = `team_${playerTeamId}_${kind}`;
+            const condition = `'${playerTopic}' in topics && !('${teamBase}_d0' in topics) && ` +
+                `!('${teamBase}_d2' in topics) && !('${teamBase}_d5' in topics) && ` +
+                `!('${teamBase}_d10' in topics)`;
+            const pName = change.type === 'goal' ? change.scorerName : change.playerName;
+            const pTitle = change.type === 'goal'
+                ? (change.goalKind === 'penalty'
+                    ? `⚽ ¡Gol de penal de ${pName ?? 'tu jugador'}!`
+                    : `⚽ ¡Gol de ${pName ?? 'tu jugador'}!`)
+                : `🟥 Expulsado: ${pName ?? 'tu jugador'}`;
+            const pMinute = change.minute != null ? ` · ${change.minute}'` : '';
+            const pBody = `${loc(change.homeTeam.name)} ${change.homeScore}-${change.awayScore} ${loc(change.awayTeam.name)}${pMinute}`;
+            sendPromises.push(sendWithCondition(messaging, condition, pTitle, pBody, { ...data, type: change.type === 'goal' ? 'playerGoal' : 'playerRedCard', playerId: String(change.playerId) }, `${dedupId}_p${change.playerId}`.slice(0, 64)));
+            logger.info(`⭐ PLAYER ${change.type.toUpperCase()} — ${pTitle}`, { matchId: change.matchId, playerId: change.playerId });
         }
         // ── Live retrasable events (goal, halftime, matchEnd, redCard) ─────────
         // 1. Send _d0 immediately.

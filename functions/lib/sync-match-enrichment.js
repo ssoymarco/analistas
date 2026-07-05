@@ -326,10 +326,39 @@ async function writeEnrichment(m, fixture, h2hSkipCutoff) {
                     apns: { payload: { aps: { sound: 'default', badge: 0 } } },
                 }),
             ]);
+            // ── Seguidores del JUGADOR: alineación titular confirmada (Fase 2, 5 jul
+            // 2026). Un push por cada titular de las 22 plazas — la condición FCM
+            // excluye a quien ya sigue al EQUIPO (ese usuario ya recibió el push de
+            // arriba). Igual que goles/rojas: sin buckets de Modo Estadio, es
+            // información pre-partido, no hay nada que spoilear.
+            const starters = newLineups.filter(e => e.type_id === 11 && e.player_id && e.team_id);
+            const playerSends = starters.map(e => {
+                const teamId = e.team_id;
+                const teamName = teamId === homeId ? m.homeTeamName : m.awayTeamName;
+                const rival = teamId === homeId ? m.awayTeamName : m.homeTeamName;
+                const topic = `player_${e.player_id}_lineups`;
+                const teamBase = `team_${teamId}_lineups`;
+                return messaging.send({
+                    condition: `'${topic}' in topics && !('${teamBase}' in topics)`,
+                    notification: {
+                        title: `📋 ${e.player_name} es titular`,
+                        body: `${teamName} vs ${rival} · ${m.league}`,
+                    },
+                    data: { type: 'playerLineup', matchId: m.id, playerId: String(e.player_id) },
+                    android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
+                    apns: { payload: { aps: { sound: 'default', badge: 0 } } },
+                }).catch(err => {
+                    const code = err.code;
+                    if (code !== 'messaging/invalid-argument') {
+                        logger.warn(`📋 Player lineup push failed (player ${e.player_id})`, { err });
+                    }
+                });
+            });
+            await Promise.allSettled(playerSends);
             // Persist the flag so future enrichment runs don't re-notify
             await admin_init_1.db.collection('matches').doc(m.id).set({ lineupsSent: true }, { merge: true });
             m.lineupsSent = true;
-            logger.info(`📋 Lineup notification sent for match ${m.id}: ${m.homeTeamName} vs ${m.awayTeamName}`);
+            logger.info(`📋 Lineup notification sent for match ${m.id}: ${m.homeTeamName} vs ${m.awayTeamName} (+${starters.length} player pushes)`);
         }
         catch (err) {
             logger.warn(`📋 Lineup notification failed for match ${m.id}:`, err);

@@ -211,6 +211,9 @@ export interface DetectedChange {
     scorerName?: string;
     /** Player involved in the event (red cards, yellow cards). */
     playerName?: string;
+    /** SM player_id of the scorer (goal) or carded player (redCard) — used to
+     *  notify followers of the PLAYER via player_{id}_goals / player_{id}_cards. */
+    playerId?: number | null;
     /** For substitutions: the player coming ON (replacing playerName). */
     relatedPlayerName?: string;
     /** Match minute when the event occurred. */
