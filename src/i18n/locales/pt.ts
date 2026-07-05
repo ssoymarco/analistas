@@ -101,6 +101,12 @@ const pt: TranslationKeys = {
     channelName: 'Placar ao vivo',
   },
 
+  matchShare: {
+    live: '⚽ {{score}} · {{league}}\nEstá rolando AGORA! Acompanhe ao vivo no Analistas 👉 {{url}}',
+    finished: '⚽ Final: {{score}} · {{league}}\nReviva o jogo no Analistas 👉 {{url}}',
+    scheduled: '⚽ {{match}} · {{league}}\nAcompanhe ao vivo no Analistas 👉 {{url}}',
+  },
+
   promoBanner: {
     title: 'Começam os dezesseis avos da Copa!',
     body: 'Siga suas seleções favoritas para receber gols, escalações e resultados.',
@@ -651,6 +657,7 @@ const pt: TranslationKeys = {
     teamsTitle: 'Times ({{count}})',
     noFixtures: 'Sem jogos recentes ou próximos',
     friendlies: 'Amistosos',
+    friendly: 'Amistoso',
     showMoreMatches: 'Ver mais jogos ({{count}})',
     upcomingFixtures: 'Próximos jogos',
     recentResults: 'Resultados recentes',

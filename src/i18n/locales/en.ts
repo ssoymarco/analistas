@@ -108,6 +108,12 @@ const en: TranslationKeys = {
     channelName: 'Live score',
   },
 
+  matchShare: {
+    live: '⚽ {{score}} · {{league}}\nPlaying RIGHT NOW! Follow it live on Analistas 👉 {{url}}',
+    finished: '⚽ Full time: {{score}} · {{league}}\nRelive the match on Analistas 👉 {{url}}',
+    scheduled: '⚽ {{match}} · {{league}}\nFollow it live on Analistas 👉 {{url}}',
+  },
+
   promoBanner: {
     title: 'The World Cup Round of 32 is here!',
     body: 'Make sure you follow your favorite national teams to get their goals, lineups and results.',
@@ -709,6 +715,7 @@ const en: TranslationKeys = {
     teamsTitle: 'Teams ({{count}})',
     noFixtures: 'No recent or upcoming matches',
     friendlies: 'Friendlies',
+    friendly: 'Friendly',
     showMoreMatches: 'Show more matches ({{count}})',
     upcomingFixtures: 'Upcoming matches',
     recentResults: 'Recent results',

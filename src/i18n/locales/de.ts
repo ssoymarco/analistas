@@ -101,6 +101,12 @@ const de: TranslationKeys = {
     channelName: 'Live-Spielstand',
   },
 
+  matchShare: {
+    live: '⚽ {{score}} · {{league}}\nLäuft JETZT! Verfolge es live auf Analistas 👉 {{url}}',
+    finished: '⚽ Endstand: {{score}} · {{league}}\nErlebe das Spiel auf Analistas 👉 {{url}}',
+    scheduled: '⚽ {{match}} · {{league}}\nVerfolge es live auf Analistas 👉 {{url}}',
+  },
+
   promoBanner: {
     title: 'Das WM-Sechzehntelfinale beginnt!',
     body: 'Folge deinen Lieblings-Nationalteams, um ihre Tore, Aufstellungen und Ergebnisse zu erhalten.',
@@ -650,6 +656,7 @@ const de: TranslationKeys = {
     teamsTitle: 'Teams ({{count}})',
     noFixtures: 'Keine aktuellen oder bevorstehenden Spiele',
     friendlies: 'Freundschaftsspiele',
+    friendly: 'Freundschaftsspiel',
     showMoreMatches: 'Mehr Spiele anzeigen ({{count}})',
     upcomingFixtures: 'Bevorstehende Spiele',
     recentResults: 'Aktuelle Ergebnisse',

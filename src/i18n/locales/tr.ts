@@ -98,6 +98,12 @@ const tr: TranslationKeys = {
     channelName: 'Canlı skor',
   },
 
+  matchShare: {
+    live: '⚽ {{score}} · {{league}}\nŞU AN oynanıyor! Analistas ile canlı takip et 👉 {{url}}',
+    finished: '⚽ Maç sonucu: {{score}} · {{league}}\nMaçı Analistas ile yeniden yaşa 👉 {{url}}',
+    scheduled: '⚽ {{match}} · {{league}}\nAnalistas ile canlı takip et 👉 {{url}}',
+  },
+
   promoBanner: {
     title: 'Dünya Kupası son 32 turu başlıyor!',
     body: 'Favori millî takımlarını takip et; goller, kadrolar ve sonuçlar sana gelsin.',
@@ -647,6 +653,7 @@ const tr: TranslationKeys = {
     teamsTitle: 'Takımlar ({{count}})',
     noFixtures: 'Son veya yaklaşan maç yok',
     friendlies: 'Hazırlık maçları',
+    friendly: 'Hazırlık maçı',
     showMoreMatches: 'Daha fazla maç göster ({{count}})',
     upcomingFixtures: 'Yaklaşan maçlar',
     recentResults: 'Son sonuçlar',

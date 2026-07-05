@@ -101,6 +101,12 @@ const it: TranslationKeys = {
     channelName: 'Punteggio in diretta',
   },
 
+  matchShare: {
+    live: '⚽ {{score}} · {{league}}\nSi gioca ORA! Seguila in diretta su Analistas 👉 {{url}}',
+    finished: '⚽ Finale: {{score}} · {{league}}\nRivivi la partita su Analistas 👉 {{url}}',
+    scheduled: '⚽ {{match}} · {{league}}\nSeguila in diretta su Analistas 👉 {{url}}',
+  },
+
   promoBanner: {
     title: 'Iniziano i sedicesimi del Mondiale!',
     body: 'Segui le tue nazionali preferite per ricevere gol, formazioni e risultati.',
@@ -650,6 +656,7 @@ const it: TranslationKeys = {
     teamsTitle: 'Squadre ({{count}})',
     noFixtures: 'Nessuna partita recente o in programma',
     friendlies: 'Amichevoli',
+    friendly: 'Amichevole',
     showMoreMatches: 'Mostra altre partite ({{count}})',
     upcomingFixtures: 'Prossime partite',
     recentResults: 'Risultati recenti',

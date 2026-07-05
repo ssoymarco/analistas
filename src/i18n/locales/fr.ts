@@ -101,6 +101,12 @@ const fr: TranslationKeys = {
     channelName: 'Score en direct',
   },
 
+  matchShare: {
+    live: '⚽ {{score}} · {{league}}\nEn ce moment ! Suivez-le en direct sur Analistas 👉 {{url}}',
+    finished: '⚽ Score final : {{score}} · {{league}}\nRevivez le match sur Analistas 👉 {{url}}',
+    scheduled: '⚽ {{match}} · {{league}}\nSuivez-le en direct sur Analistas 👉 {{url}}',
+  },
+
   promoBanner: {
     title: 'Les seizièmes de finale du Mondial commencent !',
     body: 'Suivez vos sélections favorites pour recevoir leurs buts, compositions et résultats.',
@@ -650,6 +656,7 @@ const fr: TranslationKeys = {
     teamsTitle: 'Équipes ({{count}})',
     noFixtures: 'Aucun match récent ou à venir',
     friendlies: 'Matchs amicaux',
+    friendly: 'Match amical',
     showMoreMatches: 'Voir plus de matchs ({{count}})',
     upcomingFixtures: 'Prochains matchs',
     recentResults: 'Résultats récents',

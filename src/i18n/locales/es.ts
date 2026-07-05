@@ -116,6 +116,12 @@ const es = {
     channelName: 'Marcador en vivo',
   },
 
+  matchShare: {
+    live: '⚽ {{score}} · {{league}}\n¡Se está jugando AHORA! Síguelo en vivo en Analistas 👉 {{url}}',
+    finished: '⚽ Final: {{score}} · {{league}}\nRevive el partido en Analistas 👉 {{url}}',
+    scheduled: '⚽ {{match}} · {{league}}\nSíguelo en vivo en Analistas 👉 {{url}}',
+  },
+
   promoBanner: {
     title: '¡Arrancan los dieciseisavos del Mundial!',
     body: 'Asegúrate de seguir a tus selecciones favoritas para recibir sus goles, alineaciones y resultados.',
@@ -725,6 +731,7 @@ const es = {
     teamsTitle: 'Equipos ({{count}})',
     noFixtures: 'Sin partidos recientes o próximos',
     friendlies: 'Amistosos',
+    friendly: 'Amistoso',
     showMoreMatches: 'Ver más partidos ({{count}})',
     upcomingFixtures: 'Próximos partidos',
     recentResults: 'Resultados recientes',
