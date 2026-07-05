@@ -2643,8 +2643,11 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
           {/* Pressure index */}
           {detail.pressureIndex && <PressureSection pressure={detail.pressureIndex} match={match} events={detail.events} statistics={detail.statistics} />}
 
-          {/* Poll results (locked after match) */}
-          <PollResultsSection match={match} />
+          {/* Poll results — SOLO al final del partido: durante el juego la
+              tarjeta bloqueada "🔒 En juego" no aporta (reporte del dueño,
+              4 jul 2026). Al FT sí: compara el voto de la comunidad contra
+              el resultado real. */}
+          {isFinished && <PollResultsSection match={match} />}
 
           {/* Odds — betting content, gated off for v1.0 (Apple 2.3.6) */}
           {BETTING_CONTENT_ENABLED && detail.odds && detail.odds.length > 0 && (
