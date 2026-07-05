@@ -142,6 +142,26 @@ func crestImage(matchId: String, side: String) -> UIImage? {
   return UIImage(contentsOfFile: path)
 }
 
+/// Escudo PRE-MINIATURIZADO para la Isla compacta. El sistema RECHAZA bitmaps
+/// "grandes" en las presentaciones compactas y los pinta como cuadro gris
+/// (confirmado en device: el archivo de 128px se ve perfecto en la isla
+/// expandida y gris en la compacta — 4-5 jul 2026). Redibujar a los puntos
+/// exactos de la ranura produce una imagen diminuta que la Isla sí acepta.
+func compactCrestImage(matchId: String, side: String, pt: CGFloat) -> UIImage? {
+  guard let full = crestImage(matchId: matchId, side: side) else { return nil }
+  let canvas = CGSize(width: pt, height: pt)
+  // Aspect-fit dentro del lienzo cuadrado (los escudos no siempre son 1:1).
+  let scale = min(canvas.width / max(full.size.width, 1),
+                  canvas.height / max(full.size.height, 1))
+  let drawSize = CGSize(width: full.size.width * scale, height: full.size.height * scale)
+  let origin = CGPoint(x: (canvas.width - drawSize.width) / 2,
+                       y: (canvas.height - drawSize.height) / 2)
+  let renderer = UIGraphicsImageRenderer(size: canvas)
+  return renderer.image { _ in
+    full.draw(in: CGRect(origin: origin, size: drawSize))
+  }
+}
+
 /// Columna de equipo. Prioridad visual: escudo real (App Group) → bandera
 /// emoji → punto del color del equipo. `fullName` (lock screen, hay espacio)
 /// muestra el nombre completo traducido; si no, el código corto.
@@ -193,14 +213,12 @@ struct CompactBadge: View {
   var body: some View {
     if let flag = team.flagEmoji, !flag.isEmpty {
       Text(flag).font(.body)
-    } else if let crest = crestImage(matchId: matchId, side: side) {
+    } else if let crest = compactCrestImage(matchId: matchId, side: side, pt: 14) {
       ZStack {
         Circle()
           .fill(Color.white.opacity(0.92))
           .frame(width: 19, height: 19)
         Image(uiImage: crest)
-          .resizable()
-          .scaledToFit()
           .frame(width: 14, height: 14)
       }
     } else if !team.shortName.isEmpty {
