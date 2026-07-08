@@ -278,6 +278,7 @@ async function syncMatchEnrichmentHandler() {
     const now = new Date();
     const h2hSkipCutoff = new Date(now.getTime() - H2H_REFRESH_HOURS * 3600_000);
     let detailsWritten = 0;
+    let detailsSkipped = 0;
     let h2hWritten = 0;
     let errors = 0;
     for (const m of hot) {
@@ -285,7 +286,10 @@ async function syncMatchEnrichmentHandler() {
             const fixture = await (0, sportmonks_1.fetchFixtureFullDetail)(Number(m.id));
             if (fixture) {
                 const wrote = await writeEnrichment(m, fixture, h2hSkipCutoff);
-                detailsWritten++;
+                if (wrote.detail)
+                    detailsWritten++;
+                else
+                    detailsSkipped++;
                 if (wrote.h2h)
                     h2hWritten++;
             }
@@ -297,7 +301,7 @@ async function syncMatchEnrichmentHandler() {
         }
     }
     const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
-    logger.info(`✅ syncMatchEnrichment: ${detailsWritten} details + ${h2hWritten} h2h written ` +
+    logger.info(`✅ syncMatchEnrichment: ${detailsWritten} details written, ${detailsSkipped} skipped (sin cambios) + ${h2hWritten} h2h ` +
         `(${errors} errors) in ${elapsed}s`);
 }
 /** Shared enrichment write — used by both the scheduled handler and the

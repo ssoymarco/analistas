@@ -257,6 +257,7 @@ export async function syncMatchEnrichmentHandler(): Promise<void> {
   const h2hSkipCutoff = new Date(now.getTime() - H2H_REFRESH_HOURS * 3600_000);
 
   let detailsWritten = 0;
+  let detailsSkipped = 0;
   let h2hWritten = 0;
   let errors = 0;
 
@@ -265,7 +266,8 @@ export async function syncMatchEnrichmentHandler(): Promise<void> {
       const fixture = await fetchFixtureFullDetail(Number(m.id));
       if (fixture) {
         const wrote = await writeEnrichment(m, fixture, h2hSkipCutoff);
-        detailsWritten++;
+        if (wrote.detail) detailsWritten++;
+        else detailsSkipped++;
         if (wrote.h2h) h2hWritten++;
       }
       await sleep(SLEEP_BETWEEN_MATCHES_MS);
@@ -277,7 +279,7 @@ export async function syncMatchEnrichmentHandler(): Promise<void> {
 
   const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
   logger.info(
-    `✅ syncMatchEnrichment: ${detailsWritten} details + ${h2hWritten} h2h written ` +
+    `✅ syncMatchEnrichment: ${detailsWritten} details written, ${detailsSkipped} skipped (sin cambios) + ${h2hWritten} h2h ` +
     `(${errors} errors) in ${elapsed}s`,
   );
 }
