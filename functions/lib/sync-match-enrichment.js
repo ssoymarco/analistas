@@ -65,7 +65,18 @@ exports.enrichMatchesByIds = enrichMatchesByIds;
 exports.syncMatchEnrichmentHandler = syncMatchEnrichmentHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
+const crypto_1 = require("crypto");
 const sportmonks_1 = require("./sportmonks");
+// ── Filtro de cadenas de TV (auditoría de costos, 8 jul 2026) ────────────────
+// SM manda TODAS las cadenas del mundo por partido de Mundial: 276 entradas de
+// 84 países = 130 KB — la MITAD del documento matches/{id}. Cada escritura del
+// doc abanicaba ese peso a cada listener. La audiencia real es MX + mexicanos
+// en EE.UU., así que solo conservamos esos dos países (IDs verificados
+// empíricamente contra datos reales: 458 = México → TUDN/ViX/Televisa;
+// 3483 = EE.UU. → Telemundo/Peacock/FOX). Resultado: ~130 KB → ~5 KB.
+const TVSTATION_COUNTRY_IDS = new Set([458, 3483]);
+// Tope defensivo por si SM duplica entradas dentro de esos países.
+const TVSTATION_MAX_ENTRIES = 25;
 const HOT_WINDOW_FUTURE_HOURS = 6;
 const HOT_WINDOW_PAST_HOURS = 2;
 const H2H_REFRESH_HOURS = 24;
@@ -127,6 +138,7 @@ async function queryHotMatches() {
                 lastDetailUpdate: lastDetail,
                 lastH2hUpdate: lastH2h,
                 lineupsSent: data?.lineupsSent ?? false,
+                detailHash: data?.detailHash ?? null,
             });
         }
     }
@@ -154,8 +166,11 @@ function extractStaticEnrichment(fixture) {
         out.venue = f.venue;
     if (Array.isArray(f.referees))
         out.referees = f.referees;
-    if (Array.isArray(f.tvstations))
-        out.tvstations = f.tvstations;
+    if (Array.isArray(f.tvstations)) {
+        out.tvstations = f.tvstations
+            .filter((t) => TVSTATION_COUNTRY_IDS.has(Number(t?.country_id)))
+            .slice(0, TVSTATION_MAX_ENTRIES);
+    }
     if (f.weatherreport != null)
         out.weatherreport = f.weatherreport;
     if (Array.isArray(f.predictions))
@@ -226,6 +241,7 @@ async function enrichMatchesByIds(matchIds) {
                 lastDetailUpdate: null,
                 lastH2hUpdate: null,
                 lineupsSent: d?.lineupsSent ?? false,
+                detailHash: null, // backfill: siempre reescribe
             });
         });
     }
@@ -365,19 +381,28 @@ async function writeEnrichment(m, fixture, h2hSkipCutoff) {
             // Non-fatal — enrichment continues normally
         }
     }
-    await admin_init_1.db.collection('matches').doc(m.id).set({ detail: enrichment, detailUpdatedAt: admin_init_1.admin.firestore.Timestamp.now() }, { merge: true });
-    result.detail = true;
-    // ── Sidelined ──
-    if (seasonId) {
-        const [sidelinedHome, sidelinedAway] = await Promise.all([
-            (0, sportmonks_1.fetchSidelined)(seasonId, m.homeTeamId),
-            (0, sportmonks_1.fetchSidelined)(seasonId, m.awayTeamId),
-        ]);
-        await admin_init_1.db.collection('matches').doc(m.id).set({ sidelinedHome, sidelinedAway }, { merge: true });
+    // ── Detail: solo escribir si el contenido REALMENTE cambió ──────────────
+    // Antes se reescribían ~260 KB cada 4 min por partido caliente aunque nada
+    // hubiera cambiado — y cada escritura abanica el doc completo a cada
+    // listener. El hash viaja en la misma escritura (cero costo extra).
+    const newHash = (0, crypto_1.createHash)('sha256').update(JSON.stringify(enrichment)).digest('hex');
+    if (newHash !== m.detailHash) {
+        await admin_init_1.db.collection('matches').doc(m.id).set({ detail: enrichment, detailUpdatedAt: admin_init_1.admin.firestore.Timestamp.now(), detailHash: newHash }, { merge: true });
+        result.detail = true;
     }
-    // ── H2H ──
+    // ── Sidelined + H2H (cadencia de 24h, no cada 4 min) ────────────────────
+    // Las bajas/lesiones cambian a lo mucho una vez al día — refrescarlas cada
+    // 4 min eran 2 llamadas SM + 1 escritura (fan-out) por partido caliente por
+    // ciclo, para datos idénticos. Ahora comparten la cadencia diaria del H2H.
     const needsH2h = !m.lastH2hUpdate || m.lastH2hUpdate < h2hSkipCutoff;
     if (needsH2h) {
+        if (seasonId) {
+            const [sidelinedHome, sidelinedAway] = await Promise.all([
+                (0, sportmonks_1.fetchSidelined)(seasonId, m.homeTeamId),
+                (0, sportmonks_1.fetchSidelined)(seasonId, m.awayTeamId),
+            ]);
+            await admin_init_1.db.collection('matches').doc(m.id).set({ sidelinedHome, sidelinedAway }, { merge: true });
+        }
         const h2h = await (0, sportmonks_1.fetchH2H)(m.homeTeamId, m.awayTeamId).catch(() => []);
         await admin_init_1.db.collection('matches').doc(m.id).set({ h2h, h2hUpdatedAt: admin_init_1.admin.firestore.Timestamp.now() }, { merge: true });
         result.h2h = true;

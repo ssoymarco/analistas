@@ -223,6 +223,12 @@ export interface LivescoresSnapshot {
     penMissHome?:       number;   // in-play missed-penalty count (home)
     penMissAway?:       number;   // in-play missed-penalty count (away)
     rivalResultSent?:   boolean;  // rival loss/big-loss push already fired this match
+    /** SHA-256 del matchDoc SIN los campos volátiles (updatedAt,
+     *  detailUpdatedAt) NI `detail`. pollLivescores solo escribe el doc a
+     *  Firestore cuando este hash cambia — antes escribía TODOS los partidos
+     *  vivos cada 4s y cada escritura abanicaba el doc completo (~260 KB) a
+     *  cada listener (auditoría de costos, 8 jul 2026: 708 GiB egress). */
+    docHash?:           string;
   }>;
   updatedAt: Timestamp;
 }

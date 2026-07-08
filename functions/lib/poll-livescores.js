@@ -50,6 +50,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.pollLivescoresHandler = pollLivescoresHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
+const crypto_1 = require("crypto");
 const config_1 = require("./config");
 const sportmonks_1 = require("./sportmonks");
 const mappers_1 = require("./mappers");
@@ -58,6 +59,33 @@ const live_activities_1 = require("./live-activities");
 /** Utility: sleep for N milliseconds */
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+// ── Skip-unchanged writes (auditoría de costos, 8 jul 2026) ──────────────────
+// Antes: CADA poll (cada ~4s) escribía TODOS los partidos vivos a Firestore,
+// hubiera cambiado algo o no — y `updatedAt`/`detailUpdatedAt` se re-generaban
+// en cada mapeo, así que el doc "siempre cambiaba". Cada escritura abanica el
+// documento COMPLETO (~260 KB con el blob `detail`) a cada listener del feed y
+// de la pantalla de detalle → 708 GiB de egress + 50M lecturas en 8 días.
+//
+// Ahora: se calcula un fingerprint del doc EXCLUYENDO los campos volátiles
+// (updatedAt, detailUpdatedAt) Y el blob `detail` (las estadísticas en vivo
+// micro-cambian casi cada poll y anularían el ahorro). Solo se escribe cuando
+// el fingerprint cambia. Consecuencias deliberadas:
+//   · Goles, tarjetas-por-marcador, cambios de estado/periodo → escritura
+//     INMEDIATA (cambian el core).
+//   · `minute` cambia cada ~60s → cada escritura por minuto lleva de paso el
+//     `detail` fresco (stats/eventos ≤60s de rezago; las notificaciones NO
+//     dependen de esto — salen de detectChanges, que es pre-escritura).
+//   · Medio tiempo / pausas: minuto congelado → CERO escrituras (antes: 15/min
+//     × N partidos abanicando 260 KB a todos, con el partido detenido).
+const FINGERPRINT_EXCLUDED_KEYS = new Set(['updatedAt', 'detailUpdatedAt', 'detail']);
+function liveDocFingerprint(doc) {
+    const clean = {};
+    for (const [k, v] of Object.entries(doc)) {
+        if (!FINGERPRINT_EXCLUDED_KEYS.has(k))
+            clean[k] = v;
+    }
+    return (0, crypto_1.createHash)('sha256').update(JSON.stringify(clean)).digest('hex');
 }
 /**
  * Execute a single livescores poll cycle.
@@ -115,14 +143,22 @@ async function executeSinglePoll(pollIndex) {
     //    the events array on the same response.
     const prevSnapshot = await (0, detect_changes_1.loadSnapshot)();
     const changes = (0, detect_changes_1.detectChanges)(matchDocs, prevSnapshot, smFixtures);
-    // 4. Batch write to Firestore (max 500 per batch)
+    // 4. Batch write to Firestore (max 500 per batch) — SOLO los docs cuyo
+    //    fingerprint cambió desde el poll anterior (ver liveDocFingerprint).
     const batches = [];
     let currentBatch = admin_init_1.db.batch();
     let opCount = 0;
+    let written = 0;
+    const docHashes = new Map();
     for (const matchDoc of matchDocs) {
+        const fp = liveDocFingerprint(matchDoc);
+        docHashes.set(matchDoc.id, fp);
+        if (prevSnapshot?.[matchDoc.id]?.docHash === fp)
+            continue; // sin cambios → sin escritura
         const ref = admin_init_1.db.collection('matches').doc(matchDoc.id);
         currentBatch.set(ref, matchDoc, { merge: true });
         opCount++;
+        written++;
         if (opCount >= 499) {
             batches.push(currentBatch);
             currentBatch = admin_init_1.db.batch();
@@ -134,8 +170,9 @@ async function executeSinglePoll(pollIndex) {
     await Promise.all(batches.map(b => b.commit()));
     // 5. Save snapshot for next poll. The detector reads event counts off
     //    the fixtures' events array; we also pass the previous snapshot so
-    //    one-time flags (reminderSent, lineupsSent) are preserved across polls.
-    await (0, detect_changes_1.saveSnapshot)(matchDocs, smFixtures, prevSnapshot);
+    //    one-time flags (reminderSent, lineupsSent) are preserved across polls,
+    //    plus the doc fingerprints for the skip-unchanged write optimization.
+    await (0, detect_changes_1.saveSnapshot)(matchDocs, smFixtures, prevSnapshot, docHashes);
     // 6. Dispatch notifications for detected changes
     if (changes.length > 0) {
         await (0, detect_changes_1.dispatchNotifications)(changes);
@@ -145,7 +182,7 @@ async function executeSinglePoll(pollIndex) {
     //     cuando el estado cambió — ver live-activities.ts.
     await (0, live_activities_1.sendLiveActivityUpdates)(matchDocs);
     const elapsed = Date.now() - startMs;
-    logger.debug(`Poll ${pollIndex}: ${matchDocs.length} matches, ${changes.length} changes, ${elapsed}ms`);
+    logger.debug(`Poll ${pollIndex}: ${matchDocs.length} matches, ${changes.length} changes, ${written} written (${matchDocs.length - written} skipped), ${elapsed}ms`);
     return matchDocs.length;
 }
 /**

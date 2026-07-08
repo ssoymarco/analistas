@@ -254,8 +254,11 @@ function findRecentSubstitution(fixture, side) {
     }
     return null;
 }
-/** Snapshot the relevant per-match state for next-poll diff detection. */
-async function saveSnapshot(matches, fixtures, previousSnapshot) {
+/** Snapshot the relevant per-match state for next-poll diff detection.
+ *  `docHashes` (opcional): fingerprint del matchDoc calculado por
+ *  pollLivescores — se persiste para que el próximo poll pueda saltarse la
+ *  escritura a Firestore cuando nada relevante cambió (ahorro de egress). */
+async function saveSnapshot(matches, fixtures, previousSnapshot, docHashes) {
     const snapshot = {};
     // Build a quick lookup of fixture by id so we can pull the events array
     // (red card count) for each MatchDoc without iterating the fixtures list
@@ -290,6 +293,10 @@ async function saveSnapshot(matches, fixtures, previousSnapshot) {
             extraTimeSent: prev?.extraTimeSent ?? false,
             penaltiesSent: prev?.penaltiesSent ?? false,
             rivalResultSent: prev?.rivalResultSent ?? false,
+            // Fingerprint del doc para el skip-unchanged de pollLivescores. Si este
+            // poll no lo calculó (p. ej. saveSnapshot llamado desde otro camino),
+            // preservar el anterior para no forzar una escritura extra.
+            ...(docHashes?.get(m.id) ? { docHash: docHashes.get(m.id) } : (prev?.docHash ? { docHash: prev.docHash } : {})),
         };
     }
     await admin_init_1.db.doc('_meta/livescoresSnapshot').set({

@@ -37,8 +37,11 @@
 import { LIVE_STATE_IDS, FINISHED_STATE_IDS } from './types';
 import type { MatchDoc, LivescoresSnapshot, DetectedChange, SMFixture } from './types';
 export declare function loadSnapshot(): Promise<LivescoresSnapshot['matches']>;
-/** Snapshot the relevant per-match state for next-poll diff detection. */
-export declare function saveSnapshot(matches: MatchDoc[], fixtures: SMFixture[], previousSnapshot?: LivescoresSnapshot['matches']): Promise<void>;
+/** Snapshot the relevant per-match state for next-poll diff detection.
+ *  `docHashes` (opcional): fingerprint del matchDoc calculado por
+ *  pollLivescores — se persiste para que el próximo poll pueda saltarse la
+ *  escritura a Firestore cuando nada relevante cambió (ahorro de egress). */
+export declare function saveSnapshot(matches: MatchDoc[], fixtures: SMFixture[], previousSnapshot?: LivescoresSnapshot['matches'], docHashes?: Map<string, string>): Promise<void>;
 export declare function detectChanges(currentMatches: MatchDoc[], previousSnapshot: LivescoresSnapshot['matches'], fixtures: SMFixture[]): DetectedChange[];
 /** Send FCM topic pushes for each detected change. */
 export declare function dispatchNotifications(changes: DetectedChange[]): Promise<void>;

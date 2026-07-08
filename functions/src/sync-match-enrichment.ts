@@ -29,12 +29,24 @@
 
 import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
+import { createHash } from 'crypto';
 import {
   fetchFixtureFullDetail,
   fetchH2H,
   fetchSidelined,
 } from './sportmonks';
 import type { SMFixture } from './types';
+
+// ── Filtro de cadenas de TV (auditoría de costos, 8 jul 2026) ────────────────
+// SM manda TODAS las cadenas del mundo por partido de Mundial: 276 entradas de
+// 84 países = 130 KB — la MITAD del documento matches/{id}. Cada escritura del
+// doc abanicaba ese peso a cada listener. La audiencia real es MX + mexicanos
+// en EE.UU., así que solo conservamos esos dos países (IDs verificados
+// empíricamente contra datos reales: 458 = México → TUDN/ViX/Televisa;
+// 3483 = EE.UU. → Telemundo/Peacock/FOX). Resultado: ~130 KB → ~5 KB.
+const TVSTATION_COUNTRY_IDS = new Set([458, 3483]);
+// Tope defensivo por si SM duplica entradas dentro de esos países.
+const TVSTATION_MAX_ENTRIES = 25;
 
 const HOT_WINDOW_FUTURE_HOURS  = 6;
 const HOT_WINDOW_PAST_HOURS    = 2;
@@ -55,6 +67,11 @@ interface HotMatch {
   lastDetailUpdate: Date | null;
   lastH2hUpdate: Date | null;
   lineupsSent: boolean;
+  /** SHA-256 del último `detail` escrito por ESTA función. Si el nuevo
+   *  enrichment produce el mismo hash, se salta la escritura — antes se
+   *  reescribían ~260 KB cada 4 min por partido caliente aunque nada hubiera
+   *  cambiado, abanicando el doc completo a cada listener. */
+  detailHash: string | null;
 }
 
 /**
@@ -117,6 +134,7 @@ async function queryHotMatches(): Promise<HotMatch[]> {
         lastDetailUpdate: lastDetail,
         lastH2hUpdate: lastH2h,
         lineupsSent: data?.lineupsSent ?? false,
+        detailHash: data?.detailHash ?? null,
       });
     }
   }
@@ -138,7 +156,11 @@ function extractStaticEnrichment(fixture: SMFixture): Record<string, unknown> {
   if (Array.isArray(f.coaches))           out.coaches           = f.coaches;
   if (f.venue != null)                    out.venue             = f.venue;
   if (Array.isArray(f.referees))          out.referees          = f.referees;
-  if (Array.isArray(f.tvstations))        out.tvstations        = f.tvstations;
+  if (Array.isArray(f.tvstations)) {
+    out.tvstations = f.tvstations
+      .filter((t: { country_id?: number | null }) => TVSTATION_COUNTRY_IDS.has(Number(t?.country_id)))
+      .slice(0, TVSTATION_MAX_ENTRIES);
+  }
   if (f.weatherreport != null)            out.weatherreport     = f.weatherreport;
   if (Array.isArray(f.predictions))       out.predictions       = f.predictions;
   if (Array.isArray(f.periods))           out.periods           = f.periods;
@@ -193,6 +215,7 @@ export async function enrichMatchesByIds(matchIds: string[]): Promise<{ enriched
         lastDetailUpdate: null,
         lastH2hUpdate: null,
         lineupsSent: d?.lineupsSent ?? false,
+        detailHash: null, // backfill: siempre reescribe
       });
     });
   }
@@ -353,24 +376,32 @@ async function writeEnrichment(
     }
   }
 
-  await db.collection('matches').doc(m.id).set(
-    { detail: enrichment, detailUpdatedAt: admin.firestore.Timestamp.now() },
-    { merge: true },
-  );
-  result.detail = true;
-
-  // ── Sidelined ──
-  if (seasonId) {
-    const [sidelinedHome, sidelinedAway] = await Promise.all([
-      fetchSidelined(seasonId, m.homeTeamId),
-      fetchSidelined(seasonId, m.awayTeamId),
-    ]);
-    await db.collection('matches').doc(m.id).set({ sidelinedHome, sidelinedAway }, { merge: true });
+  // ── Detail: solo escribir si el contenido REALMENTE cambió ──────────────
+  // Antes se reescribían ~260 KB cada 4 min por partido caliente aunque nada
+  // hubiera cambiado — y cada escritura abanica el doc completo a cada
+  // listener. El hash viaja en la misma escritura (cero costo extra).
+  const newHash = createHash('sha256').update(JSON.stringify(enrichment)).digest('hex');
+  if (newHash !== m.detailHash) {
+    await db.collection('matches').doc(m.id).set(
+      { detail: enrichment, detailUpdatedAt: admin.firestore.Timestamp.now(), detailHash: newHash },
+      { merge: true },
+    );
+    result.detail = true;
   }
 
-  // ── H2H ──
+  // ── Sidelined + H2H (cadencia de 24h, no cada 4 min) ────────────────────
+  // Las bajas/lesiones cambian a lo mucho una vez al día — refrescarlas cada
+  // 4 min eran 2 llamadas SM + 1 escritura (fan-out) por partido caliente por
+  // ciclo, para datos idénticos. Ahora comparten la cadencia diaria del H2H.
   const needsH2h = !m.lastH2hUpdate || m.lastH2hUpdate < h2hSkipCutoff;
   if (needsH2h) {
+    if (seasonId) {
+      const [sidelinedHome, sidelinedAway] = await Promise.all([
+        fetchSidelined(seasonId, m.homeTeamId),
+        fetchSidelined(seasonId, m.awayTeamId),
+      ]);
+      await db.collection('matches').doc(m.id).set({ sidelinedHome, sidelinedAway }, { merge: true });
+    }
     const h2h = await fetchH2H(m.homeTeamId, m.awayTeamId).catch(() => [] as SMFixture[]);
     await db.collection('matches').doc(m.id).set(
       { h2h, h2hUpdatedAt: admin.firestore.Timestamp.now() },

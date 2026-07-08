@@ -219,11 +219,15 @@ function findRecentSubstitution(
   return null;
 }
 
-/** Snapshot the relevant per-match state for next-poll diff detection. */
+/** Snapshot the relevant per-match state for next-poll diff detection.
+ *  `docHashes` (opcional): fingerprint del matchDoc calculado por
+ *  pollLivescores — se persiste para que el próximo poll pueda saltarse la
+ *  escritura a Firestore cuando nada relevante cambió (ahorro de egress). */
 export async function saveSnapshot(
   matches: MatchDoc[],
   fixtures: SMFixture[],
   previousSnapshot?: LivescoresSnapshot['matches'],
+  docHashes?: Map<string, string>,
 ): Promise<void> {
   const snapshot: LivescoresSnapshot['matches'] = {};
 
@@ -260,6 +264,10 @@ export async function saveSnapshot(
       extraTimeSent:    prev?.extraTimeSent     ?? false,
       penaltiesSent: prev?.penaltiesSent ?? false,
       rivalResultSent: prev?.rivalResultSent ?? false,
+      // Fingerprint del doc para el skip-unchanged de pollLivescores. Si este
+      // poll no lo calculó (p. ej. saveSnapshot llamado desde otro camino),
+      // preservar el anterior para no forzar una escritura extra.
+      ...(docHashes?.get(m.id) ? { docHash: docHashes.get(m.id)! } : (prev?.docHash ? { docHash: prev.docHash } : {})),
     };
   }
   await db.doc('_meta/livescoresSnapshot').set({
