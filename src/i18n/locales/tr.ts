@@ -723,6 +723,7 @@ const tr: TranslationKeys = {
     foulsPerMatch: 'Faul / maç',
     penaltiesPerMatch: 'Penaltı / maç',
     totalMatches: 'Yönetilen maçlar',
+    whereToWatch: 'Maç nerede izlenir',
     nationality: 'Milliyet',
     birthDate: 'Doğum tarihi',
     loadingProfile: 'Profil yükleniyor...',

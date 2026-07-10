@@ -726,6 +726,7 @@ const de: TranslationKeys = {
     foulsPerMatch: 'Fouls / Spiel',
     penaltiesPerMatch: 'Elfmeter / Spiel',
     totalMatches: 'Geleitete Spiele',
+    whereToWatch: 'Wo läuft das Spiel',
     nationality: 'Nationalität',
     birthDate: 'Geburtsdatum',
     loadingProfile: 'Profil wird geladen...',

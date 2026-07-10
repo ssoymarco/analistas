@@ -458,6 +458,82 @@ async function saveVote(
   return { votes: newVotes, counts: newCounts };
 }
 
+// ── Dónde ver (cadenas de TV) ────────────────────────────────────────────────
+// Muestra las cadenas MX/US donde pasa el partido (detail.tvStations ya llega
+// filtrado por el servidor — ver functions/src/sync-match-enrichment.ts).
+// Se oculta sola si no hay cadenas registradas (cero estados vacíos).
+// Compartida por PreviewTab (previa) y EnVivoTab (en vivo).
+export const WhereToWatchSection: React.FC<{ detail: MatchDetail }> = ({ detail }) => {
+  const c = useThemeColors();
+  const { t } = useTranslation();
+
+  // Dedupe por nombre normalizado — la misma cadena puede venir en la lista
+  // de México Y la de EE.UU. (p. ej. TUDN).
+  const stations = useMemo(() => {
+    const seen = new Set<string>();
+    return (detail.tvStations ?? []).filter(s => {
+      const key = s.name.trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [detail.tvStations]);
+
+  if (stations.length === 0) return null;
+
+  return (
+    <View style={[ww.card, { backgroundColor: c.card, borderColor: c.border }]}>
+      <View style={[ww.header, { borderBottomColor: c.border }]}>
+        <View style={[ww.accent, { backgroundColor: c.accent }]} />
+        <Text style={[ww.title, { color: c.textTertiary }]}>
+          📺 {t('matchInfo.whereToWatch').toUpperCase()}
+        </Text>
+      </View>
+      <View style={ww.chipsWrap}>
+        {stations.map((s, i) => (
+          <View key={`${s.name}-${i}`} style={[ww.chip, { backgroundColor: c.surface, borderColor: c.border }]}>
+            {s.logo && isImageUri(s.logo) ? (
+              <View style={ww.logoWrap}>
+                <Image source={{ uri: s.logo }} style={ww.logo} contentFit="contain" recyclingKey={s.logo} />
+              </View>
+            ) : null}
+            <Text style={[ww.chipText, { color: c.textPrimary }]} numberOfLines={1}>{s.name}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+};
+
+const ww = StyleSheet.create({
+  card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+  header: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  accent: { width: 3, height: 13, borderRadius: 1.5, opacity: 0.8 },
+  title: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9 },
+  chipsWrap: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    borderRadius: 20, borderWidth: 1,
+    paddingLeft: 6, paddingRight: 12, paddingVertical: 5,
+    maxWidth: 200,
+  },
+  // Fondo blanco fijo: los logos de SM son PNG pensados para fondo claro y
+  // varios se pierden sobre superficie oscura.
+  logoWrap: {
+    width: 24, height: 24, borderRadius: 12, backgroundColor: '#FFFFFF',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  logo: { width: 18, height: 18 },
+  chipText: { fontSize: 12, fontWeight: '600', flexShrink: 1 },
+});
+
 // ── Predictions carousel (6 interactive polls) ─────────────────────────────
 // Shared flag: true while the user is actively touching the predictions
 // carousel. MatchDetailScreen's tab-swipe gesture checks this and yields, so
@@ -2632,6 +2708,9 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
             <InjuriesSection home={detail.missingPlayers!.home} away={detail.missingPlayers!.away} match={match} />
           )}
 
+          {/* Dónde ver */}
+          <WhereToWatchSection detail={detail} />
+
           {/* Match info */}
           <MatchInfoCard match={match} detail={detail} />
         </>
@@ -2682,6 +2761,9 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
           {hasMissing && (
             <InjuriesSection home={detail.missingPlayers!.home} away={detail.missingPlayers!.away} match={match} />
           )}
+
+          {/* Dónde ver — solo mientras el partido importa (no en el resumen final) */}
+          {!isFinished && <WhereToWatchSection detail={detail} />}
 
           {/* Match info */}
           <MatchInfoCard match={match} detail={detail} />

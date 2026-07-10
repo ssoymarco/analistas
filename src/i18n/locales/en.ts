@@ -805,6 +805,7 @@ const en: TranslationKeys = {
     foulsPerMatch: 'Fouls / match',
     penaltiesPerMatch: 'Penalties / match',
     totalMatches: 'Matches refereed',
+    whereToWatch: 'Where to watch',
     nationality: 'Nationality',
     birthDate: 'Date of birth',
     loadingProfile: 'Loading profile...',

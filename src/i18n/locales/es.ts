@@ -824,6 +824,7 @@ const es = {
     foulsPerMatch: 'Faltas / partido',
     penaltiesPerMatch: 'Penales / partido',
     totalMatches: 'Partidos arbitrados',
+    whereToWatch: 'Dónde ver el partido',
     nationality: 'Nacionalidad',
     birthDate: 'Nacimiento',
     loadingProfile: 'Cargando perfil...',

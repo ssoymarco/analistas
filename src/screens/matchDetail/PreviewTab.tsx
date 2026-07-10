@@ -10,7 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
 import type { Match, MatchDetail, TeamFormEntry, MissingPlayer } from '../../data/types';
-import { PredictionsCarousel, AIPredictionsSection } from './EnVivoTab';
+import { PredictionsCarousel, AIPredictionsSection, WhereToWatchSection } from './EnVivoTab';
 import { PlaceholderBannerAd } from '../../components/PlaceholderBannerAd';
 import AdMobBanner from '../../components/AdMobBanner';
 import MediumRectangleBannerAd from '../../components/MediumRectangleBannerAd';
@@ -525,6 +525,8 @@ export const PreviewTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
       )}
       {/* SportMonks-powered pre-match insights (Spanish-translated) */}
       <MatchFactsCard     match={match} detail={detail} />
+      {/* Dónde ver el partido — cadenas MX/US (se oculta sola si no hay datos) */}
+      <WhereToWatchSection detail={detail} />
       {ADMOB_ENABLED && <MediumRectangleBannerAd />}
       <H2HCard            match={match} detail={detail} />
       <FormCard           match={match} detail={detail} />
