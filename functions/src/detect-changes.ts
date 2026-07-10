@@ -1032,7 +1032,9 @@ function sendWithCondition(
     },
     apns: {
       headers: { 'apns-collapse-id': dedupId },
-      payload: { aps: { sound: 'default', badge: 0 } },
+      // category MATCH_EVENT → iOS muestra la acción "Silenciar este partido"
+      // en el long-press (registrada en el cliente, notifications.ts).
+      payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } },
     },
   }).catch(err => {
     const code = (err as { code?: string }).code;
@@ -1075,7 +1077,9 @@ function sendToTopic(
     },
     apns: {
       headers: { 'apns-collapse-id': dedupId },
-      payload: { aps: { sound: 'default', badge: 0 } },
+      // category MATCH_EVENT → iOS muestra la acción "Silenciar este partido"
+      // en el long-press (registrada en el cliente, notifications.ts).
+      payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } },
     },
   }).catch(err => {
     const code = (err as { code?: string }).code;

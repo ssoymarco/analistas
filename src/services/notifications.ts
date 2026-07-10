@@ -14,6 +14,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import i18n from '../i18n';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -99,15 +100,39 @@ function configureNotificationHandler(): void {
   });
 }
 
+// ── Acciones de notificación (iOS) ───────────────────────────────────────────
+// Long-press sobre una notificación de partido → botón "🔕 Silenciar este
+// partido". El servidor etiqueta cada push con category MATCH_EVENT
+// (aps.category); iOS muestra las acciones registradas aquí. La acción se
+// maneja en el response listener de App.tsx (actionIdentifier MUTE_MATCH) y
+// aplica el mute REAL de la Fase 2 (topic mute_{matchId}) SIN abrir la app.
+// Android ignora las categorías (los banners del OS no aceptan botones) —
+// llegará con el binario 1.4.0 vía notifee si se decide.
+async function registerNotificationCategories(): Promise<void> {
+  if (Platform.OS !== 'ios') return;
+  try {
+    await Notifications.setNotificationCategoryAsync('MATCH_EVENT', [
+      {
+        identifier: 'MUTE_MATCH',
+        buttonTitle: `🔕 ${i18n.t('notifications.matchSheet.muteTitle')}`,
+        options: { opensAppToForeground: false },
+      },
+    ]);
+  } catch {
+    // Best-effort: sin categoría, la notificación se comporta como siempre.
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Bootstrap: set foreground handler + Android channel.
+ * Bootstrap: set foreground handler + Android channel + iOS action categories.
  * Call once at app startup, BEFORE requesting permissions.
  */
 export async function initialize(): Promise<void> {
   configureNotificationHandler();
   await setupAndroidChannel();
+  await registerNotificationCategories();
 }
 
 /**

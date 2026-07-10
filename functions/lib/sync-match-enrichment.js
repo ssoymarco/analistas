@@ -340,7 +340,7 @@ async function writeEnrichment(m, fixture, h2hSkipCutoff) {
                     ` && !('mute_${m.id}' in topics)`,
                 notification: { title, body }, data,
                 android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
-                apns: { payload: { aps: { sound: 'default', badge: 0 } } },
+                apns: { payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } } },
             }).catch(err => {
                 const code = err.code;
                 if (code !== 'messaging/invalid-argument') {
@@ -367,7 +367,7 @@ async function writeEnrichment(m, fixture, h2hSkipCutoff) {
                     },
                     data: { type: 'playerLineup', matchId: m.id, playerId: String(e.player_id) },
                     android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
-                    apns: { payload: { aps: { sound: 'default', badge: 0 } } },
+                    apns: { payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } } },
                 }).catch(err => {
                     const code = err.code;
                     if (code !== 'messaging/invalid-argument') {

@@ -25,6 +25,7 @@ import { useVersionCheck } from './src/hooks/useVersionCheck';
 import { initialize } from './src/services/notifications';
 import { initializeFCM, initializeFCMAtStartup, attachFCMHandlers } from './src/services/fcmInit';
 import { navigateToMatch, buildMatchStubFromPayload } from './src/utils/navigationRef';
+import { requestMatchMuteFromNotification } from './src/contexts/NotificationPrefsContext';
 import { initDeepLinks } from './src/utils/deepLinks';
 import { initializeAdMob } from './src/services/adMobService';
 // ── Sentry user sync ──────────────────────────────────────────────────────────
@@ -117,6 +118,13 @@ function App() {
     notifResponseListener.current = Notifications.addNotificationResponseReceivedListener(
       response => {
         const data = response.notification.request.content.data as Record<string, unknown>;
+        // Acción "🔕 Silenciar este partido" (long-press en la notificación,
+        // iOS): silenciar SIN abrir la app — no navegar. Fase 3, 10 jul 2026.
+        if (response.actionIdentifier === 'MUTE_MATCH') {
+          const matchId = typeof data?.matchId === 'string' ? data.matchId : null;
+          if (matchId) requestMatchMuteFromNotification(matchId);
+          return;
+        }
         const match = buildMatchStubFromPayload(data);
         if (match) navigateToMatch(match);
       },

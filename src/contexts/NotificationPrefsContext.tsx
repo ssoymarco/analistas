@@ -126,6 +126,33 @@ interface NotificationPrefsContextType {
   setPermissionStatus: (status: 'undetermined' | 'granted' | 'denied') => void;
 }
 
+// ── Puente para la acción "Silenciar este partido" de la notificación ───────
+// iOS entrega la acción (long-press → botón) despertando la app en background
+// — a veces sin montar React. Si el provider está vivo, actualiza su estado;
+// si no, persiste directo a AsyncStorage + suscribe el topic de mute, y el
+// provider lo hidrata en el próximo arranque. (Fase 3 de la auditoría,
+// 10 jul 2026.)
+let externalMuteHandler: ((matchId: string) => void) | null = null;
+
+export function requestMatchMuteFromNotification(matchId: string): void {
+  if (externalMuteHandler) {
+    externalMuteHandler(matchId);
+    return;
+  }
+  // Provider no montado (background wake): camino directo e idempotente.
+  AsyncStorage.getItem(MUTED_KEY)
+    .then(raw => {
+      const arr: string[] = raw ? JSON.parse(raw) : [];
+      if (!arr.includes(matchId)) {
+        arr.push(matchId);
+        return AsyncStorage.setItem(MUTED_KEY, JSON.stringify(arr));
+      }
+      return undefined;
+    })
+    .catch(() => {});
+  subscribeMatchMute(matchId).catch(() => {});
+}
+
 const NotificationPrefsContext = createContext<NotificationPrefsContextType>({
   prefs: DEFAULT_PREFS,
   isHydrated: false,
@@ -399,6 +426,23 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
     (matchId: string) => mutedMatchIds.has(matchId),
     [mutedMatchIds],
   );
+
+  // Registro del puente para la acción de notificación (mute idempotente —
+  // NO toggle: si el partido ya estaba silenciado, se queda silenciado).
+  useEffect(() => {
+    externalMuteHandler = (matchId: string) => {
+      setMutedMatchIds(prev => {
+        if (prev.has(matchId)) return prev;
+        const next = new Set(prev);
+        next.add(matchId);
+        AsyncStorage.setItem(MUTED_KEY, JSON.stringify([...next])).catch(() => {});
+        return next;
+      });
+      subscribeMatchMute(matchId).catch(() => {});
+      cancelAllNotificationsForMatch(matchId).catch(() => {});
+    };
+    return () => { externalMuteHandler = null; };
+  }, []);
 
   const toggleMatchEstadio = useCallback((matchId: string) => {
     setEstadioMatchIds(prev => {

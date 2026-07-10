@@ -119,7 +119,7 @@ exports.deliverDelayedPush = (0, tasks_1.onTaskDispatched)({
             },
             apns: {
                 headers: { 'apns-collapse-id': p.dedupId },
-                payload: { aps: { sound: 'default', badge: 0 } },
+                payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } },
             },
         });
         logger.info(`⏰ Delayed push delivered → ${p.topic}`, {

@@ -469,6 +469,9 @@ export const AppNavigator: React.FC = () => {
     //      Android (and iOS) killed-state taps.
     Notifications.getLastNotificationResponseAsync().then(response => {
       if (!response) return;
+      // La acción "Silenciar este partido" no debe abrir el partido — el mute
+      // ya lo aplicó el listener de App.tsx (o el camino directo del puente).
+      if (response.actionIdentifier === 'MUTE_MATCH') return;
       const data = response.notification.request.content.data as Record<string, unknown>;
       const match = buildMatchStubFromPayload(data);
       if (match) navigateToMatch(match);
