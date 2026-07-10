@@ -1134,10 +1134,19 @@ function mapWeather(w: SMWeatherReport | undefined): MatchDetail['weather'] | un
 
 // ── TV Station Mapper ───────────────────────────────────────────────────────
 
+// Solo cadenas de México (458) y EE.UU. (3483) — la audiencia real. El servidor
+// ya filtra igual (sync-match-enrichment), pero los docs enriquecidos ANTES del
+// filtro traen las ~276 cadenas de 84 países hasta que el partido re-entra a la
+// ventana caliente — este candado del cliente cubre esa generación vieja para
+// que la tarjeta "Dónde ver" nunca muestre el catálogo mundial completo.
+const TVSTATION_COUNTRY_IDS = new Set([458, 3483]);
+const TVSTATION_MAX = 16;
+
 function mapTVStations(stations: SMFixtureTVStation[] | undefined): MatchDetail['tvStations'] {
   if (!stations || stations.length === 0) return undefined;
   return stations
-    .filter(s => s.tvstation?.name)
+    .filter(s => s.tvstation?.name && TVSTATION_COUNTRY_IDS.has(Number(s.country_id)))
+    .slice(0, TVSTATION_MAX)
     .map(s => ({
       name: s.tvstation!.name,
       logo: s.tvstation!.image_path ?? undefined,
