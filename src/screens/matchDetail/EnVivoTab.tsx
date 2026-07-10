@@ -35,6 +35,7 @@ import { BETTING_CONTENT_ENABLED, ADMOB_ENABLED } from '../../config/features';
 import MediumRectangleBannerAd from '../../components/MediumRectangleBannerAd';
 import { LiveActivityButton } from '../../components/LiveActivityButton';
 import { useLiveTick, computeLiveMinuteSeconds } from '../../hooks/useLiveTick';
+import { useUserCountry } from '../../hooks/useUserCountry';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH   = SCREEN_WIDTH - 72; // prediction card width
@@ -459,25 +460,25 @@ async function saveVote(
 }
 
 // ── Dónde ver (cadenas de TV) ────────────────────────────────────────────────
-// Muestra las cadenas MX/US donde pasa el partido (detail.tvStations ya llega
-// filtrado por el servidor — ver functions/src/sync-match-enrichment.ts).
-// Se oculta sola si no hay cadenas registradas (cero estados vacíos).
+// Muestra SOLO las cadenas del país del usuario (MX o US) — un usuario en
+// México no necesita ver Peacock, ni uno en EE.UU. a Canal 5. El mapper
+// (mapTVStations en sportsApi) ya filtró a MX+US, quitó radios/agregadores y
+// colapsó variantes ("TUDN En Vivo" → "TUDN"). Se oculta sola sin datos.
 // Compartida por PreviewTab (previa) y EnVivoTab (en vivo).
 export const WhereToWatchSection: React.FC<{ detail: MatchDetail }> = ({ detail }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
+  const { country } = useUserCountry();
 
-  // Dedupe por nombre normalizado — la misma cadena puede venir en la lista
-  // de México Y la de EE.UU. (p. ej. TUDN).
   const stations = useMemo(() => {
-    const seen = new Set<string>();
-    return (detail.tvStations ?? []).filter(s => {
-      const key = s.name.trim().toLowerCase();
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [detail.tvStations]);
+    const all = detail.tvStations ?? [];
+    // EE.UU. ve cadenas US; todos los demás (MX y resto del mundo) ven las MX
+    // — la audiencia default es mexicana. Si el país elegido no tiene cadenas
+    // registradas, caer a la lista completa antes que mostrar tarjeta vacía.
+    const preferred = country === 'US' ? 'US' : 'MX';
+    const local = all.filter(s => s.country === preferred);
+    return local.length > 0 ? local : all;
+  }, [detail.tvStations, country]);
 
   if (stations.length === 0) return null;
 

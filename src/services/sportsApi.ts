@@ -1139,17 +1139,50 @@ function mapWeather(w: SMWeatherReport | undefined): MatchDetail['weather'] | un
 // filtro traen las ~276 cadenas de 84 países hasta que el partido re-entra a la
 // ventana caliente — este candado del cliente cubre esa generación vieja para
 // que la tarjeta "Dónde ver" nunca muestre el catálogo mundial completo.
-const TVSTATION_COUNTRY_IDS = new Set([458, 3483]);
+const TVSTATION_COUNTRY_BY_ID: Record<number, 'MX' | 'US'> = { 458: 'MX', 3483: 'US' };
 const TVSTATION_MAX = 16;
+
+// Radios y agregadores que no son "prender la tele": el `type` de SM no sirve
+// para detectarlos (Futbol de Primera Radio viene como type='stream'), así que
+// va por nombre. Decisión del dueño, 9 jul 2026: solo cadenas de TV.
+const TVSTATION_NAME_BLACKLIST = /radio|siriusxm|fubo/i;
+
+/** "TUDN En Vivo" → "tudnenvivo" — para colapsar variantes por prefijo. */
+const normalizeStationName = (name: string) =>
+  name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
 
 function mapTVStations(stations: SMFixtureTVStation[] | undefined): MatchDetail['tvStations'] {
   if (!stations || stations.length === 0) return undefined;
-  return stations
-    .filter(s => s.tvstation?.name && TVSTATION_COUNTRY_IDS.has(Number(s.country_id)))
+
+  const relevant = stations.filter(s =>
+    s.tvstation?.name &&
+    TVSTATION_COUNTRY_BY_ID[Number(s.country_id)] !== undefined &&
+    !TVSTATION_NAME_BLACKLIST.test(s.tvstation.name),
+  );
+
+  // Colapsar variantes de la misma cadena: "TUDN" absorbe "TUDN En Vivo",
+  // "ViX" absorbe "VIX+", "Telemundo" absorbe "Telemundo Deportes En Vivo".
+  // Se decide de nombre más corto a más largo; la salida conserva el orden
+  // original de SM (que ya trae MX primero).
+  const byLength = [...relevant].sort(
+    (a, b) => normalizeStationName(a.tvstation!.name).length - normalizeStationName(b.tvstation!.name).length,
+  );
+  const keptNorms: string[] = [];
+  const keptIds = new Set<number>();
+  for (const s of byLength) {
+    const norm = normalizeStationName(s.tvstation!.name);
+    if (keptNorms.some(k => norm.startsWith(k))) continue;
+    keptNorms.push(norm);
+    keptIds.add(s.id);
+  }
+
+  return relevant
+    .filter(s => keptIds.has(s.id))
     .slice(0, TVSTATION_MAX)
     .map(s => ({
       name: s.tvstation!.name,
       logo: s.tvstation!.image_path ?? undefined,
+      country: TVSTATION_COUNTRY_BY_ID[Number(s.country_id)],
     }));
 }
 
