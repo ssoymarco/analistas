@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as Notifications from 'expo-notifications';
 import { navigationRef, navigateToMatch, buildMatchStubFromPayload, flushPendingMatchNavigation } from '../utils/navigationRef';
+import { requestMatchMuteFromNotification } from '../contexts/NotificationPrefsContext';
 import { logScreenView } from '../services/analytics';
 import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -469,10 +470,16 @@ export const AppNavigator: React.FC = () => {
     //      Android (and iOS) killed-state taps.
     Notifications.getLastNotificationResponseAsync().then(response => {
       if (!response) return;
-      // La acción "Silenciar este partido" no debe abrir el partido — el mute
-      // ya lo aplicó el listener de App.tsx (o el camino directo del puente).
-      if (response.actionIdentifier === 'MUTE_MATCH') return;
       const data = response.notification.request.content.data as Record<string, unknown>;
+      // La acción "Silenciar este partido" no debe abrir el partido. Además,
+      // si la app estaba MUERTA cuando iOS entregó la acción, el listener
+      // vivo de App.tsx pudo no dispararse — re-aplicar el mute aquí es
+      // idempotente (nunca des-silencia), así que cubre ese hueco sin riesgo.
+      if (response.actionIdentifier === 'MUTE_MATCH') {
+        const matchId = typeof data?.matchId === 'string' ? data.matchId : null;
+        if (matchId) requestMatchMuteFromNotification(matchId);
+        return;
+      }
       const match = buildMatchStubFromPayload(data);
       if (match) navigateToMatch(match);
     }).catch(() => {});
