@@ -16,8 +16,11 @@ import {
   subscribeRivalTopics, unsubscribeRivalTopics,
   reconcileSubscriptions,
   rivalEventsFromPrefs,
+  teamEventsFromPrefs,
+  bucketForDelay,
   type DelayBucket,
   type RivalEvent,
+  type TeamEventClass,
 } from '../services/fcmTopics';
 import { useNotificationPrefs } from './NotificationPrefsContext';
 
@@ -98,12 +101,25 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   // Modo Estadio prefs — FavoritesProvider is nested INSIDE NotificationPrefsProvider
   // (see App.tsx), so this hook call is always valid.
   const { prefs, isHydrated } = useNotificationPrefs();
+  // bucketForDelay garantiza un bucket que el servidor SÍ publica (d2/d5/d10).
+  // El viejo `d${prefs.estadioDelay}` fabricaba 'd1' cuando la UI ofrecía
+  // "1 min" — un topic fantasma que silenciaba todo (auditoría 10 jul 2026).
   const delayBucket: DelayBucket = prefs.estadioMode
-    ? (`d${prefs.estadioDelay}` as DelayBucket)
+    ? bucketForDelay(prefs.estadioDelay)
     : 'd0';
   // Keep a ref so async callbacks can read the current bucket without stale closures
   const delayBucketRef = useRef<DelayBucket>(delayBucket);
   useEffect(() => { delayBucketRef.current = delayBucket; }, [delayBucket]);
+
+  // ── Clases de evento de equipo habilitadas (derivadas de prefs) ──
+  // El enforcement real de los toggles de notificaciones: gatean qué topics
+  // FCM se suscriben por equipo. Antes eran decorativos (auditoría 10 jul).
+  const teamEvents: TeamEventClass[] = teamEventsFromPrefs(prefs);
+  const teamEventsSig = `${teamEvents.join(',')}|${prefs.notificationsEnabled}`;
+  const teamEventsRef = useRef<TeamEventClass[]>(teamEvents);
+  useEffect(() => { teamEventsRef.current = teamEvents; }, [teamEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  const notifsEnabledRef = useRef<boolean>(prefs.notificationsEnabled);
+  useEffect(() => { notifsEnabledRef.current = prefs.notificationsEnabled; }, [prefs.notificationsEnabled]);
   // Ref mirror of isHydrated for async/event callbacks (foreground handler).
   const isHydratedRef = useRef(isHydrated);
   useEffect(() => { isHydratedRef.current = isHydrated; }, [isHydrated]);
@@ -180,9 +196,11 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       playerIds:    playerRef.current,
       rivalTeamIds: rivalRef.current,
       rivalEvents:  rivalEventsRef.current,
+      teamEvents:   teamEventsRef.current,
+      enabled:      notifsEnabledRef.current,
       delayBucket:  delayBucket,
     }).catch(() => {});
-  }, [isHydrated, favoritesLoaded, delayBucket, rivalEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isHydrated, favoritesLoaded, delayBucket, rivalEventsSig, teamEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── AppState foreground → re-reconcile to heal any mid-flip desync ─────────
   // Heals subscriptions that drifted while backgrounded (e.g. a Modo Estadio
@@ -197,6 +215,8 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
           playerIds:    playerRef.current,
           rivalTeamIds: rivalRef.current,
           rivalEvents:  rivalEventsRef.current,
+          teamEvents:   teamEventsRef.current,
+          enabled:      notifsEnabledRef.current,
           delayBucket:  delayBucketRef.current,
         }).catch(() => {});
       }
@@ -231,6 +251,14 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
             AsyncStorage.removeItem(LEAGUE_STORAGE_KEY),
             AsyncStorage.removeItem(RIVAL_STORAGE_KEY),
           ]).catch(() => {});
+          // Desuscribir los topics FCM del usuario saliente — sin esto el
+          // device seguía recibiendo los pushes de la cuenta anterior
+          // (auditoría 10 jul 2026). Con listas vacías, el reconcile remueve
+          // todo lo que el caché conoce.
+          reconcileSubscriptions({
+            teamIds: [], leagueIds: [], playerIds: [], rivalTeamIds: [],
+            delayBucket: delayBucketRef.current,
+          }).catch(() => {});
         }
         return; // guest or logged out — AsyncStorage is enough
       }
@@ -309,6 +337,8 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
           reconcileSubscriptions({
             teamIds: t, leagueIds: l, playerIds: p, rivalTeamIds: rv,
             rivalEvents: rivalEventsRef.current,
+            teamEvents:  teamEventsRef.current,
+            enabled:     notifsEnabledRef.current,
             delayBucket: delayBucketRef.current,
           }).catch(() => {});
         } else {
@@ -435,7 +465,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
         unsubscribeTeamTopics(teamId).catch(() => {});
         logEvent(ANALYTICS_EVENTS.UNFOLLOW_TEAM, { team_id: teamId });
       } else {
-        subscribeTeamTopics(teamId, delayBucketRef.current).catch(() => {});
+        subscribeTeamTopics(teamId, delayBucketRef.current, teamEventsRef.current).catch(() => {});
         logEvent(ANALYTICS_EVENTS.FOLLOW_TEAM, { team_id: teamId });
         // Mutual exclusivity: you don't "follow" a rival — drop it if present.
         if (rivalRef.current.includes(teamId)) {
@@ -557,6 +587,8 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       playerIds:    playerRef.current,
       rivalTeamIds: rivalRef.current,
       rivalEvents:  rivalEventsRef.current,
+      teamEvents:   teamEventsRef.current,
+      enabled:      notifsEnabledRef.current,
       delayBucket:  delayBucketRef.current,
     }).catch(() => {});
   }, []);

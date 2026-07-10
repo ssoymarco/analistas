@@ -233,6 +233,12 @@ async function doInitializeFCM(): Promise<string | null> {
     const fcmToken = await messaging().getToken();
     if (fcmToken) {
       await AsyncStorage.setItem(FCM_TOKEN_KEY, fcmToken).catch(() => {});
+      // La membresía de topics vive POR TOKEN. Si el token cambió (Auto
+      // Backup de Android restauró el caché de suscripciones junto a un
+      // token nuevo, o rotación), el caché describe un token muerto y el
+      // reconcile no re-suscribiría nada → silencio total. Invalidar aquí.
+      const { invalidateSubscriptionCacheOnTokenChange } = await import('./fcmTopics');
+      await invalidateSubscriptionCacheOnTokenChange(fcmToken).catch(() => {});
     }
     addBreadcrumb('fcm', 'FCM token result', { hasToken: !!fcmToken });
     Sentry.setContext('fcm', {
@@ -292,7 +298,65 @@ export function attachFCMHandlers(): () => void {
     const homeScore = data.homeScore;
     const awayScore = data.awayScore;
     if (matchId == null || type == null) return null;
-    return `${matchId}_${type}_${homeScore ?? ''}-${awayScore ?? ''}`;
+    // Incluye el minuto (espejo del dedupId del servidor, 10 jul 2026): dos
+    // eventos DISTINTOS del mismo tipo con el mismo marcador (dos amarillas
+    // seguidas a 0-0) ya no se suprimen entre sí.
+    return `${matchId}_${type}_${homeScore ?? ''}-${awayScore ?? ''}_m${data.minute ?? ''}`;
+  };
+
+  // ── Filtro de FOREGROUND por prefs / partido silenciado (auditoría 10 jul
+  // 2026). En background el OS pinta el banner y no hay filtro posible (eso
+  // se arregla gateando la SUSCRIPCIÓN al topic — ver fcmTopics.ts), pero en
+  // foreground el banner lo pintamos NOSOTROS aquí, así que este es el punto
+  // donde el mute por partido y los overrides por evento sí pueden cumplirse.
+  // Se lee AsyncStorage directo porque este handler vive fuera de React.
+  const TYPE_TO_PREF: Record<string, string> = {
+    goal: 'goals', goalCancelled: 'goals',
+    matchStart: 'matchStart',
+    halftime: 'halftime', secondHalfStart: 'halftime',
+    matchEnd: 'matchEnd', extraTimeStart: 'matchEnd', penaltiesStart: 'matchEnd',
+    matchSuspended: 'matchEnd',
+    redCard: 'redCards', yellowCard: 'yellowCards', substitution: 'substitutions',
+    lineups: 'lineups', matchReminder: 'matchReminder',
+    rivalLoss: 'rivalResult', rivalBigLoss: 'rivalResult',
+    rivalRedCard: 'rivalRedCard', rivalPenMiss: 'rivalPenMiss',
+  };
+
+  const shouldDisplayInForeground = async (
+    data: Record<string, unknown> | undefined,
+  ): Promise<boolean> => {
+    try {
+      const { PREFS_KEY, MUTED_KEY, OVERRIDES_KEY } = await import('../contexts/NotificationPrefsContext');
+      const entries = await AsyncStorage.multiGet([PREFS_KEY, MUTED_KEY, OVERRIDES_KEY]);
+      const rawPrefs = entries[0][1];
+      const rawMuted = entries[1][1];
+      const rawOverrides = entries[2][1];
+
+      const prefs: Record<string, unknown> = rawPrefs ? JSON.parse(rawPrefs) : {};
+      if (prefs.notificationsEnabled === false) return false;
+
+      const matchId = typeof data?.matchId === 'string' ? data.matchId : null;
+      if (matchId && rawMuted) {
+        const muted: unknown = JSON.parse(rawMuted);
+        if (Array.isArray(muted) && muted.includes(matchId)) return false;
+      }
+
+      const type = typeof data?.type === 'string' ? data.type : null;
+      if (!type) return true;
+      if (type.startsWith('player')) return true; // seguir al jugador ES el control
+
+      const prefKey = TYPE_TO_PREF[type];
+      if (!prefKey) return true; // tipo desconocido → mostrar (fail-open)
+
+      if (matchId && rawOverrides) {
+        const overrides = JSON.parse(rawOverrides) as Record<string, Record<string, boolean>>;
+        const override = overrides?.[matchId]?.[prefKey];
+        if (override !== undefined) return override;
+      }
+      return prefs[prefKey] !== false; // ausente → default mostrar
+    } catch {
+      return true; // ante la duda, mostrar — jamás perder un gol por un parse
+    }
   };
 
   // Foreground messages. The expo-notifications foreground handler
@@ -316,6 +380,12 @@ export function attachFCMHandlers(): () => void {
         if (now - t > DEDUP_WINDOW_MS) recentlyShown.delete(k);
       }
     }
+
+    // ── Prefs / mute por partido (solo aplicable en foreground) ──
+    const display = await shouldDisplayInForeground(
+      remoteMessage.data as Record<string, unknown> | undefined,
+    );
+    if (!display) return;
 
     try {
       await Notifications.scheduleNotificationAsync({

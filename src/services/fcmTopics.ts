@@ -137,16 +137,57 @@ export const TopicNames = {
  *  where the device is in two buckets simultaneously. */
 const ALL_BUCKETS: DelayBucket[] = ['d0', 'd2', 'd5', 'd10'];
 
-/** All topics for a team in a given delay bucket. */
-function topicsForTeam(teamId: string, bucket: DelayBucket): string[] {
-  return [
-    TopicNames.teamGoals(teamId, bucket),
-    TopicNames.teamCards(teamId, bucket),
-    TopicNames.teamLive(teamId, bucket),
-    TopicNames.teamKickoff(teamId),
-    TopicNames.teamLineups(teamId),
-    TopicNames.teamReminders(teamId),
-  ];
+// ── Clases de evento por equipo (auditoría 10 jul 2026) ─────────────────────
+// La granularidad REAL que el servidor ofrece son estas 6 clases de topic.
+// Antes el cliente se suscribía SIEMPRE a las 6 y los toggles de la UI eran
+// decorativos (en background el OS pinta el banner sin preguntarle a la app).
+// Ahora las prefs gatean la membresía — el único enforcement que existe.
+export type TeamEventClass = 'goals' | 'cards' | 'live' | 'kickoff' | 'lineups' | 'reminders';
+
+export const ALL_TEAM_EVENT_CLASSES: TeamEventClass[] =
+  ['goals', 'cards', 'live', 'kickoff', 'lineups', 'reminders'];
+
+/** Mapea las prefs del usuario → clases de topic habilitadas. Espejo de la
+ *  taxonomía del servidor: goals={gol+VAR}, cards={amarillas+rojas},
+ *  live={MT+2T+final+sustituciones+prórroga+penales+suspendido},
+ *  kickoff={inicio}, lineups, reminders. Master switch apagado → nada. */
+export function teamEventsFromPrefs(p: {
+  notificationsEnabled: boolean;
+  goals: boolean; yellowCards: boolean; redCards: boolean;
+  matchStart: boolean; halftime: boolean; matchEnd: boolean;
+  substitutions: boolean; lineups: boolean; matchReminder: boolean;
+}): TeamEventClass[] {
+  if (!p.notificationsEnabled) return [];
+  const ev: TeamEventClass[] = [];
+  if (p.goals)                                        ev.push('goals');
+  if (p.yellowCards || p.redCards)                    ev.push('cards');
+  if (p.halftime || p.matchEnd || p.substitutions)    ev.push('live');
+  if (p.matchStart)                                   ev.push('kickoff');
+  if (p.lineups)                                      ev.push('lineups');
+  if (p.matchReminder)                                ev.push('reminders');
+  return ev;
+}
+
+/** Minutos de retraso → bucket VÁLIDO del servidor. El server solo publica
+ *  d0/d2/d5/d10 — un bucket inventado (p. ej. 'd1' cuando la UI ofrecía
+ *  "1 min") suscribía a topics fantasma y silenciaba TODO para siempre
+ *  (bug crítico de la auditoría del 10 jul 2026). */
+export function bucketForDelay(minutes: number): DelayBucket {
+  if (minutes >= 10) return 'd10';
+  if (minutes >= 5)  return 'd5';
+  return 'd2';
+}
+
+/** Topics for a team in a given delay bucket, gated by enabled event classes. */
+function topicsForTeam(teamId: string, bucket: DelayBucket, events: TeamEventClass[]): string[] {
+  const t: string[] = [];
+  if (events.includes('goals'))     t.push(TopicNames.teamGoals(teamId, bucket));
+  if (events.includes('cards'))     t.push(TopicNames.teamCards(teamId, bucket));
+  if (events.includes('live'))      t.push(TopicNames.teamLive(teamId, bucket));
+  if (events.includes('kickoff'))   t.push(TopicNames.teamKickoff(teamId));
+  if (events.includes('lineups'))   t.push(TopicNames.teamLineups(teamId));
+  if (events.includes('reminders')) t.push(TopicNames.teamReminders(teamId));
+  return t;
 }
 
 /** All topics for ALL buckets of a team (used during reconcile to unsubscribe
@@ -161,6 +202,22 @@ function allBucketTopicsForTeam(teamId: string): string[] {
     );
   }
   return topics;
+}
+
+/** TODOS los topics posibles de un equipo (buckets + inmediatos + legacy).
+ *  Base del sweep autoritativo y del unfollow blindado: se intenta desuscribir
+ *  todo lo que no esté en `wanted`, SIN confiar en el caché local (que puede
+ *  mentir tras un wipe/fallo). FCM unsubscribe es idempotente y barato. */
+function allPossibleTopicsForTeam(teamId: string): string[] {
+  return [
+    ...allBucketTopicsForTeam(teamId),
+    TopicNames.teamKickoff(teamId),
+    TopicNames.teamLineups(teamId),
+    TopicNames.teamReminders(teamId),
+    TopicNames._legacyTeamGoals(teamId),
+    TopicNames._legacyTeamCards(teamId),
+    TopicNames._legacyTeamStart(teamId),
+  ];
 }
 
 /** Topics for a player (no bucket — el servidor envía inmediato, como Modo Rival). */
@@ -235,9 +292,13 @@ async function writeSubscribedTopics(topics: Set<string>): Promise<void> {
  * Defensively unsubscribes from sibling buckets first to guarantee exclusion
  * mutua — prevents a device from being in two buckets simultaneously.
  */
-export async function subscribeTeamTopics(teamId: string, bucket: DelayBucket = 'd0'): Promise<void> {
+export async function subscribeTeamTopics(
+  teamId: string,
+  bucket: DelayBucket = 'd0',
+  events: TeamEventClass[] = ALL_TEAM_EVENT_CLASSES,
+): Promise<void> {
   const subscribed = await readSubscribedTopics();
-  const wanted     = new Set(topicsForTeam(teamId, bucket));
+  const wanted     = new Set(topicsForTeam(teamId, bucket, events));
 
   // Sibling live-event topics across ALL buckets (includes the target bucket).
   // Unsubscribe from every sibling bucket — intentionally do NOT filter by
@@ -266,18 +327,16 @@ export async function subscribeTeamTopics(teamId: string, bucket: DelayBucket = 
 
 export async function unsubscribeTeamTopics(teamId: string): Promise<void> {
   const subscribed = await readSubscribedTopics();
-  // Unsubscribe from ALL buckets of this team's live events + immediate topics
-  const allTopics = [
-    ...allBucketTopicsForTeam(teamId),
-    TopicNames.teamKickoff(teamId),
-    TopicNames.teamLineups(teamId),
-    TopicNames.teamReminders(teamId),
-  ];
-  const toRemove = allTopics.filter(t => subscribed.has(t));
-  if (toRemove.length === 0) return;
-
-  await Promise.all(toRemove.map(t => safeUnsubscribe(t)));
-  toRemove.forEach(t => subscribed.delete(t));
+  // BLINDADO (auditoría 10 jul 2026): NO filtrar por el caché local. Si el
+  // caché se perdió sin desuscribir (wipe de FCM_INIT_VERSION, fallo de
+  // escritura), filtrar dejaba toRemove vacío → CERO llamadas FCM → el
+  // usuario dejaba de seguir al equipo y los pushes seguían PARA SIEMPRE.
+  // FCM unsubscribe es idempotente: intentar todo, siempre.
+  const allTopics = allPossibleTopicsForTeam(teamId);
+  const results = await Promise.all(allTopics.map(t => safeUnsubscribe(t)));
+  // Solo sacar del caché lo que FCM confirmó — un fallo (offline) se queda
+  // registrado y el próximo reconcile/unfollow lo reintenta.
+  allTopics.forEach((t, i) => { if (results[i]) subscribed.delete(t); });
   await writeSubscribedTopics(subscribed);
 }
 
@@ -310,12 +369,10 @@ export async function subscribePlayerTopics(playerId: string): Promise<void> {
 
 export async function unsubscribePlayerTopics(playerId: string): Promise<void> {
   const subscribed = await readSubscribedTopics();
-  const wanted = topicsForPlayer(playerId);
-  const toRemove = wanted.filter(t => subscribed.has(t));
-  if (toRemove.length === 0) return;
-
-  await Promise.all(toRemove.map(t => safeUnsubscribe(t)));
-  toRemove.forEach(t => subscribed.delete(t));
+  // Blindado: sin filtro por caché (ver unsubscribeTeamTopics).
+  const topics = topicsForPlayer(playerId);
+  const results = await Promise.all(topics.map(t => safeUnsubscribe(t)));
+  topics.forEach((t, i) => { if (results[i]) subscribed.delete(t); });
   await writeSubscribedTopics(subscribed);
 }
 
@@ -340,11 +397,10 @@ export async function subscribeRivalTopics(
 /** Unsubscribe from a rival team's bad-news topics (all five). */
 export async function unsubscribeRivalTopics(teamId: string): Promise<void> {
   const subscribed = await readSubscribedTopics();
-  const toRemove = topicsForRival(teamId).filter(t => subscribed.has(t));
-  if (toRemove.length === 0) return;
-
-  await Promise.all(toRemove.map(t => safeUnsubscribe(t)));
-  toRemove.forEach(t => subscribed.delete(t));
+  // Blindado: sin filtro por caché (ver unsubscribeTeamTopics).
+  const topics = topicsForRival(teamId);
+  const results = await Promise.all(topics.map(t => safeUnsubscribe(t)));
+  topics.forEach((t, i) => { if (results[i]) subscribed.delete(t); });
   await writeSubscribedTopics(subscribed);
 }
 
@@ -418,6 +474,12 @@ interface ReconcileArgs {
   playerIds:  string[];
   rivalTeamIds?: string[];      // Modo Rival teams
   rivalEvents?:  RivalEvent[];  // enabled rival event classes (defaults to all)
+  /** Clases de evento de equipo habilitadas por las prefs del usuario.
+   *  Default: todas (compat con callers viejos). */
+  teamEvents?: TeamEventClass[];
+  /** Master switch "Recibir notificaciones". false → wanted vacío: el sweep
+   *  desuscribe TODO (equipos, jugadores y rivales) de verdad, en FCM. */
+  enabled?: boolean;
   delayBucket?: DelayBucket;    // defaults to 'd0' (Modo Estadio OFF)
 }
 
@@ -454,17 +516,26 @@ export async function reconcileSubscriptions(args: ReconcileArgs): Promise<void>
 async function doReconcileSubscriptions(args: ReconcileArgs): Promise<void> {
   const bucket: DelayBucket = args.delayBucket ?? 'd0';
   const rivalEvents = args.rivalEvents ?? RIVAL_EVENTS;
+  const teamEvents  = args.teamEvents ?? ALL_TEAM_EVENT_CLASSES;
+  const enabled     = args.enabled !== false;
 
   // One-time cleanup of v1.0.x legacy (un-bucketed) topic subscriptions.
   migrateFromLegacyTopics(args.teamIds).catch(() => {});
 
   // ── Desired ("wanted") topic set ──────────────────────────────────────────
+  // Gateado por las prefs (auditoría 10 jul 2026): las clases de evento de
+  // equipo y el master switch por fin gobiernan la membresía real de topics —
+  // antes se suscribía SIEMPRE el paquete completo y los toggles eran
+  // decorativos. Con el master apagado, wanted queda vacío y el sweep de
+  // abajo desuscribe todo.
   const wanted = new Set<string>();
-  for (const id of args.teamIds)   topicsForTeam(id, bucket).forEach(t => wanted.add(t));
-  // leagueIds intentionally skipped — display-only.
-  for (const id of args.playerIds) topicsForPlayer(id).forEach(t => wanted.add(t));
-  for (const id of args.rivalTeamIds ?? []) {
-    for (const ev of rivalEvents) wanted.add(RIVAL_TOPIC_BY_EVENT[ev](id));
+  if (enabled) {
+    for (const id of args.teamIds)   topicsForTeam(id, bucket, teamEvents).forEach(t => wanted.add(t));
+    // leagueIds intentionally skipped — display-only.
+    for (const id of args.playerIds) topicsForPlayer(id).forEach(t => wanted.add(t));
+    for (const id of args.rivalTeamIds ?? []) {
+      for (const ev of rivalEvents) wanted.add(RIVAL_TOPIC_BY_EVENT[ev](id));
+    }
   }
 
   const current = await readSubscribedTopics();
@@ -472,19 +543,25 @@ async function doReconcileSubscriptions(args: ReconcileArgs): Promise<void> {
   // ── Removals — AUTHORITATIVE, not a pure cache diff ───────────────────────
   // (1) Anything cached that's no longer wanted (unfollowed team/player/rival,
   //     or a stale delay bucket left in the cache).
-  // (2) CRITICAL FIX: every delay-bucket SIBLING of a still-followed team that
-  //     isn't the target bucket — INCLUDING topics absent from the local cache.
-  //     The cache can diverge from FCM's real membership (an FCM_INIT_VERSION
-  //     wipe cleared the cache WITHOUT unsubscribing server-side, orphaning the
-  //     old _d0 topics). The old `current - wanted` diff could never remove what
-  //     it didn't know about, leaving devices subscribed to BOTH the immediate
-  //     (_d0) and delayed (_dN) bucket → every event arrived twice (spoiler now
-  //     + duplicate after the Modo Estadio delay). Mirrors subscribeTeamTopics's
-  //     defensive sibling cleanup so both paths behave identically.
+  // (2) CRITICAL FIX: every possible topic of a KNOWN entity (equipo, jugador,
+  //     rival) that isn't wanted — INCLUDING topics absent from the local
+  //     cache. The cache can diverge from FCM's real membership (an
+  //     FCM_INIT_VERSION wipe cleared the cache WITHOUT unsubscribing
+  //     server-side, orphaning old topics). A pure `current - wanted` diff can
+  //     never remove what it doesn't know about — the device stayed in stale
+  //     buckets (double push / spoiler) or in event classes the user disabled.
+  //     This sweep covers buckets, immediate topics, legacy topics, player and
+  //     rival topics uniformly. FCM unsubscribe is idempotent and cheap.
   const removeSet = new Set<string>();
   for (const t of current) if (!wanted.has(t)) removeSet.add(t);
   for (const id of args.teamIds) {
-    for (const t of allBucketTopicsForTeam(id)) if (!wanted.has(t)) removeSet.add(t);
+    for (const t of allPossibleTopicsForTeam(id)) if (!wanted.has(t)) removeSet.add(t);
+  }
+  for (const id of args.playerIds) {
+    for (const t of topicsForPlayer(id)) if (!wanted.has(t)) removeSet.add(t);
+  }
+  for (const id of args.rivalTeamIds ?? []) {
+    for (const t of topicsForRival(id)) if (!wanted.has(t)) removeSet.add(t);
   }
   const toRemove = [...removeSet];
   const toAdd    = [...wanted].filter(t => !current.has(t));
@@ -523,4 +600,28 @@ async function doReconcileSubscriptions(args: ReconcileArgs): Promise<void> {
  */
 export async function clearLocalSubscriptionRecord(): Promise<void> {
   await AsyncStorage.removeItem(SUBSCRIBED_TOPICS_KEY).catch(() => {});
+}
+
+// ── Invalidación por cambio de token ─────────────────────────────────────────
+// La membresía de topics en FCM vive POR TOKEN. Si el token cambió (reinstalación
+// con Android Auto Backup que restaura AsyncStorage, rotación de token), el
+// caché local describe las suscripciones del token MUERTO: el reconcile creería
+// que todo está suscrito y no re-suscribiría nada → silencio total (síntoma A
+// de la auditoría 10 jul 2026). Guardamos el token junto al caché; si difiere,
+// se borra el caché y el próximo reconcile re-suscribe todo desde cero.
+const CACHE_TOKEN_KEY = 'analistas_fcm_cache_token';
+
+export async function invalidateSubscriptionCacheOnTokenChange(currentToken: string): Promise<void> {
+  try {
+    const cachedToken = await AsyncStorage.getItem(CACHE_TOKEN_KEY);
+    if (cachedToken === currentToken) return;
+    if (cachedToken) {
+      // Token distinto al que construyó el caché → el caché miente.
+      await AsyncStorage.removeItem(SUBSCRIBED_TOPICS_KEY);
+      addBreadcrumb('fcm', 'subscription cache invalidated (token changed)');
+    }
+    await AsyncStorage.setItem(CACHE_TOKEN_KEY, currentToken);
+  } catch {
+    // Best-effort — el próximo arranque lo reintenta.
+  }
 }

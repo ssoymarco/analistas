@@ -88,6 +88,8 @@ interface NotificationPrefsContextType {
    *  topics thinking the default 'd0' is the truth. See FavoritesContext. */
   isHydrated: boolean;
   togglePref: (key: keyof Pick<NotificationPrefs, 'notificationsEnabled' | 'matchReminder' | 'goals' | 'matchStart' | 'halftime' | 'matchEnd' | 'lineups' | 'yellowCards' | 'redCards' | 'substitutions' | 'var' | 'estadioMode' | 'rivalResult' | 'rivalRedCard' | 'rivalPenMiss'>) => void;
+  /** Actualiza varias prefs de un golpe (toggles agrupados de la UI honesta). */
+  updatePrefs: (partial: Partial<NotificationPrefs>) => void;
   /** Set the Modo Estadio delay in minutes */
   setEstadioDelay: (minutes: number) => void;
   /** Set how many minutes before kickoff the match reminder fires */
@@ -127,6 +129,7 @@ const NotificationPrefsContext = createContext<NotificationPrefsContextType>({
   prefs: DEFAULT_PREFS,
   isHydrated: false,
   togglePref: () => {},
+  updatePrefs: () => {},
   setEstadioDelay: () => {},
   setMatchReminderMinutes: () => {},
   mutedMatchIds: new Set(),
@@ -150,11 +153,14 @@ const NotificationPrefsContext = createContext<NotificationPrefsContextType>({
   setPermissionStatus: () => {},
 });
 
-const PREFS_KEY          = 'analistas_notif_prefs';
-const MUTED_KEY          = 'analistas_muted_matches';
+// Exportadas: fcmInit.ts las lee directo de AsyncStorage para filtrar los
+// pushes de FOREGROUND por prefs/mute/overrides (el onMessage vive fuera del
+// árbol de React y no puede usar el hook).
+export const PREFS_KEY     = 'analistas_notif_prefs';
+export const MUTED_KEY     = 'analistas_muted_matches';
+export const OVERRIDES_KEY = 'analistas_match_event_overrides';
 const ESTADIO_KEY        = 'analistas_estadio_matches';
 const ESTADIO_DELAYS_KEY = 'analistas_estadio_delays';
-const OVERRIDES_KEY      = 'analistas_match_event_overrides';
 const PERM_KEY           = 'analistas_notif_permission';
 
 export function NotificationPrefsProvider({ children }: { children: ReactNode }) {
@@ -245,7 +251,18 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
     AsyncStorage.multiGet([PREFS_KEY, MUTED_KEY, ESTADIO_KEY, ESTADIO_DELAYS_KEY, OVERRIDES_KEY, PUSH_TOKEN_KEY, PERM_KEY]).then(
       ([[, rawPrefs], [, rawMuted], [, rawEstadio], [, rawDelays], [, rawOverrides], [, savedToken], [, savedPerm]]) => {
         if (rawPrefs) {
-          try { setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(rawPrefs) }); } catch {}
+          try {
+            const parsed = { ...DEFAULT_PREFS, ...JSON.parse(rawPrefs) } as NotificationPrefs;
+            // Migración (auditoría 10 jul 2026): la UI ofrecía retraso de
+            // "1 min", que suscribía al bucket d1 — un bucket que el servidor
+            // JAMÁS publica → silencio total. Se elimina la opción y cualquier
+            // valor almacenado < 2 se normaliza a 2.
+            if (parsed.estadioDelay < 2) {
+              parsed.estadioDelay = 2;
+              AsyncStorage.setItem(PREFS_KEY, JSON.stringify(parsed)).catch(() => {});
+            }
+            setPrefs(parsed);
+          } catch {}
         }
         if (rawMuted) {
           try { setMutedMatchIds(new Set(JSON.parse(rawMuted))); } catch {}
@@ -284,9 +301,24 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
     });
   }, [syncPrefsToCloud]);
 
+  /** Actualiza varias prefs de un golpe — usado por los toggles agrupados de
+   *  la UI honesta (p. ej. "Tarjetas" = yellowCards + redCards juntas, que es
+   *  la granularidad REAL del topic team_X_cards). */
+  const updatePrefs = useCallback((partial: Partial<NotificationPrefs>) => {
+    setPrefs(p => {
+      const next = { ...p, ...partial };
+      AsyncStorage.setItem(PREFS_KEY, JSON.stringify(next));
+      syncPrefsToCloud(next);
+      return next;
+    });
+  }, [syncPrefsToCloud]);
+
   const setEstadioDelay = useCallback((minutes: number) => {
     setPrefs(p => {
-      const next = { ...p, estadioDelay: minutes };
+      // Solo retrasos con bucket real en el servidor (d2/d5/d10) — ver
+      // bucketForDelay en fcmTopics.ts. Un valor < 2 suscribiría a un bucket
+      // fantasma y silenciaría todo.
+      const next = { ...p, estadioDelay: Math.max(2, minutes) };
       AsyncStorage.setItem(PREFS_KEY, JSON.stringify(next));
       syncPrefsToCloud(next);
       return next;
@@ -323,6 +355,7 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
           // newly-introduced fields (added to the schema after the user's
           // last save) default to the new default rather than being undefined.
           const merged: NotificationPrefs = { ...DEFAULT_PREFS, ...remote };
+          if (merged.estadioDelay < 2) merged.estadioDelay = 2; // bucket d1 no existe en el server
           setPrefs(merged);
           AsyncStorage.setItem(PREFS_KEY, JSON.stringify(merged)).catch(() => {});
         } else {
@@ -478,7 +511,7 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   return (
     <NotificationPrefsContext.Provider
       value={{
-        prefs, isHydrated, togglePref, setEstadioDelay, setMatchReminderMinutes,
+        prefs, isHydrated, togglePref, updatePrefs, setEstadioDelay, setMatchReminderMinutes,
         mutedMatchIds, toggleMatchMute, isMatchMuted,
         estadioMatchIds, toggleMatchEstadio, isMatchEstadio,
         estadioMatchDelays, setMatchEstadioDelay, getMatchEstadioDelay,

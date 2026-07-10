@@ -829,11 +829,15 @@ function routeChange(c) {
                 legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`],
             };
         case 'matchSuspended':
-            // Suspended/postponed are immediate — no spoiler concern
+            // FIX (auditoría 10 jul 2026): esto se enviaba SOLO a los topics legacy
+            // team_X_start, de los que los builds actuales están desuscritos —
+            // NADIE recibía el aviso de suspensión. Ahora viaja por la clase _live
+            // como el resto de los cambios de estado (retrasable: una suspensión
+            // llegando 2-10 min tarde a un usuario en Modo Estadio es aceptable).
             return {
-                retrasableBases: [],
+                retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
                 immediateTopic: null,
-                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`],
+                legacyTopics: [],
             };
         case 'matchReminder':
             // Reminders are always immediate (pre-match)
@@ -1004,7 +1008,11 @@ async function dispatchNotifications(changes) {
         // Same dedupId is reused for _d0 and _dN pushes. iOS APNs uses it as
         // apns-collapse-id (collapses duplicates within the notification centre);
         // Android uses it as `tag` (replaces rather than stacks). Capped at 64 B.
-        const dedupId = `${change.matchId}_${change.type}_${change.homeScore}-${change.awayScore}`.slice(0, 64);
+        // Incluye el minuto (auditoría 10 jul 2026): dos eventos DISTINTOS del
+        // mismo tipo con el mismo marcador (p. ej. dos amarillas seguidas a 0-0)
+        // compartían dedupId y el segundo REEMPLAZABA al primero en el centro de
+        // notificaciones — el usuario perdía eventos.
+        const dedupId = `${change.matchId}_${change.type}_${change.homeScore}-${change.awayScore}_m${change.minute ?? ''}`.slice(0, 64);
         // ── Modo Rival events (immediate, single topic, no delay buckets) ──────
         // Routed to team_{affectedId}_rival_<event> — only users who set that team
         // as a rival (and enabled the event) are subscribed. scoringTeamSide is the
@@ -1035,12 +1043,13 @@ async function dispatchNotifications(changes) {
             logger.info(`📣 MATCHSTART — ${title}`, { matchId: change.matchId });
             continue;
         }
-        // ── Immediate-only events (reminder, lineups, suspended) ──────────────
-        // These use only legacyTopics (which map to _reminders, _lineups, _kickoff, _start)
+        // ── Immediate-only events (reminder, lineups) ─────────────────────────
+        // These use only legacyTopics (which map to _reminders, _lineups)
         // and have no bucket variants. Send immediately to all legacy topics.
+        // matchSuspended ya NO va aquí: se rutea por la clase _live con buckets
+        // (antes se enviaba solo a topics legacy muertos — nadie lo recibía).
         if (change.type === 'matchReminder' ||
-            change.type === 'lineups' ||
-            change.type === 'matchSuspended') {
+            change.type === 'lineups') {
             // legacyTopics for these events is always [team_homeId_X, team_awayId_X] — use
             // a single condition so users following both teams get exactly one notification.
             if (legacyTopics.length === 2) {

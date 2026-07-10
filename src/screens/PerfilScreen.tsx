@@ -171,7 +171,9 @@ function CenterModal({ visible, onClose, c, children }: {
 }
 
 // ── Modo Estadio Card ────────────────────────────────────────────────────────
-const ESTADIO_DELAYS = [1, 2, 5, 10] as const;
+// Solo retrasos con bucket real en el servidor (d2/d5/d10) — "1 min" suscribía
+// al bucket fantasma d1 y silenciaba TODO (auditoría 10 jul 2026).
+const ESTADIO_DELAYS = [2, 5, 10] as const;
 
 function ModoEstadioCard({ c, isDark }: { c: ColorPalette; isDark: boolean }) {
   const { t } = useTranslation();

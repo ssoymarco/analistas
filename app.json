@@ -223,7 +223,8 @@
             "scheme": "com.googleusercontent.apps.562270448336-v86ai9gk29pgiv6ng9dosepvvl4pgeou"
           }
         }
-      ]
+      ],
+      "allowBackup": false
     },
     "web": {
       "favicon": "./assets/icon.png"
