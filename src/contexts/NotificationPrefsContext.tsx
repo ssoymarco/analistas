@@ -5,6 +5,7 @@ import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { captureFirestoreRejection } from '../services/sentry';
 import { cancelAllNotificationsForMatch, PUSH_TOKEN_KEY } from '../services/notifications';
+import { subscribeMatchMute, unsubscribeMatchMute } from '../services/fcmTopics';
 
 export interface NotificationPrefs {
   /** Master kill-switch. When `false`, no notification is dispatched
@@ -376,10 +377,18 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
       const next = new Set(prev);
       if (next.has(matchId)) {
         next.delete(matchId);
+        // Fase 2 (10 jul 2026): reabrir el grifo — el servidor deja de
+        // excluirnos de los envíos de este partido.
+        unsubscribeMatchMute(matchId).catch(() => {});
       } else {
         next.add(matchId);
         // Cancel any scheduled local notifications for this match
         cancelAllNotificationsForMatch(matchId).catch(() => {});
+        // Fase 2: suscribirse al topic mute_{matchId} — el servidor agrega
+        // "&& !('mute_X' in topics)" a cada envío del partido, así el
+        // silencio funciona TAMBIÉN con la app cerrada (antes el mute era
+        // un flag local que nada consultaba — auditoría 10 jul 2026).
+        subscribeMatchMute(matchId).catch(() => {});
       }
       AsyncStorage.setItem(MUTED_KEY, JSON.stringify([...next]));
       return next;

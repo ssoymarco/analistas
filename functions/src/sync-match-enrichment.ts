@@ -318,21 +318,23 @@ async function writeEnrichment(
         homeTeam: m.homeTeamName,
         awayTeam: m.awayTeamName,
       };
-      // Send to both teams' lineup topics (no delay — lineups are pre-match info)
-      await Promise.allSettled([
-        messaging.send({
-          topic: `team_${homeId}_lineups`,
-          notification: { title, body }, data,
-          android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
-          apns: { payload: { aps: { sound: 'default', badge: 0 } } },
-        }),
-        messaging.send({
-          topic: `team_${awayId}_lineups`,
-          notification: { title, body }, data,
-          android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
-          apns: { payload: { aps: { sound: 'default', badge: 0 } } },
-        }),
-      ]);
+      // Una sola condición (Fase 2, 10 jul 2026) en vez de dos sends:
+      //  1. quien sigue a AMBOS equipos recibe UNA notificación, no dos
+      //     (hallazgo de la auditoría), y
+      //  2. quien silenció este partido (topic mute_{matchId}) no recibe nada.
+      await messaging.send({
+        condition:
+          `('team_${homeId}_lineups' in topics || 'team_${awayId}_lineups' in topics)` +
+          ` && !('mute_${m.id}' in topics)`,
+        notification: { title, body }, data,
+        android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
+        apns: { payload: { aps: { sound: 'default', badge: 0 } } },
+      }).catch(err => {
+        const code = (err as { code?: string }).code;
+        if (code !== 'messaging/invalid-argument') {
+          logger.warn(`📋 Lineup push failed for match ${m.id}`, { err });
+        }
+      });
       // ── Seguidores del JUGADOR: alineación titular confirmada (Fase 2, 5 jul
       // 2026). Un push por cada titular de las 22 plazas — la condición FCM
       // excluye a quien ya sigue al EQUIPO (ese usuario ya recibió el push de

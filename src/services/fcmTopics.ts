@@ -121,6 +121,14 @@ export const TopicNames = {
   playerCards:   (playerId: string)  => `player_${playerId}_cards`,
   playerLineups: (playerId: string)  => `player_${playerId}_lineups`,
 
+  // ── Mute por partido (Fase 2, 10 jul 2026) ─────────────────────────────────
+  // Al silenciar un partido, el device se SUSCRIBE a este topic; el servidor
+  // agrega "&& !('mute_{matchId}' in topics)" a cada envío de ese partido.
+  // FCM evalúa la condición por dispositivo → silencio real con app cerrada.
+  // (Los pushes de JUGADOR seguido lo ignoran a propósito: seguir al jugador
+  // es un opt-in explícito más fuerte que el mute del partido.)
+  matchMute: (matchId: string) => `mute_${matchId}`,
+
   // ── Legacy topic builders (for reference / dual-send awareness) ────────────
   // NOTE: do NOT subscribe to these on new builds. The server dual-sends to them
   // during the migration window so old builds keep working. These are kept here
@@ -376,6 +384,30 @@ export async function unsubscribePlayerTopics(playerId: string): Promise<void> {
   await writeSubscribedTopics(subscribed);
 }
 
+// ── Mute por partido ─────────────────────────────────────────────────────────
+
+/** Silenciar un partido = suscribirse a su topic de mute (el servidor excluye
+ *  con condición FCM a los suscritos). Fire-and-forget desde toggleMatchMute. */
+export async function subscribeMatchMute(matchId: string): Promise<void> {
+  const subscribed = await readSubscribedTopics();
+  const topic = TopicNames.matchMute(matchId);
+  if (subscribed.has(topic)) return;
+  if (await safeSubscribe(topic)) {
+    subscribed.add(topic);
+    await writeSubscribedTopics(subscribed);
+  }
+}
+
+export async function unsubscribeMatchMute(matchId: string): Promise<void> {
+  const subscribed = await readSubscribedTopics();
+  const topic = TopicNames.matchMute(matchId);
+  // Blindado: intentar siempre (el caché puede mentir); idempotente.
+  if (await safeUnsubscribe(topic)) {
+    subscribed.delete(topic);
+    await writeSubscribedTopics(subscribed);
+  }
+}
+
 // ── Modo Rival ──────────────────────────────────────────────────────────────
 
 /** Subscribe to a rival team's "bad news" topics. `events` defaults to all
@@ -480,6 +512,9 @@ interface ReconcileArgs {
   /** Master switch "Recibir notificaciones". false → wanted vacío: el sweep
    *  desuscribe TODO (equipos, jugadores y rivales) de verdad, en FCM. */
   enabled?: boolean;
+  /** Partidos silenciados por el usuario — sus topics mute_{id} se preservan
+   *  en wanted para que el sweep (current − wanted) no los desuscriba. */
+  muteMatchIds?: string[];
   delayBucket?: DelayBucket;    // defaults to 'd0' (Modo Estadio OFF)
 }
 
@@ -537,6 +572,10 @@ async function doReconcileSubscriptions(args: ReconcileArgs): Promise<void> {
       for (const ev of rivalEvents) wanted.add(RIVAL_TOPIC_BY_EVENT[ev](id));
     }
   }
+  // Los mutes por partido se preservan SIEMPRE (incluso con el master switch
+  // apagado — silenciar es lo contrario de recibir): si no estuvieran en
+  // wanted, el diff current − wanted los desuscribiría en cada reconcile.
+  for (const id of args.muteMatchIds ?? []) wanted.add(TopicNames.matchMute(id));
 
   const current = await readSubscribedTopics();
 

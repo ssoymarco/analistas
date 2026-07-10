@@ -100,7 +100,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
   // Modo Estadio prefs — FavoritesProvider is nested INSIDE NotificationPrefsProvider
   // (see App.tsx), so this hook call is always valid.
-  const { prefs, isHydrated } = useNotificationPrefs();
+  const { prefs, isHydrated, mutedMatchIds } = useNotificationPrefs();
   // bucketForDelay garantiza un bucket que el servidor SÍ publica (d2/d5/d10).
   // El viejo `d${prefs.estadioDelay}` fabricaba 'd1' cuando la UI ofrecía
   // "1 min" — un topic fantasma que silenciaba todo (auditoría 10 jul 2026).
@@ -120,6 +120,13 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   useEffect(() => { teamEventsRef.current = teamEvents; }, [teamEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
   const notifsEnabledRef = useRef<boolean>(prefs.notificationsEnabled);
   useEffect(() => { notifsEnabledRef.current = prefs.notificationsEnabled; }, [prefs.notificationsEnabled]);
+
+  // Partidos silenciados (Fase 2): sus topics mute_{id} viajan en el reconcile
+  // para que el sweep no los desuscriba. La suscripción/desuscripción directa
+  // la hace toggleMatchMute; aquí solo se preservan.
+  const mutedSig = [...mutedMatchIds].sort().join(',');
+  const mutedRef = useRef<string[]>([...mutedMatchIds]);
+  useEffect(() => { mutedRef.current = [...mutedMatchIds]; }, [mutedSig]); // eslint-disable-line react-hooks/exhaustive-deps
   // Ref mirror of isHydrated for async/event callbacks (foreground handler).
   const isHydratedRef = useRef(isHydrated);
   useEffect(() => { isHydratedRef.current = isHydrated; }, [isHydrated]);
@@ -198,6 +205,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       rivalEvents:  rivalEventsRef.current,
       teamEvents:   teamEventsRef.current,
       enabled:      notifsEnabledRef.current,
+      muteMatchIds: mutedRef.current,
       delayBucket:  delayBucket,
     }).catch(() => {});
   }, [isHydrated, favoritesLoaded, delayBucket, rivalEventsSig, teamEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -217,6 +225,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
           rivalEvents:  rivalEventsRef.current,
           teamEvents:   teamEventsRef.current,
           enabled:      notifsEnabledRef.current,
+          muteMatchIds: mutedRef.current,
           delayBucket:  delayBucketRef.current,
         }).catch(() => {});
       }
@@ -339,6 +348,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
             rivalEvents: rivalEventsRef.current,
             teamEvents:  teamEventsRef.current,
             enabled:     notifsEnabledRef.current,
+            muteMatchIds: mutedRef.current,
             delayBucket: delayBucketRef.current,
           }).catch(() => {});
         } else {
@@ -589,6 +599,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       rivalEvents:  rivalEventsRef.current,
       teamEvents:   teamEventsRef.current,
       enabled:      notifsEnabledRef.current,
+      muteMatchIds: mutedRef.current,
       delayBucket:  delayBucketRef.current,
     }).catch(() => {});
   }, []);

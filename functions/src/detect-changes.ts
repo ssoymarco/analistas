@@ -1042,6 +1042,19 @@ function sendWithCondition(
   });
 }
 
+/**
+ * Guard de mute por partido (Fase 2, 10 jul 2026). El cliente suscribe el
+ * device a mute_{matchId} al silenciar un partido; anexar esto a la condición
+ * de envío excluye a esos devices EN FCM — silencio real con app cerrada.
+ * OJO: siempre parentizar el resto de la condición ("&&" liga más fuerte que
+ * "||" en el lenguaje de condiciones de FCM). Los pushes de JUGADOR seguido
+ * lo omiten a propósito (su condición ya usa los 5 topics del límite, y
+ * seguir a un jugador es un opt-in más fuerte que el mute del partido).
+ */
+function muteGuard(matchId: string): string {
+  return ` && !('mute_${matchId}' in topics)`;
+}
+
 /** Send one FCM alert push to a specific topic — shared helper. */
 function sendToTopic(
   messaging: ReturnType<typeof admin.messaging>,
@@ -1121,7 +1134,9 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
         change.type === 'rivalRedCard' ? 'rival_redcard' :
         change.type === 'rivalPenMiss' ? 'rival_penmiss' :
                                          'rival_loss';
-      sendPromises.push(sendToTopic(messaging, `team_${affectedId}_${suffix}`, title, body, data, dedupId));
+      sendPromises.push(sendWithCondition(messaging,
+        `'team_${affectedId}_${suffix}' in topics${muteGuard(change.matchId)}`,
+        title, body, data, dedupId));
       logger.info(`😈 ${change.type.toUpperCase()} — ${title}`, { matchId: change.matchId });
       continue;
     }
@@ -1134,7 +1149,7 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
       const awayId = change.awayTeam.id;
       // Single condition → users following both teams get exactly one notification.
       sendPromises.push(sendWithCondition(messaging,
-        `'team_${homeId}_kickoff' in topics || 'team_${awayId}_kickoff' in topics`,
+        `('team_${homeId}_kickoff' in topics || 'team_${awayId}_kickoff' in topics)${muteGuard(change.matchId)}`,
         title, body, data, dedupId));
       // Dual-send legacy (old builds subscribed to _start / league_start)
       for (const topic of legacyTopics) {
@@ -1157,11 +1172,13 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
       // a single condition so users following both teams get exactly one notification.
       if (legacyTopics.length === 2) {
         sendPromises.push(sendWithCondition(messaging,
-          `'${legacyTopics[0]}' in topics || '${legacyTopics[1]}' in topics`,
+          `('${legacyTopics[0]}' in topics || '${legacyTopics[1]}' in topics)${muteGuard(change.matchId)}`,
           title, body, data, dedupId));
       } else {
         for (const topic of legacyTopics) {
-          sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
+          sendPromises.push(sendWithCondition(messaging,
+            `'${topic}' in topics${muteGuard(change.matchId)}`,
+            title, body, data, dedupId));
         }
       }
       logger.info(`📣 ${change.type.toUpperCase()} — ${title}`, { matchId: change.matchId });
@@ -1175,7 +1192,7 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
     if (change.type === 'goalCancelled') {
       // Send to _d0 bases only via condition — users following both teams get one notification.
       sendPromises.push(sendWithCondition(messaging,
-        `'team_${change.homeTeam.id}_goals_d0' in topics || 'team_${change.awayTeam.id}_goals_d0' in topics`,
+        `('team_${change.homeTeam.id}_goals_d0' in topics || 'team_${change.awayTeam.id}_goals_d0' in topics)${muteGuard(change.matchId)}`,
         title, body, data, dedupId));
       logger.info(`📣 GOALCANCELLED (VAR) — ${title}`, { matchId: change.matchId });
       continue;
@@ -1238,11 +1255,13 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
     // both teams receive exactly one notification instead of two.
     if (retrasableBases.length === 2) {
       sendPromises.push(sendWithCondition(messaging,
-        `'${retrasableBases[0]}_d0' in topics || '${retrasableBases[1]}_d0' in topics`,
+        `('${retrasableBases[0]}_d0' in topics || '${retrasableBases[1]}_d0' in topics)${muteGuard(change.matchId)}`,
         title, body, data, dedupId));
     } else {
       for (const base of retrasableBases) {
-        sendPromises.push(sendToTopic(messaging, `${base}_d0`, title, body, data, dedupId));
+        sendPromises.push(sendWithCondition(messaging,
+          `'${base}_d0' in topics${muteGuard(change.matchId)}`,
+          title, body, data, dedupId));
       }
     }
 
@@ -1256,7 +1275,7 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
         for (const delayMin of [2, 5, 10] as const) {
           const taskId = toTaskId(`estadio_${baseA}_${baseB}_${dedupId}_d${delayMin}`);
           const payload: DelayedPushPayload = {
-            condition:  `'${baseA}_d${delayMin}' in topics || '${baseB}_d${delayMin}' in topics`,
+            condition:  `('${baseA}_d${delayMin}' in topics || '${baseB}_d${delayMin}' in topics)${muteGuard(change.matchId)}`,
             title, body, data, dedupId,
             changeType: change.type,
             matchId:    change.matchId,
@@ -1278,7 +1297,9 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
           for (const delayMin of [2, 5, 10] as const) {
             const taskId = toTaskId(`estadio_${base}_${dedupId}_d${delayMin}`);
             const payload: DelayedPushPayload = {
-              topic:      `${base}_d${delayMin}`,
+              // Condición (no topic directo) para poder excluir a los devices
+              // que silenciaron este partido (mute_{matchId}).
+              condition:  `'${base}_d${delayMin}' in topics${muteGuard(change.matchId)}`,
               title, body, data, dedupId,
               changeType: change.type,
               matchId:    change.matchId,
