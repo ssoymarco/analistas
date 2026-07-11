@@ -7,6 +7,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, FlatList, SectionList,
+  PanResponder,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { haptics } from '../utils/haptics';
@@ -470,6 +471,29 @@ export const FavoritosScreen: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<Tab>('equipos');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // ── Swipe entre tabs (Equipos ↔ Ligas ↔ Jugadores) ──
+  // Mismo patrón que MatchDetail/LeagueDetail; al cambiar limpia la búsqueda
+  // igual que el tap en CategoryTabs.
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const tabSwipe = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+      onPanResponderRelease: (_, g) => {
+        const dir = g.dx <= -55 ? 1 : g.dx >= 55 ? -1 : 0;
+        if (!dir) return;
+        const keys: Tab[] = ['equipos', 'ligas', 'jugadores'];
+        const next = keys.indexOf(activeTabRef.current) + dir;
+        if (next >= 0 && next < keys.length) {
+          setActiveTab(keys[next]);
+          setSearchQuery('');
+          setDebouncedQuery('');
+        }
+      },
+    }),
+  ).current;
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [suggestedVisible, setSuggestedVisible] = useState(INITIAL_SUGGESTED);
@@ -968,6 +992,7 @@ export const FavoritosScreen: React.FC = () => {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={st.scrollContent}
+          {...tabSwipe.panHandlers}
         >
           {/* ── SEARCH MODE ── */}
           {searchResults !== null && (

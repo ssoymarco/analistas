@@ -14,6 +14,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  PanResponder,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
@@ -35,7 +36,7 @@ import type { LeagueStanding, Match } from '../data/types';
 import { SkeletonTeamDetail } from '../components/Skeleton';
 import { BackArrow, ShareIcon } from '../components/NavIcons';
 import { translateNationalTeam } from '../utils/nationalTeams';
-import { CupBracketView } from '../components/CupBracketView';
+import { CupBracketView, bracketRoundPillsDragging } from '../components/CupBracketView';
 import { useCupBracket } from '../hooks/useCupBracket';
 import type { CupTie } from '../services/sportsApi';
 import { getLeagueConfig, type LeagueZone } from '../config/leagues';
@@ -1477,6 +1478,35 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
     }
     toggleRivalTeam(String(teamId));
   }, [isRivalTeam, toggleRivalTeam, teamId]);
+  // ── Swipe entre tabs (Resumen ↔ Partidos ↔ Plantilla ↔ Tabla ↔ Bracket) ──
+  // Mismo patrón que MatchDetail/LeagueDetail: PanResponder casero que solo
+  // reclama gestos netamente horizontales, con refs espejo para no leer
+  // estado stale, y cediendo el gesto a las píldoras de rondas del bracket.
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  // TABS se declara más abajo (depende de isWCTeam); el ref se rellena ahí.
+  const tabsSwipeRef = useRef<{ key: Tab; label: string }[]>([]);
+  const tabSwipe = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        !bracketRoundPillsDragging.current &&
+        Math.abs(g.dx) > 24 &&
+        Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+      onPanResponderRelease: (_, g) => {
+        if (bracketRoundPillsDragging.current) return;
+        const dir = g.dx <= -55 ? 1 : g.dx >= 55 ? -1 : 0;
+        if (!dir) return;
+        const tabs = tabsSwipeRef.current;
+        const cur = tabs.findIndex(tb => tb.key === activeTabRef.current);
+        const next = cur + dir;
+        if (next >= 0 && next < tabs.length) {
+          if (tabs[next].key === 'partidos') partidosAnchorFiredRef.current = false;
+          setActiveTab(tabs[next].key);
+        }
+      },
+    }),
+  ).current;
+
   const scrollY = useRef(new Animated.Value(0)).current;
   const heroHeight = useRef(0);
   // ── Ancla FotMob del tab Partidos ──
@@ -1564,6 +1594,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
     { key: 'tabla',     label: t('team.standingsTab') },
     ...(isWCTeam ? [{ key: 'bracket' as Tab, label: 'Bracket' }] : []),
   ];
+  tabsSwipeRef.current = TABS;
 
   const TabBar: React.FC<{ style?: any }> = ({ style }) => (
     <View style={[hs.tabBar, { backgroundColor: c.bg, borderBottomColor: c.border }, style]}>
@@ -1748,6 +1779,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
           <View
             style={{ paddingTop: 12 }}
             onLayout={e => { tabContentYRef.current = e.nativeEvent.layout.y; }}
+            {...tabSwipe.panHandlers}
           >
             {activeTab === 'resumen'   && <ResumenTab   data={data} teamId={teamId} onSeeFullTable={() => setActiveTab('tabla')} />}
             {activeTab === 'partidos'  && <PartidosTab  data={data} teamId={teamId} onUpcomingLayout={handleUpcomingLayout} />}

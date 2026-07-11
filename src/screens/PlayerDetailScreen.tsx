@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Dimensions,
+  PanResponder,
 } from 'react-native';
 import { Image } from 'expo-image';
 
@@ -586,6 +587,25 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
   ];
   const [activeTab, setActiveTab] = useState<Tab>('resumen');
 
+  // ── Swipe entre tabs (Resumen ↔ Estadísticas ↔ Historial) ──
+  // Mismo patrón que MatchDetail/LeagueDetail: solo gestos netamente
+  // horizontales; el scroll vertical pasa intacto al ScrollView.
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const tabSwipe = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+      onPanResponderRelease: (_, g) => {
+        const dir = g.dx <= -55 ? 1 : g.dx >= 55 ? -1 : 0;
+        if (!dir) return;
+        const keys: Tab[] = ['resumen', 'estadisticas', 'historial'];
+        const next = keys.indexOf(activeTabRef.current) + dir;
+        if (next >= 0 && next < keys.length) setActiveTab(keys[next]);
+      },
+    }),
+  ).current;
+
   // ── Scroll animation ──
   const scrollY = useRef(new Animated.Value(0)).current;
   const compactOpacity = scrollY.interpolate({
@@ -819,7 +839,7 @@ export const PlayerDetailScreen: React.FC<Props> = ({ route }) => {
             <Text style={{ fontSize: 14, color: c.textSecondary }}>{t('player.unavailable')}</Text>
           </View>
         ) : (
-          <View style={{ paddingTop: 12 }}>
+          <View style={{ paddingTop: 12 }} {...tabSwipe.panHandlers}>
             {activeTab === 'resumen'       && <ResumenTab data={data} />}
             {activeTab === 'estadisticas'  && <EstadisticasTab data={data} />}
             {activeTab === 'historial'     && <HistorialTab data={data} />}

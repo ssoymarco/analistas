@@ -912,12 +912,21 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
     awayProfile.stats.matchesPlayed > 0
   );
 
-  // Lineup state — three buckets:
-  // • AI predicted (SportMonks expectedlineups add-on) → "🤖 Predicción IA"
-  // • live/finished with real lineup data                → "✅ Confirmada"
-  // • scheduled with non-expected data (rare)            → "ℹ️ Probable"
+  // Lineup state — dos estados honestos (feedback dueño 11-jul-2026):
+  // Las alineaciones OFICIALES se anuncian ~60-75 min antes del silbatazo.
+  // SM a veces publica un XI proyectado con muchas horas de antelación
+  // (Mundial: 15h antes) y el banner decía "✅ Confirmada" — mentira.
+  // • CONFIRMADA = hay XI real Y (partido en vivo/terminado O faltan ≤2h)
+  //   → SIN banner: la alineación habla por sí sola (y recupera espacio).
+  // • Cualquier otro caso (predicción IA o XI temprano de SM) → banner
+  //   morado "Analistas IA · formación esperada".
   const isExpected  = detail.homeLineup?.isExpected ?? detail.awayLineup?.isExpected ?? false;
-  const isConfirmed = !isExpected;
+  const kickoffRaw  = match.startingAtUtc ?? '';
+  const kickoffMs   = kickoffRaw ? new Date(kickoffRaw.replace(' ', 'T') + 'Z').getTime() : NaN;
+  const insideConfirmWindow =
+    match.status === 'live' || match.status === 'finished' ||
+    (Number.isFinite(kickoffMs) && Date.now() >= kickoffMs - 2 * 60 * 60 * 1000);
+  const isConfirmed = !isExpected && insideConfirmWindow;
 
   const handleShare = async () => {
     if (!ViewShot || !captureRef.current) return;
@@ -986,25 +995,19 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   return (
     <View style={ms.outer}>
 
-      {/* ── Confirmation banner ── */}
-      <View style={[
-        ms.banner,
-        isExpected
-          ? { backgroundColor: 'rgba(139,92,246,0.12)', borderColor: 'rgba(139,92,246,0.3)' }
-          : isConfirmed
-          ? { backgroundColor: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.3)' }
-          : { backgroundColor: 'rgba(202,138,4,0.12)', borderColor: 'rgba(202,138,4,0.3)' },
-      ]}>
-        <Text style={{ fontSize: 14 }}>
-          {isExpected ? '🤖' : isConfirmed ? '✅' : 'ℹ️'}
-        </Text>
-        <Text style={[
-          ms.bannerText,
-          { color: isExpected ? '#8b5cf6' : isConfirmed ? '#10b981' : '#ca8a04' },
+      {/* ── Banner solo para formación ESPERADA — la confirmada se muestra
+             sin banner (más espacio, y el dato habla por sí solo) ── */}
+      {!isConfirmed && (
+        <View style={[
+          ms.banner,
+          { backgroundColor: 'rgba(139,92,246,0.12)', borderColor: 'rgba(139,92,246,0.3)' },
         ]}>
-          {isExpected ? t('lineup.aiPrediction') : isConfirmed ? t('lineup.confirmed') : t('lineup.probable')}
-        </Text>
-      </View>
+          <Text style={{ fontSize: 14 }}>🤖</Text>
+          <Text style={[ms.bannerText, { color: '#8b5cf6' }]}>
+            {t('lineup.aiPrediction')}
+          </Text>
+        </View>
+      )}
 
       {/* ── Formation header ── */}
       <View style={[ms.formationHeader, { backgroundColor: c.card, borderColor: c.border }]}>

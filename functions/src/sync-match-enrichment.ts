@@ -305,7 +305,20 @@ async function writeEnrichment(
     : [];
   const hasRealLineups = newLineups.length >= 11;
 
-  if (!m.lineupsSent && hasRealLineups && m.status === 'scheduled') {
+  // Ventana de confirmación: las alineaciones OFICIALES se anuncian ~60-75
+  // min antes del silbatazo. SM a veces publica un XI proyectado con muchas
+  // horas de antelación (Mundial: 15h antes, 11-jul-2026) — notificar eso
+  // como "confirmada" es mentirle al usuario. Solo empujamos cuando el XI
+  // está presente DENTRO de las 2h previas al kickoff; el sync corre cada
+  // 4 min, así que el push sale minutos después del anuncio real. El cliente
+  // aplica la misma ventana para el banner (AlineacionTab).
+  const kickoffMs = m.startingAtUtc
+    ? new Date(m.startingAtUtc.replace(' ', 'T') + 'Z').getTime()
+    : NaN;
+  const insideConfirmWindow =
+    Number.isFinite(kickoffMs) && Date.now() >= kickoffMs - 2 * 60 * 60 * 1000;
+
+  if (!m.lineupsSent && hasRealLineups && insideConfirmWindow && m.status === 'scheduled') {
     try {
       const messaging = admin.messaging();
       const homeId = m.homeTeamId;
