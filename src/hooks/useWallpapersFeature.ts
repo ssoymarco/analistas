@@ -24,6 +24,7 @@ import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
+import { useAuth } from '../contexts/AuthContext';
 
 export interface WallpaperPrize {
   id: string;
@@ -37,6 +38,10 @@ export interface WallpaperPrize {
 export interface WallpapersConfig {
   enabled: boolean;
   prize: WallpaperPrize | null;
+  /** Vista previa privada: uids que ven la sección aunque enabled=false.
+   *  Permite al dueño validar la versión final en su device antes del
+   *  encendido público — sin TestFlight (los OTA llegan a todos). */
+  previewUids?: string[];
 }
 
 const STORAGE_KEY = 'wallpapers_config_v1';
@@ -63,6 +68,7 @@ async function loadConfig(): Promise<void> {
     const config: WallpapersConfig = {
       enabled: d?.enabled === true,
       prize: d?.prize && typeof d.prize === 'object' ? (d.prize as WallpaperPrize) : null,
+      previewUids: Array.isArray(d?.previewUids) ? (d.previewUids as string[]) : [],
     };
     notify(config);
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(config)).catch(() => {});
@@ -73,8 +79,10 @@ async function loadConfig(): Promise<void> {
 
 let loadKicked = false;
 
-/** Config de la sección Wallpapers (remota, con espejo local). */
+/** Config de la sección Wallpapers (remota, con espejo local).
+ *  `enabled` ya viene resuelto: público O usuario en previewUids. */
 export function useWallpapersFeature(): WallpapersConfig {
+  const { user } = useAuth();
   const [config, setConfig] = useState<WallpapersConfig>(
     cached ?? { enabled: false, prize: null },
   );
@@ -89,5 +97,7 @@ export function useWallpapersFeature(): WallpapersConfig {
     return () => { listeners.delete(setConfig); };
   }, []);
 
-  return config;
+  const uid = user?.id ?? null;
+  const previewOn = !!uid && (config.previewUids ?? []).includes(uid);
+  return { ...config, enabled: config.enabled || previewOn };
 }
