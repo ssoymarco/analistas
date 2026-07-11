@@ -281,6 +281,10 @@ export interface LeagueDetailData {
   topCards: TopScorerRow[];
   teams: LeagueTeam[];
   fixtures: LeagueFixture[];
+  /** true cuando standings/goleadores ya cargaron (de caché o red). Mientras
+   *  sea false la UI muestra "cargando", NO "no disponible" — el flash de
+   *  "Clasificación no disponible" era este flag inexistente (11-jul-2026). */
+  metaLoaded?: boolean;
 }
 
 // ── Map helpers ────────────────────────────────────────────────────────────
@@ -546,8 +550,31 @@ export function useLeagueDetail(
             ...slice,
           });
 
-          // 2. FIXTURES FIRST — all the landing "Partidos" tab needs. Painting
-          // these dismisses the full-screen skeleton (gate is loading && !data).
+          // 2. FIXTURES + META EN PARALELO. El orden secuencial original
+          // (fixtures primero, tabla después) se diseñó para copas — que
+          // abren en Partidos — pero las LIGAS abren en Clasificación y el
+          // usuario veía la tabla vacía mientras cargaban partidos que no
+          // estaba mirando (flash "no disponible", 11-jul-2026). Las lecturas
+          // de Firestore son independientes: latencia = max, no suma.
+          const metaPromise = Promise.all([
+            getStandingsFromFirestore(seasonIdNum).catch(() => []),
+            getTopScorersAllCategories(seasonIdNum).catch(() => ({ goals: [], assists: [], cards: [] })),
+          ] as const);
+
+          // SWR de la tabla: pintar el meta cacheado al instante (re-aperturas
+          // = 0 flash) y refrescar abajo con lo fresco de Firestore.
+          const metaKey = `league_meta_v1_${seasonIdNum}`;
+          type CachedMeta = Pick<LeagueDetailData, 'standings' | 'topScorers' | 'topAssists' | 'topCards' | 'teams'>;
+          AppCache.get<CachedMeta>(metaKey).then(cachedMeta => {
+            if (cachedMeta && !cancelled) {
+              setData(prev => {
+                // No pisar meta fresco si la red ganó la carrera.
+                if (prev?.metaLoaded) return prev;
+                return mergeData(prev, { ...cachedMeta, metaLoaded: true });
+              });
+            }
+          }).catch(() => {});
+
           const fixturesKey = `league_fixtures_v2_${seasonIdNum}`;
 
           // 2a. Stale-while-revalidate: paint cached fixtures instantly.
@@ -582,12 +609,9 @@ export function useLeagueDetail(
             }
           }
 
-          // 3. META (standings + scorers + teams) — background; the
-          // Grupos/Goleadores/Asistencias/Equipos tabs need it.
-          const [fsStandings, fsTopScorers] = await Promise.all([
-            getStandingsFromFirestore(seasonIdNum).catch(() => []),
-            getTopScorersAllCategories(seasonIdNum).catch(() => ({ goals: [], assists: [], cards: [] })),
-          ]);
+          // 3. META (standings + scorers + teams) — la promesa arrancó en
+          // paralelo con los fixtures (arriba); aquí solo se consume.
+          const [fsStandings, fsTopScorers] = await metaPromise;
           // DESACOPLADO (11-jul-2026): antes hasFsMeta exigía standings Y
           // goleadores juntos. En temporada recién estrenada hay tabla (en
           // ceros, sintetizada por syncStandings) pero CERO goleadores → se
@@ -664,7 +688,8 @@ export function useLeagueDetail(
           const topCards = buildStatRows(topCardsRaw);
 
           if (!cancelled) {
-            setData(prev => mergeData(prev, { standings, topScorers, topAssists, topCards, teams }));
+            setData(prev => mergeData(prev, { standings, topScorers, topAssists, topCards, teams, metaLoaded: true }));
+            AppCache.set(metaKey, { standings, topScorers, topAssists, topCards, teams }, CacheTTL.detailScheduled).catch(() => {});
           }
 
           // 4. League logo — fire-and-forget, OFF the critical path. Skip for
@@ -702,6 +727,7 @@ export function useLeagueDetail(
             topCards: [],
             teams: [],
             fixtures: [],
+            metaLoaded: true, // error → mostrar empty state, no skeleton eterno
           });
         } finally {
           if (!cancelled) setLoading(false);

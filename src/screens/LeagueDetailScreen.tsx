@@ -227,6 +227,18 @@ const ClasificacionTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
   const { standings } = data;
 
   if (standings.length === 0) {
+    // Mientras el meta está cargando (Firestore en vuelo), spinner discreto —
+    // "no disponible" solo cuando la carga TERMINÓ y de verdad no hay tabla.
+    // (El flash de "Clasificación no disponible" al abrir era esto.)
+    if (!data.metaLoaded) {
+      return (
+        <View style={cl.outer}>
+          <View style={[cl.card, { backgroundColor: c.card, borderColor: c.border, paddingVertical: 36, alignItems: 'center' }]}>
+            <ActivityIndicator size="small" color={c.accent} />
+          </View>
+        </View>
+      );
+    }
     return (
       <View style={cl.outer}>
         <View style={[cl.card, { backgroundColor: c.card, borderColor: c.border }]}>
