@@ -60,6 +60,7 @@ const es = {
     unit_h: 'hrs',
     unit_m: 'min',
     unit_s: 'seg',
+    savedOk: 'Wallpaper guardado en tus fotos',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

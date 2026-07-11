@@ -41,8 +41,13 @@ import { captureFirestoreRejection } from '../services/sentry';
 // oculta y Participar sigue funcionando (patrón guard-OTA del app).
 let ViewShot: any = null;
 let Sharing: any = null;
+let MediaLibrary: any = null;
 try { ViewShot = require('react-native-view-shot').default; } catch {}
 try { Sharing = require('expo-sharing'); } catch {}
+// Guardado DIRECTO a galería (una tocada, clave en Android donde el share
+// sheet no ofrece "guardar" de forma consistente). Módulo nativo: viaja en
+// el build 1.4.0; en binarios sin él cae al share sheet.
+try { MediaLibrary = require('expo-media-library'); } catch {}
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const CARD_W = (SCREEN_W - 16 * 2 - 12) / 2;
@@ -143,14 +148,30 @@ export const WallpapersScreen: React.FC = () => {
     }
   }, [canParticipate, uid, entries, prize, navigation, t]);
 
-  // ── Guardar (captura + share sheet → "Guardar imagen") ──
+  // ── Guardar ──
+  // Camino ideal (build 1.4.0+): expo-media-library → DIRECTO a la galería
+  // con una tocada, en iOS y Android por igual. Fallback (binarios viejos o
+  // permiso denegado): share sheet con UTI de imagen.
   const saveWallpaper = useCallback(async () => {
-    if (!ViewShot || !Sharing || !captureRef.current) return;
+    if (!ViewShot || !captureRef.current) return;
     setSaving(true);
     haptics.selection();
     try {
       const uri: string = await captureRef.current.capture();
-      if (await Sharing.isAvailableAsync()) {
+
+      if (MediaLibrary) {
+        try {
+          const { granted } = await MediaLibrary.requestPermissionsAsync(true); // writeOnly
+          if (granted) {
+            await MediaLibrary.saveToLibraryAsync(uri);
+            haptics.selection();
+            Alert.alert('✅', t('wallpapers.savedOk'));
+            return;
+          }
+        } catch { /* cae al share sheet */ }
+      }
+
+      if (Sharing && await Sharing.isAvailableAsync()) {
         // UTI 'public.png': sin él iOS trata el archivo como "documento PNG"
         // genérico y el share sheet NO ofrece "Guardar imagen" (solo Copiar/
         // Imprimir/AirDrop — reporte del dueño 12-jul-2026). Con el UTI
@@ -333,7 +354,7 @@ export const WallpapersScreen: React.FC = () => {
                 </Text>
               </TouchableOpacity>
 
-              {ViewShot && Sharing && (
+              {ViewShot && (MediaLibrary || Sharing) && (
                 <TouchableOpacity
                   style={[s.actionBtn, { backgroundColor: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.3)' }]}
                   activeOpacity={0.85}

@@ -57,6 +57,7 @@ const fr: TranslationKeys = {
     unit_h: 'h',
     unit_m: 'min',
     unit_s: 'sec',
+    savedOk: 'Fond d’écran enregistré dans tes photos',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

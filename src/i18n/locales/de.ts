@@ -57,6 +57,7 @@ const de: TranslationKeys = {
     unit_h: 'Std',
     unit_m: 'Min',
     unit_s: 'Sek',
+    savedOk: 'Wallpaper in deinen Fotos gespeichert',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

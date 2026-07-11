@@ -57,6 +57,7 @@ const it: TranslationKeys = {
     unit_h: 'ore',
     unit_m: 'min',
     unit_s: 'sec',
+    savedOk: 'Sfondo salvato nelle tue foto',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

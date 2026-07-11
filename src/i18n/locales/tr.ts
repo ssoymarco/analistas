@@ -54,6 +54,7 @@ const tr: TranslationKeys = {
     unit_h: 'sa',
     unit_m: 'dk',
     unit_s: 'sn',
+    savedOk: 'Duvar kağıdı fotoğraflarına kaydedildi',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────
