@@ -109,6 +109,28 @@ function getPeriodNominalCap(periodMinuteOffset: number): number {
  *  above any real-world stoppage (the record is ~14 min, rare). */
 const MAX_STOPPAGE_MIN = 15;
 
+// ── Reloj suave para partidos SIN ancla del servidor ─────────────────────────
+// Algunos fixtures (sobre todo amistosos de bajo perfil) nunca traen el dato
+// de "período corriendo" de SportMonks, así que `match.liveClock` nunca se
+// llena (ver functions/src/mappers.ts:getLiveClockAnchor) — el minuto solo
+// avanza cuando llega un valor NUEVO del servidor, y sin esto los segundos se
+// quedan fijos en :00 entre actualizaciones (reporte del dueño, 11 jul 2026:
+// Chivas vs Universidad de Guadalajara mostró "69:00'" y dos minutos después
+// "71:00'", sin nada corriendo entre medio). Esto NO intenta ser preciso al
+// segundo real — solo hace que se sienta vivo: la primera vez que vemos un
+// minuto para un partido, guardamos el momento; mientras el servidor no
+// mande un minuto distinto, animamos 0→59 desde ahí.
+const softAnchors = new Map<string, { minute: number; seenAtMs: number }>();
+
+function softTickSeconds(matchId: string, minute: number, now: number): number {
+  const prev = softAnchors.get(matchId);
+  if (!prev || prev.minute !== minute) {
+    softAnchors.set(matchId, { minute, seenAtMs: now });
+    return 0;
+  }
+  return Math.min(59, Math.floor((now - prev.seenAtMs) / 1000));
+}
+
 /**
  * Compute the live broadcast minute + seconds from a Match and the current
  * wall-clock. Uses `match.liveClock` (server anchor) to extrapolate between
@@ -121,7 +143,7 @@ const MAX_STOPPAGE_MIN = 15;
  * prevents "ghost ticking" during HT/end-of-period cache lag.
  */
 export function computeLiveMinuteSeconds(
-  match: Pick<Match, 'status' | 'minute' | 'stateLabel' | 'liveClock'>,
+  match: Pick<Match, 'id' | 'status' | 'minute' | 'stateLabel' | 'liveClock'>,
   now: number,
 ): LiveDisplayTime {
   const empty: LiveDisplayTime = {
@@ -135,8 +157,14 @@ export function computeLiveMinuteSeconds(
 
   const anchor = match.liveClock;
   if (!anchor || anchor.periodStartedAt <= 0) {
-    // No anchor → use server's last-known minute without sub-minute precision.
-    return { minute: match.minute, seconds: 0, isHalfTime: false, isStoppage: false };
+    // Sin ancla del servidor → reloj suave (ver softTickSeconds arriba) en
+    // vez de segundos fijos en :00.
+    return {
+      minute: match.minute,
+      seconds: match.minute != null ? softTickSeconds(match.id, match.minute, now) : 0,
+      isHalfTime: false,
+      isStoppage: false,
+    };
   }
 
   const elapsedSec  = Math.max(0, Math.floor(now / 1000 - anchor.periodStartedAt));
