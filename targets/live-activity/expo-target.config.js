@@ -13,6 +13,10 @@ module.exports = {
   type: 'widget',
   name: 'AnalistasLiveActivity',
   deploymentTarget: '16.2',
+  // Icono de la extensión — sin él, App Store Connect manda el warning
+  // ITMS-90892 "Missing recommended icon" (iPad 152/167px) en cada delivery
+  // (correo del 11 jul 2026). No bloquea nada, pero mejor silenciarlo.
+  icon: '../../assets/icon.png',
   frameworks: ['SwiftUI', 'WidgetKit', 'ActivityKit'],
   // App Group compartido con el app: el módulo escribe los escudos aquí y el
   // widget los lee (WidgetKit no puede hacer red). Debe coincidir con
