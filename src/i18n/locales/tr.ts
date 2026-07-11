@@ -50,6 +50,10 @@ const tr: TranslationKeys = {
     signInBody: 'İmzalı forma çekilişine katılmak için Analistas hesabı gerekli.',
     signInCta: 'Hesap oluştur',
     empty: 'Yakında yeni duvar kağıtları burada',
+    unit_d: 'gün',
+    unit_h: 'sa',
+    unit_m: 'dk',
+    unit_s: 'sn',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

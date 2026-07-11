@@ -54,6 +54,10 @@ const en: TranslationKeys = {
     signInBody: 'You need an Analistas account to enter the signed jersey giveaway.',
     signInCta: 'Create account',
     empty: 'New wallpapers coming soon',
+    unit_d: 'days',
+    unit_h: 'hrs',
+    unit_m: 'min',
+    unit_s: 'sec',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

@@ -53,6 +53,10 @@ const fr: TranslationKeys = {
     signInBody: 'Un compte Analistas est requis pour participer au tirage du maillot signé.',
     signInCta: 'Créer un compte',
     empty: 'De nouveaux fonds arrivent bientôt',
+    unit_d: 'jours',
+    unit_h: 'h',
+    unit_m: 'min',
+    unit_s: 'sec',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

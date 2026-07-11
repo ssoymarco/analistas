@@ -56,6 +56,10 @@ const es = {
     signInBody: 'Necesitas una cuenta de Analistas para entrar a la dinámica del jersey firmado.',
     signInCta: 'Crear cuenta',
     empty: 'Pronto habrá wallpapers nuevos por aquí',
+    unit_d: 'días',
+    unit_h: 'hrs',
+    unit_m: 'min',
+    unit_s: 'seg',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

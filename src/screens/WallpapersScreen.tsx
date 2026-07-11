@@ -20,6 +20,8 @@ import {
   ActivityIndicator, Alert, Linking, Dimensions, Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { useTranslation } from 'react-i18next';
 import { useNavigation } from '@react-navigation/native';
 import {
@@ -28,6 +30,8 @@ import {
 import { db } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useThemeColors } from '../theme/useTheme';
+import { useDarkMode } from '../contexts/DarkModeContext';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { useWallpapersFeature } from '../hooks/useWallpapersFeature';
 import { haptics } from '../utils/haptics';
 import { captureFirestoreRejection } from '../services/sentry';
@@ -56,6 +60,7 @@ interface Wallpaper {
 
 export const WallpapersScreen: React.FC = () => {
   const c = useThemeColors();
+  const { isDark } = useDarkMode();
   const { t } = useTranslation();
   const navigation = useNavigation<any>();
   const { user, isAuthenticated, isGuest } = useAuth();
@@ -152,16 +157,23 @@ export const WallpapersScreen: React.FC = () => {
     finally { setSaving(false); }
   }, [t]);
 
-  // ── Countdown del premio ──
+  // ── Countdown VIVO del premio (tick 1 Hz, estilo marcador) ──
+  const [nowTick, setNowTick] = useState(Date.now());
+  useEffect(() => {
+    if (!prize?.announceAt) return;
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [prize?.announceAt]);
   const countdown = (() => {
     if (!prize?.announceAt) return null;
-    const ms = new Date(prize.announceAt).getTime() - Date.now();
+    const ms = new Date(prize.announceAt).getTime() - nowTick;
     if (!Number.isFinite(ms) || ms <= 0) return null;
-    const days = Math.floor(ms / 86_400_000);
-    const hours = Math.floor((ms % 86_400_000) / 3_600_000);
-    return days > 0
-      ? t('wallpapers.announceInDays', { days, hours })
-      : t('wallpapers.announceInHours', { hours: Math.max(1, hours) });
+    return {
+      d: Math.floor(ms / 86_400_000),
+      h: Math.floor((ms % 86_400_000) / 3_600_000),
+      m: Math.floor((ms % 3_600_000) / 60_000),
+      s: Math.floor((ms % 60_000) / 1000),
+    };
   })();
 
   const renderCard = ({ item }: { item: Wallpaper }) => {
@@ -185,7 +197,16 @@ export const WallpapersScreen: React.FC = () => {
   };
 
   return (
-    <View style={[s.container, { backgroundColor: c.bg }]}>
+    <SafeAreaView style={[s.container, { backgroundColor: c.bg }]} edges={['top']}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+
+      {/* Header unificado — misma métrica que Partidos/Favoritos/Perfil */}
+      <ScreenHeader
+        icon="🖼️"
+        iconBg="rgba(139,92,246,0.18)"
+        title={t('wallpapers.title')}
+      />
+
       <FlatList
         data={wallpapers}
         keyExtractor={w => w.id}
@@ -196,43 +217,52 @@ export const WallpapersScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
           <View>
-            {/* Header */}
-            <View style={s.header}>
-              <Text style={[s.headerTitle, { color: c.textPrimary }]}>{t('wallpapers.title')}</Text>
-              <Text style={[s.headerSub, { color: c.textSecondary }]}>{t('wallpapers.subtitle')}</Text>
-            </View>
+            <Text style={[s.headerSub, { color: c.textSecondary }]}>{t('wallpapers.subtitle')}</Text>
 
             {/* Tarjeta del premio */}
             {prize && (
               <View style={[s.prizeCard, { backgroundColor: c.card, borderColor: c.accent + '55' }]}>
-                {!!prize.imageUrl && (
-                  <Image source={{ uri: prize.imageUrl }} style={s.prizeImg} contentFit="cover" transition={150} />
-                )}
-                <View style={s.prizeBody}>
-                  <Text style={[s.prizeKicker, { color: c.accent }]}>{t('wallpapers.prizeKicker')}</Text>
-                  <Text style={[s.prizeTitle, { color: c.textPrimary }]} numberOfLines={2}>{prize.title}</Text>
-                  {countdown && (
-                    <Text style={[s.prizeCountdown, { color: c.textSecondary }]}>{countdown}</Text>
+                <View style={s.prizeTop}>
+                  {!!prize.imageUrl && (
+                    <Image source={{ uri: prize.imageUrl }} style={s.prizeImg} contentFit="cover" transition={150} />
                   )}
-                  <View style={s.prizeBtns}>
-                    {!!prize.socialUrl && (
-                      <TouchableOpacity
-                        style={[s.prizeBtn, { backgroundColor: c.accent }]}
-                        activeOpacity={0.85}
-                        onPress={() => Linking.openURL(prize.socialUrl).catch(() => {})}
-                      >
-                        <Text style={s.prizeBtnText}>{t('wallpapers.seeDynamic')}</Text>
-                      </TouchableOpacity>
-                    )}
-                    {!!prize.termsUrl && (
-                      <TouchableOpacity
-                        activeOpacity={0.7}
-                        onPress={() => Linking.openURL(prize.termsUrl).catch(() => {})}
-                      >
-                        <Text style={[s.termsLink, { color: c.textTertiary }]}>{t('wallpapers.terms')}</Text>
-                      </TouchableOpacity>
-                    )}
+                  <View style={s.prizeBody}>
+                    <Text style={[s.prizeKicker, { color: c.accent }]}>{t('wallpapers.prizeKicker')}</Text>
+                    {/* Título COMPLETO — hay espacio de sobra, nada de "Haa…" */}
+                    <Text style={[s.prizeTitle, { color: c.textPrimary }]}>{prize.title}</Text>
                   </View>
+                </View>
+
+                {/* Countdown vivo estilo marcador: D · H · M · S */}
+                {countdown && (
+                  <View style={s.countdownRow}>
+                    {([['d', countdown.d], ['h', countdown.h], ['m', countdown.m], ['s', countdown.s]] as const).map(([unit, val]) => (
+                      <View key={unit} style={[s.countCell, { backgroundColor: c.surface, borderColor: c.border }]}>
+                        <Text style={[s.countNum, { color: c.accent }]}>{String(val).padStart(2, '0')}</Text>
+                        <Text style={[s.countUnit, { color: c.textTertiary }]}>{t(`wallpapers.unit_${unit}`)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                <View style={s.prizeBtns}>
+                  {!!prize.socialUrl && (
+                    <TouchableOpacity
+                      style={[s.prizeBtn, { backgroundColor: c.accent }]}
+                      activeOpacity={0.85}
+                      onPress={() => Linking.openURL(prize.socialUrl).catch(() => {})}
+                    >
+                      <Text style={s.prizeBtnText}>{t('wallpapers.seeDynamic')}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {!!prize.termsUrl && (
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={() => Linking.openURL(prize.termsUrl).catch(() => {})}
+                    >
+                      <Text style={[s.termsLink, { color: c.textTertiary }]}>{t('wallpapers.terms')}</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
             )}
@@ -311,28 +341,33 @@ export const WallpapersScreen: React.FC = () => {
           </View>
         )}
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14 },
-  headerTitle: { fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
-  headerSub: { fontSize: 13, marginTop: 2 },
+  headerSub: { fontSize: 13, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12 },
 
   prizeCard: {
     marginHorizontal: 16, marginBottom: 16, borderRadius: 16, borderWidth: 1.5,
-    flexDirection: 'row', overflow: 'hidden',
+    overflow: 'hidden', padding: 14, gap: 12,
   },
-  prizeImg: { width: 110, height: 140 },
-  prizeBody: { flex: 1, padding: 12, justifyContent: 'center', gap: 4 },
+  prizeTop: { flexDirection: 'row', gap: 12 },
+  prizeImg: { width: 96, height: 108, borderRadius: 10 },
+  prizeBody: { flex: 1, justifyContent: 'center', gap: 4 },
   prizeKicker: { fontSize: 10, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },
-  prizeTitle: { fontSize: 16, fontWeight: '800', letterSpacing: -0.3 },
-  prizeCountdown: { fontSize: 12, fontWeight: '600' },
-  prizeBtns: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
-  prizeBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18 },
-  prizeBtnText: { fontSize: 12, fontWeight: '800', color: '#003d2b' },
+  prizeTitle: { fontSize: 16, fontWeight: '800', letterSpacing: -0.3, lineHeight: 21 },
+  countdownRow: { flexDirection: 'row', gap: 8 },
+  countCell: {
+    flex: 1, borderRadius: 10, borderWidth: 1,
+    alignItems: 'center', paddingVertical: 8, gap: 1,
+  },
+  countNum: { fontSize: 20, fontWeight: '900', fontVariant: ['tabular-nums'], letterSpacing: -0.5 },
+  countUnit: { fontSize: 9, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
+  prizeBtns: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  prizeBtn: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20 },
+  prizeBtnText: { fontSize: 13, fontWeight: '800', color: '#003d2b' },
   termsLink: { fontSize: 11, textDecorationLine: 'underline' },
 
   card: { width: CARD_W, borderRadius: 14, borderWidth: 1, overflow: 'hidden' },

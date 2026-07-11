@@ -53,6 +53,10 @@ const de: TranslationKeys = {
     signInBody: 'Du brauchst ein Analistas-Konto, um am Trikot-Gewinnspiel teilzunehmen.',
     signInCta: 'Konto erstellen',
     empty: 'Bald gibt es hier neue Wallpaper',
+    unit_d: 'Tage',
+    unit_h: 'Std',
+    unit_m: 'Min',
+    unit_s: 'Sek',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

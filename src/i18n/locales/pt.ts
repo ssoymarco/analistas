@@ -53,6 +53,10 @@ const pt: TranslationKeys = {
     signInBody: 'Você precisa de uma conta Analistas para entrar no sorteio da camisa autografada.',
     signInCta: 'Criar conta',
     empty: 'Em breve novos wallpapers por aqui',
+    unit_d: 'dias',
+    unit_h: 'hrs',
+    unit_m: 'min',
+    unit_s: 'seg',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

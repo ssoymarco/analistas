@@ -53,6 +53,10 @@ const it: TranslationKeys = {
     signInBody: 'Serve un account Analistas per partecipare al giveaway della maglia firmata.',
     signInCta: 'Crea account',
     empty: 'Presto nuovi sfondi qui',
+    unit_d: 'giorni',
+    unit_h: 'ore',
+    unit_m: 'min',
+    unit_s: 'sec',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────
