@@ -378,14 +378,60 @@ struct LockScreenView: View {
   }
 }
 
+// ── Familia .small (CarPlay + Apple Watch Smart Stack, iOS 18+) ───────────────
+//
+// Desde iOS 26, CarPlay muestra Live Activities. Sin adopción explícita, el
+// sistema COMPONE las vistas compactas de la Dynamic Island (bandera + gol por
+// lado) — sin minuto (foto del dueño, 13 jul 2026, España-Bélgica). Adoptar
+// `supplementalActivityFamilies([.small])` nos da una tarjeta propia donde SÍ
+// cabe la PhaseTimeline: el mismo timer del minuto (Text(timerInterval:)) con
+// su fallback de minuto estático. Si el renderer del coche no tickea el timer,
+// cada push (~1/min) re-renderiza y el minuto se ve actualizado igual.
+// API iOS 18+ → widget "moderno" gateado; iOS 16.2–17 siguen con el clásico.
+
+@available(iOS 18.0, *)
+struct SmallFamilyView: View {
+  let context: ActivityViewContext<MatchActivityAttributes>
+
+  var body: some View {
+    VStack(spacing: 5) {
+      HStack(spacing: 8) {
+        CompactBadge(team: context.attributes.home, matchId: context.attributes.matchId, side: "home")
+        ScoreBlock(state: context.state, big: false)
+        CompactBadge(team: context.attributes.away, matchId: context.attributes.matchId, side: "away")
+      }
+      PhaseTimeline(state: context.state)
+    }
+    .padding(.vertical, 6)
+    .activityBackgroundTint(Color(red: 0.05, green: 0.05, blue: 0.05).opacity(0.85))
+    .activitySystemActionForegroundColor(.white)
+    .widgetURL(deepLinkURL(context.attributes, context.state))
+  }
+}
+
+/// Enruta por familia: .small (CarPlay/Watch) → tarjeta compacta con minuto;
+/// resto → lock screen completa de siempre.
+@available(iOS 18.0, *)
+struct FamilyAwareLockView: View {
+  @Environment(\.activityFamily) private var family
+  let context: ActivityViewContext<MatchActivityAttributes>
+
+  var body: some View {
+    switch family {
+    case .small:
+      SmallFamilyView(context: context)
+    default:
+      LockScreenView(context: context)
+    }
+  }
+}
+
 // ── Widget (Activity) ─────────────────────────────────────────────────────────
 
-struct MatchLiveActivity: Widget {
-  var body: some WidgetConfiguration {
-    ActivityConfiguration(for: MatchActivityAttributes.self) { context in
-      LockScreenView(context: context)
-    } dynamicIsland: { context in
-      DynamicIsland {
+/// DynamicIsland compartida por el widget clásico (iOS 16.2–17) y el moderno
+/// (iOS 18+) — una sola fuente de verdad para la Isla.
+func matchDynamicIsland(_ context: ActivityViewContext<MatchActivityAttributes>) -> DynamicIsland {
+  DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
           // Alineado hacia el CENTRO (junto al marcador) — pegados a los
           // bordes se veían "muy separados" (feedback dueño).
@@ -432,17 +478,39 @@ struct MatchLiveActivity: Widget {
           CompactBadge(team: context.attributes.away, matchId: context.attributes.matchId, side: "away")
         }
         .padding(.trailing, 2)
-      } minimal: {
-        if context.state.phase == "pre" {
-          Text("VS").font(.system(size: 10, weight: .heavy))
-        } else {
-          Text("\(context.state.homeScore)-\(context.state.awayScore)")
-            .font(.system(size: 10, weight: .heavy)).monospacedDigit()
-        }
-      }
-      .widgetURL(deepLinkURL(context.attributes, context.state))
-      .keylineTint(Color(red: 0.0, green: 0.88, blue: 0.59)) // accent #00E096
+  } minimal: {
+    if context.state.phase == "pre" {
+      Text("VS").font(.system(size: 10, weight: .heavy))
+    } else {
+      Text("\(context.state.homeScore)-\(context.state.awayScore)")
+        .font(.system(size: 10, weight: .heavy)).monospacedDigit()
     }
+  }
+  .widgetURL(deepLinkURL(context.attributes, context.state))
+  .keylineTint(Color(red: 0.0, green: 0.88, blue: 0.59)) // accent #00E096
+}
+
+/// Widget clásico — iOS 16.2–17.x (sin familias suplementarias).
+struct MatchLiveActivity: Widget {
+  var body: some WidgetConfiguration {
+    ActivityConfiguration(for: MatchActivityAttributes.self) { context in
+      LockScreenView(context: context)
+    } dynamicIsland: { context in
+      matchDynamicIsland(context)
+    }
+  }
+}
+
+/// Widget moderno — iOS 18+: misma Isla + familia .small para CarPlay/Watch.
+@available(iOS 18.0, *)
+struct MatchLiveActivityModern: Widget {
+  var body: some WidgetConfiguration {
+    ActivityConfiguration(for: MatchActivityAttributes.self) { context in
+      FamilyAwareLockView(context: context)
+    } dynamicIsland: { context in
+      matchDynamicIsland(context)
+    }
+    .supplementalActivityFamilies([.small])
   }
 }
 
@@ -451,6 +519,17 @@ struct MatchLiveActivity: Widget {
 @main
 struct AnalistasLiveActivityBundle: WidgetBundle {
   var body: some Widget {
-    MatchLiveActivity()
+    // Indirección necesaria: WidgetBundleBuilder NO soporta if/#available.
+    // Una función con retorno opaco SÍ admite ramas de disponibilidad con
+    // tipos subyacentes distintos (Swift 5.8+).
+    widgetForOSVersion()
+  }
+
+  private func widgetForOSVersion() -> some Widget {
+    if #available(iOS 18.0, *) {
+      return MatchLiveActivityModern()
+    } else {
+      return MatchLiveActivity()
+    }
   }
 }
