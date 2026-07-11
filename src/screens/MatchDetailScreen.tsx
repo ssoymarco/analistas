@@ -19,6 +19,7 @@ import {
 import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import { haptics } from '../utils/haptics';
+import { deadStateLabelKey } from '../utils/deadState';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { SkeletonMatchDetail } from '../components/Skeleton';
@@ -708,12 +709,19 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               )
             )}
 
-            {/* Finished label */}
-            {isFinished && (
-              <View style={[scr.timeCapsule, { backgroundColor: hCapsuleBg }]}>
-                <Text style={[scr.timeText, { color: hTextSoft }]}>Finalizado</Text>
-              </View>
-            )}
+            {/* Finished label — "Cancelado"/"Aplazado" si SM lo marcó muerto
+                (el status es 'finished' para no disparar el reloj, pero la
+                etiqueta debe ser honesta). Ver utils/deadState.ts. */}
+            {isFinished && (() => {
+              const deadKey = deadStateLabelKey(displayMatch.stateId);
+              return (
+                <View style={[scr.timeCapsule, { backgroundColor: hCapsuleBg }]}>
+                  <Text style={[scr.timeText, { color: hTextSoft }]}>
+                    {deadKey ? t(deadKey) : 'Finalizado'}
+                  </Text>
+                </View>
+              );
+            })()}
 
             {/* Badges row */}
             <View style={scr.badgesRow}>

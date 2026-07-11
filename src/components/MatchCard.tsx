@@ -13,6 +13,7 @@ import { useLiveTick, computeLiveMinuteSeconds, formatLiveMinute } from '../hook
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatMatchTime } from '../utils/formatMatchTime';
 import { isImageUri } from '../utils/imageUri';
+import { deadStateLabelKey } from '../utils/deadState';
 import type { Match } from '../data/types';
 import { getLeagueConfig } from '../config/leagues';
 import { getDisplayVenueName, getDisplayVenueCity } from '../config/worldCupVenues';
@@ -143,14 +144,16 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
           )}
           {isFinished && (
             <Text style={[s.ftLabel, { color: c.textTertiary }]}>
-              {/* FotMob-style inline shootout result. When the match ended in
-                  penalties we surface "Final · 4-2 pen" so the user reading
-                  the list immediately knows who won the shootout without
-                  having to open the match detail. Falls back to plain
-                  "Final" for every other finished match. */}
-              {typeof match.homePenScore === 'number' && typeof match.awayPenScore === 'number'
-                ? `Final · ${match.homePenScore}-${match.awayPenScore} pen`
-                : 'Final'}
+              {/* Cancelado/Aplazado si SM marcó el partido muerto (ver
+                  utils/deadState.ts); si no, resultado normal. FotMob-style
+                  inline shootout: "Final · 4-2 pen" para tandas. */}
+              {(() => {
+                const deadKey = deadStateLabelKey(match.stateId);
+                if (deadKey) return t(deadKey);
+                return typeof match.homePenScore === 'number' && typeof match.awayPenScore === 'number'
+                  ? `Final · ${match.homePenScore}-${match.awayPenScore} pen`
+                  : 'Final';
+              })()}
             </Text>
           )}
         </View>
