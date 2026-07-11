@@ -32,6 +32,8 @@ struct MatchActivityAttributes: ActivityAttributes {
     var phase: String
     var periodStartedAt: Double?
     var periodMinuteOffset: Int?
+    /// Fallback sin ancla: último minuto conocido del servidor (estático).
+    var minute: Int?
     var kickoffAt: Double?
     var penHome: Int?
     var penAway: Int?

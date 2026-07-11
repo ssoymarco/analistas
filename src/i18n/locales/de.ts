@@ -99,6 +99,8 @@ const de: TranslationKeys = {
     on: 'Aktiviert',
     off: 'Deaktiviert',
     channelName: 'Live-Spielstand',
+    limitedCoverageBody: 'Der Datenanbieter deckt dieses Spiel nicht live ab. Der Spielstand auf deinem Sperrbildschirm wird möglicherweise nicht aktualisiert.',
+    activateAnyway: 'Trotzdem aktivieren',
   },
 
   matchShare: {

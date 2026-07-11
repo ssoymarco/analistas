@@ -226,6 +226,12 @@ export function buildActivityState(match: Match): MatchActivityState {
     phase,
     periodStartedAt: ticks ? anchor!.periodStartedAt : undefined,
     periodMinuteOffset: ticks ? anchor!.periodMinuteOffset : undefined,
+    // Fallback sin ancla (espejo de buildStateFromMatchDoc del server):
+    // minuto estático en el widget cuando la fase corre pero SM no manda
+    // el ancla del período (amistosos de bajo perfil).
+    minute: !ticks && TICKING.has(phase) && typeof match.minute === 'number'
+      ? match.minute
+      : undefined,
     kickoffAt: phase === 'pre' ? kickoffUnixSeconds(match) : undefined,
     penHome: typeof match.homePenScore === 'number' ? match.homePenScore : undefined,
     penAway: typeof match.awayPenScore === 'number' ? match.awayPenScore : undefined,

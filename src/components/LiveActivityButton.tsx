@@ -7,7 +7,7 @@
 // Iconos = primitivas RN (convención del app: sin librerías de iconos).
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { useLiveActivity, canFollowMatch } from '../hooks/useLiveActivity';
@@ -24,13 +24,32 @@ export const LiveActivityButton: React.FC<{ match: Match }> = ({ match }) => {
   // En vivo, o por comenzar dentro de ≤4 h (previa con cuenta regresiva).
   if (!supported || !canFollowMatch(match)) return null;
 
+  // Honestidad (11 jul 2026, Chivas vs U. de G.): si el partido está "en vivo"
+  // para la UI pero el SERVIDOR no tiene datos (sin ancla NI minuto — SM llegó
+  // a marcar un amistoso real como cancelado y dejó de cubrirlo), el marcador
+  // de la pantalla de bloqueo no va a recibir actualizaciones. Avisar ANTES
+  // de activar, en vez de dejar un widget congelado sin explicación.
+  const serverBlind =
+    match.status === 'live' && !match.liveClock && match.minute == null;
+
   const onPress = async () => {
     haptics.selection();
     if (following) {
       await end();
-    } else {
-      await start();
+      return;
     }
+    if (serverBlind) {
+      Alert.alert(
+        t('dataCoverage.limitedGeneric'),
+        t('liveActivity.limitedCoverageBody'),
+        [
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('liveActivity.activateAnyway'), onPress: () => { start(); } },
+        ],
+      );
+      return;
+    }
+    await start();
   };
 
   return (

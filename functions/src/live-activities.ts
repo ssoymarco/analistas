@@ -70,6 +70,14 @@ export function buildStateFromMatchDoc(m: MatchDoc): MatchActivityState {
     phase,
     periodStartedAt: ticks ? anchor!.periodStartedAt : undefined,
     periodMinuteOffset: ticks ? anchor!.periodMinuteOffset : undefined,
+    // Fallback sin ancla (amistosos de bajo perfil, 11 jul 2026): el último
+    // minuto del servidor, estático en el widget. Solo cuando la fase corre
+    // pero NO hay ancla — con ancla el timer nativo manda y meter el minuto
+    // aquí generaría un push por minuto sin necesidad (presupuesto de
+    // ActivityKit).
+    minute: !ticks && TICKING.has(phase) && typeof m.minute === 'number'
+      ? m.minute
+      : undefined,
     kickoffAt: phase === 'pre' ? kickoffUnixSeconds(m) : undefined,
     penHome: typeof m.homePenScore === 'number' ? m.homePenScore : undefined,
     penAway: typeof m.awayPenScore === 'number' ? m.awayPenScore : undefined,
@@ -81,6 +89,7 @@ function stateKey(s: MatchActivityState): string {
   return JSON.stringify([
     s.homeScore, s.awayScore, s.phase, s.periodStartedAt ?? 0,
     s.periodMinuteOffset ?? 0, s.kickoffAt ?? 0, s.penHome ?? -1, s.penAway ?? -1,
+    s.minute ?? -1,
   ]);
 }
 

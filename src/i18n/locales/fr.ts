@@ -99,6 +99,8 @@ const fr: TranslationKeys = {
     on: 'Activé',
     off: 'Désactivé',
     channelName: 'Score en direct',
+    limitedCoverageBody: "Le fournisseur de données ne couvre pas ce match en direct. Le score sur votre écran verrouillé pourrait ne pas se mettre à jour.",
+    activateAnyway: 'Activer quand même',
   },
 
   matchShare: {

@@ -24,6 +24,9 @@ export interface MatchActivityState {
      *  fase no corre (pre/HT/PEN/FT). */
     periodStartedAt?: number;
     periodMinuteOffset?: number;
+    /** FALLBACK sin ancla de período: último minuto conocido del servidor
+     *  (estático en el widget, actualizado por push). */
+    minute?: number;
     /** Unix seconds del kickoff — countdown del widget en phase 'pre'. */
     kickoffAt?: number;
     /** Tanda de penales (solo cuando aplica) → "PENALES · 4-2" / "FINAL · 4-2 pen". */

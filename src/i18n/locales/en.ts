@@ -106,6 +106,8 @@ const en: TranslationKeys = {
     on: 'On',
     off: 'Off',
     channelName: 'Live score',
+    limitedCoverageBody: 'The data provider is not covering this match live. The score on your lock screen may not update.',
+    activateAnyway: 'Activate anyway',
   },
 
   matchShare: {

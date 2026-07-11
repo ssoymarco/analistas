@@ -99,6 +99,8 @@ const pt: TranslationKeys = {
     on: 'Ativado',
     off: 'Desativado',
     channelName: 'Placar ao vivo',
+    limitedCoverageBody: 'O provedor de dados não está cobrindo esta partida ao vivo. O placar na sua tela de bloqueio pode não ser atualizado.',
+    activateAnyway: 'Ativar mesmo assim',
   },
 
   matchShare: {

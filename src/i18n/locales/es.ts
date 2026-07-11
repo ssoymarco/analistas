@@ -114,6 +114,8 @@ const es = {
     on: 'Activado',
     off: 'Desactivado',
     channelName: 'Marcador en vivo',
+    limitedCoverageBody: 'El proveedor de datos no está cubriendo este partido en vivo. El marcador en tu pantalla de bloqueo podría no actualizarse.',
+    activateAnyway: 'Activar de todos modos',
   },
 
   matchShare: {

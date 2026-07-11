@@ -32,6 +32,8 @@ struct MatchActivityAttributes: ActivityAttributes {
     var periodStartedAt: Double?
     /// 0 (1T) | 45 (2T) | 90 (TE1) | 105 (TE2)
     var periodMinuteOffset: Int?
+    /// Fallback sin ancla: último minuto conocido del servidor (estático).
+    var minute: Int?
     /// Unix seconds del kickoff — countdown en phase 'pre'.
     var kickoffAt: Double?
     /// Tanda de penales — "PENALES · 4-2" (en vivo) / "FINAL · 4-2 pen".
@@ -290,6 +292,18 @@ struct PhaseTimeline: View {
             .fontWeight(.bold)
             .foregroundStyle(.white.opacity(0.85))
         }
+      } else if phaseTicks(state.phase), let minute = state.minute {
+        // ── Fase corriendo SIN ancla del período (amistosos de bajo perfil
+        //    donde SM no manda periods.ticking — 11 jul 2026): mostrar el
+        //    último minuto conocido del servidor, ESTÁTICO. Se refresca con
+        //    cada push. Mucho mejor que la etiqueta de fase sola. ──
+        Circle()
+          .fill(Color(red: 1.0, green: 0.27, blue: 0.23)) // live red dot
+          .frame(width: 6, height: 6)
+        Text("\(minute)'")
+          .font(.caption2.monospacedDigit())
+          .fontWeight(.bold)
+          .foregroundStyle(.white.opacity(0.9))
       } else {
         // ── Fase SIN reloj (MT/FINAL/PENALES/SUSPENDIDO): solo la etiqueta,
         //    porque no hay minuto que mostrar. ──

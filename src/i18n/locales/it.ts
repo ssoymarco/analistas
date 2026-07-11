@@ -99,6 +99,8 @@ const it: TranslationKeys = {
     on: 'Attivo',
     off: 'Disattivato',
     channelName: 'Punteggio in diretta',
+    limitedCoverageBody: 'Il fornitore di dati non copre questa partita in diretta. Il punteggio sulla schermata di blocco potrebbe non aggiornarsi.',
+    activateAnyway: 'Attiva comunque',
   },
 
   matchShare: {

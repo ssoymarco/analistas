@@ -67,6 +67,11 @@ export interface MatchActivityState {
   periodStartedAt?: number;
   /** Offset de minuto del período: 0 (1T) | 45 (2T) | 90 (TE1) | 105 (TE2). */
   periodMinuteOffset?: number;
+  /** FALLBACK cuando SM no manda el ancla del período (amistosos de bajo
+   *  perfil): último minuto conocido del servidor. El widget lo muestra
+   *  ESTÁTICO ("47'") y se actualiza con cada push — mejor que la etiqueta
+   *  de fase sola. Ausente cuando hay ancla (el timer nativo manda). */
+  minute?: number;
   /** Unix seconds del kickoff — usado en phase 'pre' para la CUENTA REGRESIVA
    *  del widget (Text(timerInterval:countsDown:true)). Al llegar a 0 el widget
    *  se queda en 0:00 hasta que el push (Fase 2) o el update en foreground

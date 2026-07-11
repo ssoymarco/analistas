@@ -96,6 +96,8 @@ const tr: TranslationKeys = {
     on: 'Açık',
     off: 'Kapalı',
     channelName: 'Canlı skor',
+    limitedCoverageBody: 'Veri sağlayıcı bu maçı canlı olarak kapsamıyor. Kilit ekranınızdaki skor güncellenmeyebilir.',
+    activateAnyway: 'Yine de etkinleştir',
   },
 
   matchShare: {
