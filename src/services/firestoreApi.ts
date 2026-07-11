@@ -337,6 +337,12 @@ function matchFromDoc(d: MatchDoc): Match {
     homePenScore:   d.homePenScore ?? undefined,
     awayPenScore:   d.awayPenScore ?? undefined,
     stateLabel:     d.stateLabel ?? undefined,
+    // stateId crudo de SM — lo necesita deadStateLabelKey (etiqueta
+    // "Cancelado"/"Aplazado" vs "Finalizado") y la detección de DELAYED (16).
+    // Se leía en este archivo para derivar 'interrupted' pero NUNCA se
+    // copiaba al objeto Match → displayMatch.stateId llegaba undefined y la
+    // etiqueta caía siempre a "Finalizado" (bug 11 jul 2026).
+    stateId:        d.stateId ?? undefined,
     // Live-clock anchor — used by useLiveTick to smoothly extrapolate the
     // minute between server polls. Only populated for live matches.
     liveClock:      (d as any).liveClock ?? undefined,
