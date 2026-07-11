@@ -49,7 +49,7 @@ import {
 // Notifications are built server-side; i18n lives on the client. Since our
 // primary audience is MX/LATAM we localize to Spanish here. Club names that
 // don't appear in the map are returned unchanged (safe call).
-const TEAMS_ES: Record<string, string> = {
+export const TEAMS_ES: Record<string, string> = {
   'Afghanistan': 'Afganistán', 'Albania': 'Albania', 'Algeria': 'Argelia',
   'Angola': 'Angola', 'Argentina': 'Argentina', 'Armenia': 'Armenia',
   'Australia': 'Australia', 'Austria': 'Austria', 'Azerbaijan': 'Azerbaiyán',
@@ -92,7 +92,7 @@ const TEAMS_ES: Record<string, string> = {
 };
 
 /** Translate a team name to Spanish. Club names not in the map pass through unchanged. */
-function loc(name: string): string {
+export function loc(name: string): string {
   return TEAMS_ES[name] ?? name;
 }
 import type {

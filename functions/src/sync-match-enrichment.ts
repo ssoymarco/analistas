@@ -30,6 +30,7 @@
 import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { createHash } from 'crypto';
+import { loc } from './detect-changes';
 import {
   fetchFixtureFullDetail,
   fetchH2H,
@@ -324,7 +325,7 @@ async function writeEnrichment(
       const homeId = m.homeTeamId;
       const awayId = m.awayTeamId;
       const title  = '📋 Alineaciones confirmadas';
-      const body   = `${m.homeTeamName} vs ${m.awayTeamName} · ${m.league}`;
+      const body   = `${loc(m.homeTeamName)} vs ${loc(m.awayTeamName)} · ${m.league}`;
       const data   = {
         type:    'lineups',
         matchId: m.id,
@@ -366,7 +367,7 @@ async function writeEnrichment(
           condition: `'${topic}' in topics && !('${teamBase}' in topics)`,
           notification: {
             title: `📋 ${e.player_name} es titular`,
-            body:  `${teamName} vs ${rival} · ${m.league}`,
+            body:  `${loc(teamName)} vs ${loc(rival)} · ${m.league}`,
           },
           data: { type: 'playerLineup', matchId: m.id, playerId: String(e.player_id) },
           android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
