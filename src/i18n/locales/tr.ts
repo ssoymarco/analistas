@@ -711,6 +711,8 @@ const tr: TranslationKeys = {
 
   // ── Lineup tab ─────────────────────────────────────────────────────────────
   lineup: {
+    saveImage: 'Kaydet',
+    savedOk: 'Kadro fotoğraflarına kaydedildi',
     shareLineup: 'Kadroyu paylaş',
     noLineup: 'Kadro mevcut değil',
     confirmed: 'Kesinleşmiş kadro',

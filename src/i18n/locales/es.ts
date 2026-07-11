@@ -813,6 +813,8 @@ const es = {
 
   // ── Lineup tab ─────────────────────────────────────────────────────────────
   lineup: {
+    saveImage: 'Guardar',
+    savedOk: 'Alineación guardada en tus fotos',
     shareLineup: 'Compartir alineación',
     noLineup: 'Sin alineaciones disponibles',
     confirmed: 'Alineación confirmada',

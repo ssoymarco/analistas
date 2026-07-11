@@ -714,6 +714,8 @@ const de: TranslationKeys = {
 
   // ── Lineup tab ─────────────────────────────────────────────────────────────
   lineup: {
+    saveImage: 'Speichern',
+    savedOk: 'Aufstellung in deinen Fotos gespeichert',
     shareLineup: 'Aufstellung teilen',
     noLineup: 'Keine Aufstellung verfügbar',
     confirmed: 'Bestätigte Aufstellung',

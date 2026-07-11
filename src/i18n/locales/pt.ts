@@ -715,6 +715,8 @@ const pt: TranslationKeys = {
 
   // ── Lineup tab ─────────────────────────────────────────────────────────────
   lineup: {
+    saveImage: 'Salvar',
+    savedOk: 'Escalação salva nas suas fotos',
     shareLineup: 'Compartilhar escalação',
     noLineup: 'Sem escalações disponíveis',
     confirmed: 'Escalação confirmada',

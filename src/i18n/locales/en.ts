@@ -794,6 +794,8 @@ const en: TranslationKeys = {
 
   // ── Lineup tab ─────────────────────────────────────────────────────────────
   lineup: {
+    saveImage: 'Save',
+    savedOk: 'Lineup saved to your photos',
     shareLineup: 'Share lineup',
     noLineup: 'No lineups available',
     confirmed: 'Confirmed lineup',

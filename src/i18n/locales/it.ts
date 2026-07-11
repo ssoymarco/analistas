@@ -714,6 +714,8 @@ const it: TranslationKeys = {
 
   // ── Lineup tab ─────────────────────────────────────────────────────────────
   lineup: {
+    saveImage: 'Salva',
+    savedOk: 'Formazione salvata nelle tue foto',
     shareLineup: 'Condividi formazione',
     noLineup: 'Nessuna formazione disponibile',
     confirmed: 'Formazione confermata',

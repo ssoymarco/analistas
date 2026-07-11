@@ -714,6 +714,8 @@ const fr: TranslationKeys = {
 
   // ── Lineup tab ─────────────────────────────────────────────────────────────
   lineup: {
+    saveImage: 'Enregistrer',
+    savedOk: 'Compo enregistrée dans tes photos',
     shareLineup: 'Partager la composition',
     noLineup: 'Aucune composition disponible',
     confirmed: 'Composition confirmée',

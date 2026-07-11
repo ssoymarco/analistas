@@ -14,6 +14,7 @@ import {
   Pressable,
   ScrollView,
   Animated,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
@@ -32,8 +33,12 @@ import { ADMOB_ENABLED } from '../../config/features';
 // ── Optional packages (graceful degradation if missing) ──────────────────────
 let ViewShot: any = null;
 let Sharing: any   = null;
+let MediaLibrary: any = null;
 try { ViewShot = require('react-native-view-shot').default; } catch {}
 try { Sharing   = require('expo-sharing'); } catch {}
+// Guardado directo a galería — módulo nativo del build 1.4.0+; en binarios
+// sin él, el botón Guardar cae al share sheet (mismo patrón que Wallpapers).
+try { MediaLibrary = require('expo-media-library'); } catch {}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const HOME_COLOR   = '#3b82f6';
@@ -933,6 +938,34 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
     (Number.isFinite(kickoffMs) && Date.now() >= kickoffMs - 2 * 60 * 60 * 1000);
   const isConfirmed = !isExpected && insideConfirmWindow;
 
+  const handleSave = async () => {
+    if (!ViewShot || !captureRef.current) return;
+    try {
+      setCapturing(true);
+      await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+      const uri: string = await captureRef.current.capture();
+
+      if (MediaLibrary) {
+        try {
+          const { granted } = await MediaLibrary.requestPermissionsAsync(true); // writeOnly
+          if (granted) {
+            await MediaLibrary.saveToLibraryAsync(uri);
+            Alert.alert('✅', t('lineup.savedOk'));
+            return;
+          }
+        } catch { /* cae al share sheet */ }
+      }
+      if (Sharing && await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          UTI: 'public.png',
+          dialogTitle: t('lineup.saveImage'),
+        });
+      }
+    } catch {}
+    finally { setCapturing(false); }
+  };
+
   const handleShare = async () => {
     if (!ViewShot || !captureRef.current) return;
     try {
@@ -1070,16 +1103,27 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
           <Text style={[ms.shareCardDesc, { color: c.textSecondary }]}>
             {t('lineup.shareLineupDesc')}
           </Text>
-          <TouchableOpacity
-            style={[ms.shareCardBtn, { backgroundColor: c.accent }]}
-            onPress={handleShare}
-            activeOpacity={0.82}
-          >
-            <ShareIcon color="#000" size={15} />
-            <Text style={ms.shareCardBtnText}>
-              {t('common.share').toUpperCase()}
-            </Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity
+              style={[ms.shareCardBtn, { backgroundColor: c.accent, flex: 1 }]}
+              onPress={handleShare}
+              activeOpacity={0.82}
+            >
+              <ShareIcon color="#000" size={15} />
+              <Text style={ms.shareCardBtnText}>
+                {t('common.share').toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[ms.shareCardBtn, { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: c.accent, flex: 1 }]}
+              onPress={handleSave}
+              activeOpacity={0.82}
+            >
+              <Text style={[ms.shareCardBtnText, { color: c.accent }]}>
+                ⬇️ {t('lineup.saveImage').toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
