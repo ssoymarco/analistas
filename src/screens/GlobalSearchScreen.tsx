@@ -20,6 +20,7 @@ import {
   type SearchableTeam, type SearchablePlayer, type SearchableLeague,
 } from '../services/sportsApi';
 import { SearchIcon } from '../components/NavIcons';
+import { ChevronRight as SharedChevron } from '../components/ChevronRight';
 import { radius, ui } from '../theme/tokens';
 
 const RECENT_KEY = 'analistas_recent_searches';
@@ -480,12 +481,7 @@ export const GlobalSearchScreen: React.FC = () => {
     );
   };
 
-  const ChevronRight = () => (
-    <View style={s.chevron}>
-      <View style={[s.chevronLine1, { backgroundColor: c.textTertiary }]} />
-      <View style={[s.chevronLine2, { backgroundColor: c.textTertiary }]} />
-    </View>
-  );
+  const ChevronRightRow = () => <SharedChevron color={c.textTertiary} size={16} />;
 
 
   // ── Search icon for input — uses the shared SearchIcon from NavIcons ──────
@@ -602,7 +598,7 @@ export const GlobalSearchScreen: React.FC = () => {
                         </Text>
                       </View>
                       {renderTypeLabel(item.type, item.subtitle)}
-                      <ChevronRight />
+                      <ChevronRightRow />
                     </TouchableOpacity>
                   );
                 })}
@@ -686,7 +682,7 @@ export const GlobalSearchScreen: React.FC = () => {
                           {item.subtitle}
                         </Text>
                       </View>
-                      <ChevronRight />
+                      <ChevronRightRow />
                     </TouchableOpacity>
                   ))}
                 </View>

@@ -1,3 +1,4 @@
+import { ChevronRight as SharedChevron } from './ChevronRight';
 import React, { useRef, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { View, Text, TouchableOpacity, StyleSheet, Animated, Easing } from 'react-native';
@@ -84,12 +85,7 @@ export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPre
   };
 
   // Chevron ">" icon
-  const ChevronRight = () => (
-    <View style={s.chevron}>
-      <View style={[s.chevronLine1, { backgroundColor: c.textTertiary }]} />
-      <View style={[s.chevronLine2, { backgroundColor: c.textTertiary }]} />
-    </View>
-  );
+  const ChevronRightRow = () => <SharedChevron color={c.textTertiary} size={15} />;
 
   return (
     <Animated.View style={[s.card, { backgroundColor: c.card }, entryStyle]}>
@@ -104,7 +100,7 @@ export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPre
           </View>
         )}
         <View style={{ flex: 1 }} />
-        <ChevronRight />
+        <ChevronRightRow />
       </TouchableOpacity>
 
       {/* Matches — secciones gigantes (amistosos: 100+ partidos el mismo día)

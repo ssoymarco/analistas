@@ -12,8 +12,46 @@ import { db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { getLeaguesWithSeason } from './config';
 import { getCurrentSeasonMap } from './sync-league-seasons';
-import { fetchStandings, fetchTopScorers } from './sportmonks';
+import { fetchStandings, fetchTopScorers, fetchTeamsForSeason } from './sportmonks';
 import { mapStandingsToDoc, mapTopScorersToDoc } from './mappers';
+import { Timestamp } from 'firebase-admin/firestore';
+import type { StandingsDoc } from './types';
+
+/**
+ * Tabla SINTETIZADA en ceros para temporadas que aún no arrancan.
+ *
+ * SM siembra las standings de cada temporada nueva en momentos distintos
+ * (Liga MX y Premier ya; La Liga todavía no al 11-jul-2026). Mientras tanto
+ * la pestaña Clasificación decía "no disponible" — feo para el usuario y
+ * distinto entre ligas. Si SM devuelve 0 filas, construimos la tabla con los
+ * equipos de la temporada, todos en cero, orden alfabético. La corrida
+ * horaria la reemplaza con la real en cuanto SM la publique.
+ *
+ * Solo para formatos de LIGA (8–30 equipos): una "tabla" de la Copa del Rey
+ * (~100 equipos) o un mundialito no tiene sentido — esas siguen mostrando
+ * su empty state hasta tener grupos reales.
+ */
+async function synthesizeZeroTable(seasonId: number, leagueId: number): Promise<StandingsDoc | null> {
+  const teams = await fetchTeamsForSeason(seasonId);
+  if (teams.length < 8 || teams.length > 30) return null;
+  const rows = teams
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+    .map((t, i) => ({
+      position: i + 1,
+      team: {
+        id: String(t.id),
+        name: t.name,
+        shortName: t.short_code || t.name.slice(0, 3).toUpperCase(),
+        logo: t.image_path ?? '',
+      },
+      played: 0, won: 0, drawn: 0, lost: 0,
+      goalsFor: 0, goalsAgainst: 0, goalDifference: 0,
+      points: 0,
+      groupId: null,
+    }));
+  return { seasonId, leagueId, rows, updatedAt: Timestamp.now() };
+}
 
 /** Utility: sleep for N milliseconds (rate limit courtesy) */
 function sleep(ms: number): Promise<void> {
@@ -45,6 +83,21 @@ export async function syncStandingsHandler(): Promise<void> {
         const doc = mapStandingsToDoc(seasonId, league.id, groups);
         await db.collection('standings').doc(String(seasonId)).set(doc);
         successCount++;
+      } else {
+        // Temporada sin standings en SM (aún no arranca / no sembrada):
+        // sintetizar tabla en ceros — pero NUNCA pisar una real ya escrita.
+        const existing = await db.collection('standings').doc(String(seasonId)).get();
+        const hasRealRows = existing.exists
+          && Array.isArray(existing.data()?.rows)
+          && (existing.data()!.rows as unknown[]).length > 0;
+        if (!hasRealRows) {
+          const zeroDoc = await synthesizeZeroTable(seasonId, league.id);
+          if (zeroDoc) {
+            await db.collection('standings').doc(String(seasonId)).set(zeroDoc);
+            logger.info(`  🅾️ tabla en ceros sintetizada para ${league.name} (season ${seasonId}, ${zeroDoc.rows.length} equipos)`);
+            successCount++;
+          }
+        }
       }
     } catch (err) {
       logger.error(`Failed standings for ${league.name} (season ${seasonId}):`, err);

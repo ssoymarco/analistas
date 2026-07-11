@@ -45,6 +45,7 @@ import type {
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { getLeagueConfig, getLeagueDisplayName, isCopyrightSensitiveLeague } from '../config/leagues';
 import { peekCurrentSeasonId, peekLeagueLogo } from '../services/seasonResolver';
+import { ChevronRight } from '../components/ChevronRight';
 import type { LeagueZone } from '../config/leagues';
 import type { Match, MatchStatus } from '../data/types';
 import { BackArrow, ShareIcon } from '../components/NavIcons';
@@ -58,14 +59,6 @@ type Tab = 'clasificacion' | 'grupos' | 'partidos' | 'goleadores' | 'asistencias
 
 
 // ── Icon: Chevron right ─────────────────────────────────────────────────────
-function ChevronRight({ color, size = 12 }: { color: string; size?: number }) {
-  return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ position: 'absolute', top: 1, right: 2, width: 6, height: 1.5, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '45deg' }] }} />
-      <View style={{ position: 'absolute', bottom: 1, right: 2, width: 6, height: 1.5, backgroundColor: color, borderRadius: 1, transform: [{ rotate: '-45deg' }] }} />
-    </View>
-  );
-}
 
 // ── Zone colors ────────────────────────────────────────────────────────────
 function getZoneColor(position: number, totalTeams: number, zones?: LeagueZone[]): string | null {
@@ -1365,7 +1358,7 @@ const FixtureRow: React.FC<{ fixture: LeagueFixture; onPress?: () => void; showD
       )}
 
       {/* Chevron */}
-      <ChevronRight color={c.textTertiary} size={12} />
+      <ChevronRight color={c.textTertiary} size={16} />
     </TouchableOpacity>
   );
 };
