@@ -31,7 +31,25 @@ const tr: TranslationKeys = {
     matches: 'Maçlar',
     favorites: 'Favoriler',
     news: 'Haberler',
+    wallpapers: 'Duvar Kağıtları',
     profile: 'Profil',
+  },
+
+  wallpapers: {
+    title: 'Duvar Kağıtları',
+    subtitle: 'Yıldızlarının özel duvar kağıtlarını indir',
+    prizeKicker: 'Haftanın ödülü',
+    participate: 'Katıl',
+    participating: 'Katıldın',
+    save: 'Kaydet',
+    seeDynamic: 'Nasıl katılırım',
+    terms: 'Şartlar ve koşullar',
+    announceInDays: 'Kazanan {{days}}g {{hours}}s sonra',
+    announceInHours: 'Kazanan {{hours}}s sonra',
+    signInTitle: 'Katılmak için hesap oluştur',
+    signInBody: 'İmzalı forma çekilişine katılmak için Analistas hesabı gerekli.',
+    signInCta: 'Hesap oluştur',
+    empty: 'Yakında yeni duvar kağıtları burada',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

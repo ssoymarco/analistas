@@ -23,6 +23,7 @@ import { pollLivescoresHandler } from './poll-livescores';
 import { syncFixturesHandler } from './sync-fixtures';
 import { syncStandingsHandler, syncTopScorersHandler } from './sync-standings';
 import { syncLeagueSeasonsHandler } from './sync-league-seasons';
+export { onWallpaperEntryCreated } from './wallpaper-entries';
 import { syncTeamsHandler } from './sync-teams';
 import { syncSquadsHandler } from './sync-squads';
 import { syncMatchEnrichmentHandler, enrichMatchesByIds } from './sync-match-enrichment';

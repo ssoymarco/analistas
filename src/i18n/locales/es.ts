@@ -36,7 +36,26 @@ const es = {
     matches: 'Partidos',
     favorites: 'Favoritos',
     news: 'Noticias',
+    wallpapers: 'Wallpapers',
     profile: 'Perfil',
+  },
+
+  // ── Wallpapers + concurso de jerseys ───────────────────────────────────────
+  wallpapers: {
+    title: 'Wallpapers',
+    subtitle: 'Descarga fondos exclusivos de tus cracks',
+    prizeKicker: 'Premio de la semana',
+    participate: 'Participar',
+    participating: 'Participando',
+    save: 'Guardar',
+    seeDynamic: 'Ver dinámica',
+    terms: 'Términos y condiciones',
+    announceInDays: 'Ganador en {{days}}d {{hours}}h',
+    announceInHours: 'Ganador en {{hours}}h',
+    signInTitle: 'Crea tu cuenta para participar',
+    signInBody: 'Necesitas una cuenta de Analistas para entrar a la dinámica del jersey firmado.',
+    signInCta: 'Crear cuenta',
+    empty: 'Pronto habrá wallpapers nuevos por aquí',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

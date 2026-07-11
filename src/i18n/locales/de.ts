@@ -34,7 +34,25 @@ const de: TranslationKeys = {
     matches: 'Spiele',
     favorites: 'Favoriten',
     news: 'Neuigkeiten',
+    wallpapers: 'Wallpaper',
     profile: 'Profil',
+  },
+
+  wallpapers: {
+    title: 'Wallpaper',
+    subtitle: 'Exklusive Wallpaper deiner Stars',
+    prizeKicker: 'Preis der Woche',
+    participate: 'Teilnehmen',
+    participating: 'Dabei',
+    save: 'Speichern',
+    seeDynamic: 'So machst du mit',
+    terms: 'Teilnahmebedingungen',
+    announceInDays: 'Gewinner in {{days}}T {{hours}}h',
+    announceInHours: 'Gewinner in {{hours}}h',
+    signInTitle: 'Konto erstellen zum Teilnehmen',
+    signInBody: 'Du brauchst ein Analistas-Konto, um am Trikot-Gewinnspiel teilzunehmen.',
+    signInCta: 'Konto erstellen',
+    empty: 'Bald gibt es hier neue Wallpaper',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

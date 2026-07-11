@@ -11,6 +11,7 @@
  * - syncTopScorers:   Every 15 min → top scorers for all configured leagues
  */
 import './admin-init';
+export { onWallpaperEntryCreated } from './wallpaper-entries';
 export { deliverDelayedPush } from './deliver-delayed-push';
 /**
  * Poll livescores every 1 minute.

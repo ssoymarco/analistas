@@ -45,7 +45,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.runLeagueSeasonsSync = exports.syncLeagueSeasons = exports.sendTestPush = exports.backfillEnrichmentByMatchIds = exports.reportFcmToken = exports.rebuildSeasonFixtureIndexes = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = exports.deliverDelayedPush = void 0;
+exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.runLeagueSeasonsSync = exports.syncLeagueSeasons = exports.sendTestPush = exports.backfillEnrichmentByMatchIds = exports.reportFcmToken = exports.rebuildSeasonFixtureIndexes = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = exports.deliverDelayedPush = exports.onWallpaperEntryCreated = void 0;
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
 // before any other module touches admin.firestore().
 require("./admin-init");
@@ -57,6 +57,8 @@ const poll_livescores_1 = require("./poll-livescores");
 const sync_fixtures_1 = require("./sync-fixtures");
 const sync_standings_1 = require("./sync-standings");
 const sync_league_seasons_1 = require("./sync-league-seasons");
+var wallpaper_entries_1 = require("./wallpaper-entries");
+Object.defineProperty(exports, "onWallpaperEntryCreated", { enumerable: true, get: function () { return wallpaper_entries_1.onWallpaperEntryCreated; } });
 const sync_teams_1 = require("./sync-teams");
 const sync_squads_1 = require("./sync-squads");
 const sync_match_enrichment_1 = require("./sync-match-enrichment");

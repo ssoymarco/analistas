@@ -34,7 +34,26 @@ const en: TranslationKeys = {
     matches: 'Matches',
     favorites: 'Favorites',
     news: 'News',
+    wallpapers: 'Wallpapers',
     profile: 'Profile',
+  },
+
+  // ── Wallpapers + jersey giveaway ───────────────────────────────────────────
+  wallpapers: {
+    title: 'Wallpapers',
+    subtitle: 'Download exclusive wallpapers of your stars',
+    prizeKicker: 'Prize of the week',
+    participate: 'Enter',
+    participating: 'Entered',
+    save: 'Save',
+    seeDynamic: 'See how to enter',
+    terms: 'Terms & conditions',
+    announceInDays: 'Winner in {{days}}d {{hours}}h',
+    announceInHours: 'Winner in {{hours}}h',
+    signInTitle: 'Create an account to enter',
+    signInBody: 'You need an Analistas account to enter the signed jersey giveaway.',
+    signInCta: 'Create account',
+    empty: 'New wallpapers coming soon',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

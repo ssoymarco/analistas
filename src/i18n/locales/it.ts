@@ -34,7 +34,25 @@ const it: TranslationKeys = {
     matches: 'Partite',
     favorites: 'Preferiti',
     news: 'Notizie',
+    wallpapers: 'Sfondi',
     profile: 'Profilo',
+  },
+
+  wallpapers: {
+    title: 'Sfondi',
+    subtitle: 'Scarica gli sfondi esclusivi dei tuoi campioni',
+    prizeKicker: 'Premio della settimana',
+    participate: 'Partecipa',
+    participating: 'Iscritto',
+    save: 'Salva',
+    seeDynamic: 'Come partecipare',
+    terms: 'Termini e condizioni',
+    announceInDays: 'Vincitore tra {{days}}g {{hours}}h',
+    announceInHours: 'Vincitore tra {{hours}}h',
+    signInTitle: 'Crea un account per partecipare',
+    signInBody: 'Serve un account Analistas per partecipare al giveaway della maglia firmata.',
+    signInCta: 'Crea account',
+    empty: 'Presto nuovi sfondi qui',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────

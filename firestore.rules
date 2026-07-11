@@ -189,6 +189,37 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /// _meta/wallpapers — config de la sección Wallpapers + concurso de
+    /// jerseys. Shape: { enabled: bool, prize: {id, title, imageUrl,
+    /// announceAt, socialUrl, termsUrl} | null }. Escritura solo server/consola.
+    match /_meta/wallpapers {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// wallpapers/{id} — catálogo de wallpapers (título, imageUrl, likes).
+    /// `likes` lo mantiene la Cloud Function onWallpaperEntryCreated.
+    match /wallpapers/{wallpaperId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// wallpaperEntries/{wallpaperId}_{uid} — participación en la dinámica.
+    /// CREATE-ONCE por el dueño (docId amarrado a su uid, campos exactos,
+    /// uid no-anónimo implícito porque el cliente gatea con isGuest, y el
+    /// server puede filtrar anónimos al elegir ganador). Sin update/delete:
+    /// una participación no se edita ni se retira — auditable para el sorteo.
+    match /wallpaperEntries/{entryId} {
+      allow read: if request.auth != null && entryId.matches('.*_' + request.auth.uid + '$');
+      allow create: if request.auth != null
+        && entryId == request.resource.data.wallpaperId + '_' + request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.wallpaperId is string
+        && request.resource.data.wallpaperId.size() > 0
+        && request.resource.data.keys().hasOnly(['uid', 'wallpaperId', 'prizeId', 'createdAt']);
+      allow update, delete: if false;
+    }
+
     /// _meta/leagueSeasons — mapa liga→temporada ACTUAL, escrito por
     /// syncLeagueSeasons (2×/día). Shape: { seasons: { [leagueId]:
     /// { seasonId, seasonName, leagueName } }, updatedAt }. El cliente lo lee
