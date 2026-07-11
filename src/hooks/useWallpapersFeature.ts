@@ -30,6 +30,10 @@ export interface WallpaperPrize {
   id: string;
   title: string;
   imageUrl: string;
+  /** Segunda foto del premio (p.ej. jersey de Messi junto al de Haaland). */
+  imageUrl2?: string;
+  /** Instrucción de participación mostrada bajo el contador. */
+  howTo?: string;
   announceAt: string;
   socialUrl: string;
   termsUrl: string;

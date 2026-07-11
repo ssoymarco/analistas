@@ -252,8 +252,16 @@ export const WallpapersScreen: React.FC = () => {
             {prize && (
               <View style={[s.prizeCard, { backgroundColor: c.card, borderColor: c.accent + '55' }]}>
                 <View style={s.prizeTop}>
-                  {!!prize.imageUrl && (
-                    <Image source={{ uri: prize.imageUrl }} style={s.prizeImg} contentFit="cover" transition={150} />
+                  {/* Una o DOS fotos de jersey (Messi + Haaland). */}
+                  {(!!prize.imageUrl || !!prize.imageUrl2) && (
+                    <View style={s.prizeImgStack}>
+                      {!!prize.imageUrl && (
+                        <Image source={{ uri: prize.imageUrl }} style={s.prizeImg} contentFit="cover" transition={150} />
+                      )}
+                      {!!prize.imageUrl2 && (
+                        <Image source={{ uri: prize.imageUrl2 }} style={s.prizeImg} contentFit="cover" transition={150} />
+                      )}
+                    </View>
                   )}
                   <View style={s.prizeBody}>
                     <Text style={[s.prizeKicker, { color: c.accent }]}>{t('wallpapers.prizeKicker')}</Text>
@@ -271,6 +279,13 @@ export const WallpapersScreen: React.FC = () => {
                         <Text style={[s.countUnit, { color: c.textTertiary }]}>{t(`wallpapers.unit_${unit}`)}</Text>
                       </View>
                     ))}
+                  </View>
+                )}
+
+                {/* Cómo participar (bajo el contador) */}
+                {!!prize.howTo && (
+                  <View style={[s.howToBox, { backgroundColor: c.accent + '14', borderColor: c.accent + '33' }]}>
+                    <Text style={[s.howToText, { color: c.textPrimary }]}>{prize.howTo}</Text>
                   </View>
                 )}
 
@@ -383,8 +398,11 @@ const s = StyleSheet.create({
     overflow: 'hidden', padding: 14, gap: 12,
   },
   prizeTop: { flexDirection: 'row', gap: 12 },
-  prizeImg: { width: 96, height: 108, borderRadius: 10 },
+  prizeImgStack: { flexDirection: 'row', gap: 6 },
+  prizeImg: { width: 78, height: 96, borderRadius: 10 },
   prizeBody: { flex: 1, justifyContent: 'center', gap: 4 },
+  howToBox: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9 },
+  howToText: { fontSize: 12.5, fontWeight: '600', lineHeight: 17 },
   prizeKicker: { fontSize: 10, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },
   prizeTitle: { fontSize: 16, fontWeight: '800', letterSpacing: -0.3, lineHeight: 21 },
   countdownRow: { flexDirection: 'row', gap: 8 },
