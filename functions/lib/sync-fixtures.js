@@ -49,6 +49,7 @@ const logger = __importStar(require("firebase-functions/logger"));
 const sportmonks_1 = require("./sportmonks");
 const mappers_1 = require("./mappers");
 const season_fixtures_index_1 = require("./season-fixtures-index");
+const kickoff_delays_1 = require("./kickoff-delays");
 /**
  * Format a Date as 'YYYY-MM-DD' in UTC.
  */
@@ -110,6 +111,9 @@ async function syncFixturesHandler(explicitDates) {
         logger.info('📅 syncFixtures: no fixtures found');
         return;
     }
+    // Aviso de retraso pre-partido: comparar la hora nueva contra la que aún
+    // está en Firestore ANTES de sobrescribirla. No-fatal (nunca frena el sync).
+    await (0, kickoff_delays_1.notifyKickoffDelays)(allMatchDocs).catch(err => logger.error('notifyKickoffDelays falló (non-fatal):', err));
     const batches = [];
     let currentBatch = admin_init_1.db.batch();
     let opCount = 0;
