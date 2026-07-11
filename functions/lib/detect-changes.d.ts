@@ -35,6 +35,9 @@
  *     two pushes for the same goal feels like spam.
  */
 import { LIVE_STATE_IDS, FINISHED_STATE_IDS } from './types';
+export declare const TEAMS_ES: Record<string, string>;
+/** Translate a team name to Spanish. Club names not in the map pass through unchanged. */
+export declare function loc(name: string): string;
 import type { MatchDoc, LivescoresSnapshot, DetectedChange, SMFixture } from './types';
 export declare function loadSnapshot(): Promise<LivescoresSnapshot['matches']>;
 /** Snapshot the relevant per-match state for next-poll diff detection.

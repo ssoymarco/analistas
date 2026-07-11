@@ -66,6 +66,7 @@ exports.syncMatchEnrichmentHandler = syncMatchEnrichmentHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
 const crypto_1 = require("crypto");
+const detect_changes_1 = require("./detect-changes");
 const sportmonks_1 = require("./sportmonks");
 // ── Filtro de cadenas de TV (auditoría de costos, 8 jul 2026) ────────────────
 // SM manda TODAS las cadenas del mundo por partido de Mundial: 276 entradas de
@@ -335,7 +336,7 @@ async function writeEnrichment(m, fixture, h2hSkipCutoff) {
             const homeId = m.homeTeamId;
             const awayId = m.awayTeamId;
             const title = '📋 Alineaciones confirmadas';
-            const body = `${m.homeTeamName} vs ${m.awayTeamName} · ${m.league}`;
+            const body = `${(0, detect_changes_1.loc)(m.homeTeamName)} vs ${(0, detect_changes_1.loc)(m.awayTeamName)} · ${m.league}`;
             const data = {
                 type: 'lineups',
                 matchId: m.id,
@@ -374,7 +375,7 @@ async function writeEnrichment(m, fixture, h2hSkipCutoff) {
                     condition: `'${topic}' in topics && !('${teamBase}' in topics)`,
                     notification: {
                         title: `📋 ${e.player_name} es titular`,
-                        body: `${teamName} vs ${rival} · ${m.league}`,
+                        body: `${(0, detect_changes_1.loc)(teamName)} vs ${(0, detect_changes_1.loc)(rival)} · ${m.league}`,
                     },
                     data: { type: 'playerLineup', matchId: m.id, playerId: String(e.player_id) },
                     android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },

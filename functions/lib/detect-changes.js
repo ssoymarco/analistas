@@ -69,7 +69,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.FINISHED_STATE_IDS = exports.LIVE_STATE_IDS = void 0;
+exports.FINISHED_STATE_IDS = exports.LIVE_STATE_IDS = exports.TEAMS_ES = void 0;
+exports.loc = loc;
 exports.loadSnapshot = loadSnapshot;
 exports.saveSnapshot = saveSnapshot;
 exports.detectChanges = detectChanges;
@@ -86,7 +87,7 @@ Object.defineProperty(exports, "FINISHED_STATE_IDS", { enumerable: true, get: fu
 // Notifications are built server-side; i18n lives on the client. Since our
 // primary audience is MX/LATAM we localize to Spanish here. Club names that
 // don't appear in the map are returned unchanged (safe call).
-const TEAMS_ES = {
+exports.TEAMS_ES = {
     'Afghanistan': 'Afganistán', 'Albania': 'Albania', 'Algeria': 'Argelia',
     'Angola': 'Angola', 'Argentina': 'Argentina', 'Armenia': 'Armenia',
     'Australia': 'Australia', 'Austria': 'Austria', 'Azerbaijan': 'Azerbaiyán',
@@ -129,7 +130,7 @@ const TEAMS_ES = {
 };
 /** Translate a team name to Spanish. Club names not in the map pass through unchanged. */
 function loc(name) {
-    return TEAMS_ES[name] ?? name;
+    return exports.TEAMS_ES[name] ?? name;
 }
 // ── Snapshot helpers ────────────────────────────────────────────────────────
 async function loadSnapshot() {

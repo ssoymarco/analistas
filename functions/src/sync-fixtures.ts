@@ -14,6 +14,7 @@ import * as logger from 'firebase-functions/logger';
 import { fetchFixturesByDate } from './sportmonks';
 import { mapFixtureToMatchDoc } from './mappers';
 import { rebuildSeasonFixturesForSeasons } from './season-fixtures-index';
+import { notifyKickoffDelays } from './kickoff-delays';
 import type { MatchDoc } from './types';
 
 /**
@@ -82,6 +83,12 @@ export async function syncFixturesHandler(explicitDates?: string[]): Promise<voi
     logger.info('📅 syncFixtures: no fixtures found');
     return;
   }
+
+  // Aviso de retraso pre-partido: comparar la hora nueva contra la que aún
+  // está en Firestore ANTES de sobrescribirla. No-fatal (nunca frena el sync).
+  await notifyKickoffDelays(allMatchDocs).catch(err =>
+    logger.error('notifyKickoffDelays falló (non-fatal):', err),
+  );
 
   const batches: admin.firestore.WriteBatch[] = [];
   let currentBatch = db.batch();
