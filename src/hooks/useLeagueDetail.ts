@@ -588,28 +588,41 @@ export function useLeagueDetail(
             getStandingsFromFirestore(seasonIdNum).catch(() => []),
             getTopScorersAllCategories(seasonIdNum).catch(() => ({ goals: [], assists: [], cards: [] })),
           ]);
-          const hasFsMeta =
-            fsStandings.length > 0 &&
-            (fsTopScorers.goals.length > 0 || fsTopScorers.assists.length > 0 || fsTopScorers.cards.length > 0);
+          // DESACOPLADO (11-jul-2026): antes hasFsMeta exigía standings Y
+          // goleadores juntos. En temporada recién estrenada hay tabla (en
+          // ceros, sintetizada por syncStandings) pero CERO goleadores → se
+          // descartaba la tabla de Firestore y el proxy devolvía vacío →
+          // "Clasificación no disponible" (La Liga 26/27). Cada pieza decide
+          // su fuente por separado.
+          const hasFsStandings = fsStandings.length > 0;
+          const hasFsTop =
+            fsTopScorers.goals.length > 0 || fsTopScorers.assists.length > 0 || fsTopScorers.cards.length > 0;
 
           let standingsRaw: SMStandingGroup[];
           let topScorersRaw: SMTopScorer[];
           let topAssistsRaw: SMTopScorer[];
           let topCardsRaw: SMTopScorer[];
           let teamsRaw: SMParticipant[];
-          if (hasFsMeta) {
+
+          if (hasFsStandings) {
             standingsRaw = firestoreStandingsToSMGroups(fsStandings);
+            teamsRaw = deriveTeamsFromStandings(fsStandings);
+          } else {
+            [standingsRaw, teamsRaw] = await Promise.all([
+              fetchStandings(seasonIdNum).catch(() => [] as SMStandingGroup[]),
+              fetchTeamsBySeasonId(seasonIdNum).catch(() => [] as SMParticipant[]),
+            ]);
+          }
+
+          if (hasFsTop) {
             topScorersRaw = firestoreTopToSM(fsTopScorers.goals);
             topAssistsRaw = firestoreTopToSM(fsTopScorers.assists);
             topCardsRaw = firestoreTopToSM(fsTopScorers.cards);
-            teamsRaw = deriveTeamsFromStandings(fsStandings);
           } else {
-            [standingsRaw, topScorersRaw, topAssistsRaw, topCardsRaw, teamsRaw] = await Promise.all([
-              fetchStandings(seasonIdNum).catch(() => [] as SMStandingGroup[]),
+            [topScorersRaw, topAssistsRaw, topCardsRaw] = await Promise.all([
               fetchTopScorers(seasonIdNum, 208).catch(() => [] as SMTopScorer[]),
               fetchTopScorers(seasonIdNum, 209).catch(() => [] as SMTopScorer[]),
               fetchTopScorers(seasonIdNum, 84).catch(() => [] as SMTopScorer[]),
-              fetchTeamsBySeasonId(seasonIdNum).catch(() => [] as SMParticipant[]),
             ]);
           }
 

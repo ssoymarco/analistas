@@ -1497,13 +1497,21 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   // último y de scroll del usuario (si ya scrolleó, no lo interrumpimos).
   const tabContentYRef = useRef(0);
   const lastScrollYRef = useRef(0);
+  // Y absoluta (contenido del scroll) del día-ancla ("hoy"/próxima jornada).
+  // La consume el botón flotante "Volver a Hoy" para regresar al presente
+  // cuando el usuario se pierde scrolleando temporadas completas
+  // (feedback dueño 11-jul-2026).
+  const calendarAnchorYRef = useRef<number | null>(null);
   const handleCalendarAnchor = useCallback((innerY: number) => {
+    const STICKY_TABS_OFFSET = 64; // barra de tabs pegajosa + respiro
+    const y = Math.max(0, tabContentYRef.current + innerY - STICKY_TABS_OFFSET);
+    // Guardar SIEMPRE el objetivo (aunque no auto-scrolleemos) — el botón
+    // flotante lo necesita para funcionar después de que el usuario navegó.
+    calendarAnchorYRef.current = y;
     // Usuario ya navegando → no robarle el scroll.
     if (lastScrollYRef.current > 40) return;
     // Objetivo prácticamente arriba → dejar la vista donde está (sin saltito).
     if (innerY < 120) return;
-    const STICKY_TABS_OFFSET = 64; // barra de tabs pegajosa + respiro
-    const y = Math.max(0, tabContentYRef.current + innerY - STICKY_TABS_OFFSET);
     requestAnimationFrame(() => {
       try {
         scrollHostRef.current?.scrollTo?.({ y, animated: false });
@@ -1511,6 +1519,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
     });
   }, []);
   const [showCompact, setShowCompact] = useState(false);
+  const [showGoToday, setShowGoToday] = useState(false);
 
   // ── Header theme colors ──
   const headerBg   = c.bg;
@@ -1627,6 +1636,15 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
           scrollY.setValue(y);
           lastScrollYRef.current = y;
           setShowCompact(y > 80);
+          // Botón "Volver a Hoy": aparece al alejarse del día-ancla en el
+          // calendario (histéresis 700/450 para no parpadear en el umbral).
+          const anchorY = calendarAnchorYRef.current;
+          if (activeTab === 'partidos' && anchorY != null) {
+            const dist = Math.abs(y - anchorY);
+            setShowGoToday(prev => (prev ? dist > 450 : dist > 700));
+          } else if (showGoToday) {
+            setShowGoToday(false);
+          }
         }}
         scrollEventThrottle={16}
         stickyHeaderIndices={[1]}
@@ -1768,6 +1786,29 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
           )}
         </View>
       </Animated.ScrollView>
+
+      {/* ── Volver a Hoy — flotante, mismo look que PartidosScreen ── */}
+      {showGoToday && activeTab === 'partidos' && (
+        <TouchableOpacity
+          style={{
+            position: 'absolute', bottom: 24, alignSelf: 'center',
+            backgroundColor: c.emerald, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 24,
+            shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6,
+          }}
+          activeOpacity={0.85}
+          onPress={() => {
+            const y = calendarAnchorYRef.current;
+            if (y != null) {
+              scrollHostRef.current?.scrollTo?.({ y, animated: true });
+              setShowGoToday(false);
+            }
+          }}
+        >
+          <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff', letterSpacing: -0.2 }}>
+            {t('dates.goToToday')}
+          </Text>
+        </TouchableOpacity>
+      )}
     </SafeAreaView>
   );
 };
