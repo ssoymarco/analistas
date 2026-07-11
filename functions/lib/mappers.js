@@ -71,8 +71,16 @@ function getMatchStatus(stateId, startingAt) {
     // the scheduled bucket so the client never reverts to the pre-match view.
     if (PAUSED_LIVE_STATE_IDS.has(stateId))
         return 'live';
+    // Estados MUERTOS (cancelado/pospuesto/abandonado/eliminado) → 'finished',
+    // que es TERMINAL. Antes se mapeaban a 'scheduled' con la idea de "nunca
+    // inferir en vivo", PERO la heurística del cliente (reapplyLiveStatus en
+    // firestoreApi.ts) revive cualquier 'scheduled' con kickoff pasado como
+    // 'live' por 135 min → reloj desbocado (incidente Chivas vs U. de G.,
+    // 11 jul 2026: SM canceló un amistoso que sí se jugaba y la app mostró
+    // "EN VIVO · 119:08'"). 'finished' corta la cadena: el cliente jamás
+    // revive un partido terminado, y si SM lo resucita, el sync lo re-mapea.
     if (types_1.DEAD_STATE_IDS.has(stateId))
-        return 'scheduled';
+        return 'finished';
     // Time-based inference for NOT_STARTED, unknown IDs, or lagging feeds.
     if (startingAt) {
         const kickoffMs = new Date(startingAt.replace(' ', 'T') + 'Z').getTime();

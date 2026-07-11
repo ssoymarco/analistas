@@ -145,7 +145,11 @@ function mapStateToStatus(stateId: number, startingAt?: string): MatchStatus {
   if (LIVE_STATE_IDS.has(stateId)) return 'live';
   if (FINISHED_STATE_IDS.has(stateId)) return 'finished';
   if (INTERRUPTED_STATE_IDS.has(stateId)) return 'interrupted';
-  if (DEAD_STATE_IDS.has(stateId)) return 'scheduled'; // postponed/cancelled → never infer live
+  // Estados MUERTOS → 'finished' (terminal). Antes 'scheduled', pero la
+  // heurística reapplyLiveStatus (firestoreApi.ts) revivía esos docs como
+  // 'live' por 135 min → reloj desbocado (Chivas vs U. de G., 11 jul 2026).
+  // Espejo de getMatchStatus en functions/src/mappers.ts.
+  if (DEAD_STATE_IDS.has(stateId)) return 'finished';
   // Time-based live inference (applies to NOT_STARTED, 0, undefined, or any unexpected id)
   if (startingAt) {
     const kickoff = new Date(startingAt.replace(' ', 'T') + 'Z');
