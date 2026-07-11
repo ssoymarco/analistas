@@ -151,7 +151,15 @@ export const WallpapersScreen: React.FC = () => {
     try {
       const uri: string = await captureRef.current.capture();
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: t('wallpapers.save') });
+        // UTI 'public.png': sin él iOS trata el archivo como "documento PNG"
+        // genérico y el share sheet NO ofrece "Guardar imagen" (solo Copiar/
+        // Imprimir/AirDrop — reporte del dueño 12-jul-2026). Con el UTI
+        // correcto aparecen las acciones de imagen, incluida Fotos.
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          UTI: 'public.png',
+          dialogTitle: t('wallpapers.save'),
+        });
       }
     } catch { /* usuario canceló el share sheet */ }
     finally { setSaving(false); }
