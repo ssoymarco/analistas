@@ -856,6 +856,11 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   const { isDark } = useDarkMode();
   const navigation = useNavigation<any>();
   const captureRef = useRef<any>(null);
+  // Durante la captura, el banner de AdMob se sustituye por la barra de
+  // Analistas: la imagen compartida NO debe llevar publicidad de terceros
+  // (feedback dueño 12-jul-2026) — solo las barras "ANALISTAS APP · DESCARGA
+  // YA" arriba y abajo. En la app el AdMob se ve normal.
+  const [capturing, setCapturing] = useState(false);
   const theme = isDark ? DARK_PITCH : LIGHT_PITCH;
 
   const handlePlayerPress = useCallback((p: LineupPlayer, isHome: boolean) => {
@@ -931,12 +936,23 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   const handleShare = async () => {
     if (!ViewShot || !captureRef.current) return;
     try {
+      // Swap AdMob→barra Analistas y esperar a que el re-render pinte antes
+      // de capturar (dos frames para asegurar layout en dispositivos lentos).
+      setCapturing(true);
+      await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
       const uri: string = await captureRef.current.capture();
       if (!Sharing) return;
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: t('lineup.shareLineup') });
+        // UTI 'public.png': sin él iOS trata el archivo como documento y el
+        // share sheet no ofrece "Guardar imagen" (mismo fix que Wallpapers).
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          UTI: 'public.png',
+          dialogTitle: t('lineup.shareLineup'),
+        });
       }
     } catch {}
+    finally { setCapturing(false); }
   };
 
   if (!hasLineups) {
@@ -952,8 +968,9 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   // ── Pitch block ──────────────────────────────────────────────────────────
   const PitchBlock = (
     <View style={{ overflow: 'hidden', borderRadius: 18 }}>
-      {/* Top advertising banner — AdMob */}
-      {ADMOB_ENABLED && <AdMobBanner />}
+      {/* Banner superior: AdMob en la app; barra Analistas en la CAPTURA
+          (la imagen compartida no lleva publicidad de terceros). */}
+      {capturing ? <MatchBanner /> : (ADMOB_ENABLED && <AdMobBanner />)}
 
       {/* Pitch */}
       <View style={[ms.pitchContainer, { backgroundColor: theme.grassA, borderRadius: 0 }]}>
