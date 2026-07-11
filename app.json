@@ -3,7 +3,7 @@
     "name": "Analistas",
     "slug": "Analistas",
     "scheme": "analistas",
-    "version": "1.2.3",
+    "version": "1.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -154,6 +154,14 @@
             "image": "./assets/appIcons/Version2.png",
             "prerendered": true
           }
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Analistas guarda los wallpapers que elijas directamente en tu galería.",
+          "photosPermission": "Analistas guarda los wallpapers que elijas directamente en tu galería.",
+          "isAccessMediaLocationEnabled": false
         }
       ]
     ],
