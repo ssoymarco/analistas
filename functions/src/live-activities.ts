@@ -218,10 +218,11 @@ async function sendAndroid(
  * Punto de entrada — llamado desde executeSinglePoll tras el batch write.
  * `matchDocs` = partidos del ciclo (live + próximos a empezar). NUNCA lanza.
  */
-export async function sendLiveActivityUpdates(matchDocs: MatchDoc[]): Promise<void> {
+export async function sendLiveActivityUpdates(
+  matchDocs: MatchDoc[],
+  opts?: { deepPass?: boolean },
+): Promise<void> {
   try {
-    if (matchDocs.length === 0) return;
-
     // Firestore 'in' admite máx 30 valores — chunk defensivo.
     const byId = new Map(matchDocs.map(m => [m.id, m]));
     const ids = [...byId.keys()];
@@ -232,12 +233,49 @@ export async function sendLiveActivityUpdates(matchDocs: MatchDoc[]): Promise<vo
         .get();
       snap.forEach(d => regs.push({ ref: d.ref, data: d.data() as RegDoc }));
     }
-    if (regs.length === 0) return;
 
+    // ── Catch-up de HUÉRFANOS (paso profundo, 1×/min) ─────────────────────
+    // Incidente España-Bélgica (10 jul 2026): SM saca al partido de la lista
+    // en vivo casi de inmediato tras el FT. Si el push del FINAL falló una
+    // vez, o el registro llegó tarde, NADIE reintentaba — la Activity quedaba
+    // contando para siempre (104' en un partido terminado al 90+14). Aquí se
+    // rescatan los registros abiertos (ended=false) cuyo partido YA no está
+    // en el ciclo: se lee su doc de Firestore (que syncFixtures mantiene) y
+    // si el partido terminó, se entrega el FINAL desde el doc.
+    const orphanRegs: { ref: FirebaseFirestore.DocumentReference; data: RegDoc }[] = [];
+    if (opts?.deepPass) {
+      try {
+        const open = await db.collection(COLLECTION)
+          .where('ended', '==', false)
+          .limit(100)
+          .get();
+        const orphans = open.docs.filter(d => !byId.has((d.data() as RegDoc).matchId));
+        const orphanIds = [...new Set(orphans.map(d => (d.data() as RegDoc).matchId))];
+        for (let i = 0; i < orphanIds.length; i += 10) {
+          const chunk = orphanIds.slice(i, i + 10);
+          const docs = await db.getAll(...chunk.map(id => db.collection('matches').doc(id)));
+          for (const snap of docs) {
+            if (snap.exists) byId.set(snap.id, snap.data() as MatchDoc);
+          }
+        }
+        for (const d of orphans) {
+          if (byId.has((d.data() as RegDoc).matchId)) {
+            orphanRegs.push({ ref: d.ref, data: d.data() as RegDoc });
+          }
+        }
+        if (orphanRegs.length > 0) {
+          logger.info(`liveActivities: catch-up de ${orphanRegs.length} registro(s) fuera del ciclo`);
+        }
+      } catch (err) {
+        logger.warn('liveActivities: catch-up de huérfanos falló', { err });
+      }
+    }
+
+    const allRegs = regs.concat(orphanRegs);
     const now = Date.now();
     let sent = 0;
 
-    await Promise.all(regs.map(async ({ ref, data }) => {
+    await Promise.all(allRegs.map(async ({ ref, data }) => {
       try {
         // TTL: registros viejos se borran y ya.
         const createdMs = (data.createdAt as FirebaseFirestore.Timestamp | undefined)
@@ -266,7 +304,15 @@ export async function sendLiveActivityUpdates(matchDocs: MatchDoc[]): Promise<vo
           }
         }
 
-        if (data.lastState === key) return; // sin cambios → sin push
+        if (data.lastState === key) {
+          // Sin cambios → sin push. Pero si el estado ya entregado es FT y el
+          // flag `ended` no quedó estampado (crash entre el push y el write),
+          // ciérralo ahora para que el catch-up no lo revisite cada minuto.
+          if (state.phase === 'FT' && !data.ended) {
+            await ref.set({ ended: true }, { merge: true }).catch(() => {});
+          }
+          return;
+        }
 
         const isEnd = state.phase === 'FT';
         const delivered = data.platform === 'ios'
@@ -303,21 +349,24 @@ export async function sendLiveActivityUpdates(matchDocs: MatchDoc[]): Promise<vo
 
     if (sent > 0) logger.info(`liveActivities: ${sent} push(es) enviados`);
 
-    // Sweep global de TTL: la purga del loop solo alcanza registros cuyos
-    // partidos están en el ciclo actual — los de partidos ya fuera del poll
-    // crecerían sin límite. Barrido barato (≤50/ciclo, index automático).
-    try {
-      const cutoff = admin.firestore.Timestamp.fromMillis(now - REGISTRATION_TTL_MS);
-      const stale = await db.collection(COLLECTION)
-        .where('createdAt', '<', cutoff)
-        .limit(50)
-        .get();
-      if (!stale.empty) {
-        await Promise.all(stale.docs.map(d => d.ref.delete().catch(() => {})));
-        logger.info(`liveActivities: sweep purgó ${stale.size} registro(s) viejos`);
+    // Sweep global de TTL — SOLO en el paso profundo (1×/min) y SIN depender
+    // de que haya registros en el ciclo actual (antes los early-returns lo
+    // saltaban y los registros zombie sobrevivían días — visto el 10 jul con
+    // un registro del día 8 aún vivo). Barrido barato (≤50, index automático).
+    if (opts?.deepPass) {
+      try {
+        const cutoff = admin.firestore.Timestamp.fromMillis(now - REGISTRATION_TTL_MS);
+        const stale = await db.collection(COLLECTION)
+          .where('createdAt', '<', cutoff)
+          .limit(50)
+          .get();
+        if (!stale.empty) {
+          await Promise.all(stale.docs.map(d => d.ref.delete().catch(() => {})));
+          logger.info(`liveActivities: sweep purgó ${stale.size} registro(s) viejos`);
+        }
+      } catch {
+        // best-effort — el sweep jamás debe afectar el poll
       }
-    } catch {
-      // best-effort — el sweep jamás debe afectar el poll
     }
   } catch (err) {
     // Blindaje total: esto corre dentro del poll de producción.

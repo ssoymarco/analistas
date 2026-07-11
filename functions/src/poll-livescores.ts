@@ -107,6 +107,13 @@ async function executeSinglePoll(pollIndex: number): Promise<number> {
   }
 
   if (!matchDocs.length) {
+    // Sin partidos en el ciclo, el catch-up de Live Activities debe correr
+    // igual (1×/min): si el ÚLTIMO partido de la noche terminó y SM lo sacó
+    // de la lista antes de entregarse el FINAL, este es el único camino que
+    // rescata la Activity huérfana (incidente España-Bélgica, 10 jul 2026).
+    if (pollIndex === 1) {
+      await sendLiveActivityUpdates([], { deepPass: true });
+    }
     logger.debug(`Poll ${pollIndex}: No live or upcoming matches`);
     return 0;
   }
@@ -158,8 +165,9 @@ async function executeSinglePoll(pollIndex: number): Promise<number> {
 
   // 6b. Live Activities: empujar estado a lock screen / Dynamic Island de
   //     quien sigue estos partidos. Autoblindada (nunca lanza) y solo envía
-  //     cuando el estado cambió — ver live-activities.ts.
-  await sendLiveActivityUpdates(matchDocs);
+  //     cuando el estado cambió — ver live-activities.ts. El paso profundo
+  //     (huérfanos + sweep TTL) corre 1×/min en el primer poll del ciclo.
+  await sendLiveActivityUpdates(matchDocs, { deepPass: pollIndex === 1 });
 
   const elapsed = Date.now() - startMs;
   logger.debug(`Poll ${pollIndex}: ${matchDocs.length} matches, ${changes.length} changes, ${written} written (${matchDocs.length - written} skipped), ${elapsed}ms`);

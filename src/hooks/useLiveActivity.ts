@@ -18,7 +18,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, type DocumentReference } from 'firebase/firestore';
+import { captureFirestoreRejection } from '../services/sentry';
 import { auth, db } from '../services/firebase';
 import { getSavedFCMToken } from '../services/fcmInit';
 import {
@@ -116,6 +117,29 @@ async function registrationRef(matchId: string) {
   if (!uid) return null;
   const deviceId = await getDeviceId();
   return { ref: doc(db, 'liveActivities', `${matchId}_${uid}_${deviceId}`), uid };
+}
+
+/** setDoc del registro con 1 reintento (5s) + reporte a Sentry. El registro
+ *  remoto es lo ÚNICO que conecta la Activity local con los pushes del
+ *  servidor: si esta escritura se pierde en silencio, el marcador queda vivo
+ *  pero congelado con la app cerrada — nunca llega el FINAL (incidente
+ *  España-Bélgica, 10 jul 2026: el reloj siguió hasta 104' tras el FT). */
+async function writeRegistration(
+  ref: DocumentReference,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await setDoc(ref, payload, { merge: true });
+  } catch (err) {
+    captureFirestoreRejection('liveActivity.register', err);
+    await new Promise(r => setTimeout(r, 5000));
+    try {
+      await setDoc(ref, payload, { merge: true });
+    } catch (err2) {
+      captureFirestoreRejection('liveActivity.register.retry', err2);
+      throw err2;
+    }
+  }
 }
 
 function teamToContract(team: Team, colorHex: string) {
@@ -282,17 +306,13 @@ export function useLiveActivity(match: Match) {
         // la ventana de arranque en frío, antes de que la sesión restaure).
         const reg = await registrationRef(tokenMatchId);
         if (!reg) return;
-        await setDoc(
-          reg.ref,
-          {
-            activityPushToken: token,
-            userId: reg.uid,
-            matchId: tokenMatchId,
-            platform: 'ios',
-            ended: false,
-          },
-          { merge: true },
-        );
+        await writeRegistration(reg.ref, {
+          activityPushToken: token,
+          userId: reg.uid,
+          matchId: tokenMatchId,
+          platform: 'ios',
+          ended: false,
+        });
       } catch {
         // Best-effort: sin registro remoto la Activity sigue viva localmente
         // (el usuario la ve; solo no recibiría updates con el app cerrada).
@@ -309,18 +329,14 @@ export function useLiveActivity(match: Match) {
       const reg = await registrationRef(matchId);
       if (!reg) return;
       const fcmToken = await getSavedFCMToken();
-      await setDoc(
-        reg.ref,
-        {
-          fcmToken: fcmToken ?? null,
-          matchId,
-          platform,
-          userId: reg.uid,
-          createdAt: serverTimestamp(),
-          ended: false,
-        },
-        { merge: true },
-      );
+      await writeRegistration(reg.ref, {
+        fcmToken: fcmToken ?? null,
+        matchId,
+        platform,
+        userId: reg.uid,
+        createdAt: serverTimestamp(),
+        ended: false,
+      });
     } catch {
       // Best-effort: sin registro remoto el marcador sigue vivo localmente
       // (solo no recibiría updates con el app cerrada).

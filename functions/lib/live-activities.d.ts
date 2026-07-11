@@ -24,4 +24,6 @@ export declare function buildStateFromMatchDoc(m: MatchDoc): MatchActivityState;
  * Punto de entrada — llamado desde executeSinglePoll tras el batch write.
  * `matchDocs` = partidos del ciclo (live + próximos a empezar). NUNCA lanza.
  */
-export declare function sendLiveActivityUpdates(matchDocs: MatchDoc[]): Promise<void>;
+export declare function sendLiveActivityUpdates(matchDocs: MatchDoc[], opts?: {
+    deepPass?: boolean;
+}): Promise<void>;
