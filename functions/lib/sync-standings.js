@@ -47,6 +47,7 @@ exports.syncTopScorersHandler = syncTopScorersHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
 const config_1 = require("./config");
+const sync_league_seasons_1 = require("./sync-league-seasons");
 const sportmonks_1 = require("./sportmonks");
 const mappers_1 = require("./mappers");
 /** Utility: sleep for N milliseconds (rate limit courtesy) */
@@ -59,21 +60,25 @@ function sleep(ms) {
  */
 async function syncStandingsHandler() {
     const leagues = (0, config_1.getLeaguesWithSeason)();
+    // Temporada ACTUAL desde _meta/leagueSeasons (dinámico), no el hardcode —
+    // el hardcode es solo el fallback dentro de getCurrentSeasonMap().
+    const seasonMap = await (0, sync_league_seasons_1.getCurrentSeasonMap)();
     logger.info(`📊 syncStandings: processing ${leagues.length} leagues`);
     let successCount = 0;
     let errorCount = 0;
     for (let i = 0; i < leagues.length; i++) {
         const league = leagues[i];
+        const seasonId = seasonMap.get(league.id) ?? league.currentSeasonId;
         try {
-            const groups = await (0, sportmonks_1.fetchStandings)(league.currentSeasonId);
+            const groups = await (0, sportmonks_1.fetchStandings)(seasonId);
             if (groups.length > 0) {
-                const doc = (0, mappers_1.mapStandingsToDoc)(league.currentSeasonId, league.id, groups);
-                await admin_init_1.db.collection('standings').doc(String(league.currentSeasonId)).set(doc);
+                const doc = (0, mappers_1.mapStandingsToDoc)(seasonId, league.id, groups);
+                await admin_init_1.db.collection('standings').doc(String(seasonId)).set(doc);
                 successCount++;
             }
         }
         catch (err) {
-            logger.error(`Failed standings for ${league.name} (season ${league.currentSeasonId}):`, err);
+            logger.error(`Failed standings for ${league.name} (season ${seasonId}):`, err);
             errorCount++;
         }
         // Rate limit: pause every 10 leagues
@@ -97,12 +102,13 @@ async function syncStandingsHandler() {
  */
 async function syncTopScorersHandler() {
     const leagues = (0, config_1.getLeaguesWithSeason)();
+    const seasonMap = await (0, sync_league_seasons_1.getCurrentSeasonMap)();
     logger.info(`🏅 syncTopScorers: processing ${leagues.length} leagues (3 categories each)`);
     let successCount = 0;
     let errorCount = 0;
     for (let i = 0; i < leagues.length; i++) {
         const league = leagues[i];
-        const seasonId = league.currentSeasonId;
+        const seasonId = seasonMap.get(league.id) ?? league.currentSeasonId;
         try {
             const [goals, assists, cards] = await Promise.all([
                 (0, sportmonks_1.fetchTopScorers)(seasonId, 208).catch(() => []),

@@ -22,6 +22,7 @@
 import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { LEAGUES } from './config';
+import { getCurrentSeasonMap } from './sync-league-seasons';
 import { fetchTeamsForSeason, type SMTeamFull } from './sportmonks';
 import type { TeamFullDoc } from './types';
 
@@ -89,12 +90,14 @@ function mapTeamToDoc(
 
 export async function syncTeamsHandler(): Promise<void> {
   logger.info(`👥 syncTeams: starting for ${LEAGUES.length} leagues`);
+  // Temporada actual dinámica (_meta/leagueSeasons); hardcode = fallback.
+  const seasonMap = await getCurrentSeasonMap();
 
   let totalTeams = 0;
   let leagueErrors = 0;
 
   for (const league of LEAGUES) {
-    const seasonId = league.currentSeasonId;
+    const seasonId = seasonMap.get(league.id) ?? league.currentSeasonId;
     if (seasonId == null) {
       logger.debug(`👥 syncTeams: skipping ${league.name} — no currentSeasonId`);
       continue;

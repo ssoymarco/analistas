@@ -58,6 +58,7 @@ const admin_init_1 = require("./admin-init");
 const sportmonks_1 = require("./sportmonks");
 const mappers_1 = require("./mappers");
 const config_1 = require("./config");
+const sync_league_seasons_1 = require("./sync-league-seasons");
 /**
  * Refresh standings for a single league. Silent no-op if the league has
  * no configured seasonId (e.g. friendlies). Errors are caught + logged —
@@ -65,16 +66,17 @@ const config_1 = require("./config");
  */
 async function syncLeagueStandings(leagueId) {
     const cfg = (0, config_1.getLeagueConfig)(leagueId);
-    if (!cfg?.currentSeasonId) {
+    const seasonId = (await (0, sync_league_seasons_1.getCurrentSeasonMap)()).get(leagueId) ?? cfg?.currentSeasonId;
+    if (!cfg || !seasonId) {
         logger.debug(`[event-sync] no seasonId for league ${leagueId} — skipping standings`);
         return;
     }
     try {
-        const groups = await (0, sportmonks_1.fetchStandings)(cfg.currentSeasonId);
+        const groups = await (0, sportmonks_1.fetchStandings)(seasonId);
         if (groups.length === 0)
             return;
-        const doc = (0, mappers_1.mapStandingsToDoc)(cfg.currentSeasonId, cfg.id, groups);
-        await admin_init_1.db.collection('standings').doc(String(cfg.currentSeasonId)).set(doc);
+        const doc = (0, mappers_1.mapStandingsToDoc)(seasonId, cfg.id, groups);
+        await admin_init_1.db.collection('standings').doc(String(seasonId)).set(doc);
         logger.info(`📊 event-driven standings refreshed for ${cfg.name}`);
     }
     catch (err) {
@@ -87,16 +89,17 @@ async function syncLeagueStandings(leagueId) {
  */
 async function syncLeagueTopScorers(leagueId) {
     const cfg = (0, config_1.getLeagueConfig)(leagueId);
-    if (!cfg?.currentSeasonId) {
+    const seasonId = (await (0, sync_league_seasons_1.getCurrentSeasonMap)()).get(leagueId) ?? cfg?.currentSeasonId;
+    if (!cfg || !seasonId) {
         logger.debug(`[event-sync] no seasonId for league ${leagueId} — skipping topscorers`);
         return;
     }
     try {
-        const scorers = await (0, sportmonks_1.fetchTopScorers)(cfg.currentSeasonId);
+        const scorers = await (0, sportmonks_1.fetchTopScorers)(seasonId);
         if (scorers.length === 0)
             return;
-        const doc = (0, mappers_1.mapTopScorersToDoc)(cfg.currentSeasonId, cfg.id, scorers);
-        await admin_init_1.db.collection('topscorers').doc(String(cfg.currentSeasonId)).set(doc);
+        const doc = (0, mappers_1.mapTopScorersToDoc)(seasonId, cfg.id, scorers);
+        await admin_init_1.db.collection('topscorers').doc(String(seasonId)).set(doc);
         logger.info(`🏅 event-driven topscorers refreshed for ${cfg.name}`);
     }
     catch (err) {

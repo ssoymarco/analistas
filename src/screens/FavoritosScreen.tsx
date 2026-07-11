@@ -113,9 +113,9 @@ const POPULAR_TEAMS: FavItem[] = [
 ];
 
 const POPULAR_LEAGUES: FavItem[] = [
-  { id: '743',  name: 'Liga MX',              subtitle: 'México',           emoji: '🇲🇽', smId: 743 },
-  { id: '8',    name: 'Premier League',       subtitle: 'Inglaterra',       emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', smId: 8 },
-  { id: '564',  name: 'La Liga',              subtitle: 'España',           emoji: '🇪🇸', smId: 564 },
+  { id: '743',  name: 'Liga MX',              subtitle: 'México',           emoji: '🇲🇽', smId: 743,  searchAliases: ['ligamx', 'liga mexicana', 'apertura', 'clausura'] },
+  { id: '8',    name: 'Premier League',       subtitle: 'Inglaterra',       emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', smId: 8,    searchAliases: ['epl', 'liga inglesa'] },
+  { id: '564',  name: 'La Liga',              subtitle: 'España',           emoji: '🇪🇸', smId: 564,  searchAliases: ['laliga', 'liga espanola', 'liga española'] },
   { id: '384',  name: 'Serie A',              subtitle: 'Italia',           emoji: '🇮🇹', smId: 384 },
   { id: '82',   name: 'Bundesliga',           subtitle: 'Alemania',         emoji: '🇩🇪', smId: 82 },
   { id: '301',  name: 'Ligue 1',              subtitle: 'Francia',          emoji: '🇫🇷', smId: 301 },

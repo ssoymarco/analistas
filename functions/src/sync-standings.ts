@@ -11,6 +11,7 @@
 import { db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { getLeaguesWithSeason } from './config';
+import { getCurrentSeasonMap } from './sync-league-seasons';
 import { fetchStandings, fetchTopScorers } from './sportmonks';
 import { mapStandingsToDoc, mapTopScorersToDoc } from './mappers';
 
@@ -25,6 +26,9 @@ function sleep(ms: number): Promise<void> {
  */
 export async function syncStandingsHandler(): Promise<void> {
   const leagues = getLeaguesWithSeason();
+  // Temporada ACTUAL desde _meta/leagueSeasons (dinámico), no el hardcode —
+  // el hardcode es solo el fallback dentro de getCurrentSeasonMap().
+  const seasonMap = await getCurrentSeasonMap();
   logger.info(`📊 syncStandings: processing ${leagues.length} leagues`);
 
   let successCount = 0;
@@ -32,17 +36,18 @@ export async function syncStandingsHandler(): Promise<void> {
 
   for (let i = 0; i < leagues.length; i++) {
     const league = leagues[i];
+    const seasonId = seasonMap.get(league.id) ?? league.currentSeasonId!;
 
     try {
-      const groups = await fetchStandings(league.currentSeasonId!);
+      const groups = await fetchStandings(seasonId);
 
       if (groups.length > 0) {
-        const doc = mapStandingsToDoc(league.currentSeasonId!, league.id, groups);
-        await db.collection('standings').doc(String(league.currentSeasonId)).set(doc);
+        const doc = mapStandingsToDoc(seasonId, league.id, groups);
+        await db.collection('standings').doc(String(seasonId)).set(doc);
         successCount++;
       }
     } catch (err) {
-      logger.error(`Failed standings for ${league.name} (season ${league.currentSeasonId}):`, err);
+      logger.error(`Failed standings for ${league.name} (season ${seasonId}):`, err);
       errorCount++;
     }
 
@@ -69,6 +74,7 @@ export async function syncStandingsHandler(): Promise<void> {
  */
 export async function syncTopScorersHandler(): Promise<void> {
   const leagues = getLeaguesWithSeason();
+  const seasonMap = await getCurrentSeasonMap();
   logger.info(`🏅 syncTopScorers: processing ${leagues.length} leagues (3 categories each)`);
 
   let successCount = 0;
@@ -76,7 +82,7 @@ export async function syncTopScorersHandler(): Promise<void> {
 
   for (let i = 0; i < leagues.length; i++) {
     const league = leagues[i];
-    const seasonId = league.currentSeasonId!;
+    const seasonId = seasonMap.get(league.id) ?? league.currentSeasonId!;
 
     try {
       const [goals, assists, cards] = await Promise.all([

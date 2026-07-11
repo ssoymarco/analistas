@@ -44,6 +44,7 @@ import type {
 } from '../hooks/useLeagueDetail';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { getLeagueConfig, getLeagueDisplayName, isCopyrightSensitiveLeague } from '../config/leagues';
+import { peekCurrentSeasonId, peekLeagueLogo } from '../services/seasonResolver';
 import type { LeagueZone } from '../config/leagues';
 import type { Match, MatchStatus } from '../data/types';
 import { BackArrow, ShareIcon } from '../components/NavIcons';
@@ -1190,15 +1191,19 @@ const CalendarioTab: React.FC<{
     const stages = Array.from(stageMap.entries()).sort(([, a], [, b]) => a.sortOrder - b.sortOrder);
 
     // Objetivo del ancla: primer día ≥ hoy (local) siguiendo el orden de
-    // render. Si la temporada ya terminó (todo pasado) → null, abre arriba.
+    // render. Si la temporada ya terminó (todo pasado), anclar al ÚLTIMO día
+    // jugado — antes quedaba null y la vista abría en el partido inaugural
+    // de hace meses (feedback dueño 11-jul-2026).
     const todayLocal = localDayKey(new Date().toISOString().replace('T', ' ').slice(0, 19));
     let target: { stageName: string; dateKey: string } | null = null;
+    let lastPlayed: { stageName: string; dateKey: string } | null = null;
     outer: for (const [stageName, { byDate }] of stages) {
       for (const dateKey of Array.from(byDate.keys()).sort()) {
         if (dateKey >= todayLocal) { target = { stageName, dateKey }; break outer; }
+        lastPlayed = { stageName, dateKey };
       }
     }
-    return { sortedStages: stages, anchorTarget: target };
+    return { sortedStages: stages, anchorTarget: target ?? lastPlayed };
   }, [fixtures]);
 
   // ── Ancla en HOY (reimplementación segura) ─────────────────────────────────
@@ -1425,7 +1430,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   // fire its own getFixturesBySeasonFromFirestore in parallel with
   // useLeagueDetail (that duplicate season query was the bulk of the 3-4s hang).
   const cupSeasonId = isCup && activeTab === 'clasificacion'
-    ? (selectedSeasonId ?? data?.seasonId ?? leagueConfig?.currentSeasonId ?? null)
+    ? (selectedSeasonId ?? data?.seasonId ?? peekCurrentSeasonId(leagueId) ?? null)
     : null;
   const { rounds: cupRoundsAll, loading: bracketLoading } = useCupBracket(cupSeasonId);
 
@@ -1433,7 +1438,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   const isCurrentSeason = (() => {
     if (!selectedSeasonId) return true; // default state before user picks
     const sel = availableSeasons.find(s => s.id === selectedSeasonId);
-    return sel ? sel.current : (selectedSeasonId === leagueConfig?.currentSeasonId);
+    return sel ? sel.current : (selectedSeasonId === peekCurrentSeasonId(leagueId));
   })();
   // Only show knockout rounds in the Bracket tab (Group Stage is in Partidos)
   const cupRounds = cupRoundsAll.filter(r => {
@@ -1530,12 +1535,13 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   const suppressRemoteLogo = leagueId ? isCopyrightSensitiveLeague(leagueId) : false;
   const apiOrParamName = data?.leagueName || leagueName;
   const displayName = leagueId ? getLeagueDisplayName(leagueId, apiOrParamName) : apiOrParamName;
-  // Use ONLY the real image_path from API or nav params — never construct
-  // URLs because SportMonks uses sharded folder paths (e.g. /leagues/2/1122.png)
-  // that we cannot predict from the league id alone.
+  // Logo: primero el image_path REAL de _meta/leagueSeasons (sharded, p.ej.
+  // /leagues/7/743.png — el actual), luego el del API/nav param. Nunca
+  // construir URLs planas: /leagues/{id}.png sirve el asset VIEJO (Liga MX
+  // y La Liga desactualizados, 11-jul-2026).
   const displayLogo = suppressRemoteLogo
     ? '' // force fallback to emoji
-    : (data?.leagueLogo || leagueLogo || '');
+    : ((leagueId ? peekLeagueLogo(leagueId) : null) || data?.leagueLogo || leagueLogo || '');
   const fallbackEmoji = suppressRemoteLogo ? (leagueCfg?.flag || '🌍') : '🏆';
   const displayFlag = data?.countryFlag || '';
   const displayCountry = translateLeagueCountry(data?.country || '');

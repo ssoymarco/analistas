@@ -22,6 +22,7 @@ import { SPORTMONKS_TOKEN } from './config';
 import { pollLivescoresHandler } from './poll-livescores';
 import { syncFixturesHandler } from './sync-fixtures';
 import { syncStandingsHandler, syncTopScorersHandler } from './sync-standings';
+import { syncLeagueSeasonsHandler } from './sync-league-seasons';
 import { syncTeamsHandler } from './sync-teams';
 import { syncSquadsHandler } from './sync-squads';
 import { syncMatchEnrichmentHandler, enrichMatchesByIds } from './sync-match-enrichment';
@@ -332,6 +333,50 @@ export const sendTestPush = onCall(
  * Cost: 51 leagues × 24 executions/day = 1,224 calls/day (1.7% of Pro limit).
  * Future improvement: switch to event-driven sync from pollLivescores matchEnd.
  */
+/**
+ * Resolución dinámica liga→temporada actual (_meta/leagueSeasons) + crawl
+ * automático del calendario completo cuando una liga estrena temporada.
+ * 2×/día es suficiente: SM voltea `is_current` días antes del primer partido.
+ * Costo: ~51 calls a /leagues (2×/día) + crawl one-shot por cambio real.
+ */
+export const syncLeagueSeasons = onSchedule(
+  {
+    schedule: 'every 12 hours',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    retryCount: 1,
+    secrets: [SPORTMONKS_TOKEN],
+  },
+  async () => {
+    await syncLeagueSeasonsHandler();
+  },
+);
+
+/**
+ * Disparo manual de syncLeagueSeasons (mismo gate adminToken que los demás
+ * callables de mantenimiento). Para correr la resolución + crawl inicial sin
+ * esperar a la próxima corrida programada.
+ */
+export const runLeagueSeasonsSync = onCall(
+  {
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    secrets: [SPORTMONKS_TOKEN, BACKFILL_TOKEN],
+    invoker: 'public',
+  },
+  async (req) => {
+    const tokenHeader = (req.data?.adminToken as string | undefined) ?? '';
+    const expectedToken = BACKFILL_TOKEN.value();
+    if (!expectedToken || tokenHeader !== expectedToken) {
+      throw new HttpsError('permission-denied', 'Requires matching adminToken.');
+    }
+    const result = await syncLeagueSeasonsHandler();
+    return { ok: true, ...result };
+  },
+);
+
 export const syncStandings = onSchedule(
   {
     schedule: 'every 1 hours',

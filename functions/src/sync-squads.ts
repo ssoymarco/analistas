@@ -18,6 +18,7 @@
 import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { LEAGUES } from './config';
+import { getCurrentSeasonMap } from './sync-league-seasons';
 import {
   fetchTeamsForSeason,
   fetchSquadForSeasonAndTeam,
@@ -53,13 +54,14 @@ function mapPlayerToDoc(sp: SMSquadPlayerFull): SquadPlayerDoc {
 
 export async function syncSquadsHandler(): Promise<void> {
   logger.info(`📋 syncSquads: starting for ${LEAGUES.length} leagues`);
+  const seasonMap = await getCurrentSeasonMap();
 
   let totalSquads = 0;
   let totalPlayers = 0;
   let teamErrors = 0;
 
   for (const league of LEAGUES) {
-    const seasonId = league.currentSeasonId;
+    const seasonId = seasonMap.get(league.id) ?? league.currentSeasonId;
     if (seasonId == null) continue;
 
     let teams;

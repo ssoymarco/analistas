@@ -658,12 +658,18 @@ const rs = StyleSheet.create({
 // PARTIDOS TAB
 // ════════════════════════════════════════════════════════════════════════════
 
-const PartidosTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data, teamId }) => {
+const PartidosTab: React.FC<{
+  data: TeamDetailData;
+  teamId: number;
+  /** Reporta la Y (dentro del tab) de la sección PRÓXIMOS para que el padre
+   *  ancle el scroll en "hoy" — mismo patrón FotMob que el calendario del
+   *  Mundial: pasados arriba (scroll hacia arriba), próximos a la vista. */
+  onUpcomingLayout?: (y: number) => void;
+}> = ({ data, teamId, onUpcomingLayout }) => {
   const { t } = useTranslation();
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const navigation = useNavigation<NativeStackNavigationProp<PartidosStackParamList>>();
-  const [filter, setFilter] = useState<MatchFilter>('all');
   const monthsAbbr = t('dates.monthsAbbr', { returnObjects: true }) as string[];
 
   const textSec = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
@@ -671,17 +677,11 @@ const PartidosTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data,
   const border  = c.border;
   const today   = new Date().toISOString().split('T')[0];
 
-  const filtered = useMemo(() => {
-    if (filter === 'all') return data.recentMatches;
-    return data.recentMatches.filter(m => {
-      const comp = getCompetitionInfo(m.league);
-      return filter === 'wc' ? comp.type === 'wc' : comp.type === 'friendly';
-    });
-  }, [data.recentMatches, filter]);
-
-  const upcoming = filtered.filter(m => !m.isFinished && m.date >= today)
-    .sort((a, b) => a.date.localeCompare(b.date));
-  const previous = filtered.filter(m => m.isFinished || m.date < today);
+  // data.recentMatches ya viene CRONOLÓGICO (pasados → temporada completa de
+  // próximos, todas las competencias). Sin chips de filtro: cada fila muestra
+  // su propia competencia (feedback dueño 11-jul-2026).
+  const upcoming = data.recentMatches.filter(m => !m.isFinished && m.date >= today);
+  const previous = data.recentMatches.filter(m => m.isFinished || m.date < today);
 
   const goToMatch = useCallback((m: RecentMatch) => {
     const match: Match = {
@@ -699,12 +699,6 @@ const PartidosTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data,
     navigation.navigate('MatchDetail', { match });
   }, [navigation, data.info]);
 
-  const FILTERS: { key: MatchFilter; label: string }[] = [
-    { key: 'all',      label: t('team.allFilter') },
-    { key: 'wc',       label: t('team.wcFilter') },
-    { key: 'friendly', label: t('team.friendlyFilter') },
-  ];
-
   // ── Match row ─────────────────────────────────────────────────────────
   const MatchRow: React.FC<{ m: RecentMatch }> = ({ m }) => {
     const comp = getCompetitionInfo(m.league);
@@ -719,10 +713,15 @@ const PartidosTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data,
         activeOpacity={0.7}
         style={[pt.matchRow, { borderTopColor: border }]}
       >
-        {/* Date + comp */}
+        {/* Date + competencia (nombre visible, no solo el punto de color) */}
         <View style={pt.matchDateCol}>
           <Text style={[pt.matchDate, { color: textSec }]}>{dateStr}</Text>
-          <View style={[pt.compDot, { backgroundColor: comp.color }]} />
+          <View style={pt.compLine}>
+            <View style={[pt.compDot, { backgroundColor: comp.color }]} />
+            <Text style={[pt.compName, { color: textSec }]} numberOfLines={1}>
+              {m.league}
+            </Text>
+          </View>
         </View>
 
         {/* Teams */}
@@ -780,47 +779,34 @@ const PartidosTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data,
 
   return (
     <View style={pt.container}>
-      {/* Filter pills */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, flexDirection: 'row' }}>
-        {FILTERS.map(f => {
-          const active = filter === f.key;
-          return (
-            <TouchableOpacity
-              key={f.key}
-              onPress={() => setFilter(f.key)}
-              style={[pt.filterPill, { borderColor: active ? c.accent : border, backgroundColor: active ? c.accent + '22' : 'transparent' }]}
-              activeOpacity={0.7}
-            >
-              <Text style={[pt.filterText, { color: active ? c.accent : textSec }]}>{f.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      {/* Upcoming */}
-      {upcoming.length > 0 && (
-        <View style={[pt.section, { backgroundColor: cardBg, borderColor: border }]}>
-          <Text style={[pt.sectionLabel, { color: textSec }]}>{t('team.upcomingSection')}</Text>
-          {upcoming.map(m => <MatchRow key={m.id} m={m} />)}
-        </View>
-      )}
-
-      {upcoming.length === 0 && filter === 'all' && (
-        <View style={[pt.emptyBox, { borderColor: border }]}>
-          <Text style={[pt.emptyText, { color: textSec }]}>{t('team.noUpcoming')}</Text>
-        </View>
-      )}
-
-      {/* Previous */}
+      {/* Cronológico estilo Mundial: ANTERIORES arriba (scroll hacia arriba
+          para verlos), PRÓXIMOS anclados a la vista al abrir el tab. */}
       {previous.length > 0 && (
-        <View style={[pt.section, { backgroundColor: cardBg, borderColor: border, marginTop: 10 }]}>
+        <View style={[pt.section, { backgroundColor: cardBg, borderColor: border }]}>
           <Text style={[pt.sectionLabel, { color: textSec }]}>{t('team.previous')}</Text>
           {previous.map(m => <MatchRow key={m.id} m={m} />)}
         </View>
       )}
 
-      {previous.length === 0 && filter === 'all' && (
-        <View style={[pt.emptyBox, { borderColor: border }]}>
+      {/* Próximos — onLayout reporta la Y para el auto-anclaje del padre */}
+      {upcoming.length > 0 && (
+        <View
+          style={[pt.section, { backgroundColor: cardBg, borderColor: border, marginTop: 10 }]}
+          onLayout={e => onUpcomingLayout?.(e.nativeEvent.layout.y)}
+        >
+          <Text style={[pt.sectionLabel, { color: textSec }]}>{t('team.upcomingSection')}</Text>
+          {upcoming.map(m => <MatchRow key={m.id} m={m} />)}
+        </View>
+      )}
+
+      {upcoming.length === 0 && (
+        <View style={[pt.emptyBox, { borderColor: border, marginTop: 10 }]}>
+          <Text style={[pt.emptyText, { color: textSec }]}>{t('team.noUpcoming')}</Text>
+        </View>
+      )}
+
+      {previous.length === 0 && upcoming.length === 0 && (
+        <View style={[pt.emptyBox, { borderColor: border, marginTop: 10 }]}>
           <Text style={[pt.emptyText, { color: textSec }]}>{t('team.noRecent')}</Text>
         </View>
       )}
@@ -832,11 +818,6 @@ const PartidosTab: React.FC<{ data: TeamDetailData; teamId: number }> = ({ data,
 
 const pt = StyleSheet.create({
   container: { paddingTop: 4 },
-  filterPill: {
-    paddingHorizontal: 14, paddingVertical: 6,
-    borderRadius: 20, borderWidth: 1.5,
-  },
-  filterText: { fontSize: 13, fontWeight: '600' },
   section: {
     borderRadius: 14, borderWidth: 1, overflow: 'hidden',
     marginHorizontal: 16,
@@ -857,8 +838,10 @@ const pt = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 8,
   },
-  matchDateCol: { width: 42, alignItems: 'center', gap: 3 },
-  matchDate: { fontSize: 10, fontWeight: '600', textAlign: 'center' },
+  matchDateCol: { width: 74, alignItems: 'flex-start', gap: 3 },
+  matchDate: { fontSize: 10, fontWeight: '600' },
+  compLine: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 74 },
+  compName: { fontSize: 9, flexShrink: 1 },
   compDot: { width: 6, height: 6, borderRadius: 3 },
   teamsCol: { flex: 1, gap: 4 },
   teamLine: { flexDirection: 'row', alignItems: 'center', gap: 7 },
@@ -1496,6 +1479,24 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
   }, [isRivalTeam, toggleRivalTeam, teamId]);
   const scrollY = useRef(new Animated.Value(0)).current;
   const heroHeight = useRef(0);
+  // ── Ancla FotMob del tab Partidos ──
+  // El tab reporta la Y de su sección PRÓXIMOS (relativa al wrapper del tab);
+  // sumando la Y del wrapper (relativa al contenido del ScrollView) scrolleamos
+  // para que los próximos partidos queden a la vista, con los anteriores
+  // disponibles scrolleando hacia arriba — igual que el calendario del Mundial.
+  const scrollHostRef = useRef<ScrollView | null>(null);
+  const tabContentYRef = useRef(0);
+  const partidosAnchorFiredRef = useRef(false);
+  const handleUpcomingLayout = useCallback((sectionY: number) => {
+    if (partidosAnchorFiredRef.current) return;
+    partidosAnchorFiredRef.current = true;
+    // Compensa el header sticky (topBar + tabs ≈ 100pt) para que el label
+    // PRÓXIMOS no quede oculto debajo.
+    const target = Math.max(0, tabContentYRef.current + sectionY - 100);
+    if (target > 0) {
+      requestAnimationFrame(() => scrollHostRef.current?.scrollTo({ y: target, animated: false }));
+    }
+  }, []);
   const [showFixedTabs, setShowFixedTabs] = useState(false);
 
   const { data, loading, error } = useTeamDetail(teamId, seasonId);
@@ -1571,7 +1572,11 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
         return (
           <TouchableOpacity
             key={tab.key}
-            onPress={() => setActiveTab(tab.key)}
+            onPress={() => {
+              // Re-armar el ancla de PRÓXIMOS cada vez que se entra a Partidos.
+              if (tab.key === 'partidos') partidosAnchorFiredRef.current = false;
+              setActiveTab(tab.key);
+            }}
             style={[hs.tab, active && { borderBottomColor: c.accent }]}
             activeOpacity={0.7}
           >
@@ -1616,6 +1621,7 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
       </View>
 
       <ScrollView
+        ref={scrollHostRef}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
@@ -1739,9 +1745,12 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
             <Text style={{ fontSize: 12, color: c.textTertiary, textAlign: 'center' }}>{error}</Text>
           </View>
         ) : data ? (
-          <View style={{ paddingTop: 12 }}>
+          <View
+            style={{ paddingTop: 12 }}
+            onLayout={e => { tabContentYRef.current = e.nativeEvent.layout.y; }}
+          >
             {activeTab === 'resumen'   && <ResumenTab   data={data} teamId={teamId} onSeeFullTable={() => setActiveTab('tabla')} />}
-            {activeTab === 'partidos'  && <PartidosTab  data={data} teamId={teamId} />}
+            {activeTab === 'partidos'  && <PartidosTab  data={data} teamId={teamId} onUpcomingLayout={handleUpcomingLayout} />}
             {activeTab === 'plantilla' && <PlantillaTab data={data} />}
             {activeTab === 'tabla'     && <TablaTab     data={data} teamId={teamId} />}
             {activeTab === 'bracket'   && (

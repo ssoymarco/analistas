@@ -45,7 +45,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.sendTestPush = exports.backfillEnrichmentByMatchIds = exports.reportFcmToken = exports.rebuildSeasonFixtureIndexes = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = exports.deliverDelayedPush = void 0;
+exports.syncPlayers = exports.syncCoaches = exports.syncMatchEnrichment = exports.syncSquads = exports.syncTeams = exports.syncTopScorers = exports.syncStandings = exports.runLeagueSeasonsSync = exports.syncLeagueSeasons = exports.sendTestPush = exports.backfillEnrichmentByMatchIds = exports.reportFcmToken = exports.rebuildSeasonFixtureIndexes = exports.backfillFixturesByDates = exports.syncFixtures = exports.pollLivescores = exports.deliverDelayedPush = void 0;
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
 // before any other module touches admin.firestore().
 require("./admin-init");
@@ -56,6 +56,7 @@ const config_1 = require("./config");
 const poll_livescores_1 = require("./poll-livescores");
 const sync_fixtures_1 = require("./sync-fixtures");
 const sync_standings_1 = require("./sync-standings");
+const sync_league_seasons_1 = require("./sync-league-seasons");
 const sync_teams_1 = require("./sync-teams");
 const sync_squads_1 = require("./sync-squads");
 const sync_match_enrichment_1 = require("./sync-match-enrichment");
@@ -334,6 +335,42 @@ exports.sendTestPush = (0, https_1.onCall)({
  * Cost: 51 leagues × 24 executions/day = 1,224 calls/day (1.7% of Pro limit).
  * Future improvement: switch to event-driven sync from pollLivescores matchEnd.
  */
+/**
+ * Resolución dinámica liga→temporada actual (_meta/leagueSeasons) + crawl
+ * automático del calendario completo cuando una liga estrena temporada.
+ * 2×/día es suficiente: SM voltea `is_current` días antes del primer partido.
+ * Costo: ~51 calls a /leagues (2×/día) + crawl one-shot por cambio real.
+ */
+exports.syncLeagueSeasons = (0, scheduler_1.onSchedule)({
+    schedule: 'every 12 hours',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    retryCount: 1,
+    secrets: [config_1.SPORTMONKS_TOKEN],
+}, async () => {
+    await (0, sync_league_seasons_1.syncLeagueSeasonsHandler)();
+});
+/**
+ * Disparo manual de syncLeagueSeasons (mismo gate adminToken que los demás
+ * callables de mantenimiento). Para correr la resolución + crawl inicial sin
+ * esperar a la próxima corrida programada.
+ */
+exports.runLeagueSeasonsSync = (0, https_1.onCall)({
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    region: 'us-central1',
+    secrets: [config_1.SPORTMONKS_TOKEN, BACKFILL_TOKEN],
+    invoker: 'public',
+}, async (req) => {
+    const tokenHeader = req.data?.adminToken ?? '';
+    const expectedToken = BACKFILL_TOKEN.value();
+    if (!expectedToken || tokenHeader !== expectedToken) {
+        throw new https_1.HttpsError('permission-denied', 'Requires matching adminToken.');
+    }
+    const result = await (0, sync_league_seasons_1.syncLeagueSeasonsHandler)();
+    return { ok: true, ...result };
+});
 exports.syncStandings = (0, scheduler_1.onSchedule)({
     schedule: 'every 1 hours',
     timeoutSeconds: 540,

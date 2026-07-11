@@ -189,6 +189,17 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /// _meta/leagueSeasons — mapa liga→temporada ACTUAL, escrito por
+    /// syncLeagueSeasons (2×/día). Shape: { seasons: { [leagueId]:
+    /// { seasonId, seasonName, leagueName } }, updatedAt }. El cliente lo lee
+    /// para resolver la temporada vigente en vez del hardcode de
+    /// config/leagues.ts (bug 11-jul-2026: tablas/calendarios de la temporada
+    /// terminada). Escritura solo server.
+    match /_meta/leagueSeasons {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // ── liveActivities/{regId} ──────────────────────────────────────────────────
     // Registro de tokens de Live Activity (doc id = `${matchId}_${uid}`).
     // El cliente crea/actualiza SU registro (incluye invitados — anonymous auth

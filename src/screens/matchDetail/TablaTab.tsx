@@ -19,6 +19,7 @@ import type { CupRound, CupTie } from '../../services/sportsApi';
 import { SkeletonLeagueDetail } from '../../components/Skeleton';
 import type { PartidosStackParamList } from '../../navigation/AppNavigator';
 import { getLeagueConfig, getLeagueConfigByName, getLeagueDisplayName, type LeagueZone } from '../../config/leagues';
+import { peekCurrentSeasonId } from '../../services/seasonResolver';
 import { translateNationalTeam } from '../../utils/nationalTeams';
 import { isImageUri } from '../../utils/imageUri';
 
@@ -334,7 +335,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
 
   const seasonId: number | null =
     (match.seasonId && match.seasonId > 0) ? match.seasonId
-    : (leagueConfig?.currentSeasonId ?? null);
+    : (leagueConfig ? peekCurrentSeasonId(leagueConfig.id) : null);
 
   // ── Standings (league competitions) ─────────────────────────────────────────
   const { standings, loading: standingsLoading, error: standingsError } = useStandings(seasonId);

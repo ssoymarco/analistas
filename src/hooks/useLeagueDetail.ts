@@ -53,6 +53,7 @@ import {
   getFixturesBySeasonFromFirestore,
   type FirestoreTopScorer,
 } from '../services/firestoreApi';
+import { getCurrentSeasonId, peekCurrentSeasonId } from '../services/seasonResolver';
 import type { LeagueStanding, Match } from '../data/types';
 
 // ── Firestore → SM shape shims ──────────────────────────────────────────────
@@ -494,9 +495,11 @@ export function useLeagueDetail(
         try {
           const config = getLeagueConfig(leagueId);
 
-          // 1. Resolve season ID — sync-first (route param → config). Only hit
-          // the network when we genuinely don't know the season.
-          let resolvedSeasonId = seasonId ?? config?.currentSeasonId ?? null;
+          // 1. Resolve season ID — route param → mapa dinámico (_meta/
+          // leagueSeasons; cae al hardcode de config si el doc no está). El
+          // hardcode solo era correcto hasta que la liga estrenaba temporada
+          // (bug 11-jul-2026: tablas y calendarios de la temporada terminada).
+          let resolvedSeasonId = seasonId ?? (await getCurrentSeasonId(leagueId)) ?? null;
           let resolvedSeasonName = '';
           if (!resolvedSeasonId) {
             try {
@@ -678,7 +681,7 @@ export function useLeagueDetail(
             leagueLogo: leagueLogo || '',
             country: config?.country || '',
             countryFlag: config?.flag || '',
-            seasonId: seasonId ?? config?.currentSeasonId ?? 0,
+            seasonId: seasonId ?? peekCurrentSeasonId(leagueId) ?? 0,
             seasonName: '',
             standings: [],
             topScorers: [],

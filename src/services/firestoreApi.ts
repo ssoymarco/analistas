@@ -811,6 +811,44 @@ export async function getFixturesByDateFromFirestore(localDate: string): Promise
  * The teamId param is stringified — MatchDoc stores team IDs as strings
  * (e.g. "2626"), not numbers.
  */
+/**
+ * PRÓXIMOS partidos de un equipo (todas las competencias), ascendente.
+ *
+ * Truco de índice: solo existen los compuestos (homeTeam.id ASC,
+ * startingAtUtc DESC) / (awayTeam.id ASC, startingAtUtc DESC). Una query
+ * `>= now` con orderBy ASC exigiría índices nuevos; en su lugar pedimos
+ * DESC (futuro más lejano primero) con limit generoso y revertimos en
+ * cliente. Un equipo tiene ≤ ~60 partidos futuros conocidos, así que el
+ * limit 100 nunca corta el extremo cercano.
+ *
+ * Los fixtures de temporada completa existen en `matches` gracias al crawl
+ * de syncLeagueSeasons (cambio de temporada) + la ventana de 15 días de
+ * syncFixtures.
+ */
+export async function getUpcomingFixturesByTeam(
+  teamId: string | number,
+  count = 100,
+): Promise<Match[]> {
+  const idStr = String(teamId);
+  const nowUtc = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const mk = (field: 'homeTeam.id' | 'awayTeam.id') => query(
+    collection(db, 'matches'),
+    where(field, '==', idStr),
+    where('startingAtUtc', '>=', nowUtc),
+    orderBy('startingAtUtc', 'desc'),
+    limit(count),
+  );
+  const [homeSnap, awaySnap] = await Promise.all([getDocs(mk('homeTeam.id')), getDocs(mk('awayTeam.id'))]);
+  const byId = new Map<string, Match>();
+  for (const d of [...homeSnap.docs, ...awaySnap.docs]) {
+    const m = matchFromDoc(d.data() as MatchDoc);
+    if (!byId.has(m.id)) byId.set(m.id, m);
+  }
+  // Ascendente: el siguiente partido primero.
+  return Array.from(byId.values()).sort((a, b) =>
+    (a.startingAtUtc ?? '').localeCompare(b.startingAtUtc ?? ''));
+}
+
 export async function getRecentFixturesByTeam(
   teamId: string | number,
   count = 25,

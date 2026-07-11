@@ -12,10 +12,12 @@ import { getStandings, POPULAR_NATIONAL_TEAMS, POPULAR_TEAMS } from '../services
 import {
   getStandingsFromFirestore,
   getRecentFixturesByTeam,
+  getUpcomingFixturesByTeam,
   getTeamFromFirestore,
   getSquadFromFirestore,
 } from '../services/firestoreApi';
 import { getLeagueConfig } from '../config/leagues';
+import { getCurrentSeasonId } from '../services/seasonResolver';
 import { resolveTeamLogo } from '../utils/teamLogoOverrides';
 import { localizeCityName } from '../utils/cityI18n';
 import type { LeagueStanding, Match } from '../data/types';
@@ -271,10 +273,18 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
           //   4. whatever syncTeams wrote (worst case — may be cup/Amistosos)
           const domesticPreset = POPULAR_TEAM_DOMESTIC_LEAGUE.get(teamId);
           const nationalPreset = NATIONAL_TEAM_PRIMARY_LEAGUE.get(teamId);
+          // Los presets llevan la temporada del snapshot en que se escribieron
+          // (POPULAR_TEAMS[].seasonId) — al estrenar temporada quedan viejos.
+          // Resolver la ACTUAL de esa liga vía _meta/leagueSeasons y usar el
+          // seasonId estático solo como fallback (bug 11-jul-2026).
+          const presetLeagueId = nationalPreset?.leagueId ?? domesticPreset?.leagueId ?? null;
+          const presetSeasonId = presetLeagueId != null
+            ? (await getCurrentSeasonId(presetLeagueId))
+              ?? nationalPreset?.seasonId ?? domesticPreset?.seasonId ?? null
+            : nationalPreset?.seasonId ?? domesticPreset?.seasonId ?? null;
           const effSeasonId =
             seasonId
-            ?? nationalPreset?.seasonId
-            ?? domesticPreset?.seasonId
+            ?? presetSeasonId
             ?? fsInfo.currentSeasonId
             ?? null;
           // Standings: Firestore-first, fall back to proxy when Firestore is
@@ -300,13 +310,23 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
                 )
             : Promise.resolve([] as LeagueStanding[]);
 
-          const [squadFs, recentMatchesRaw, standingsFs] = await Promise.all([
+          const [squadFs, pastRaw, upcomingRaw, standingsFs] = await Promise.all([
             effSeasonId
               ? getSquadFromFirestore(effSeasonId, teamId).catch(() => [])
               : Promise.resolve([]),
             getRecentFixturesByTeam(teamId, 25).catch(() => [] as Match[]),
+            // Temporada completa hacia adelante (todas las competencias) —
+            // existe en Firestore gracias al crawl de syncLeagueSeasons.
+            getUpcomingFixturesByTeam(teamId).catch(() => [] as Match[]),
             standingsPromise,
           ]);
+          // Cronológico completo: pasados (desc→asc) + próximos (asc), dedupe
+          // (un partido de HOY puede venir en ambas queries).
+          const seenIds = new Set<string>();
+          const recentMatchesRaw: Match[] = [
+            ...pastRaw.slice().reverse(),
+            ...upcomingRaw,
+          ].filter(m => (seenIds.has(m.id) ? false : (seenIds.add(m.id), true)));
           if (!mounted.current) return;
 
           // Only ship the Firestore result if squad OR recent matches came
@@ -314,7 +334,7 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
           // haven't run for this team yet — drop through to the proxy for
           // a complete page.
           if (squadFs.length > 0 || recentMatchesRaw.length > 0) {
-            const recentMatches: RecentMatch[] = recentMatchesRaw.slice(0, 25).map(m => {
+            const recentMatches: RecentMatch[] = recentMatchesRaw.map(m => {
               const isHome = m.homeTeam.id === String(teamId);
               const isFinished = m.status === 'finished';
               let result: 'W' | 'D' | 'L' | null = null;
@@ -343,9 +363,10 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
               };
             });
             const teamStanding = standingsFs.find(s => s.team.id === String(teamId)) ?? null;
+            // Lista ascendente → los 5 más recientes con resultado están al FINAL.
             const form: FormEntry[] = recentMatches
               .filter(rm => rm.result !== null)
-              .slice(0, 5)
+              .slice(-5)
               .map(rm => ({ result: rm.result! }));
             // National teams don't have a fixed home stadium — SportMonks
             // returns the venue of their next scheduled friendly which is
@@ -464,7 +485,15 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
         // across every league SM covers; the ongoing syncFixtures keeps
         // ±1 day fresh. Fall back to the proxy only if the Firestore
         // query errors out (rules / network).
-        const recentPromise: Promise<Match[]> = getRecentFixturesByTeam(teamId, 25)
+        const recentPromise: Promise<Match[]> = Promise.all([
+          getRecentFixturesByTeam(teamId, 25),
+          getUpcomingFixturesByTeam(teamId).catch(() => [] as Match[]),
+        ])
+          .then(([past, upcoming]) => {
+            const seen = new Set<string>();
+            return [...past.slice().reverse(), ...upcoming]
+              .filter(m => (seen.has(m.id) ? false : (seen.add(m.id), true)));
+          })
           .catch(err => {
             console.warn('[useTeamDetail] Firestore recent fixtures failed, falling back to proxy:', err?.message);
             return fetchTeamRecentFixtures(teamId)
@@ -547,10 +576,9 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
           })
           .sort((a, b) => a.positionId - b.positionId || a.number - b.number);
 
-        // Recent fixtures are already Match[] from Firestore (or the proxy
-        // fallback shim). They're sorted desc by kickoff already; just
-        // re-clamp to 25 in case the fallback path returned more.
-        const sortedRecent = recentMatchesRaw.slice(0, 25);
+        // Recent fixtures are already Match[] from Firestore (chronological:
+        // pasados + temporada completa de próximos) or the proxy fallback shim.
+        const sortedRecent = recentMatchesRaw;
 
         // Map recent matches
         const recentMatches: RecentMatch[] = sortedRecent.map(m => {
@@ -586,10 +614,10 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
 
         const teamStanding = standings.find(s => s.team.id === String(teamId)) ?? null;
 
-        // Form (last 5 finished)
+        // Form: lista ascendente → los 5 más recientes con resultado al FINAL.
         const form: FormEntry[] = recentMatches
           .filter(m => m.result !== null)
-          .slice(0, 5)
+          .slice(-5)
           .map(m => ({ result: m.result! }));
 
         setData({ info, squad, recentMatches, standings, teamStanding, form });
