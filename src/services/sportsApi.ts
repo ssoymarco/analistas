@@ -367,6 +367,21 @@ function getLiveClockAnchor(fixture: SMFixture):
   if (!periods || periods.length === 0) return undefined;
   const ticking = periods.find(p => p.ticking);
   if (!ticking) return undefined;
+  // Ancla SINTÉTICA desde el minuto oficial de SM (espejo del server) —
+  // ver functions/src/mappers.ts: la prórroga es un solo periodo cuyo
+  // `started` no descuenta el descanso; minutes/seconds es el reloj de TV.
+  {
+    const offset = Math.max(0, typeof (ticking as any).counts_from === 'number' ? (ticking as any).counts_from : 0);
+    const mins = (ticking as any).minutes;
+    if (typeof mins === 'number' && mins >= offset) {
+      const playedSec = (mins - offset) * 60 +
+        (typeof (ticking as any).seconds === 'number' ? (ticking as any).seconds : 0);
+      return {
+        periodStartedAt: Math.round((Date.now() / 1000 - playedSec) / 30) * 30,
+        periodMinuteOffset: offset,
+      };
+    }
+  }
   if (typeof ticking.started !== 'number' || ticking.started <= 0) return undefined;
   const offset = typeof ticking.counts_from === 'number' ? ticking.counts_from : 0;
   return {

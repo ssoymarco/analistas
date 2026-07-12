@@ -133,6 +133,11 @@ function calculateLiveMinute(fixture) {
     if (fixture.state_id === types_1.SM_STATE_IDS.SECOND_HALF) {
         return Math.max(46, elapsedMin - 15);
     }
+    // Prórroga sin datos de periodos: el estimador de pared no sabe descontar
+    // los DOS descansos — el clamp de abajo inventaba "45'" (Isla Dinámica,
+    // ARG-SUI 11 jul 2026). Mejor null: el merge conserva el minuto bueno.
+    if (fixture.state_id === types_1.SM_STATE_IDS.EXTRA_TIME)
+        return null;
     return Math.max(1, Math.min(elapsedMin, 45));
 }
 // ── Time Display ────────────────────────────────────────────────────────────
@@ -213,12 +218,28 @@ function getLiveClockAnchor(fixture) {
     const ticking = periods.find(p => p.ticking);
     if (!ticking)
         return undefined;
+    const offset = Math.max(0, typeof ticking.counts_from === 'number' ? ticking.counts_from : 0);
+    // ANCLA SINTÉTICA desde el minuto OFICIAL de SM (minutes/seconds) — es el
+    // mismo reloj de la TV. Anclar a `started` sobrecontaba: la prórroga es UN
+    // periodo (counts_from 90, ambos tiempos) cuyo `started` no descuenta el
+    // descanso entre TE1 y TE2 → la app iba ~5 min adelante de la transmisión
+    // (116' vs 111:39, ARG-SUI 11 jul 2026). Cuantizada a 30s para no churnear
+    // el fingerprint del doc (jitter de polling ±s no cambia el ancla).
+    if (typeof ticking.minutes === 'number' && ticking.minutes >= offset) {
+        const playedSec = (ticking.minutes - offset) * 60 +
+            (typeof ticking.seconds === 'number' ? ticking.seconds : 0);
+        const synthetic = Math.floor(Date.now() / 1000) - playedSec;
+        return {
+            periodStartedAt: Math.round(synthetic / 30) * 30,
+            periodMinuteOffset: offset,
+        };
+    }
+    // Fallback legado: timestamp real de inicio del periodo.
     if (typeof ticking.started !== 'number' || ticking.started <= 0)
         return undefined;
-    const offset = typeof ticking.counts_from === 'number' ? ticking.counts_from : 0;
     return {
         periodStartedAt: ticking.started,
-        periodMinuteOffset: Math.max(0, offset),
+        periodMinuteOffset: offset,
     };
 }
 // ── Live enrichment extractor ───────────────────────────────────────────────
@@ -336,8 +357,13 @@ function mapFixtureToMatchDoc(fixture) {
     // con merge:true, así que OMITIRLO dejaba el ancla VIEJA viva en Firestore
     // durante descansos/breaks — la Live Activity seguía contando (109:01 en
     // el descanso de la prórroga, ARG-SUI 11 jul 2026, reporte del dueño).
-    const liveClock = getLiveClockAnchor(fixture);
-    doc.liveClock = liveClock ?? null;
+    // Solo cuando el feed TRAE periodos podemos afirmar algo del reloj:
+    // syncFixtures/crawls (sin include=periods... hasta hoy) NO deben pisar el
+    // ancla buena del poll ni con null ni con basura.
+    if (Array.isArray(fixture.periods)) {
+        const liveClock = getLiveClockAnchor(fixture);
+        doc.liveClock = liveClock ?? null;
+    }
     // Optional live enrichment — only present when called from pollLivescores
     // (which pulls events/statistics/periods on /livescores/inplay).
     const liveEnrich = extractLiveEnrichment(fixture);

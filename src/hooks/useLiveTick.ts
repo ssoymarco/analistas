@@ -97,8 +97,11 @@ export interface LiveDisplayTime {
  *   ET 2nd    (counts_from 105) → cap 120
  */
 function getPeriodNominalCap(periodMinuteOffset: number): number {
-  if (periodMinuteOffset >= 105) return 120;
-  if (periodMinuteOffset >= 90)  return 105;
+  // SM modela la PRÓRROGA como UN periodo (counts_from 90, ambos tiempos,
+  // minuto continuo 90→120 — igual que la TV). El tope 105 partía el periodo
+  // en dos y pintaba "105+11'" cuando la transmisión decía 111' (ARG-SUI,
+  // 11 jul 2026). Tope real del periodo: 120.
+  if (periodMinuteOffset >= 90)  return 120;
   if (periodMinuteOffset >= 45)  return 90;
   return 45;
 }

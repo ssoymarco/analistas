@@ -104,7 +104,9 @@ async function fetchLivescores() {
  */
 async function fetchFixturesByDate(date, leagueIds) {
     const params = {
-        include: 'participants;scores;league;state;stage;round;venue',
+        // `periods` incluido (11 jul 2026): sin él, syncFixtures no podía calcular
+        // reloj/minuto de partidos en vivo y contaminaba los docs del poll.
+        include: 'participants;scores;league;state;stage;round;venue;periods',
     };
     if (leagueIds) {
         params.filters = `fixtureLeagues:${leagueIds}`;
@@ -155,7 +157,7 @@ async function fetchSeasonsListForLeague(leagueId) {
 async function fetchFixturesBySeason(seasonId) {
     return fetchAllPages('/fixtures', {
         filters: `fixtureSeasons:${seasonId}`,
-        include: 'participants;scores;league;state;stage;round;venue',
+        include: 'participants;scores;league;state;stage;round;venue;periods',
     });
 }
 /**

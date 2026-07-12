@@ -120,8 +120,8 @@ private func deepLinkURL(
 /// Tope nominal del período según su offset (espejo de getPeriodNominalCap en
 /// src/hooks/useLiveTick.ts): 1T→45' · 2T→90' · TE1→105' · TE2→120'.
 private func periodNominalCap(_ offsetMinutes: Int) -> Int {
-  if offsetMinutes >= 105 { return 120 }
-  if offsetMinutes >= 90 { return 105 }
+  // La prórroga de SM es UN periodo continuo 90→120 (ver useLiveTick.ts).
+  if offsetMinutes >= 90 { return 120 }
   if offsetMinutes >= 45 { return 90 }
   return 45
 }

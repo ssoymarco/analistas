@@ -113,7 +113,9 @@ export async function fetchFixturesByDate(
   leagueIds?: string,
 ): Promise<SMFixture[]> {
   const params: Record<string, string> = {
-    include: 'participants;scores;league;state;stage;round;venue',
+    // `periods` incluido (11 jul 2026): sin él, syncFixtures no podía calcular
+    // reloj/minuto de partidos en vivo y contaminaba los docs del poll.
+    include: 'participants;scores;league;state;stage;round;venue;periods',
   };
   if (leagueIds) {
     params.filters = `fixtureLeagues:${leagueIds}`;
@@ -180,7 +182,7 @@ export async function fetchSeasonsListForLeague(leagueId: number): Promise<SMSea
 export async function fetchFixturesBySeason(seasonId: number): Promise<SMFixture[]> {
   return fetchAllPages<SMFixture>('/fixtures', {
     filters: `fixtureSeasons:${seasonId}`,
-    include: 'participants;scores;league;state;stage;round;venue',
+    include: 'participants;scores;league;state;stage;round;venue;periods',
   });
 }
 
