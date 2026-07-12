@@ -331,10 +331,13 @@ function mapFixtureToMatchDoc(fixture) {
     // Live clock anchor — populated only when a period is actively ticking.
     // Without this the client UI freezes the minute between server polls (15s
     // intervals); with it the displayed minute advances smoothly every second.
+    //
+    // ⚠️ SIEMPRE escribir el campo (null cuando no corre): el doc se escribe
+    // con merge:true, así que OMITIRLO dejaba el ancla VIEJA viva en Firestore
+    // durante descansos/breaks — la Live Activity seguía contando (109:01 en
+    // el descanso de la prórroga, ARG-SUI 11 jul 2026, reporte del dueño).
     const liveClock = getLiveClockAnchor(fixture);
-    if (liveClock) {
-        doc.liveClock = liveClock;
-    }
+    doc.liveClock = liveClock ?? null;
     // Optional live enrichment — only present when called from pollLivescores
     // (which pulls events/statistics/periods on /livescores/inplay).
     const liveEnrich = extractLiveEnrichment(fixture);

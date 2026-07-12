@@ -59,7 +59,7 @@ export interface MatchDoc {
     liveClock?: {
         periodStartedAt: number;
         periodMinuteOffset: number;
-    };
+    } | null;
     detail?: unknown;
     /** ISO/Timestamp of last enrichment fetch — used by the sync to skip
      *  matches that were updated very recently. */

@@ -63,7 +63,12 @@ function kickoffUnixSeconds(m: MatchDoc): number | undefined {
 
 export function buildStateFromMatchDoc(m: MatchDoc): MatchActivityState {
   const phase = phaseFromMatchDoc(m);
-  const anchor = m.liveClock;
+  // 'ETB' (descanso pre/entre prórroga) viaja como fase 'ET' para los widgets
+  // ya instalados, pero JAMÁS con reloj ni minuto: el break no corre. Sin este
+  // guard, un ancla vieja (merge:true) mantenía el timer contando en pleno
+  // descanso (ARG-SUI 11 jul 2026) y el minuto estático mandaba basura (45').
+  const isBreak = m.stateLabel === 'ETB';
+  const anchor = isBreak ? undefined : m.liveClock;
   const ticks = TICKING.has(phase) && !!anchor && anchor.periodStartedAt > 0;
   return {
     homeScore: m.homeScore ?? 0,
@@ -76,7 +81,7 @@ export function buildStateFromMatchDoc(m: MatchDoc): MatchActivityState {
     // pero NO hay ancla — con ancla el timer nativo manda y meter el minuto
     // aquí generaría un push por minuto sin necesidad (presupuesto de
     // ActivityKit).
-    minute: !ticks && TICKING.has(phase) && typeof m.minute === 'number'
+    minute: !ticks && !isBreak && TICKING.has(phase) && typeof m.minute === 'number'
       ? m.minute
       : undefined,
     kickoffAt: phase === 'pre' ? kickoffUnixSeconds(m) : undefined,

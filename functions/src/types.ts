@@ -67,12 +67,14 @@ export interface MatchDoc {
   // Lets the client smoothly tick the displayed minute between server polls.
   // periodStartedAt = unix seconds when the current period kicked off.
   // periodMinuteOffset = base minute for the period (0 for 1H, 45 for 2H, etc.).
-  // Absent for scheduled, halftime, and finished matches (the client falls back
-  // to `minute` in those cases).
+  // NULL (escrito explícito) para programados, descansos/breaks y terminados —
+  // el doc se escribe con merge:true, así que omitir el campo dejaba el ancla
+  // VIEJA viva durante los descansos (LA contando en el break de la prórroga,
+  // ARG-SUI 11 jul 2026). El cliente cae a `minute` cuando es null.
   liveClock?: {
     periodStartedAt: number;
     periodMinuteOffset: number;
-  };
+  } | null;
 
   // ── Enrichment (populated by syncMatchEnrichment + pollLivescores) ──
   // Raw SM fixture payload with all includes. Stored as opaque JSON because
