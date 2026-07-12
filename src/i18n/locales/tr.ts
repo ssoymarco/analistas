@@ -95,6 +95,7 @@ const tr: TranslationKeys = {
 
   // ── Match statuses ─────────────────────────────────────────────────────────
   matchStatus: {
+    etBreak: 'Uzatma',
     finished: 'MS',
     live: 'CANLI',
     halfTime: 'DY',

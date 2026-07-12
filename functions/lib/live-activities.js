@@ -75,6 +75,7 @@ function phaseFromMatchDoc(m) {
         case 'HT': return 'HT';
         case '2T': return '2H';
         case 'ET': return 'ET';
+        case 'ETB': return 'ET'; // break pre/entre prórroga — widget muestra TE
         case 'PEN': return 'PEN';
         case 'SUSP':
         case 'INT': return 'SUSP';

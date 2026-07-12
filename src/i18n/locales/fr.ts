@@ -98,6 +98,7 @@ const fr: TranslationKeys = {
 
   // ── Match statuses ─────────────────────────────────────────────────────────
   matchStatus: {
+    etBreak: 'Prolongation',
     finished: 'FT',
     live: 'EN DIRECT',
     halfTime: 'MT',

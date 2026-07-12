@@ -154,6 +154,11 @@ export function computeLiveMinuteSeconds(
   if (match.stateLabel === 'HT') {
     return { minute: 45, seconds: 0, isHalfTime: true, isStoppage: false };
   }
+  // 'ETB' = terminaron los 90', viene prórroga (o entre tiempos extra) —
+  // reloj congelado, el caller pinta la etiqueta "Tiempos extra".
+  if (match.stateLabel === 'ETB') {
+    return { minute: 90, seconds: 0, isHalfTime: true, isStoppage: false };
+  }
 
   const anchor = match.liveClock;
   if (!anchor || anchor.periodStartedAt <= 0) {

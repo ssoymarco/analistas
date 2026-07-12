@@ -64,6 +64,7 @@ export function phaseFromMatch(match: Match): LiveActivityPhase {
     case 'HT':   return 'HT';
     case '2T':   return '2H';
     case 'ET':   return 'ET';
+    case 'ETB':  return 'ET'; // break pre/entre prórroga
     case 'PEN':  return 'PEN';
     case 'SUSP':
     case 'INT':  return 'SUSP';

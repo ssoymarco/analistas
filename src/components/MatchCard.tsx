@@ -134,7 +134,11 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
               (see functions/src/mappers.ts), this branch is gated on isLive. */}
           {isLive && (
             <Text style={s.liveMin}>
-              {match.stateLabel === 'HT' ? t('matchStatus.halfTime') : liveMinuteLabel}
+              {match.stateLabel === 'HT'
+                ? t('matchStatus.halfTime')
+                : match.stateLabel === 'ETB'
+                ? t('matchStatus.etBreak')
+                : liveMinuteLabel}
             </Text>
           )}
           {isInterrupted && (

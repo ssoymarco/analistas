@@ -676,6 +676,8 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 <Text style={scr.livePillText}>
                   {displayMatch.stateLabel === 'HT'
                     ? t('matchStatus.halfTimeLong')
+                    : displayMatch.stateLabel === 'ETB'
+                    ? t('matchStatus.etBreak')
                     : displayMatch.stateLabel === 'PEN'
                     ? `EN VIVO · ${t('matchStatus.penalties', { defaultValue: 'Penales' })}`
                     : `EN VIVO · ${liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`}`}
@@ -955,6 +957,8 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               {isLive
                 ? displayMatch.stateLabel === 'HT'
                   ? t('matchStatus.halfTimeLong')
+                  : displayMatch.stateLabel === 'ETB'
+                  ? t('matchStatus.etBreak')
                   : displayMatch.stateLabel === 'PEN'
                   ? t('matchStatus.penalties', { defaultValue: 'Penales' })
                   : liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`

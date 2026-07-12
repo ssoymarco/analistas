@@ -99,6 +99,7 @@ const en: TranslationKeys = {
 
   // ── Match statuses ─────────────────────────────────────────────────────────
   matchStatus: {
+    etBreak: 'Extra time',
     finished: 'FT',
     live: 'LIVE',
     halfTime: 'HT',

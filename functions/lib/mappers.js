@@ -20,7 +20,12 @@ function getStateLabel(stateId) {
         case types_1.SM_STATE_IDS.SECOND_HALF: return '2T';
         case types_1.SM_STATE_IDS.EXTRA_TIME: return 'ET';
         case types_1.SM_STATE_IDS.PENALTIES: return 'PEN';
-        case types_1.SM_STATE_IDS.BREAK: return 'HT';
+        // BREAK (4) = terminaron los 90', viene PRÓRROGA — NO es medio tiempo.
+        // Mapearlo a 'HT' hacía que app y Live Activity dijeran "MT/DESCANSO"
+        // al final del tiempo regular (ARG-SUI 11 jul 2026, reporte del dueño).
+        case types_1.SM_STATE_IDS.BREAK: return 'ETB';
+        case types_1.SM_STATE_IDS.EXTRA_TIME_BREAK: return 'ETB'; // entre tiempos extra
+        case types_1.SM_STATE_IDS.PEN_BREAK: return 'PEN'; // dentro de la tanda
         case types_1.SM_STATE_IDS.SUSPENDED: return 'SUSP';
         case types_1.SM_STATE_IDS.INTERRUPTED: return 'INT';
         default: return null;

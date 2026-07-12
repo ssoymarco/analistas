@@ -107,6 +107,7 @@ const es = {
 
   // ── Match statuses ─────────────────────────────────────────────────────────
   matchStatus: {
+    etBreak: 'Tiempos extra',
     finished: 'FT',
     live: 'EN VIVO',
     halfTime: 'MT',
