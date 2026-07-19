@@ -61,6 +61,10 @@ interface Wallpaper {
   likes?: number;     // mantenido por Cloud Function
   active?: boolean;
   order?: number;
+  /** false = wallpaper "legado": solo descarga, sin dinámica de premio
+   *  activa (p.ej. Haaland/Messi tras cerrar su giveaway — 18-jul-2026).
+   *  Default true si el campo no existe (compatibilidad con docs viejos). */
+  contestEntry?: boolean;
 }
 
 export const WallpapersScreen: React.FC = () => {
@@ -118,6 +122,7 @@ export const WallpapersScreen: React.FC = () => {
 
   // ── Participar ❤️ ──
   const participate = useCallback(async (w: Wallpaper) => {
+    if (w.contestEntry === false) return; // wallpaper de solo descarga
     haptics.selection();
     if (!canParticipate) {
       Alert.alert(
@@ -216,10 +221,14 @@ export const WallpapersScreen: React.FC = () => {
         <Image source={{ uri: item.thumbUrl || item.imageUrl }} style={s.cardImg} contentFit="cover" transition={150} />
         <View style={s.cardFooter}>
           <Text style={[s.cardTitle, { color: c.textPrimary }]} numberOfLines={1}>{item.title}</Text>
-          <View style={s.likesRow}>
-            <Text style={{ fontSize: 11 }}>{joined ? '❤️' : '🤍'}</Text>
-            <Text style={[s.likesText, { color: c.textTertiary }]}>{item.likes ?? 0}</Text>
-          </View>
+          {/* Sin dinámica de premio activa (contestEntry:false) → sin corazón,
+              solo el título. El wallpaper sigue siendo descargable. */}
+          {item.contestEntry !== false && (
+            <View style={s.likesRow}>
+              <Text style={{ fontSize: 11 }}>{joined ? '❤️' : '🤍'}</Text>
+              <Text style={[s.likesText, { color: c.textTertiary }]}>{item.likes ?? 0}</Text>
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -351,23 +360,28 @@ export const WallpapersScreen: React.FC = () => {
 
             {/* Acciones */}
             <View style={s.viewerActions}>
-              <TouchableOpacity
-                style={[
-                  s.actionBtn,
-                  entries.has(viewer.id)
-                    ? { backgroundColor: 'rgba(0,224,150,0.25)', borderColor: c.accent }
-                    : { backgroundColor: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.3)' },
-                ]}
-                activeOpacity={0.85}
-                onPress={() => participate(viewer)}
-                disabled={entries.has(viewer.id)}
-              >
-                <Text style={s.actionText}>
-                  {entries.has(viewer.id)
-                    ? `❤️ ${t('wallpapers.participating')}`
-                    : `🤍 ${t('wallpapers.participate')}`}
-                </Text>
-              </TouchableOpacity>
+              {/* Sin dinámica de premio activa → sin botón Participar, solo
+                  Guardar (feedback dueño 18-jul-2026: Haaland/Messi quedan
+                  como wallpapers de solo descarga tras cerrar su giveaway). */}
+              {viewer.contestEntry !== false && (
+                <TouchableOpacity
+                  style={[
+                    s.actionBtn,
+                    entries.has(viewer.id)
+                      ? { backgroundColor: 'rgba(0,224,150,0.25)', borderColor: c.accent }
+                      : { backgroundColor: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.3)' },
+                  ]}
+                  activeOpacity={0.85}
+                  onPress={() => participate(viewer)}
+                  disabled={entries.has(viewer.id)}
+                >
+                  <Text style={s.actionText}>
+                    {entries.has(viewer.id)
+                      ? `❤️ ${t('wallpapers.participating')}`
+                      : `🤍 ${t('wallpapers.participate')}`}
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               {ViewShot && (MediaLibrary || Sharing) && (
                 <TouchableOpacity
