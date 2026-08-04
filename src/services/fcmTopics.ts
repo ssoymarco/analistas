@@ -359,6 +359,34 @@ export async function subscribeLeagueTopics(_leagueId: string): Promise<void> {
   // No-op: leagues are display-only, notifications come from followed teams.
 }
 
+/**
+ * PURGA ÚNICA de topics de liga (4-ago-2026). Builds viejos suscribían
+ * league_{id}_start/_finals al seguir una liga; el subscribe se volvió no-op
+ * en la auditoría, pero las suscripciones FCM PERSISTEN server-side — el
+ * dueño recibió el kickoff de Levski Sofia vs Kairat por seguir Champions.
+ * El server ya no envía a esos topics (fix principal); esto limpia el
+ * device para siempre. Corre una vez por instalación (flag AsyncStorage),
+ * en fondo, sobre TODOS los ids de liga del catálogo (~70×2 topics) porque
+ * no sabemos qué ligas siguió el usuario en el pasado.
+ */
+const LEAGUE_TOPICS_PURGED_KEY = 'league_topics_purged_v1';
+
+export async function purgeLegacyLeagueTopics(leagueIds: number[]): Promise<void> {
+  try {
+    const done = await AsyncStorage.getItem(LEAGUE_TOPICS_PURGED_KEY);
+    if (done) return;
+    const token = await fcmReady();
+    if (!token) return; // sin permiso de notifs — nada que purgar (reintenta luego)
+    for (const id of leagueIds) {
+      // Secuencial y sin prisa: es mantenimiento de fondo.
+      await safeUnsubscribe(`league_${id}_start`);
+      await safeUnsubscribe(`league_${id}_finals`);
+    }
+    await AsyncStorage.setItem(LEAGUE_TOPICS_PURGED_KEY, '1');
+    addBreadcrumb('fcm', 'legacy league topics purged', { count: leagueIds.length });
+  } catch { /* reintenta en el próximo arranque */ }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function unsubscribeLeagueTopics(_leagueId: string): Promise<void> {
   // No-op: leagues are display-only.

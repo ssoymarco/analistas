@@ -747,14 +747,16 @@ const DELAY_BUCKETS = [0, 2, 5, 10];
 function routeChange(c) {
     const homeId = c.homeTeam.id;
     const awayId = c.awayTeam.id;
-    const leagueId = c.leagueId;
+    // NOTA (4-ago-2026): los topics league_{id}_start/_finals se ELIMINARON de
+    // todos los ruteos. Seguir una liga = solo prioridad en el feed; las
+    // notificaciones vienen exclusivamente de EQUIPOS/JUGADORES seguidos.
     switch (c.type) {
         case 'goal':
             return {
                 retrasableBases: [`team_${homeId}_goals`, `team_${awayId}_goals`],
                 immediateTopic: null,
                 // DUAL-SEND legacy: goals + league start (old builds expect league topic)
-                legacyTopics: [`team_${homeId}_goals`, `team_${awayId}_goals`, `league_${leagueId}_start`],
+                legacyTopics: [`team_${homeId}_goals`, `team_${awayId}_goals`],
             };
         case 'goalCancelled':
             // VAR: only send to _d0 (immediate). Devices on _d2/_d5/_d10 haven't seen
@@ -765,13 +767,13 @@ function routeChange(c) {
                 immediateTopic: null,
                 // Still notify _d0 devices (they saw the goal, now see the correction)
                 // by putting the bases in legacyTopics + _d0 handling below.
-                legacyTopics: [`team_${homeId}_goals`, `team_${awayId}_goals`, `league_${leagueId}_start`],
+                legacyTopics: [`team_${homeId}_goals`, `team_${awayId}_goals`],
             };
         case 'matchStart':
             return {
                 retrasableBases: [],
                 immediateTopic: null, // kickoff fan-out handled specially below
-                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`, `league_${leagueId}_start`],
+                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`],
             };
         case 'halftime':
             return {
@@ -789,7 +791,7 @@ function routeChange(c) {
             return {
                 retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
                 immediateTopic: null,
-                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`, `league_${leagueId}_finals`],
+                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`],
             };
         case 'redCard': {
             const side = c.scoringTeamSide === 'home' ? homeId : awayId;
@@ -1053,7 +1055,7 @@ async function dispatchNotifications(changes) {
             const awayId = change.awayTeam.id;
             // Single condition → users following both teams get exactly one notification.
             sendPromises.push(sendWithCondition(messaging, `('team_${homeId}_kickoff' in topics || 'team_${awayId}_kickoff' in topics)${muteGuard(change.matchId)}`, title, body, data, dedupId));
-            // Dual-send legacy (old builds subscribed to _start / league_start)
+            // Dual-send legacy (old builds subscribed to team _start)
             for (const topic of legacyTopics) {
                 sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
             }

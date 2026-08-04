@@ -3,6 +3,7 @@ import {
   useEffect, useRef, ReactNode,
 } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
+import { AVAILABLE_LEAGUES } from '../config/leagues';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
@@ -11,7 +12,7 @@ import { logEvent, ANALYTICS_EVENTS } from '../services/analytics';
 import { captureFirestoreRejection } from '../services/sentry';
 import {
   subscribeTeamTopics, unsubscribeTeamTopics,
-  subscribeLeagueTopics, unsubscribeLeagueTopics,
+  subscribeLeagueTopics, unsubscribeLeagueTopics, purgeLegacyLeagueTopics,
   subscribePlayerTopics, unsubscribePlayerTopics,
   subscribeRivalTopics, unsubscribeRivalTopics,
   reconcileSubscriptions,
@@ -208,6 +209,10 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       muteMatchIds: mutedRef.current,
       delayBucket:  delayBucket,
     }).catch(() => {});
+    // Purga única de topics league_{id}_start/_finals heredados de builds
+    // viejos (persisten en FCM aunque el subscribe sea no-op) — el dueño
+    // recibió kickoffs de Champions por seguir la liga (4-ago-2026).
+    purgeLegacyLeagueTopics(AVAILABLE_LEAGUES.map(l => l.id)).catch(() => {});
   }, [isHydrated, favoritesLoaded, delayBucket, rivalEventsSig, teamEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── AppState foreground → re-reconcile to heal any mid-flip desync ─────────
