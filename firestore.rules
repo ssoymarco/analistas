@@ -103,11 +103,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    /// season_fixtures/{seasonId} — lightweight per-season fixtures index.
-    /// One compact doc (no detail/h2h blobs) powering the league-detail
-    /// Partidos list + cup bracket with a single read. Written server-side
-    /// by syncFixtures (see functions/src/season-fixtures-index.ts).
-    match /season_fixtures/{seasonId} {
+    /// season_fixtures/{shardId} — lightweight per-season fixtures index.
+    /// Compact docs (no detail/h2h blobs) powering the league-detail Partidos
+    /// list + cup bracket. Written server-side by syncFixtures (see
+    /// functions/src/season-fixtures-index.ts).
+    /// shardId is `{seasonId}` for shard 0 and `{seasonId}_{n}` for the
+    /// overflow shards a >1 MB season needs — the wildcard covers both.
+    match /season_fixtures/{shardId} {
       allow read: if true;
       allow write: if false;
     }
