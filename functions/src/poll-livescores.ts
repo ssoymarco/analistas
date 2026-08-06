@@ -20,6 +20,7 @@ import { LIVESCORE_POLL_INTERVAL_SEC, POLLS_PER_INVOCATION } from './config';
 import { fetchLivescores, fetchFixtureById } from './sportmonks';
 import { mapFixtureToMatchDoc } from './mappers';
 import { loadSnapshot, saveSnapshot, detectChanges, dispatchNotifications } from './detect-changes';
+import { enrichMatchesByIds } from './sync-match-enrichment';
 import { sendLiveActivityUpdates } from './live-activities';
 import type { MatchDoc } from './types';
 
@@ -139,6 +140,31 @@ async function executeSinglePoll(pollIndex: number): Promise<number> {
   //     fetch da null y la entrada expira del snapshot vía goneChecks.
   if (pollIndex === 1 && prevSnapshot) {
     const feedIds = new Set(matchDocs.map(m => m.id));
+
+    // Asentamiento post-final: re-enriquecer partidos recién terminados que ya
+    // salieron del feed, a ~1, 2, 5, 10 y 20 min del final. SM publica datos
+    // DESPUÉS del pitido — la atribución del anotador de un gol al 90+ y las
+    // rojas post-partido (bronca con el árbitro) — y para entonces ni el poll
+    // escribe (fuera del feed) ni la ventana hot del enrichment aplica si el
+    // kickoff se retrasó (por kickoff nominal expira ANTES del final: Hugo
+    // Cuypers 90+9' invisible en la app, Monterrey vs Orlando, 5 ago 2026).
+    // settleChecks avanza 1 por poll (~15/min) vía el carryover del snapshot.
+    const SETTLE_MARKS = new Set([1, 2, 5, 10, 20]); // minutos post-final
+    const settleIds = Object.entries(prevSnapshot)
+      .filter(([id, m]) =>
+        m.status === 'finished' && !feedIds.has(id) &&
+        SETTLE_MARKS.has(Math.round((m.settleChecks ?? 0) / 15)))
+      .map(([id]) => id)
+      .slice(0, 5);
+    if (settleIds.length > 0) {
+      try {
+        const r = await enrichMatchesByIds(settleIds);
+        logger.info(`🧾 settle post-final: ${settleIds.join(',')} → ${r.enriched} enriquecidos`);
+      } catch (err) {
+        logger.warn('settle post-final falló', { err: String(err) });
+      }
+    }
+
     const gone = Object.entries(prevSnapshot)
       .filter(([id, m]) => m.status === 'live' && !feedIds.has(id))
       .slice(0, 3);

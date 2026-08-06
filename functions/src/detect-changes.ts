@@ -296,10 +296,19 @@ export async function saveSnapshot(
   // entrada: ~2h de polls (1800 ≈ 15/min × 120 min) y expira — para entonces
   // syncFixtures ya resolvió el doc por su lado.
   for (const [id, prev] of Object.entries(previousSnapshot ?? {})) {
-    if (snapshot[id] || prev.status !== 'live') continue;
-    const goneChecks = (prev.goneChecks ?? 0) + 1;
-    if (goneChecks > 1800) continue;
-    snapshot[id] = { ...prev, goneChecks };
+    if (snapshot[id]) continue;
+    if (prev.status === 'live') {
+      const goneChecks = (prev.goneChecks ?? 0) + 1;
+      if (goneChecks > 1800) continue;
+      snapshot[id] = { ...prev, goneChecks };
+    } else if (prev.status === 'finished') {
+      // Asentamiento post-final: conservar ~20 min (300 polls ≈ 15/min × 20)
+      // para que poll-livescores re-enriquezca el partido y capture eventos
+      // tardíos (anotador del 90+, roja post-pitido). Ver settleChecks en types.
+      const settleChecks = (prev.settleChecks ?? 0) + 1;
+      if (settleChecks > 300) continue;
+      snapshot[id] = { ...prev, settleChecks };
+    }
   }
 
   await db.doc('_meta/livescoresSnapshot').set({

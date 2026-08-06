@@ -207,6 +207,14 @@ export interface LivescoresSnapshot {
          *  entrada del snapshot para que el rescate de poll-livescores lo
          *  re-consulte por id; expira a ~2h. */
         goneChecks?: number;
+        /** Polls desde que el partido TERMINÓ y salió del feed. SM publica datos
+         *  tardíos DESPUÉS del pitido (atribución del anotador de un gol al 90+,
+         *  expulsiones post-final por bronca) y para entonces ya no hay escrituras
+         *  del poll ni ventana hot del enrichment (si el kickoff se retrasó, la
+         *  ventana por kickoff expira antes del final — Cuypers 90+9 invisible,
+         *  Monterrey vs Orlando 5 ago 2026). Dispara re-enriquecimientos a ~1, 2,
+         *  5, 10 y 20 min post-final; expira a ~20 min. */
+        settleChecks?: number;
         extraTimeSent?: boolean;
         penaltiesSent?: boolean;
         penMissHome?: number;
