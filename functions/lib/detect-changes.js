@@ -315,6 +315,21 @@ async function saveSnapshot(matches, fixtures, previousSnapshot, docHashes) {
             ...(docHashes?.get(m.id) ? { docHash: docHashes.get(m.id) } : (prev?.docHash ? { docHash: prev.docHash } : {})),
         };
     }
+    // Carryover: partidos que estaban 'live' y DESAPARECIERON del feed (típico:
+    // suspendido por tormenta — SM los saca del inplay mientras dura la pausa).
+    // Sin esto, la entrada se perdía en el siguiente rebuild y el rescate de
+    // poll-livescores (poll 1) jamás podía re-consultarlos: el final llegaba sin
+    // push (Inter Miami vs San Luis, 5 ago 2026). goneChecks acota la vida de la
+    // entrada: ~2h de polls (1800 ≈ 15/min × 120 min) y expira — para entonces
+    // syncFixtures ya resolvió el doc por su lado.
+    for (const [id, prev] of Object.entries(previousSnapshot ?? {})) {
+        if (snapshot[id] || prev.status !== 'live')
+            continue;
+        const goneChecks = (prev.goneChecks ?? 0) + 1;
+        if (goneChecks > 1800)
+            continue;
+        snapshot[id] = { ...prev, goneChecks };
+    }
     await admin_init_1.db.doc('_meta/livescoresSnapshot').set({
         matches: snapshot,
         updatedAt: admin_init_1.admin.firestore.Timestamp.now(),

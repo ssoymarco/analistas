@@ -383,10 +383,18 @@ function getLiveClockAnchor(fixture: SMFixture):
     }
   }
   if (typeof ticking.started !== 'number' || ticking.started <= 0) return undefined;
-  const offset = typeof ticking.counts_from === 'number' ? ticking.counts_from : 0;
+  const offset = Math.max(0, typeof ticking.counts_from === 'number' ? ticking.counts_from : 0);
+  // Guard de plausibilidad (espejo de functions/src/mappers.ts): un partido
+  // REANUDADO tras suspensión trae counts_from = minuto de la pausa pero
+  // `started` = inicio original del periodo → el ancla doble-cuenta (96+78 =
+  // "174'", Inter Miami vs San Luis, 5 ago 2026). Ancla implausible → sin
+  // ancla: el minuto se congela en el último valor bueno.
+  const derivedMin = offset + Math.floor((Date.now() / 1000 - ticking.started) / 60);
+  const periodCap = offset >= 90 ? 120 : offset >= 45 ? 90 : 45;
+  if (derivedMin > periodCap + 20) return undefined;
   return {
     periodStartedAt: ticking.started,
-    periodMinuteOffset: Math.max(0, offset),
+    periodMinuteOffset: offset,
   };
 }
 

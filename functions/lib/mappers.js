@@ -154,15 +154,25 @@ function calculateLiveMinute(fixture) {
         const elapsedMin = Math.floor((nowSec - anchor.periodStartedAt) / 60);
         return Math.max(1, anchor.periodMinuteOffset + elapsedMin);
     }
-    // Fallback: wall-clock from kickoff when no usable period anchor is present.
+    // SM SÍ mandó periodos pero ninguno da ancla usable (ninguno ticking, o el
+    // ticking es basura — guard de plausibilidad). Eso significa reloj parado o
+    // datos rotos: CONGELAR (null → el merge conserva el último minuto bueno).
+    // Caer al estimador de pared aquí es lo que infló el minuto contando la
+    // suspensión por tormenta como juego (Inter Miami 5 ago 2026, "174'"). El
+    // estimador queda SOLO para feeds que no traen periodos en absoluto.
+    if (fixture.periods && fixture.periods.length > 0)
+        return null;
+    // Fallback: wall-clock from kickoff when the feed has no period data at all.
     const kickoffTs = fixture.starting_at_timestamp;
     if (!kickoffTs)
         return null;
     const nowSec = Math.floor(Date.now() / 1000);
     const elapsedMin = Math.floor((nowSec - kickoffTs) / 60);
-    // If second half (or beyond), subtract 15 min half-time break
+    // If second half (or beyond), subtract 15 min half-time break.
+    // Tope 105 (90' + descuento récord ~14'): sin él, cualquier retraso del
+    // kickoff o pausa larga se cuenta como juego y el minuto se desboca.
     if (fixture.state_id === types_1.SM_STATE_IDS.SECOND_HALF) {
-        return Math.max(46, elapsedMin - 15);
+        return Math.max(46, Math.min(elapsedMin - 15, 105));
     }
     // Prórroga sin datos de periodos: el estimador de pared no sabe descontar
     // los DOS descansos — el clamp de abajo inventaba "45'" (Isla Dinámica,
@@ -268,6 +278,19 @@ function getLiveClockAnchor(fixture) {
     // Fallback legado: timestamp real de inicio del periodo.
     if (typeof ticking.started !== 'number' || ticking.started <= 0)
         return undefined;
+    // ── Guard de plausibilidad ──
+    // Un partido REANUDADO tras suspensión por tormenta llega con counts_from =
+    // minuto real de la pausa (p. ej. 96) pero `started` = inicio ORIGINAL del
+    // periodo — el ancla doble-cuenta: offset + (now − started) = 96 + 78 = 174
+    // (Inter Miami vs San Luis, 5 ago 2026: la app dijo "174:00'" con el
+    // partido en ~96'; ver también el comentario del incidente "177'" arriba).
+    // Si el minuto derivado rebasa el tope del periodo + descuento récord, el
+    // ancla es basura → undefined. El caller congela el minuto (mejor el último
+    // bueno que uno inventado).
+    const derivedMin = offset + Math.floor((Date.now() / 1000 - ticking.started) / 60);
+    const periodCap = offset >= 90 ? 120 : offset >= 45 ? 90 : 45;
+    if (derivedMin > periodCap + 20)
+        return undefined;
     return {
         periodStartedAt: ticking.started,
         periodMinuteOffset: offset,
@@ -341,6 +364,10 @@ function mapFixtureToMatchDoc(fixture) {
         stateLabel: status === 'finished' ? null : getStateLabel(fixture.state_id),
         minute,
         time,
+        // ⚠️ Si el reloj está CONGELADO (minute null en vivo, sin etiqueta propia
+        // tipo HT/PEN/Suspendido), estos dos campos se ELIMINAN del doc más abajo
+        // — escribir null con merge:true no conserva nada: pisa el último minuto
+        // bueno y `time` cae al string de kickoff ("23:30") en pleno partido.
         league: leagueCfg?.name ?? league?.name ?? 'Unknown',
         leagueId: String(fixture.league_id),
         leagueLogo: league?.image_path ?? '',
@@ -409,6 +436,23 @@ function mapFixtureToMatchDoc(fixture) {
     if (liveEnrich) {
         doc.detail = liveEnrich;
         doc.detailUpdatedAt = firestore_1.Timestamp.now();
+    }
+    // ── Reloj congelado: OMITIR minute/time, no escribir null ──────────────────
+    // calculateLiveMinute devuelve null cuando el reloj no debe avanzar (pausa
+    // por tormenta, ancla implausible de un partido reanudado, prórroga sin
+    // periodos). Con merge:true, escribir null PISA el último minuto bueno y
+    // `time` cae al HH:MM de kickoff en pleno partido. Al eliminar los campos,
+    // Firestore conserva el último valor bueno — congelado de verdad (Inter
+    // Miami vs San Luis, 5 ago 2026). Estados con etiqueta propia (HT/PEN/
+    // Suspendido/Interrumpido) NO se tocan: su `time` es la etiqueta, no un
+    // minuto, y debe escribirse.
+    const FROZEN_LABEL_STATES = [
+        types_1.SM_STATE_IDS.HALF_TIME, types_1.SM_STATE_IDS.PENALTIES,
+        types_1.SM_STATE_IDS.SUSPENDED, types_1.SM_STATE_IDS.INTERRUPTED,
+    ];
+    if (status === 'live' && minute === null && !FROZEN_LABEL_STATES.includes(fixture.state_id)) {
+        delete doc.minute;
+        delete doc.time;
     }
     return doc;
 }

@@ -149,6 +149,42 @@ async function executeSinglePoll(pollIndex) {
     //    too so the detector can pull scorer names and red-card events from
     //    the events array on the same response.
     const prevSnapshot = await (0, detect_changes_1.loadSnapshot)();
+    // 3b. Rescate de partidos que DESAPARECEN del feed inplay.
+    //     Un partido suspendido por tormenta sale del feed de livescores de SM
+    //     mientras dura la pausa — y si termina fuera del feed, nunca vemos la
+    //     transición live→FT: sin push de final, doc congelado en vivo hasta que
+    //     syncFixtures lo flipea en silencio (Inter Miami vs San Luis, 5 ago
+    //     2026: FT real ~02:45, doc en vivo "174'" hasta las 02:49, CERO
+    //     MATCHEND). Mismo patrón que España-Bélgica pero para pushes.
+    //
+    //     1×/min (poll 1), máx 3 por ciclo: cada partido del snapshot que estaba
+    //     'live' y ya no viene en el feed se re-consulta por id y se INYECTA al
+    //     flujo normal — si volvió FT dispara matchEnd por el camino de siempre
+    //     (con el gate de FINISHED_STATE_IDS); si está suspendido, el doc se
+    //     actualiza a Interrumpido (la app deja de tickear); si SM lo borró, el
+    //     fetch da null y la entrada expira del snapshot vía goneChecks.
+    if (pollIndex === 1 && prevSnapshot) {
+        const feedIds = new Set(matchDocs.map(m => m.id));
+        const gone = Object.entries(prevSnapshot)
+            .filter(([id, m]) => m.status === 'live' && !feedIds.has(id))
+            .slice(0, 3);
+        for (const [id] of gone) {
+            try {
+                const fx = await (0, sportmonks_1.fetchFixtureById)(Number(id));
+                if (!fx)
+                    continue;
+                const doc = (0, mappers_1.mapFixtureToMatchDoc)(fx);
+                if (doc) {
+                    matchDocs.push(doc);
+                    smFixtures.push(fx);
+                    logger.info(`🔎 rescate: fixture ${id} fuera del feed → state ${fx.state_id}`);
+                }
+            }
+            catch (err) {
+                logger.warn(`rescate: fetch de fixture ${id} falló`, { err: String(err) });
+            }
+        }
+    }
     const changes = (0, detect_changes_1.detectChanges)(matchDocs, prevSnapshot, smFixtures);
     // 4. Batch write to Firestore (max 500 per batch) — SOLO los docs cuyo
     //    fingerprint cambió desde el poll anterior (ver liveDocFingerprint).

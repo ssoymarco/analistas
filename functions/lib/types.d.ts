@@ -202,6 +202,11 @@ export interface LivescoresSnapshot {
          *  regresa a 0 y no dispara nada. */
         redDropPollsHome?: number;
         redDropPollsAway?: number;
+        /** Polls que este partido lleva 'live' pero FUERA del feed inplay de SM
+         *  (suspendido por tormenta, o SM lo soltó antes del FT). Mantiene viva la
+         *  entrada del snapshot para que el rescate de poll-livescores lo
+         *  re-consulte por id; expira a ~2h. */
+        goneChecks?: number;
         extraTimeSent?: boolean;
         penaltiesSent?: boolean;
         penMissHome?: number;
