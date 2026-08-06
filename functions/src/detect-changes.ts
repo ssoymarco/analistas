@@ -198,7 +198,14 @@ function findRecentYellowCard(
 }
 
 /** Find the most recent substitution for a given side.
- *  player_name = player going OFF, related_player_name = player coming ON. */
+ *
+ *  ⚠️ Semántica REAL de SM v3 (verificada contra datos en vivo, 6 ago 2026,
+ *  Nashville vs León, fixture 19687324): `player_name` = el que ENTRA,
+ *  `related_player_name` = el que SALE. Este comentario decía lo contrario y
+ *  el copy del push construyó las flechas sobre esa premisa → "↓ Edgar
+ *  Guerra ↑ Díber Cambindo" cuando Guerra fue el que entró (reporte del
+ *  dueño; la línea de tiempo de la app siempre estuvo bien porque mapea por
+ *  su cuenta). */
 function findRecentSubstitution(
   fixture: SMFixture | undefined,
   side: 'home' | 'away',
@@ -866,8 +873,11 @@ function copyForYellowCard(c: DetectedChange): FcmCopy {
 function copyForSubstitution(c: DetectedChange): FcmCopy {
   const team = loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
   const minute = c.minute != null ? `${c.minute}' ` : '';
-  const playerOut = c.playerName        ? `↓ ${c.playerName}`        : '';
-  const playerIn  = c.relatedPlayerName ? ` ↑ ${c.relatedPlayerName}` : '';
+  // playerName = ENTRA, relatedPlayerName = SALE (semántica real de SM v3 —
+  // ver findRecentSubstitution). Sale primero en el texto, como lo lee un
+  // relator: "se va X, entra Y".
+  const playerOut = c.relatedPlayerName ? `↓ ${c.relatedPlayerName}` : '';
+  const playerIn  = c.playerName        ? ` ↑ ${c.playerName}`        : '';
   return {
     title: `🔄 Cambio · ${team}`,
     body:  `${minute}${playerOut}${playerIn}`.trim() ||

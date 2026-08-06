@@ -302,12 +302,15 @@ export interface DetectedChange {
   varConfirmed?: boolean;
   /** Goal scorer / card recipient (best-effort, may be missing). */
   scorerName?: string;
-  /** Player involved in the event (red cards, yellow cards). */
+  /** Player involved in the event (red cards, yellow cards). Para
+   *  sustituciones: el que ENTRA (semántica real de SM v3 — `player_name` es
+   *  el que entra; verificado 6 ago 2026, ver findRecentSubstitution). */
   playerName?: string;
   /** SM player_id of the scorer (goal) or carded player (redCard) — used to
    *  notify followers of the PLAYER via player_{id}_goals / player_{id}_cards. */
   playerId?: number | null;
-  /** For substitutions: the player coming ON (replacing playerName). */
+  /** For substitutions: el que SALE (SM `related_player_name`). El comentario
+   *  anterior decía "coming ON" — esa premisa invertía las flechas del push. */
   relatedPlayerName?: string;
   /** Match minute when the event occurred. */
   minute?: number | null;
