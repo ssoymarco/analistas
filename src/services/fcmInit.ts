@@ -313,7 +313,8 @@ export function attachFCMHandlers(): () => void {
   const TYPE_TO_PREF: Record<string, string> = {
     goal: 'goals', goalCancelled: 'goals',
     matchStart: 'matchStart',
-    matchDelayed: 'matchStart', // retraso pre-partido → mismo pref que el inicio
+    matchDelayed: 'matchStart',   // retraso pre-partido (SM movió starting_at)
+    kickoffDelayed: 'matchStart', // retraso pre-partido (SM movió el state_id)
     halftime: 'halftime', secondHalfStart: 'halftime',
     matchEnd: 'matchEnd', extraTimeStart: 'matchEnd', penaltiesStart: 'matchEnd',
     matchSuspended: 'matchEnd',

@@ -219,6 +219,10 @@ export interface LivescoresSnapshot {
     halftimeSent?:      boolean;
     secondHalfSent?:    boolean;
     suspendedSent?:     boolean;
+    /** Aviso de retraso PRE-partido ya enviado (state_id → DELAYED/POSTPONED
+     *  antes del pitido inicial). Latch propio: SM hace flapping entre
+     *  NOT_STARTED y DELAYED mientras dura la tormenta. */
+    kickoffDelaySent?:  boolean;
     extraTimeSent?:     boolean;
     penaltiesSent?:     boolean;
     // Modo Rival diff state
@@ -250,6 +254,7 @@ export type ChangeType =
   | 'yellowCard'      // First yellow card shown
   | 'substitution'    // Player substituted
   | 'matchSuspended'  // Match suspended or postponed mid-game
+  | 'kickoffDelayed'  // Retraso ANTES del pitido inicial (SM state_id 16/10)
   | 'matchReminder'   // Pre-match reminder (~15 min before kickoff)
   | 'lineups'         // Confirmed starting lineups published
   // ── Modo Rival ("bad news" about a team the user marked as rival) ──────────

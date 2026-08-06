@@ -291,6 +291,7 @@ async function saveSnapshot(matches, fixtures, previousSnapshot, docHashes) {
             halftimeSent: prev?.halftimeSent ?? false,
             secondHalfSent: prev?.secondHalfSent ?? false,
             suspendedSent: prev?.suspendedSent ?? false,
+            kickoffDelaySent: prev?.kickoffDelaySent ?? false,
             extraTimeSent: prev?.extraTimeSent ?? false,
             penaltiesSent: prev?.penaltiesSent ?? false,
             rivalResultSent: prev?.rivalResultSent ?? false,
@@ -464,7 +465,17 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
             prev.secondHalfSent = true;
         }
         // ── Match end ─────────────────────────────────────────────────────────
-        if (prev.status === 'live' && match.status === 'finished') {
+        // ⚠️ NO basta con `status === 'finished'`: getMatchStatus (mappers.ts) mapea
+        // los estados MUERTOS de SM (POSTPONED/CANCELLED/DELAYED/ABANDONED/…) a
+        // 'finished' a propósito, para que el reloj del cliente no se dispare
+        // (incidente Chivas vs U. de G., 11 jul 2026). Combinado con la inferencia
+        // por tiempo — un partido con state_id 1 y kickoff pasado se marca 'live' —
+        // eso mandaba un "🏁 Final del partido" de un partido que NUNCA arrancó:
+        // Monterrey 0-0 Orlando City, Leagues Cup, 5 ago 2026, retrasado 85 min por
+        // tormenta (SM pasó 1 → 16 DELAYED y salió el FT falso a las 23:39 UTC).
+        // El FT solo sale con un estado de final REAL: FT / AET / FT_PEN / AWARDED.
+        if (prev.status === 'live' && match.status === 'finished' &&
+            types_1.FINISHED_STATE_IDS.has(match.stateId)) {
             changes.push({ ...baseEvent, type: 'matchEnd' });
             // ── Modo Rival: a finished match with a loser is "bad news" for them.
             // Latched (rivalResultSent) so a finished↔live state flap can't re-fire.
@@ -529,6 +540,27 @@ function detectChanges(currentMatches, previousSnapshot, fixtures) {
             !prev.suspendedSent) {
             changes.push({ ...baseEvent, type: 'matchSuspended' });
             prev.suspendedSent = true;
+        }
+        // ── Retraso ANTES del pitido inicial ──────────────────────────────────
+        // Caso Monterrey vs Orlando City (Leagues Cup, 5 ago 2026): tormenta
+        // eléctrica, el partido arrancó 85 min tarde. SportMonks NO movió
+        // `starting_at` — señaló el retraso SOLO con `state_id` (1 → 16 DELAYED).
+        // Por eso kickoff-delays.ts (que compara starting_at viejo vs nuevo en
+        // syncFixtures) es CIEGO a esta variante, y matchSuspended tampoco cubre:
+        // exige prev.stateId ∈ {1T, 2T, ET, PEN}, o sea que el balón ya rodara.
+        // Aquí cerramos el hueco: el partido aún no empieza y SM lo marca
+        // retrasado/aplazado. Latch propio porque SM hace flapping 1 ↔ 16.
+        const preKickoffStateIds = [
+            types_1.SM_STATE_IDS.NOT_STARTED, types_1.SM_STATE_IDS.TBA, types_1.SM_STATE_IDS.PENDING,
+        ];
+        const kickoffDelayStateIds = [
+            types_1.SM_STATE_IDS.DELAYED, types_1.SM_STATE_IDS.POSTPONED,
+        ];
+        if (preKickoffStateIds.includes(prev.stateId) &&
+            kickoffDelayStateIds.includes(match.stateId) &&
+            !prev.kickoffDelaySent) {
+            changes.push({ ...baseEvent, type: 'kickoffDelayed' });
+            prev.kickoffDelaySent = true;
         }
         // ── Pre-match reminder (one-time, ~15 min before kickoff) ────────────
         // Fired when a scheduled match is within 16 minutes of kickoff and the
@@ -729,6 +761,15 @@ function copyForMatchSuspended(c) {
         body: `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`,
     };
 }
+function copyForKickoffDelayed(c) {
+    // Sin marcador: el partido no ha empezado (mandar "0-0" fue justo el error
+    // del FT falso). Sin hora nueva: SM no la publica en este camino — el estado
+    // dice "retrasado", no cuánto. La app muestra la hora local cuando llegue.
+    return {
+        title: `⏰ Partido retrasado`,
+        body: `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${(0, league_display_1.displayLeague)(c.league)} · el inicio se retrasó`,
+    };
+}
 function copyForMatchReminder(c) {
     return {
         title: `⏰ ¡El partido comienza pronto!`,
@@ -773,6 +814,16 @@ function routeChange(c) {
             return {
                 retrasableBases: [],
                 immediateTopic: null, // kickoff fan-out handled specially below
+                legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`],
+            };
+        case 'kickoffDelayed':
+            // Misma audiencia y ruta que matchStart: un retraso ES un cambio de la
+            // hora de inicio. La clase `kickoff` está ON por default (a diferencia de
+            // `reminders`, opt-in y casi vacío — lección de la auditoría 10 jul 2026).
+            // Inmediato: un retraso no es spoiler, no pasa por buckets de Modo Estadio.
+            return {
+                retrasableBases: [],
+                immediateTopic: null, // fan-out compartido con matchStart, abajo
                 legacyTopics: [`team_${homeId}_start`, `team_${awayId}_start`],
             };
         case 'halftime':
@@ -914,6 +965,7 @@ function buildFcmCopy(c) {
         case 'extraTimeStart': return copyForExtraTimeStart(c);
         case 'penaltiesStart': return copyForPenaltiesStart(c);
         case 'matchSuspended': return copyForMatchSuspended(c);
+        case 'kickoffDelayed': return copyForKickoffDelayed(c);
         case 'matchReminder': return copyForMatchReminder(c);
         case 'lineups': return copyForLineups(c);
         default: return { title: 'Analistas', body: 'Nueva actualización del partido' };
@@ -1050,7 +1102,7 @@ async function dispatchNotifications(changes) {
         // ── Special handling for matchStart (kickoff) ──────────────────────────
         // matchStart goes to the new _kickoff topics (immediate only, no bucket).
         // Also dual-sent to legacy _start topics for old builds.
-        if (change.type === 'matchStart') {
+        if (change.type === 'matchStart' || change.type === 'kickoffDelayed') {
             const homeId = change.homeTeam.id;
             const awayId = change.awayTeam.id;
             // Single condition → users following both teams get exactly one notification.
@@ -1059,7 +1111,7 @@ async function dispatchNotifications(changes) {
             for (const topic of legacyTopics) {
                 sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
             }
-            logger.info(`📣 MATCHSTART — ${title}`, { matchId: change.matchId });
+            logger.info(`📣 ${change.type.toUpperCase()} — ${title}`, { matchId: change.matchId });
             continue;
         }
         // ── Immediate-only events (reminder, lineups) ─────────────────────────
@@ -1219,6 +1271,7 @@ async function dispatchNotifications(changes) {
         extraTime: changes.filter(c => c.type === 'extraTimeStart').length,
         penalties: changes.filter(c => c.type === 'penaltiesStart').length,
         suspended: changes.filter(c => c.type === 'matchSuspended').length,
+        kickoffDelays: changes.filter(c => c.type === 'kickoffDelayed').length,
         reminders: changes.filter(c => c.type === 'matchReminder').length,
         lineups: changes.filter(c => c.type === 'lineups').length,
     });

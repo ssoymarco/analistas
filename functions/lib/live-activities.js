@@ -57,6 +57,7 @@ exports.sendLiveActivityUpdates = sendLiveActivityUpdates;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
 const league_display_1 = require("./league-display");
+const types_1 = require("./types");
 const COLLECTION = 'liveActivities';
 /** Registros más viejos que esto se purgan (previa 4h + partido + linger). */
 const REGISTRATION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -65,7 +66,20 @@ const REGISTRATION_TTL_MS = 12 * 60 * 60 * 1000;
 const END_LINGER_SEC = 10 * 60;
 // ── MatchDoc → ContentState (espejo de buildActivityState del cliente) ───────
 const TICKING = new Set(['1H', '2H', 'ET']);
+/** Estados de SM donde el partido AÚN NO empieza pero se retrasó/aplazó.
+ *  getMatchStatus los mapea a 'finished' (terminal, para no disparar el reloj
+ *  del cliente), así que sin este guard la Activity se cerraba con un "FT 0-0"
+ *  falso — Monterrey vs Orlando City, Leagues Cup, 5 ago 2026, retraso de 85
+ *  min por tormenta. La Activity debe QUEDARSE en previa: el partido va a
+ *  jugarse, y `end` es irreversible (el usuario tendría que re-suscribirse). */
+// Solo DELAYED: un aplazamiento (10 POSTPONED) manda el partido a otro día, y
+// ahí sí corresponde cerrar la Activity.
+const NOT_YET_PLAYED_STATE_IDS = new Set([
+    types_1.SM_STATE_IDS.DELAYED, // 16
+]);
 function phaseFromMatchDoc(m) {
+    if (NOT_YET_PLAYED_STATE_IDS.has(m.stateId))
+        return 'pre';
     if (m.status === 'finished')
         return 'FT';
     if (m.status === 'scheduled')

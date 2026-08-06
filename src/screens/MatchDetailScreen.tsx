@@ -19,7 +19,7 @@ import {
 import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import { haptics } from '../utils/haptics';
-import { deadStateLabelKey } from '../utils/deadState';
+import { deadStateLabelKey, isPreKickoffStateId } from '../utils/deadState';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { SkeletonMatchDetail } from '../components/Skeleton';
@@ -235,9 +235,17 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   // Prefer the API-fresh match (real score, correct minute) over the prop (may be time-inferred)
   const displayMatch = liveMatch ?? match;
 
-  const rawIsLive        = displayMatch.status === 'live';
-  const rawIsFinished    = displayMatch.status === 'finished';
-  const rawIsScheduled   = displayMatch.status === 'scheduled';
+  // Retraso pre-partido (SM 16 DELAYED / 13 TBA / 26 PENDING): llega como
+  // 'finished' — mapeo deliberado del servidor para que el reloj no se dispare
+  // (ver utils/deadState.ts) — pero el balón NO ha rodado. Se trata como PREVIA
+  // y, crítico, se excluye del latch `startedRef` de abajo: si no, el primer
+  // snapshot retrasado dejaba la pantalla clavada en "Finalizado · 0 – 0" para
+  // siempre, incluso cuando el partido arrancaba de verdad una hora después.
+  const isPreKickoffDelay = isPreKickoffStateId(displayMatch.stateId);
+
+  const rawIsLive        = displayMatch.status === 'live'      && !isPreKickoffDelay;
+  const rawIsFinished    = displayMatch.status === 'finished'  && !isPreKickoffDelay;
+  const rawIsScheduled   = displayMatch.status === 'scheduled' ||  isPreKickoffDelay;
   const rawIsInterrupted = displayMatch.status === 'interrupted';
 
   // ── Sticky "match is past kick-off" ─────────────────────────────────────

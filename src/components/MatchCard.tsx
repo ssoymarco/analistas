@@ -13,7 +13,7 @@ import { useLiveTick, computeLiveMinuteSeconds, formatLiveMinute } from '../hook
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatMatchTime } from '../utils/formatMatchTime';
 import { isImageUri } from '../utils/imageUri';
-import { deadStateLabelKey } from '../utils/deadState';
+import { deadStateLabelKey, isPreKickoffStateId } from '../utils/deadState';
 import type { Match } from '../data/types';
 import { getLeagueConfig } from '../config/leagues';
 import { getDisplayVenueName, getDisplayVenueCity } from '../config/worldCupVenues';
@@ -47,9 +47,15 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
   const { t } = useTranslation();
   const { timeFormat } = useTimeFormat();
 
-  const isLive        = match.status === 'live';
-  const isFinished    = match.status === 'finished';
-  const isScheduled   = match.status === 'scheduled';
+  // Retraso pre-partido (SM 16 DELAYED / 13 TBA / 26 PENDING): el servidor lo
+  // manda como 'finished' para que el reloj no se dispare, pero el balón NO ha
+  // rodado — se renderiza como PREVIA (pastilla "Retrasado", sin marcador). Sin
+  // esto la tarjeta decía "0 – 0 · Finalizado" de un partido sin empezar.
+  const isPreKickoffDelay = isPreKickoffStateId(match.stateId);
+
+  const isLive        = match.status === 'live'      && !isPreKickoffDelay;
+  const isFinished    = match.status === 'finished'  && !isPreKickoffDelay;
+  const isScheduled   = match.status === 'scheduled' ||  isPreKickoffDelay;
   const isInterrupted = match.status === 'interrupted';
 
   // Venue label — only shown for cup competitions where stadiums vary
