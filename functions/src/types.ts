@@ -296,6 +296,10 @@ export interface DetectedChange {
   awayRedCards?: number;
   /** Subtype for goals: 'normal' | 'penalty' | 'own'. Default = 'normal'. */
   goalKind?: 'normal' | 'penalty' | 'own';
+  /** Solo en goalCancelled: true si SM registró una revisión del VAR (evento
+   *  type 24) cerca del minuto actual. Decide el copy "El VAR anula" vs el
+   *  neutro "Gol anulado" (anulación inmediata del árbitro, sin revisión). */
+  varConfirmed?: boolean;
   /** Goal scorer / card recipient (best-effort, may be missing). */
   scorerName?: string;
   /** Player involved in the event (red cards, yellow cards). */

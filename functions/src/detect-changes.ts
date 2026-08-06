@@ -289,6 +289,23 @@ export async function saveSnapshot(
 
 // ── Goal scorer extraction ──────────────────────────────────────────────────
 
+/** ¿Hay un evento VAR (type 24) cercano al minuto actual? Distingue la
+ *  revisión formal del VAR de una anulación inmediata del árbitro (fuera de
+ *  lugar claro): solo la primera genera este evento en SM. Ventana de 6' hacia
+ *  atrás: una revisión larga tarda 2-4 minutos entre el gol y la decisión, y
+ *  el evento VAR queda estampado con el minuto de la jugada. Sin minuto actual
+ *  (raro), basta con que exista CUALQUIER evento VAR — mejor atribuir de más
+ *  en un partido que sí tuvo revisión que negar una que acaba de pasar. */
+function hasRecentVarEvent(fixture: SMFixture | undefined, currentMinute: number | null | undefined): boolean {
+  if (!fixture?.events?.length) return false;
+  for (const ev of fixture.events) {
+    if (ev.type_id !== SM_EVENT_TYPES.VAR) continue;
+    if (currentMinute == null || ev.minute == null) return true;
+    if (currentMinute - ev.minute <= 6) return true;
+  }
+  return false;
+}
+
 /** Find the most recent goal event for a given side, returning the scorer
  *  name + kind (normal/penalty/own). Returns null if no matching event yet. */
 function findRecentGoalEvent(
@@ -427,13 +444,19 @@ export function detectChanges(
         });
       }
     } else if (newTotal < prevTotal) {
-      // Total goals DECREASED → a goal was disallowed (VAR overturned).
-      // Figure out which side lost the goal.
+      // El marcador BAJÓ → un gol quedó anulado. Ojo: eso es lo ÚNICO que
+      // sabemos. El copy decía "El VAR anula gol" siempre, pero hay dos
+      // situaciones distintas (reporte del dueño, 5 ago 2026): el árbitro lo
+      // anula en la jugada (fuera de lugar claro, falta previa — SM alcanzó a
+      // publicar el gol y lo retira segundos después, el VAR nunca intervino)
+      // vs. una revisión formal del VAR. Solo atribuimos al VAR cuando SM trae
+      // un evento VAR (type 24) reciente; si no, copy neutro "Gol anulado".
       const side: 'home' | 'away' = match.homeScore < prev.homeScore ? 'home' : 'away';
       changes.push({
         ...baseEvent,
         type: 'goalCancelled',
         scoringTeamSide: side,
+        varConfirmed: hasRecentVarEvent(fixture, match.minute),
       });
     }
 
@@ -763,8 +786,14 @@ function copyForGoalCancelled(c: DetectedChange): FcmCopy {
   const cancelledFromTeam = loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
   const score = `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`;
   const minute = c.minute != null ? `${c.minute}' ` : '';
+  // "El VAR anula" SOLO cuando SM registró una revisión (evento type 24).
+  // Sin ella, copy neutro: cubre el fuera de lugar claro, la falta previa que
+  // el árbitro marca en la jugada, y la corrección de datos de SM. Nunca
+  // afirmar más de lo que sabemos (reporte del dueño, 5 ago 2026).
   return {
-    title: `🚫 El VAR anula gol de ${cancelledFromTeam}`,
+    title: c.varConfirmed
+      ? `🚫 El VAR anula gol de ${cancelledFromTeam}`
+      : `🚫 Gol anulado de ${cancelledFromTeam}`,
     body:  `${minute}${score}`.trim(),
   };
 }
