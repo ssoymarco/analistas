@@ -63,6 +63,10 @@ export interface MatchDoc {
    *  revocadas por VAR. El cliente los pinta en MatchCard. */
   homeRedCards?: number;
   awayRedCards?: number;
+  /** true si SM marcó el fixture como sede neutral (metadata type 35). En
+   *  ligas donde SM rellena el venue con el estadio del "local" (Leagues
+   *  Cup), los campos venue* van en null — ver shouldDiscardFixtureVenue. */
+  venueNeutral?: boolean;
   venueId?: number | null;
   venueName?: string | null;
   venueCity?: string | null;

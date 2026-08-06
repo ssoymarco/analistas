@@ -5,6 +5,10 @@
  * Mirrors the client-side sportsApi.ts mapping logic for server-side use.
  */
 import type { SMFixture, SMStandingGroup, SMTopScorer, MatchDoc, StandingsDoc, TopScorersDoc } from './types';
+/** ¿SM marcó este fixture como sede neutral? (metadata type_id 35) */
+export declare function isNeutralVenueFixture(fixture: SMFixture): boolean;
+/** ¿Hay que DESCARTAR el venue que manda SM para este fixture? */
+export declare function shouldDiscardFixtureVenue(fixture: SMFixture): boolean;
 /**
  * Expulsados de un lado (roja directa + doble amarilla).
  *

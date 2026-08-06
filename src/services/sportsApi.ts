@@ -849,7 +849,12 @@ function positionShort(posId: number): string {
 function mapVenue(v: SMVenue | undefined, venueId?: number): MatchVenue {
   return {
     id: v?.id ?? venueId,
-    name: v?.name ?? 'Estadio desconocido',
+    // Sin nombre → '' para que PreviewTab OCULTE la fila (hasVenue). Antes el
+    // fallback 'Estadio desconocido' forzaba una fila fea con dato nulo
+    // (Inter Miami vs San Luis, 5 ago 2026) — y peor: en Leagues Cup el
+    // servidor ahora BORRA a propósito venues mentirosos de sede neutral, así
+    // que "sin venue" es un estado normal, no un error que anunciar.
+    name: v?.name ?? '',
     city: v?.city_name ?? '',
     capacity: v?.capacity ?? 0,
     surface: v?.surface ?? 'grass',

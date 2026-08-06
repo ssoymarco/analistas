@@ -31,6 +31,30 @@ import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { createHash } from 'crypto';
 import { loc } from './detect-changes';
+import { shouldDiscardFixtureVenue } from './mappers';
+
+// ── Overrides curados de sede POR PARTIDO (_meta/matchVenueOverrides) ────────
+// Para partidos donde SM miente SIN bandera neutral (Tigres vs RSL "en el
+// Universitario" jugándose en America First Field, Sandy — 4 ago 2026, con
+// neutral:false). Formato: { "<fixtureId>": { name, city } }, editable por
+// REST sin deploy. Lo consumen syncFixtures (campos del doc → tarjeta del
+// feed) y syncMatchEnrichment (detail.venue → sección de información).
+
+export interface MatchVenueOverride { name?: string; city?: string }
+
+export async function loadMatchVenueOverrides(): Promise<Map<string, MatchVenueOverride>> {
+  const map = new Map<string, MatchVenueOverride>();
+  try {
+    const snap = await db.doc('_meta/matchVenueOverrides').get();
+    if (!snap.exists) return map;
+    for (const [id, ov] of Object.entries(snap.data() ?? {})) {
+      if (ov && typeof ov === 'object') map.set(id, ov as MatchVenueOverride);
+    }
+  } catch (err) {
+    logger.warn('matchVenueOverrides: lectura falló — se usan los datos de SM', { err: String(err) });
+  }
+  return map;
+}
 import {
   fetchFixtureFullDetail,
   fetchH2H,
@@ -147,7 +171,10 @@ async function queryHotMatches(): Promise<HotMatch[]> {
  * These are the fields useFixtureDetail consumes that aren't already on the
  * lean /livescores/inplay payload.
  */
-function extractStaticEnrichment(fixture: SMFixture): Record<string, unknown> {
+function extractStaticEnrichment(
+  fixture: SMFixture,
+  venueOverride?: MatchVenueOverride,
+): Record<string, unknown> {
   const f = fixture as any;
   const out: Record<string, unknown> = {};
   if (Array.isArray(f.events))            out.events            = f.events;
@@ -155,7 +182,22 @@ function extractStaticEnrichment(fixture: SMFixture): Record<string, unknown> {
   if (Array.isArray(f.lineups))           out.lineups           = f.lineups;
   if (Array.isArray(f.expectedLineups))   out.expectedLineups   = f.expectedLineups;
   if (Array.isArray(f.coaches))           out.coaches           = f.coaches;
-  if (f.venue != null)                    out.venue             = f.venue;
+  // Venue del detail (el que pinta "INFORMACIÓN DEL PARTIDO" en el cliente):
+  //  1) override curado (_meta/matchVenueOverrides) → sede real conocida;
+  //  2) sede neutral en liga no confiable (Leagues Cup) → null EXPLÍCITO,
+  //     el venue que manda SM es el estadio del "local" y es mentira;
+  //  3) lo que diga SM.
+  if (venueOverride) {
+    out.venue = {
+      ...(f.venue ?? {}),
+      name: venueOverride.name ?? f.venue?.name ?? null,
+      city_name: venueOverride.city ?? f.venue?.city_name ?? null,
+    };
+  } else if (shouldDiscardFixtureVenue(fixture)) {
+    out.venue = null;
+  } else if (f.venue != null) {
+    out.venue = f.venue;
+  }
   if (Array.isArray(f.referees))          out.referees          = f.referees;
   if (Array.isArray(f.tvstations)) {
     out.tvstations = f.tvstations
@@ -223,13 +265,14 @@ export async function enrichMatchesByIds(matchIds: string[]): Promise<{ enriched
 
   const now = new Date();
   const h2hSkipCutoff = new Date(now.getTime() - H2H_REFRESH_HOURS * 3600_000);
+  const venueOverrides = await loadMatchVenueOverrides();
   let enriched = 0;
   let errors = 0;
   for (const m of hot) {
     try {
       const fixture = await fetchFixtureFullDetail(Number(m.id));
       if (fixture) {
-        await writeEnrichment(m, fixture, h2hSkipCutoff);
+        await writeEnrichment(m, fixture, h2hSkipCutoff, venueOverrides.get(m.id));
         enriched++;
       }
     } catch (err) {
@@ -256,6 +299,7 @@ export async function syncMatchEnrichmentHandler(): Promise<void> {
 
   const now = new Date();
   const h2hSkipCutoff = new Date(now.getTime() - H2H_REFRESH_HOURS * 3600_000);
+  const venueOverrides = await loadMatchVenueOverrides();
 
   let detailsWritten = 0;
   let detailsSkipped = 0;
@@ -266,7 +310,7 @@ export async function syncMatchEnrichmentHandler(): Promise<void> {
     try {
       const fixture = await fetchFixtureFullDetail(Number(m.id));
       if (fixture) {
-        const wrote = await writeEnrichment(m, fixture, h2hSkipCutoff);
+        const wrote = await writeEnrichment(m, fixture, h2hSkipCutoff, venueOverrides.get(m.id));
         if (wrote.detail) detailsWritten++;
         else detailsSkipped++;
         if (wrote.h2h) h2hWritten++;
@@ -291,12 +335,13 @@ async function writeEnrichment(
   m: HotMatch,
   fixture: SMFixture,
   h2hSkipCutoff: Date,
+  venueOverride?: MatchVenueOverride,
 ): Promise<{ detail: boolean; h2h: boolean }> {
   const seasonId = (fixture as any)?.season_id ?? null;
   const result = { detail: false, h2h: false };
 
   // ── Detail (events, lineups, statistics, venue, predictions, …) ──
-  const enrichment = extractStaticEnrichment(fixture);
+  const enrichment = extractStaticEnrichment(fixture, venueOverride);
 
   // ── Lineup notification (one-time, fires when official lineups arrive) ──
   // Condition: match is scheduled/upcoming, lineups not yet notified, and

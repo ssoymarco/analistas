@@ -12,6 +12,7 @@
 import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { fetchFixturesByDate } from './sportmonks';
+import { loadMatchVenueOverrides } from './sync-match-enrichment';
 import { mapFixtureToMatchDoc } from './mappers';
 import { rebuildSeasonFixturesForSeasons } from './season-fixtures-index';
 import { notifyKickoffDelays } from './kickoff-delays';
@@ -64,6 +65,7 @@ export async function syncFixturesHandler(explicitDates?: string[]): Promise<voi
   logger.info(`📅 syncFixtures: syncing ${dates.length} dates (all leagues)${explicitDates ? ' [backfill mode]' : ''}`);
 
   const allMatchDocs: MatchDoc[] = [];
+  const venueOverrides = await loadMatchVenueOverrides();
 
   for (const date of dates) {
     try {
@@ -71,7 +73,18 @@ export async function syncFixturesHandler(explicitDates?: string[]): Promise<voi
 
       for (const fixture of fixtures) {
         const doc = mapFixtureToMatchDoc(fixture);
-        if (doc) allMatchDocs.push(doc);
+        if (doc) {
+          // Override curado por-partido (_meta/matchVenueOverrides): sede REAL
+          // de partidos donde SM miente sin bandera (Tigres vs RSL "en el
+          // Universitario" jugándose en Sandy, Utah — 4 ago 2026). Se re-aplica
+          // en cada sync para que la ventana de 15 días no lo pise.
+          const ov = venueOverrides.get(doc.id);
+          if (ov) {
+            if (ov.name !== undefined) doc.venueName = ov.name;
+            if (ov.city !== undefined) doc.venueCity = ov.city;
+          }
+          allMatchDocs.push(doc);
+        }
       }
     } catch (err) {
       logger.error(`Failed to fetch fixtures for ${date}:`, err);

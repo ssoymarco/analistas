@@ -6,6 +6,8 @@
  * Mirrors the client-side sportsApi.ts mapping logic for server-side use.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.isNeutralVenueFixture = isNeutralVenueFixture;
+exports.shouldDiscardFixtureVenue = shouldDiscardFixtureVenue;
 exports.countRedCardsForSide = countRedCardsForSide;
 exports.mapFixtureToMatchDoc = mapFixtureToMatchDoc;
 exports.mapStandingsToDoc = mapStandingsToDoc;
@@ -97,6 +99,26 @@ function getMatchStatus(stateId, startingAt) {
         }
     }
     return 'scheduled';
+}
+// ── Sede neutral (metadata type 35) ─────────────────────────────────────────
+/** Ligas donde el venue del fixture es BASURA cuando neutral=true: SM rellena
+ *  con el estadio del equipo listado como local aunque el partido sea en otro
+ *  país. Probado en Leagues Cup (Monterrey "en Monterrey Stadium" jugándose en
+ *  Orlando, 5 ago 2026). Acotado por liga — misma prudencia que
+ *  venueOverrides: en un torneo tipo Mundial la sede neutral SÍ viene bien y
+ *  borrarla sería destruir datos correctos. */
+const NEUTRAL_VENUE_UNRELIABLE_LEAGUE_IDS = new Set([3211]);
+/** ¿SM marcó este fixture como sede neutral? (metadata type_id 35) */
+function isNeutralVenueFixture(fixture) {
+    const md = fixture.metadata;
+    if (!Array.isArray(md))
+        return false;
+    return md.some(m => m?.type_id === 35 && m?.values?.neutral === true);
+}
+/** ¿Hay que DESCARTAR el venue que manda SM para este fixture? */
+function shouldDiscardFixtureVenue(fixture) {
+    return isNeutralVenueFixture(fixture) &&
+        NEUTRAL_VENUE_UNRELIABLE_LEAGUE_IDS.has(fixture.league_id);
 }
 // ── Red cards ───────────────────────────────────────────────────────────────
 /**
@@ -408,13 +430,25 @@ function mapFixtureToMatchDoc(fixture) {
     // retrasado de Modo Estadio.
     doc.homeRedCards = countRedCardsForSide(fixture, home.id);
     doc.awayRedCards = countRedCardsForSide(fixture, away.id);
-    if (fixture.venue_id)
-        doc.venueId = fixture.venue_id;
-    const venue = fixture.venue;
-    if (venue?.name)
-        doc.venueName = venue.name;
-    if (venue?.city_name)
-        doc.venueCity = venue.city_name;
+    // Sede: si SM marcó neutral y la liga es de las que rellenan con el estadio
+    // del "local" (Leagues Cup), NULL EXPLÍCITO — con merge:true, omitir dejaría
+    // vivo el venue mentiroso ya escrito. El flag viaja al doc para el cliente.
+    if (isNeutralVenueFixture(fixture))
+        doc.venueNeutral = true;
+    if (shouldDiscardFixtureVenue(fixture)) {
+        doc.venueId = null;
+        doc.venueName = null;
+        doc.venueCity = null;
+    }
+    else {
+        if (fixture.venue_id)
+            doc.venueId = fixture.venue_id;
+        const venue = fixture.venue;
+        if (venue?.name)
+            doc.venueName = venue.name;
+        if (venue?.city_name)
+            doc.venueCity = venue.city_name;
+    }
     // Live clock anchor — populated only when a period is actively ticking.
     // Without this the client UI freezes the minute between server polls (15s
     // intervals); with it the displayed minute advances smoothly every second.

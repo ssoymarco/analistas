@@ -61,12 +61,30 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.loadMatchVenueOverrides = loadMatchVenueOverrides;
 exports.enrichMatchesByIds = enrichMatchesByIds;
 exports.syncMatchEnrichmentHandler = syncMatchEnrichmentHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
 const crypto_1 = require("crypto");
 const detect_changes_1 = require("./detect-changes");
+const mappers_1 = require("./mappers");
+async function loadMatchVenueOverrides() {
+    const map = new Map();
+    try {
+        const snap = await admin_init_1.db.doc('_meta/matchVenueOverrides').get();
+        if (!snap.exists)
+            return map;
+        for (const [id, ov] of Object.entries(snap.data() ?? {})) {
+            if (ov && typeof ov === 'object')
+                map.set(id, ov);
+        }
+    }
+    catch (err) {
+        logger.warn('matchVenueOverrides: lectura falló — se usan los datos de SM', { err: String(err) });
+    }
+    return map;
+}
 const sportmonks_1 = require("./sportmonks");
 // ── Filtro de cadenas de TV (auditoría de costos, 8 jul 2026) ────────────────
 // SM manda TODAS las cadenas del mundo por partido de Mundial: 276 entradas de
@@ -150,7 +168,7 @@ async function queryHotMatches() {
  * These are the fields useFixtureDetail consumes that aren't already on the
  * lean /livescores/inplay payload.
  */
-function extractStaticEnrichment(fixture) {
+function extractStaticEnrichment(fixture, venueOverride) {
     const f = fixture;
     const out = {};
     if (Array.isArray(f.events))
@@ -163,8 +181,24 @@ function extractStaticEnrichment(fixture) {
         out.expectedLineups = f.expectedLineups;
     if (Array.isArray(f.coaches))
         out.coaches = f.coaches;
-    if (f.venue != null)
+    // Venue del detail (el que pinta "INFORMACIÓN DEL PARTIDO" en el cliente):
+    //  1) override curado (_meta/matchVenueOverrides) → sede real conocida;
+    //  2) sede neutral en liga no confiable (Leagues Cup) → null EXPLÍCITO,
+    //     el venue que manda SM es el estadio del "local" y es mentira;
+    //  3) lo que diga SM.
+    if (venueOverride) {
+        out.venue = {
+            ...(f.venue ?? {}),
+            name: venueOverride.name ?? f.venue?.name ?? null,
+            city_name: venueOverride.city ?? f.venue?.city_name ?? null,
+        };
+    }
+    else if ((0, mappers_1.shouldDiscardFixtureVenue)(fixture)) {
+        out.venue = null;
+    }
+    else if (f.venue != null) {
         out.venue = f.venue;
+    }
     if (Array.isArray(f.referees))
         out.referees = f.referees;
     if (Array.isArray(f.tvstations)) {
@@ -248,13 +282,14 @@ async function enrichMatchesByIds(matchIds) {
     }
     const now = new Date();
     const h2hSkipCutoff = new Date(now.getTime() - H2H_REFRESH_HOURS * 3600_000);
+    const venueOverrides = await loadMatchVenueOverrides();
     let enriched = 0;
     let errors = 0;
     for (const m of hot) {
         try {
             const fixture = await (0, sportmonks_1.fetchFixtureFullDetail)(Number(m.id));
             if (fixture) {
-                await writeEnrichment(m, fixture, h2hSkipCutoff);
+                await writeEnrichment(m, fixture, h2hSkipCutoff, venueOverrides.get(m.id));
                 enriched++;
             }
         }
@@ -278,6 +313,7 @@ async function syncMatchEnrichmentHandler() {
     }
     const now = new Date();
     const h2hSkipCutoff = new Date(now.getTime() - H2H_REFRESH_HOURS * 3600_000);
+    const venueOverrides = await loadMatchVenueOverrides();
     let detailsWritten = 0;
     let detailsSkipped = 0;
     let h2hWritten = 0;
@@ -286,7 +322,7 @@ async function syncMatchEnrichmentHandler() {
         try {
             const fixture = await (0, sportmonks_1.fetchFixtureFullDetail)(Number(m.id));
             if (fixture) {
-                const wrote = await writeEnrichment(m, fixture, h2hSkipCutoff);
+                const wrote = await writeEnrichment(m, fixture, h2hSkipCutoff, venueOverrides.get(m.id));
                 if (wrote.detail)
                     detailsWritten++;
                 else
@@ -307,11 +343,11 @@ async function syncMatchEnrichmentHandler() {
 }
 /** Shared enrichment write — used by both the scheduled handler and the
  *  ad-hoc backfill. Returns flags for what was written. */
-async function writeEnrichment(m, fixture, h2hSkipCutoff) {
+async function writeEnrichment(m, fixture, h2hSkipCutoff, venueOverride) {
     const seasonId = fixture?.season_id ?? null;
     const result = { detail: false, h2h: false };
     // ── Detail (events, lineups, statistics, venue, predictions, …) ──
-    const enrichment = extractStaticEnrichment(fixture);
+    const enrichment = extractStaticEnrichment(fixture, venueOverride);
     // ── Lineup notification (one-time, fires when official lineups arrive) ──
     // Condition: match is scheduled/upcoming, lineups not yet notified, and
     // the fixture now has ≥ 11 confirmed lineup entries (at least one full XI).
