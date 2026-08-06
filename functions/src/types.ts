@@ -59,6 +59,10 @@ export interface MatchDoc {
   stage?: unknown;
   round?: unknown;
   group?: unknown;
+  /** Expulsados por lado (roja directa + doble amarilla), ya descontadas las
+   *  revocadas por VAR. El cliente los pinta en MatchCard. */
+  homeRedCards?: number;
+  awayRedCards?: number;
   venueId?: number | null;
   venueName?: string | null;
   venueCity?: string | null;
@@ -223,6 +227,15 @@ export interface LivescoresSnapshot {
      *  antes del pitido inicial). Latch propio: SM hace flapping entre
      *  NOT_STARTED y DELAYED mientras dura la tormenta. */
     kickoffDelaySent?:  boolean;
+    /** Rojas por lado que REALMENTE notificamos. La anulación se mide contra
+     *  esta marca de agua, no contra el conteo del poll anterior. */
+    redPushedHome?:     number;
+    redPushedAway?:     number;
+    /** Polls consecutivos viendo el conteo por debajo de la marca. Debe llegar
+     *  a RED_CANCEL_CONFIRM_POLLS antes de notificar — un parpadeo del feed lo
+     *  regresa a 0 y no dispara nada. */
+    redDropPollsHome?:  number;
+    redDropPollsAway?:  number;
     extraTimeSent?:     boolean;
     penaltiesSent?:     boolean;
     // Modo Rival diff state
@@ -251,6 +264,7 @@ export type ChangeType =
   | 'extraTimeStart'  // Start of extra time
   | 'penaltiesStart'  // Start of penalty shootout
   | 'redCard'         // Red card or second yellow (sent-off)
+  | 'redCardCancelled'// Expulsión revocada (VAR / corrección del feed)
   | 'yellowCard'      // First yellow card shown
   | 'substitution'    // Player substituted
   | 'matchSuspended'  // Match suspended or postponed mid-game
@@ -275,6 +289,11 @@ export interface DetectedChange {
   leagueId: string;
   /** Which side caused the event (goal / card / substitution) */
   scoringTeamSide?: 'home' | 'away';
+  /** Expulsados por lado al momento del evento. Solo se llena en 'redCard':
+   *  viaja en la tarea retrasada para que el guard de VAR pueda comparar
+   *  contra el estado actual al entregarla. */
+  homeRedCards?: number;
+  awayRedCards?: number;
   /** Subtype for goals: 'normal' | 'penalty' | 'own'. Default = 'normal'. */
   goalKind?: 'normal' | 'penalty' | 'own';
   /** Goal scorer / card recipient (best-effort, may be missing). */

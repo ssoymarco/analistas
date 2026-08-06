@@ -12,6 +12,7 @@ exports.fetchLeagueCurrentSeason = fetchLeagueCurrentSeason;
 exports.fetchSeasonsListForLeague = fetchSeasonsListForLeague;
 exports.fetchFixturesBySeason = fetchFixturesBySeason;
 exports.fetchFixtureById = fetchFixtureById;
+exports.fetchVenueById = fetchVenueById;
 exports.fetchStandings = fetchStandings;
 exports.fetchTopScorers = fetchTopScorers;
 exports.fetchFixtureFullDetail = fetchFixtureFullDetail;
@@ -169,6 +170,22 @@ async function fetchFixtureById(id) {
         const res = await fetchApi(`/fixtures/${id}`, {
             include: 'participants;scores;events;statistics;lineups.player;venue;league;referees.referee;tvstations.tvstation;weatherreport',
         });
+        return res.data ?? null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * GET /venues/{id} — ficha completa de un estadio.
+ *
+ * Se usa cuando detectamos que el `venue` a nivel EQUIPO que publica SM está
+ * viejo (ver deriveHomeVenue en sync-teams.ts): de los fixtures sacamos el
+ * venue_id correcto, y de aquí el nombre/capacidad/imagen que lo acompañan.
+ */
+async function fetchVenueById(id) {
+    try {
+        const res = await fetchApi(`/venues/${id}`, {});
         return res.data ?? null;
     }
     catch {

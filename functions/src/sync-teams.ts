@@ -23,7 +23,7 @@ import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { LEAGUES } from './config';
 import { getCurrentSeasonMap } from './sync-league-seasons';
-import { fetchTeamsForSeason, type SMTeamFull } from './sportmonks';
+import { fetchTeamsForSeason, fetchVenueById, type SMTeamFull } from './sportmonks';
 import type { TeamFullDoc } from './types';
 
 const SLEEP_BETWEEN_LEAGUES_MS = 500;
@@ -88,6 +88,103 @@ function mapTeamToDoc(
   };
 }
 
+// ── Estadio real, derivado de los partidos de local ─────────────────────────
+//
+// SportMonks mantiene un `venue` a nivel EQUIPO que se queda viejo cuando un
+// club se muda: el Atlante seguía publicado en el Estadio Olímpico Andrés
+// Quintana Roo (Cancún, cap. 17,289) mucho después de mudarse a Ciudad de
+// México, y la ficha del equipo mostraba eso — reporte del dueño, 5 ago 2026.
+//
+// El dato bueno YA lo tenemos: el `venue` a nivel FIXTURE sí está al día (el
+// partido del 25 jul dice "Mexico City Stadium / Mexico City"). Así que en vez
+// de hardcodear excepciones — la lección de los season IDs — derivamos la sede
+// de los últimos partidos de local y dejamos que se auto-corrija para
+// cualquier equipo que se mude en el futuro.
+//
+// Se toma la MODA, no el último partido: un club puede jugar un partido suelto
+// en sede neutral (una final, una gira) sin haberse mudado. Se exige mayoría
+// real para no reescribir la sede por un solo dato raro.
+
+/** Cuántos partidos de local recientes se miran. */
+const HOME_VENUE_LOOKBACK = 7;
+/** Apariciones mínimas de la sede ganadora para aceptar la corrección. */
+const HOME_VENUE_MIN_HITS = 3;
+
+interface DerivedVenue { venueId: number; name: string; city: string }
+
+/**
+ * Sede más frecuente entre los últimos partidos de local YA JUGADOS del equipo.
+ * `null` si no hay datos suficientes (equipos de ligas que crawleamos parcial,
+ * o recién ascendidos) — el caller conserva entonces el valor de SM.
+ *
+ * ⚠️ Usa `.select()`: los docs de `matches` pesan ~260 KB por el blob `detail`,
+ * y leerlos completos para ~1,500 equipos al día repetiría el incidente de
+ * egress de julio. La proyección server-side trae solo 3 campos. (El cliente
+ * NO puede proyectar; el Admin SDK sí.)
+ */
+async function deriveHomeVenue(teamId: string): Promise<DerivedVenue | null> {
+  const nowSm = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const snap = await db.collection('matches')
+    .where('homeTeam.id', '==', teamId)
+    .where('startingAtUtc', '<=', nowSm)
+    .orderBy('startingAtUtc', 'desc')
+    .limit(HOME_VENUE_LOOKBACK)
+    .select('venueId', 'venueName', 'venueCity')
+    .get();
+
+  const tally = new Map<number, { hits: number; v: DerivedVenue }>();
+  for (const doc of snap.docs) {
+    const d = doc.data() as { venueId?: number; venueName?: string; venueCity?: string };
+    if (!d.venueId || !d.venueName) continue;
+    const entry = tally.get(d.venueId);
+    if (entry) entry.hits++;
+    else tally.set(d.venueId, {
+      hits: 1,
+      v: { venueId: d.venueId, name: d.venueName, city: d.venueCity ?? '' },
+    });
+  }
+
+  let best: { hits: number; v: DerivedVenue } | null = null;
+  for (const entry of tally.values()) {
+    if (!best || entry.hits > best.hits) best = entry;
+  }
+  return best && best.hits >= HOME_VENUE_MIN_HITS ? best.v : null;
+}
+
+/**
+ * Corrige la sede del doc cuando los partidos contradicen a SM. Capacidad e
+ * imagen no vienen en el fixture, así que se piden a /venues/{id} — una sola
+ * llamada por equipo REALMENTE mudado (un puñado al año), no por equipo.
+ *
+ * No-fatal: si algo falla se conserva lo que dijo SM.
+ */
+async function applyDerivedVenue(doc: TeamFullDoc): Promise<boolean> {
+  try {
+    const derived = await deriveHomeVenue(doc.id);
+    if (!derived) return false;
+    // SM ya coincide con la realidad → nada que hacer (el caso normal).
+    if (derived.name === doc.venueName) return false;
+
+    doc.venueName = derived.name;
+    doc.venueCity = derived.city;
+    // Capacidad/imagen del estadio VIEJO serían peor que nada junto al nombre
+    // nuevo: se limpian y solo se repuebla si SM nos da la ficha del correcto.
+    doc.venueCapacity = 0;
+    doc.venueImage = '';
+    const full = await fetchVenueById(derived.venueId);
+    if (full) {
+      if (full.capacity) doc.venueCapacity = full.capacity;
+      if (full.image_path) doc.venueImage = full.image_path;
+      if (full.city_name) doc.venueCity = full.city_name;
+    }
+    logger.info(`  🏟️ ${doc.name}: sede corregida → ${doc.venueName} (SM decía otra)`);
+    return true;
+  } catch (err) {
+    logger.warn(`  🏟️ ${doc.name}: derivación de sede falló`, { err: String(err) });
+    return false;
+  }
+}
+
 export async function syncTeamsHandler(): Promise<void> {
   logger.info(`👥 syncTeams: starting for ${LEAGUES.length} leagues`);
   // Temporada actual dinámica (_meta/leagueSeasons); hardcode = fallback.
@@ -115,8 +212,14 @@ export async function syncTeamsHandler(): Promise<void> {
       let current = db.batch();
       let opCount = 0;
 
+      // Selecciones nacionales quedan fuera: mapTeamToDoc ya les vacía la sede
+      // a propósito, y no tienen "partidos de local" en el sentido de un club.
+      const isWcNational = league.id === 732;
+      let venuesFixed = 0;
+
       for (const team of teams) {
         const doc = mapTeamToDoc(team, league.id, league.name, seasonId);
+        if (!isWcNational && await applyDerivedVenue(doc)) venuesFixed++;
         const ref = db.collection('teams').doc(doc.id);
         // `merge: true` is intentional — preserves overrides from other
         // sync paths (e.g. a future syncTeamSocial function adding twitter/
@@ -134,7 +237,8 @@ export async function syncTeamsHandler(): Promise<void> {
       await Promise.all(batches.map(b => b.commit()));
 
       totalTeams += teams.length;
-      logger.info(`  ✓ ${league.name}: ${teams.length} teams`);
+      logger.info(`  ✓ ${league.name}: ${teams.length} teams` +
+        (venuesFixed ? ` (${venuesFixed} sede(s) corregida(s))` : ''));
 
       await sleep(SLEEP_BETWEEN_LEAGUES_MS); // rate-limit courtesy
     } catch (err) {

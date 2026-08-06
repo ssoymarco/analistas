@@ -41,6 +41,7 @@ import { getFunctions } from 'firebase-admin/functions';
 import * as logger from 'firebase-functions/logger';
 import { triggerLeagueSyncForChanges } from './sync-league-data';
 import type { DelayedPushPayload } from './deliver-delayed-push';
+import { countRedCardsForSide } from './mappers';
 import {
   SM_STATE_IDS, SM_EVENT_TYPES, LIVE_STATE_IDS, FINISHED_STATE_IDS,
 } from './types';
@@ -109,16 +110,18 @@ export async function loadSnapshot(): Promise<LivescoresSnapshot['matches']> {
 
 /** Count red cards (red + second yellow) for a given side. */
 function countRedCards(events: SMFixtureEvent[] | undefined, participantId: number | undefined): number {
-  if (!events || !participantId) return 0;
-  let count = 0;
-  for (const ev of events) {
-    if (ev.participant_id !== participantId) continue;
-    if (ev.type_id === SM_EVENT_TYPES.RED_CARD || ev.type_id === SM_EVENT_TYPES.SECOND_YELLOW) {
-      count++;
-    }
-  }
-  return count;
+  // Fuente única con el conteo que se escribe en el doc (mappers.ts): si el
+  // detector y el doc contaran distinto, la UI y los pushes se contradirían.
+  return countRedCardsForSide({ events }, participantId);
 }
+
+/** Polls consecutivos que la baja debe sostenerse antes de notificar una
+ *  anulación. pollLivescores corre cada ~4s, así que 3 polls ≈ 12s — nada
+ *  frente a los minutos que tarda una revisión, y suficiente para que un
+ *  parpadeo del feed (SM reordena o pierde eventos entre polls) no dispare un
+ *  "roja anulada" falso. Es el error inverso al FT falso del 5 ago: preferimos
+ *  llegar 12s tarde a inventar una corrección que no ocurrió. */
+const RED_CANCEL_CONFIRM_POLLS = 3;
 
 /** Count in-play missed penalties (type 17) for a given side. Shootout misses
  *  (type 22) are excluded — those belong to the penalty-shootout timeline. */
@@ -262,6 +265,13 @@ export async function saveSnapshot(
       secondHalfSent:   prev?.secondHalfSent   ?? false,
       suspendedSent:    prev?.suspendedSent     ?? false,
       kickoffDelaySent: prev?.kickoffDelaySent  ?? false,
+      // Marca de agua + racha de confirmación de la anulación de roja. DEBEN
+      // preservarse entre polls: sin esto el latch se reiniciaría cada 4s y la
+      // confirmación de 3 polls jamás se alcanzaría.
+      redPushedHome:    prev?.redPushedHome     ?? 0,
+      redPushedAway:    prev?.redPushedAway     ?? 0,
+      redDropPollsHome: prev?.redDropPollsHome  ?? 0,
+      redDropPollsAway: prev?.redDropPollsAway  ?? 0,
       extraTimeSent:    prev?.extraTimeSent     ?? false,
       penaltiesSent: prev?.penaltiesSent ?? false,
       rivalResultSent: prev?.rivalResultSent ?? false,
@@ -578,15 +588,57 @@ export function detectChanges(
 
     if (redHome > prev.redCardsHome) {
       const ev = findRecentRedCard(fixture, 'home');
-      const base = { ...baseEvent, scoringTeamSide: 'home' as const, playerName: ev?.playerName, playerId: ev?.playerId ?? null, minute: ev?.minute ?? match.minute };
+      const base = { ...baseEvent, scoringTeamSide: 'home' as const, playerName: ev?.playerName, playerId: ev?.playerId ?? null, minute: ev?.minute ?? match.minute, homeRedCards: redHome, awayRedCards: redAway };
       changes.push({ ...base, type: 'redCard' });
       changes.push({ ...base, type: 'rivalRedCard' }); // Modo Rival: rival player sent off
+      // Marca de agua: cuántas rojas de este lado hemos NOTIFICADO realmente.
+      // La anulación se mide contra esto, no contra el conteo del poll previo
+      // (que se sobrescribe cada 4s y perdería la referencia al instante).
+      prev.redPushedHome = redHome;
+      prev.redDropPollsHome = 0;
     }
     if (redAway > prev.redCardsAway) {
       const ev = findRecentRedCard(fixture, 'away');
-      const base = { ...baseEvent, scoringTeamSide: 'away' as const, playerName: ev?.playerName, playerId: ev?.playerId ?? null, minute: ev?.minute ?? match.minute };
+      const base = { ...baseEvent, scoringTeamSide: 'away' as const, playerName: ev?.playerName, playerId: ev?.playerId ?? null, minute: ev?.minute ?? match.minute, homeRedCards: redHome, awayRedCards: redAway };
       changes.push({ ...base, type: 'redCard' });
       changes.push({ ...base, type: 'rivalRedCard' });
+      prev.redPushedAway = redAway;
+      prev.redDropPollsAway = 0;
+    }
+
+    // ── Roja anulada (VAR revoca la expulsión) ────────────────────────────
+    // Hueco real: la detección de tarjetas era SOLO por incremento, así que
+    // una revocación no notificaba a NADIE — caso Rodolfo Cota (Atlante vs
+    // América, 24 jul 2026): salieron 3 pushes (redCard + playerRedCard +
+    // rivalRedCard) y ninguna corrección. SM revoca BORRANDO el evento, así
+    // que el conteo baja y eso sí es observable.
+    //
+    // Solo se dispara contra `redPushed*` — la marca de las rojas que de
+    // verdad notificamos. Un partido que entra al snapshot con una roja ya
+    // puesta (sin push nuestro) nunca genera una corrección fantasma.
+    for (const side of ['home', 'away'] as const) {
+      const isHome  = side === 'home';
+      const curr    = isHome ? redHome : redAway;
+      const pushed  = (isHome ? prev.redPushedHome : prev.redPushedAway) ?? 0;
+      const dropKey = isHome ? 'redDropPollsHome' : 'redDropPollsAway';
+
+      if (curr >= pushed) { prev[dropKey] = 0; continue; }
+
+      // La baja se sostiene: un poll más cerca de confirmarla.
+      const streak = (prev[dropKey] ?? 0) + 1;
+      prev[dropKey] = streak;
+      if (streak < RED_CANCEL_CONFIRM_POLLS) continue;
+
+      changes.push({
+        ...baseEvent,
+        type: 'redCardCancelled',
+        scoringTeamSide: side,
+        minute: match.minute,
+      });
+      // Bajar la marca al conteo real: la corrección ya salió y una expulsión
+      // posterior del mismo lado vuelve a contar como roja nueva.
+      if (isHome) prev.redPushedHome = curr; else prev.redPushedAway = curr;
+      prev[dropKey] = 0;
     }
 
     // ── Modo Rival: missed penalty (in-play) ──────────────────────────────
@@ -714,6 +766,15 @@ function copyForGoalCancelled(c: DetectedChange): FcmCopy {
   return {
     title: `🚫 El VAR anula gol de ${cancelledFromTeam}`,
     body:  `${minute}${score}`.trim(),
+  };
+}
+
+function copyForRedCardCancelled(c: DetectedChange): FcmCopy {
+  const team = loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
+  const minute = c.minute != null ? `${c.minute}' ` : '';
+  return {
+    title: `🟥↩️ Se anula la expulsión de ${team}`,
+    body:  `${minute}${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`.trim(),
   };
 }
 
@@ -880,6 +941,15 @@ function routeChange(c: DetectedChange): TopicRouting {
         // by putting the bases in legacyTopics + _d0 handling below.
         legacyTopics:    [`team_${homeId}_goals`, `team_${awayId}_goals`],
       };
+    case 'redCardCancelled':
+      // Mismo criterio que goalCancelled: solo _d0. Los buckets _d2/_d5/_d10
+      // todavía no han visto la roja — el guard de VAR en deliverDelayedPush
+      // les suprime el push original, así que no hay nada que corregirles.
+      return {
+        retrasableBases: [], // sin tareas retrasadas
+        immediateTopic:  null,
+        legacyTopics:    [`team_${homeId}_cards`, `team_${awayId}_cards`],
+      };
     case 'matchStart':
       return {
         retrasableBases: [],
@@ -1033,6 +1103,7 @@ function buildFcmCopy(c: DetectedChange): FcmCopy {
     case 'rivalPenMiss':    return copyForRivalPenMiss(c);
     case 'goal':            return copyForGoal(c);
     case 'goalCancelled':   return copyForGoalCancelled(c);
+    case 'redCardCancelled': return copyForRedCardCancelled(c);
     case 'matchStart':      return copyForMatchStart(c);
     case 'halftime':          return copyForHalftime(c);
     case 'secondHalfStart':   return copyForSecondHalfStart(c);
@@ -1258,6 +1329,15 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
       continue;
     }
 
+    // ── redCardCancelled: solo _d0 (mismo criterio que goalCancelled) ──────
+    if (change.type === 'redCardCancelled') {
+      sendPromises.push(sendWithCondition(messaging,
+        `('team_${change.homeTeam.id}_cards_d0' in topics || 'team_${change.awayTeam.id}_cards_d0' in topics)${muteGuard(change.matchId)}`,
+        title, body, data, dedupId));
+      logger.info(`📣 REDCARDCANCELLED — ${title}`, { matchId: change.matchId });
+      continue;
+    }
+
     // ── Seguidores del JUGADOR (goles y rojas) ─────────────────────────────
     // Topics player_{id}_goals / player_{id}_cards: el cliente los suscribe
     // desde 1.2.x pero el servidor nunca despachó a ellos hasta hoy (5 jul
@@ -1341,6 +1421,8 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
             matchId:    change.matchId,
             homeScore:  change.homeScore,
             awayScore:  change.awayScore,
+            homeRedCards: change.homeRedCards,
+            awayRedCards: change.awayRedCards,
           };
           queue.enqueue(payload, {
             scheduleDelaySeconds: delayMin * 60,
@@ -1365,6 +1447,8 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
               matchId:    change.matchId,
               homeScore:  change.homeScore,
               awayScore:  change.awayScore,
+              homeRedCards: change.homeRedCards,
+              awayRedCards: change.awayRedCards,
             };
             // Fire-and-forget; swallow ALREADY_EXISTS (idempotent re-enqueue)
             queue.enqueue(payload, {
@@ -1393,6 +1477,7 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
   logger.info(`📊 Total changes: ${changes.length}`, {
     goals:           changes.filter(c => c.type === 'goal').length,
     goalsCancelled:  changes.filter(c => c.type === 'goalCancelled').length,
+    redsCancelled:   changes.filter(c => c.type === 'redCardCancelled').length,
     starts:          changes.filter(c => c.type === 'matchStart').length,
     halftimes:       changes.filter(c => c.type === 'halftime').length,
     ends:            changes.filter(c => c.type === 'matchEnd').length,

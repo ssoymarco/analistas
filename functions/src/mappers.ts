@@ -8,7 +8,8 @@
 import { Timestamp } from 'firebase-admin/firestore';
 import { getLeagueConfig } from './config';
 import {
-  LIVE_STATE_IDS, FINISHED_STATE_IDS, DEAD_STATE_IDS, SM_STATE_IDS, STANDING_DETAIL_TYPES,
+  LIVE_STATE_IDS, FINISHED_STATE_IDS, DEAD_STATE_IDS, SM_STATE_IDS, SM_EVENT_TYPES,
+  STANDING_DETAIL_TYPES,
 } from './types';
 import type {
   SMFixture, SMStandingGroup, SMTopScorer,
@@ -101,6 +102,38 @@ function getMatchStatus(
     }
   }
   return 'scheduled';
+}
+
+// ── Red cards ───────────────────────────────────────────────────────────────
+
+/**
+ * Expulsados de un lado (roja directa + doble amarilla).
+ *
+ * ⚠️ Filtra `cancelled`. Cuando el VAR revoca una expulsión, SportMonks
+ * normalmente BORRA el evento del arreglo (verificado en Atlante vs América,
+ * 24 jul 2026, fixture 19715303: tras la revocación de la roja a Rodolfo Cota
+ * no queda ningún evento tipo 20/21). Pero el payload define `cancelled` y
+ * algunos feeds lo usan en vez de borrar — contar un evento cancelado dejaría
+ * al jugador expulsado para siempre en la UI. Cubrimos ambas variantes.
+ *
+ * Fuente única: detect-changes.ts importa esta misma función para que el
+ * conteo del doc y el de la detección de cambios no puedan divergir.
+ */
+export function countRedCardsForSide(
+  fixture: Pick<SMFixture, 'events'>,
+  participantId: number | undefined,
+): number {
+  if (!fixture.events || !participantId) return 0;
+  let count = 0;
+  for (const ev of fixture.events) {
+    if (ev.participant_id !== participantId) continue;
+    if (ev.cancelled === true) continue;
+    if (ev.type_id === SM_EVENT_TYPES.RED_CARD ||
+        ev.type_id === SM_EVENT_TYPES.SECOND_YELLOW) {
+      count++;
+    }
+  }
+  return count;
 }
 
 // ── Live Minute Calculation ─────────────────────────────────────────────────
@@ -344,6 +377,15 @@ export function mapFixtureToMatchDoc(fixture: SMFixture): MatchDoc | null {
   if (round) doc.round = round;
   const group = (fixture as { group?: unknown }).group;
   if (group) doc.group = group;
+  // Expulsados por lado. El cliente ya los pintaba (`<RedCards>` en
+  // MatchCard.tsx) pero el servidor NUNCA escribió estos campos desde la
+  // migración a Firestore-first: el indicador de roja llevaba meses muerto en
+  // el feed. Además le da al guard de VAR (deliver-delayed-push.ts) una fuente
+  // barata para saber si una roja sigue vigente al momento de entregar un push
+  // retrasado de Modo Estadio.
+  doc.homeRedCards = countRedCardsForSide(fixture, home.id);
+  doc.awayRedCards = countRedCardsForSide(fixture, away.id);
+
   if (fixture.venue_id) doc.venueId = fixture.venue_id;
   const venue = (fixture as { venue?: { name?: string; city_name?: string } }).venue;
   if (venue?.name) doc.venueName = venue.name;

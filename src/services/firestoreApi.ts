@@ -72,6 +72,10 @@ interface MatchDoc {
    *  and the server-side MatchDoc for full semantics. */
   homePenScore: number | null;
   awayPenScore: number | null;
+  /** Expulsados por lado. El servidor empezó a escribirlos hasta ago-2026;
+   *  en docs viejos vienen undefined. */
+  homeRedCards?: number;
+  awayRedCards?: number;
   status: MatchStatus;
   stateId: number;
   stateLabel: string | null;
@@ -336,6 +340,11 @@ function matchFromDoc(d: MatchDoc): Match {
     awayScoreHT:    d.awayScoreHT ?? undefined,
     homePenScore:   d.homePenScore ?? undefined,
     awayPenScore:   d.awayPenScore ?? undefined,
+    // El indicador de expulsados de MatchCard (`<RedCards>`) llevaba muerto
+    // desde la migración a Firestore-first: el componente lo pintaba, pero ni
+    // el servidor escribía el campo ni este mapeo lo copiaba. Ahora sí.
+    homeRedCards:   d.homeRedCards || undefined,
+    awayRedCards:   d.awayRedCards || undefined,
     stateLabel:     d.stateLabel ?? undefined,
     // stateId crudo de SM — lo necesita deadStateLabelKey (etiqueta
     // "Cancelado"/"Aplazado" vs "Finalizado") y la detección de DELAYED (16).

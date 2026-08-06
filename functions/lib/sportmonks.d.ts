@@ -55,6 +55,21 @@ export declare function fetchFixturesBySeason(seasonId: number): Promise<SMFixtu
  * Used for match detail enrichment.
  */
 export declare function fetchFixtureById(id: number): Promise<SMFixture | null>;
+export interface SMVenue {
+    id: number;
+    name?: string;
+    city_name?: string;
+    capacity?: number;
+    image_path?: string;
+}
+/**
+ * GET /venues/{id} — ficha completa de un estadio.
+ *
+ * Se usa cuando detectamos que el `venue` a nivel EQUIPO que publica SM está
+ * viejo (ver deriveHomeVenue en sync-teams.ts): de los fixtures sacamos el
+ * venue_id correcto, y de aquí el nombre/capacidad/imagen que lo acompañan.
+ */
+export declare function fetchVenueById(id: number): Promise<SMVenue | null>;
 /**
  * GET /standings/seasons/{seasonId} — full league standings, all pages.
  * Group-stage cups (WC, UCL) can have many entries — pagination is required.
