@@ -729,7 +729,11 @@ export async function fetchFixturesByDate(date: string, leagueIds?: string): Pro
 export async function fetchFixtureById(id: number): Promise<SMFixture> {
   return fetchApi<SMFixture>(`fixtures/${id}`, {
     // Note: 'odds' causes 403 on Pro plan — omitted. Fetch separately if needed.
-    include: 'participants;scores;events;statistics;lineups.player;expectedLineups.player;coaches.nationality;venue;league;referees.referee.country;tvstations.tvstation;weatherreport;predictions;periods;aggregate.fixtures.scores;aggregate.fixtures.participants',
+    // 'expectedLineups' TAMBIÉN se omite: nuestro plan no tiene ese add-on y SM
+    // responde 403 (code 5002) a TODA la petición, no solo al include — el
+    // detalle completo fallaba vía proxy (Sentry REACT-NATIVE-3/-E, ~116
+    // usuarios en 14 d, nov 2026). Verificado: con el include → 403, sin él → 200.
+    include: 'participants;scores;events;statistics;lineups.player;coaches.nationality;venue;league;referees.referee.country;tvstations.tvstation;weatherreport;predictions;periods;aggregate.fixtures.scores;aggregate.fixtures.participants',
   });
 }
 
