@@ -1,0 +1,992 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Analistas — El escudo es el dato</title>
+<meta name="viewport" content="width=1080">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=block" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #0D1F35; }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: #0D1F35;
+           font-family: 'Montserrat', sans-serif; -webkit-font-smoothing: antialiased; }
+  #main { position: absolute; left: 0; top: 0; overflow: visible; }
+  #main text { font-family: 'Montserrat', sans-serif; font-weight: 900; }
+  /* 3D layer */
+  #persp { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; perspective: 2400px; perspective-origin: 540px 960px; }
+  #world { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; transform-style: preserve-3d; transform-origin: 0 0; }
+  .box { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-style: preserve-3d; }
+  .f { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  #floor { position: absolute; left: 0; top: 0; height: 4px; background: rgba(255,255,255,0.3); transform-origin: 50% 50%; }
+  /* UI layer */
+  #ui { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; }
+  #ui div { position: absolute; box-sizing: border-box; }
+  .lbl { color: #FFFFFF; font-weight: 800; white-space: nowrap; text-transform: uppercase; }
+  .flexc { display: flex; align-items: center; justify-content: center; }
+  .pill { height: 72px; width: 144px; border-radius: 36px; display: flex; align-items: center; justify-content: center;
+          font-weight: 900; font-size: 44px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="persp"><div id="world"></div></div>
+  <div id="ui"></div>
+  <svg id="main" width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <defs id="defs"></defs>
+    <g id="root"></g>
+  </svg>
+  <canvas id="fx" width="1080" height="1920" style="position:absolute;left:0;top:0"></canvas>
+</div>
+
+<script>
+/* =====================================================================
+   ANALISTAS — "El escudo es el dato"
+   10 s · 120 BPM · 1080x1920. Every visual property is a pure function
+   of t inside window.seek(t). No CSS animations, timers or frame state.
+   ===================================================================== */
+const LOGO_SUBPATHS = %%LOGO_SUBPATHS%%;
+
+const W = 1080, H = 1920, DUR = 10, BEAT = 0.5;
+const NAVY = '#0D1F35', BLUE = '#3B82F6', RED = '#EF4444', WHITE = '#FFFFFF', BLACK = '#000000';
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+/* ---------------- easing & time helpers (all functions of time) ---------------- */
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, t0, d) => clamp((t - t0) / d);
+const E10 = 1 - Math.pow(2, -10);
+const expoOut = p => p <= 0 ? 0 : p >= 1 ? 1 : (1 - Math.pow(2, -10 * p)) / E10;
+const expoIn = p => p <= 0 ? 0 : p >= 1 ? 1 : (Math.pow(2, 10 * p) - 1) / 1023;
+const expoInOut = p => p <= 0 ? 0 : p >= 1 ? 1 : (p < 0.5 ? expoIn(2 * p) / 2 : 0.5 + expoOut(2 * p - 1) / 2);
+const cubicInOut = p => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const cubicIn = p => p * p * p;
+const smooth = p => p * p * (3 - 2 * p);
+// critically damped spring (no overshoot, no bounce): 0 -> 1
+const spring = (t, t0, w = 26) => { const x = t - t0; return x <= 0 ? 0 : 1 - (1 + w * x) * Math.exp(-w * x); };
+// numeric derivative of any f(t)
+const H_D = 1 / 240;
+const vel = (f, t) => (f(t + H_D) - f(t - H_D)) / (2 * H_D);
+// motion blur from speed (px/s) -> px
+const mb = (v, k = 0.0042, cap = 40) => Math.min(cap, Math.abs(v) * k);
+
+/* ---------------- temporal smear (motion blur along the true path) ----------------
+   For the fastest moves, K samples spread over one subframe interval are drawn
+   additively at 1/K each: an exact average, i.e. a 360° shutter that follows
+   rotation and zoom. Combined with the 3 tmix subframes it leaves no ghosts. */
+const SUBDT = 1 / 180, SMEAR_K = 12;
+let FX = null, FXO = null;
+function smear(t, drawAt, K = SMEAR_K) {
+  for (let k = 0; k < K; k++) {
+    const tk = t + ((k + 0.5) / K - 0.5) * SUBDT;
+    FXO.setTransform(1, 0, 0, 1, 0, 0); FXO.clearRect(0, 0, W, H);
+    drawAt(FXO, tk);
+    FX.save(); FX.setTransform(1, 0, 0, 1, 0, 0);
+    FX.globalCompositeOperation = 'lighter'; FX.globalAlpha = 1 / K;
+    FX.drawImage(FXO.canvas, 0, 0); FX.restore();
+  }
+}
+function fillPoly(ctx, P) { ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]); for (let i = 1; i < P.length; i++) ctx.lineTo(P[i][0], P[i][1]); ctx.closePath(); }
+
+/* ---------------- DOM helpers ---------------- */
+const $ = id => document.getElementById(id);
+function S(tag, attrs = {}, parent = null, text = null) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text !== null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function D(parent, style = {}, text = null, cls = null) {
+  const e = document.createElement('div');
+  if (cls) e.className = cls;
+  Object.assign(e.style, style);
+  if (text !== null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const show = (e, on) => { e.style.display = on ? '' : 'none'; };
+const sshow = (e, on) => e.setAttribute('display', on ? 'inline' : 'none');
+// SVG blur filters (directional: sx, sy)
+const filters = {};
+function mkFilter(id) {
+  const f = S('filter', { id, filterUnits: 'userSpaceOnUse', x: -1200, y: -1200, width: 3480, height: 4320,
+                          'color-interpolation-filters': 'sRGB' }, $('defs'));
+  filters[id] = S('feGaussianBlur', { stdDeviation: '0 0' }, f);
+  return id;
+}
+function blurSVG(el, id, sx, sy) {
+  if (sx < 0.25 && sy < 0.25) { el.removeAttribute('filter'); return; }
+  filters[id].setAttribute('stdDeviation', `${sx.toFixed(2)} ${sy.toFixed(2)}`);
+  el.setAttribute('filter', `url(#${id})`);
+}
+function blurHTML(el, id, sx, sy) {
+  if (sx < 0.25 && sy < 0.25) { el.style.filter = 'none'; return; }
+  filters[id].setAttribute('stdDeviation', `${sx.toFixed(2)} ${sy.toFixed(2)}`);
+  el.style.filter = `url(#${id})`;
+}
+function mkClip(id, x, y, w, h, units) {
+  const c = S('clipPath', { id }, $('defs'));
+  if (units) c.setAttribute('clipPathUnits', units);
+  return S('rect', { x, y, width: w, height: h }, c);
+}
+
+/* ---------------- geometry: polygons & morphing ---------------- */
+function polyArea(P) { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; }
+function centroid(P) { let x = 0, y = 0; for (const p of P) { x += p[0]; y += p[1]; } return [x / P.length, y / P.length]; }
+// corner-preserving resample of a closed polygon to N points
+function resample(pts, N) {
+  const n = pts.length, L = [];
+  let tot = 0;
+  for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % n]; const l = Math.hypot(b[0] - a[0], b[1] - a[1]); L.push(l); tot += l; }
+  const cnt = L.map(l => Math.max(1, Math.round(N * l / tot)));
+  let sum = cnt.reduce((a, b) => a + b, 0);
+  while (sum !== N) {
+    // adjust on longest edges
+    let bi = 0; for (let i = 1; i < n; i++) if ((sum > N ? cnt[i] > 1 : true) && L[i] / cnt[i] * (sum > N ? -1 : 1) > L[bi] / cnt[bi] * (sum > N ? -1 : 1)) bi = i;
+    if (sum > N) { let mi = -1; for (let i = 0; i < n; i++) if (cnt[i] > 1 && (mi < 0 || L[i] / cnt[i] < L[mi] / cnt[mi])) mi = i; cnt[mi]--; sum--; }
+    else { let mi = 0; for (let i = 1; i < n; i++) if (L[i] / cnt[i] > L[mi] / cnt[mi]) mi = i; cnt[mi]++; sum++; }
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % n]; for (let k = 0; k < cnt[i]; k++) { const u = k / cnt[i]; out.push([a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u]); } }
+  return out;
+}
+// orient clockwise (screen, y-down => positive area) and start at the "12 o'clock" point
+function align(P) {
+  let Q = P.slice();
+  if (polyArea(Q) < 0) Q.reverse();
+  const c = centroid(Q);
+  let bi = 0, bd = 1e9;
+  for (let i = 0; i < Q.length; i++) {
+    const a = Math.atan2(Q[i][1] - c[1], Q[i][0] - c[0]);
+    let d = Math.abs(a + Math.PI / 2); if (d > Math.PI) d = 2 * Math.PI - d;
+    if (d < bd) { bd = d; bi = i; }
+  }
+  return Q.slice(bi).concat(Q.slice(0, bi));
+}
+const rot = (p, a) => [p[0] * Math.cos(a) - p[1] * Math.sin(a), p[0] * Math.sin(a) + p[1] * Math.cos(a)];
+// Build a morph from polygon A (source) to polygon B (target), with B arriving rotated by theta.
+function makeMorph(A, B, theta = 0, N = 160) {
+  const cA = centroid(A), cB = centroid(B);
+  const Al = align(resample(A.map(p => [p[0] - cA[0], p[1] - cA[1]]), N));
+  const Bl = align(resample(B.map(p => rot([p[0] - cB[0], p[1] - cB[1]], -theta)), N));
+  return { Al, Bl, cA, cB, theta };
+}
+function morphAt(M, pShape, pRot = pShape, pPos = pShape, cBOverride = null) {
+  const cB = cBOverride || M.cB, a = M.theta * pRot;
+  const cx = lerp(M.cA[0], cB[0], pPos), cy = lerp(M.cA[1], cB[1], pPos);
+  const out = new Array(M.Al.length);
+  for (let i = 0; i < M.Al.length; i++) {
+    const x = lerp(M.Al[i][0], M.Bl[i][0], pShape), y = lerp(M.Al[i][1], M.Bl[i][1], pShape);
+    const r = rot([x, y], a); out[i] = [r[0] + cx, r[1] + cy];
+  }
+  return out;
+}
+const pathOf = P => 'M' + P.map(p => p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join('L') + 'Z';
+const rectPoly = (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+function rrectPoly(x, y, w, h, r, seg = 10) {
+  const P = []; r = Math.min(r, w / 2, h / 2);
+  const corners = [[x + w - r, y + r, -90], [x + w - r, y + h - r, 0], [x + r, y + h - r, 90], [x + r, y + r, 180]];
+  for (const [cx, cy, a0] of corners) for (let k = 0; k <= seg; k++) { const a = (a0 + 90 * k / seg) * Math.PI / 180; P.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); }
+  return P;
+}
+
+/* ---------------- logo geometry ---------------- */
+// logo.svg is 733 x 949. Subpaths: 0 crown, 1 outer silhouette, 2-4 crown jewels, 5 inner field,
+// 6-8 upper stripes, 9/22 band rules, 10-21 ANALISTAS letters, 23-25 lower stripes.
+const LOGO_C = [371, 477];
+// The three stripes rebuilt as native vector polygons (upper + lower halves joined, band drawn on top).
+const STRIPES_LOGO = [
+  [[139, 356.5], [229.5, 284], [233.5, 285], [236, 288.5], [237, 766.5], [233.5, 772], [229.5, 773], [224.5, 771], [158.5, 732], [138, 718.5]],
+  [[322, 311.5], [339.5, 296], [367.5, 274], [373.5, 275], [419, 312.5], [419, 831.5], [399.5, 845.98], [377.5, 860], [369.5, 860.95], [362.5, 858.83], [322, 830.5]],
+  [[507.63, 290.5], [508, 287.5], [512.5, 284], [516.5, 285], [605, 356.5], [604.65, 705.5], [519.5, 763.8], [514.5, 766], [509, 763.5], [507.13, 758.5]]
+];
+const mapLogo = (P, cx, cy, s) => P.map(p => [cx + s * (p[0] - LOGO_C[0]), cy + s * (p[1] - LOGO_C[1])]);
+// End card placement
+const END = { cx: 540, cy: 760, s: 0.8 };
+const ENDZ_ORIGIN = [540, 910];
+const endZoom = t => 1 - 0.035 * (1 - smooth(prog(t, 8.0, 1.95))); // settles exactly at 9.95 so the last frame == frame 0
+function endMatrix(t) { // logo -> screen affine (a, d, e, f)
+  const z = endZoom(t), s = END.s * z;
+  const cx = ENDZ_ORIGIN[0] + (END.cx - ENDZ_ORIGIN[0]) * z, cy = ENDZ_ORIGIN[1] + (END.cy - ENDZ_ORIGIN[1]) * z;
+  return { s, e: cx - s * LOGO_C[0], f: cy - s * LOGO_C[1] };
+}
+const applyM = (M, P) => P.map(p => [M.e + M.s * p[0], M.f + M.s * p[1]]);
+function samplePath(d, N) {
+  const p = S('path', { d }, $('defs'));
+  const L = p.getTotalLength(), out = [];
+  for (let i = 0; i < N; i++) { const q = p.getPointAtLength(L * i / N); out.push([q.x, q.y]); }
+  p.remove();
+  return out;
+}
+
+/* ---------------- typography measurement ---------------- */
+const cv = document.createElement('canvas').getContext('2d');
+function meas(str, weight = 900) {
+  cv.font = `${weight} 100px Montserrat`;
+  const m = cv.measureText(str);
+  return { aL: m.actualBoundingBoxLeft, aR: m.actualBoundingBoxRight, adv: m.width };
+}
+// font size + x so that the ink of `str` spans exactly [x0, x0+w]
+function justify(str, x0, w, weight = 900) {
+  const m = meas(str, weight); const fs = w * 100 / (m.aL + m.aR);
+  return { fs, x: x0 + m.aL * fs / 100, m };
+}
+let CAP = 0.7;
+
+/* =====================================================================
+   SCENE BUILD (once). Layout constants are computed here; seek(t) never
+   reads anything it wrote in a previous frame.
+   ===================================================================== */
+const G = {};
+async function build() {
+  await document.fonts.load('900 100px Montserrat');
+  await document.fonts.load('800 100px Montserrat');
+  await document.fonts.load('700 100px Montserrat');
+  await document.fonts.ready;
+  cv.font = '900 100px Montserrat';
+  CAP = cv.measureText('H').actualBoundingBoxAscent / 100;
+
+  const root = $('root');
+  ['fGOL', 'fES', 'fAL', 'fINST', 'fCNT', 'fLG0', 'fLG1', 'fLG2', 'fLG3', 'fLG4', 'fM0', 'fM1', 'fM2',
+   'fEND', 'fTG0', 'fTG1', 'fTG2', 'fNEWS', 'fUIC', 'fSCORE', 'fE0', 'fE1', 'fE2', 'fRING'].forEach(mkFilter);
+
+  /* ---------- BAR 1 : hook + kinetic type ---------- */
+  const X0 = 90, TW = 900;
+  G.jGOL = justify('GOL', X0, TW);
+  G.jL1 = justify('GOLES', X0, TW);
+  G.jAL = justify('AL', X0, TW);
+  G.jIN = justify('INSTANTE', X0, TW);
+  G.advGOL = meas('GOL').adv;
+  G.gap = 44;
+  const c1 = CAP * G.jL1.fs, c2 = CAP * G.jAL.fs, c3 = CAP * G.jIN.fs, cA = CAP * G.jGOL.fs;
+  G.topA = 960 - cA / 2; G.topB = 960 - c1 / 2;
+  G.topC = 960 - (c1 + c2 + G.gap) / 2; G.topD = 960 - (c1 + c2 + c3 + 2 * G.gap) / 2;
+
+  G.t1 = S('g', {}, root);
+  // live counter
+  G.cntAnchor = S('g', {}, G.t1);
+  mkClip('cntClip', 60, -110, 600, 140);
+  const cntClipG = S('g', { 'clip-path': 'url(#cntClip)' }, G.cntAnchor);
+  G.cntRoll = S('g', {}, cntClipG);
+  G.cntDot = S('circle', { cx: X0 + 16, cy: -23, r: 16, fill: RED }, G.cntRoll);
+  mkClip('cntDigClip', 120, -80, 400, 100);
+  const dg = S('g', { 'clip-path': 'url(#cntDigClip)' }, G.cntRoll);
+  G.cntA = S('text', { x: 134, y: 0, 'font-size': 66, fill: WHITE, 'font-weight': 800 }, dg, "63'");
+  G.cntB = S('text', { x: 134, y: 0, 'font-size': 66, fill: WHITE, 'font-weight': 800 }, dg, "64'");
+  // GOL (red) + white wipe copy, ES
+  G.gGOL = S('g', {}, G.t1);
+  G.tGOLr = S('text', { x: 0, y: 0, 'font-size': 100, fill: RED }, G.gGOL, 'GOL');
+  const wc = S('clipPath', { id: 'wipeGOL', clipPathUnits: 'objectBoundingBox' }, $('defs'));
+  G.wipeRect = S('rect', { x: -0.05, y: -0.2, width: 0, height: 1.4 }, wc);
+  G.tGOLw = S('text', { x: 0, y: 0, 'font-size': 100, fill: WHITE, 'clip-path': 'url(#wipeGOL)' }, G.gGOL, 'GOL');
+  G.gES = S('g', {}, G.t1);
+  S('text', { x: 0, y: 0, 'font-size': 100, fill: WHITE }, G.gES, 'ES');
+  // AL in its slot
+  G.alAnchor = S('g', {}, G.t1);
+  mkClip('alClip', 0, -10, 1080, c2 + 20);
+  const alc = S('g', { 'clip-path': 'url(#alClip)' }, G.alAnchor);
+  G.gAL = S('g', {}, alc); S('text', { x: 0, y: 0, 'font-size': 100, fill: WHITE }, G.gAL, 'AL');
+  G.gIN = S('g', {}, G.t1); S('text', { x: 0, y: 0, 'font-size': 100, fill: WHITE }, G.gIN, 'INSTANTE');
+  G.c = [c1, c2, c3];
+
+  /* ---------- BAR 2 : league names ---------- */
+  G.lgY = 1365;
+  mkClip('lgClip', 0, G.lgY - 175, 1080, 350);
+  G.lgG = S('g', { 'clip-path': 'url(#lgClip)' }, root);
+  const LG = [['PREMIER LEAGUE'], ['LIGA MX'], ['CHAMPIONS LEAGUE'], ['LALIGA'], ['+120', ' LIGAS']];
+  G.lg = LG.map((parts, i) => {
+    const str = parts.join('');
+    const j = justify(str, X0, TW);
+    const g = S('g', {}, G.lgG);
+    const tx = S('text', { x: 0, y: 0, 'font-size': 100, fill: WHITE }, g);
+    parts.forEach((p, k) => S('tspan', { fill: (i === 4 && k === 0) ? BLUE : WHITE }, tx, p));
+    tx.setAttribute('xml:space', 'preserve'); tx.style.whiteSpace = 'pre';
+    return { g, j, cap: CAP * j.fs, t0: 2.0 + 0.5 * i };
+  });
+  G.baseline = S('rect', { x: 230, y: 1148, width: 620, height: 4, fill: 'rgba(255,255,255,0.3)' }, root);
+
+  /* ---------- morph shapes (bars <-> stripes <-> columns) ---------- */
+  G.m = [0, 1, 2].map(i => S('path', { fill: WHITE }, root));
+  // bar-1 redaction bars (full) -> shield stripes (big, bar 2)
+  G.S2 = { cx: 540 - 1.25 * (371.5 - LOGO_C[0]), cy: 780 - 1.25 * (567.5 - LOGO_C[1]), s: 1.25 };
+  G.stripes2 = STRIPES_LOGO.map(P => mapLogo(P, G.S2.cx, G.S2.cy, G.S2.s));
+  const ov = 0.03;
+  G.redBars = [0, 1, 2].map(i => {
+    const top = [G.topD, G.topD + c1 + G.gap, G.topD + c1 + c2 + 2 * G.gap][i], c = G.c[i];
+    return { x: X0 - 4, y: top - ov * c, w: TW + 8, h: c * (1 + 2 * ov) };
+  });
+  G.morph1 = [0, 1, 2].map(i => { const b = G.redBars[i]; return makeMorph(rectPoly(b.x, b.y, b.w, b.h), G.stripes2[i], -Math.PI / 2, 180); });
+  // columns
+  G.colX = [320, 540, 760]; G.colW = 130; G.colB = 1150;
+  G.DATA = [[520, 690, 600], [640, 560, 720], [560, 740, 480], [610, 760, 680]];
+  G.colRect = (i, h) => rectPoly(G.colX[i] - G.colW / 2, G.colB - h, G.colW, h);
+  G.morph2 = [0, 1, 2].map(i => makeMorph(G.stripes2[i], G.colRect(i, G.DATA[0][i]), 0, 180));
+
+  /* ---------- BAR 3 : 3D world ---------- */
+  const world = $('world');
+  G.floor = D(world, { left: '230px', top: '1148px', width: '620px' }); G.floor.id = 'floor';
+  const shadeX = 'rgb(41,91,172)', shadeTop = 'rgb(50,111,209)';
+  G.boxes = [0, 1, 2].map(i => {
+    const b = D(world, {}, null, 'box');
+    const fr = D(b, { background: WHITE }, null, 'f');
+    const tp = D(b, { background: shadeTop }, null, 'f');
+    const bt = D(b, { background: BLUE }, null, 'f');
+    const lf = D(b, { background: shadeX }, null, 'f');
+    const rt = D(b, { background: shadeX }, null, 'f');
+    return { b, fr, tp, bt, lf, rt };
+  });
+  G.P3 = [540, 810];
+  // track geometry (screen, bar 4) and its inverse in world space (after the 90° camera roll)
+  G.ROW0 = 600; G.ROWD = 176;
+  G.trackY = [0, 1, 2].map(i => G.ROW0 + i * G.ROWD + 100);
+  G.trackX0 = 110; G.trackLen = 860; G.trackH = 16;
+  G.worldTrack = i => { // world rect for track i: vertical bar
+    const yc = G.trackY[i] + G.trackH / 2;
+    const xc = G.P3[0] + (yc - G.P3[1]);
+    const yTop = G.P3[1] - (G.trackX0 + G.trackLen - G.P3[0]); // screen right end -> world top
+    return { x: xc - G.trackH / 2, y: yTop, w: G.trackH, h: G.trackLen };
+  };
+
+  /* ---------- BAR 4 : app UI (HTML/CSS) ---------- */
+  buildUI();
+
+  /* ---------- BAR 5 : end card ---------- */
+  G.end = S('g', {}, root);
+  G.endZ = S('g', {}, G.end);
+  G.endT = S('g', {}, G.endZ);
+  const sp = LOGO_SUBPATHS;
+  G.ringExact = S('path', { d: [sp[1], sp[2], sp[3], sp[4], sp[5]].join(''), fill: WHITE, 'fill-rule': 'evenodd' }, G.endT);
+  mkClip('crownClip', 0, -200, 733, 200 + 176);
+  const crownWrap = S('g', { 'clip-path': 'url(#crownClip)' }, G.endT);
+  G.crown = S('path', { d: sp[0], fill: WHITE }, crownWrap);
+  G.stripesExact = STRIPES_LOGO.map(P => S('path', { d: pathOf(P), fill: WHITE }, G.endT));
+  G.bandClipRect = mkClip('bandClip', 56, 440, 0, 185);
+  const band = S('g', { 'clip-path': 'url(#bandClip)' }, G.endT);
+  S('rect', { x: 56, y: 446.6, width: 634, height: 170.3, fill: NAVY }, band);
+  S('path', { d: sp[9] + sp[22], fill: WHITE }, band);
+  S('path', { d: sp.slice(10, 22).join(''), fill: WHITE, 'fill-rule': 'evenodd' }, band);
+  // morph layers (screen space) used 8.0–8.45
+  G.ringMorph = S('path', { fill: WHITE, 'fill-rule': 'evenodd' }, G.end);
+  G.eMorph = [0, 1, 2].map(() => S('path', { fill: WHITE }, G.end));
+  // ring morph: card border (rounded rect ring) -> shield frame
+  G.ringOutL = align(samplePath(sp[1], 720));
+  G.ringInL = align(samplePath(sp[5], 640));
+  G.cardOut = align(resample(rrectPoly(60, 110, 960, 1700, 64, 16), 720));
+  G.cardIn = align(resample(rrectPoly(63, 113, 954, 1694, 61, 16), 640));
+  // tracks -> stripes (rotating back to vertical)
+  G.trackRects = [0, 1, 2].map(i => rectPoly(G.trackX0, G.trackY[i], G.trackLen, G.trackH));
+  // tagline
+  G.tag = S('g', {}, G.endZ);
+  const TAG = [['Goles al instante', '.'], ['Estadísticas', '.'], ['Noticias', '.']];
+  G.tagY = [1262, 1350, 1438];
+  G.tags = TAG.map((parts, i) => {
+    mkClip('tagClip' + i, 0, G.tagY[i] - 70, 1080, 92);
+    const cg = S('g', { 'clip-path': `url(#tagClip${i})` }, G.tag);
+    const g = S('g', {}, cg);
+    const tx = S('text', { x: 540, y: G.tagY[i], 'font-size': 66, 'font-weight': 800, fill: WHITE, 'text-anchor': 'middle' }, g);
+    tx.style.fontWeight = 800;
+    S('tspan', {}, tx, parts[0]); S('tspan', { fill: BLUE }, tx, parts[1]);
+    return g;
+  });
+  G.punchO = [540 + 0.8 * (280 - 371), 760 + 0.8 * (380 - 477)];
+  FX = $('fx').getContext('2d');
+  const oc = document.createElement('canvas'); oc.width = W; oc.height = H; FXO = oc.getContext('2d');
+  G.p2Ring = new Path2D([sp[1], sp[2], sp[3], sp[4], sp[5]].join(''));
+  G.p2Crown = new Path2D(sp[0]);
+  G.p2Rules = new Path2D(sp[9] + sp[22]);
+  G.p2Letters = new Path2D(sp.slice(10, 22).join(''));
+  G.p2Stripes = STRIPES_LOGO.map(P => new Path2D(pathOf(P)));
+  G.TAG = TAG;
+
+  window.__ready = true;
+}
+
+/* ---------------- UI construction ---------------- */
+function buildUI() {
+  const ui = $('ui');
+  G.card = D(ui, { border: '3px solid rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.035)', borderRadius: '64px' });
+  // tracks
+  G.tracks = [0, 1, 2].map(i => {
+    const tr = D(ui, { left: G.trackX0 + 'px', top: G.trackY[i] + 'px', width: G.trackLen + 'px', height: G.trackH + 'px' });
+    const bg = D(tr, { left: 0, top: 0, width: '100%', height: '100%', borderRadius: '8px', background: 'rgba(255,255,255,0.08)' });
+    const bl = D(tr, { top: 0, height: '100%', borderRadius: '8px', background: BLUE });
+    const wh = D(tr, { top: 0, height: '100%', borderRadius: '8px', background: WHITE });
+    const slab = D(tr, { left: 0, top: 0, width: '100%', height: '100%', borderRadius: '2px', background: WHITE });
+    return { tr, bg, bl, wh, slab };
+  });
+  // content container (collapses at 8.0)
+  G.uic = D(ui, { left: 0, top: 0, width: '1080px', height: '1920px', transformOrigin: '540px 760px' });
+  const uic = G.uic;
+  // header: LOC  score  VIS
+  G.hLOC = D(uic, { left: '160px', top: '236px', width: '120px', height: '170px', transformOrigin: '60px 60px' });
+  D(G.hLOC, { left: '4px', top: '0', width: '112px', height: '112px', borderRadius: '56px', background: BLUE });
+  D(G.hLOC, { left: '0', top: '128px', width: '120px', textAlign: 'center', fontSize: '34px', letterSpacing: '0.08em' }, 'LOC', 'lbl');
+  G.hVIS = D(uic, { left: '800px', top: '236px', width: '120px', height: '170px', transformOrigin: '60px 60px' });
+  D(G.hVIS, { left: '4px', top: '0', width: '112px', height: '112px', borderRadius: '56px', background: WHITE });
+  D(G.hVIS, { left: '0', top: '128px', width: '120px', textAlign: 'center', fontSize: '34px', letterSpacing: '0.08em' }, 'VIS', 'lbl');
+  G.score = D(uic, { left: '320px', top: '200px', width: '440px', height: '180px', transformOrigin: '220px 90px' });
+  const digit = (left) => {
+    const slot = D(G.score, { left: left + 'px', top: '0', width: '140px', height: '180px', overflow: 'hidden' });
+    const a = D(slot, { left: 0, top: 0, width: '140px', height: '180px', textAlign: 'center', lineHeight: '180px', fontSize: '176px', fontWeight: 900, color: WHITE });
+    const b = D(slot, { left: 0, top: 0, width: '140px', height: '180px', textAlign: 'center', lineHeight: '180px', fontSize: '176px', fontWeight: 900, color: WHITE });
+    return { slot, a, b };
+  };
+  G.dL = digit(20); G.dR = digit(280);
+  D(G.score, { left: '186px', top: '84px', width: '68px', height: '16px', borderRadius: '8px', background: 'rgba(255,255,255,0.5)' });
+  G.dL.a.textContent = '1'; G.dL.b.textContent = '2'; G.dR.a.textContent = '0'; G.dR.b.textContent = '';
+  // live row
+  G.live = D(uic, { left: '0', top: '430px', width: '1080px', height: '60px' });
+  G.liveIn = D(G.live, { left: '0', top: '0', height: '60px', width: '400px' });
+  G.golPill = D(G.liveIn, { left: '0', top: '4px', height: '52px', width: '120px', borderRadius: '26px', background: RED, color: WHITE,
+                             fontSize: '32px', fontWeight: 900, letterSpacing: '0.06em', transformOrigin: '60px 26px' }, 'GOL', 'flexc');
+  G.liveDot = D(G.liveIn, { left: '0', top: '19px', width: '22px', height: '22px', borderRadius: '11px', background: RED });
+  G.liveMin = D(G.liveIn, { left: '34px', top: '0', height: '60px', lineHeight: '60px', fontSize: '42px', fontWeight: 900, color: RED }, "67'");
+  // stat rows
+  const LAB = ['POSESIÓN', 'TIROS', 'TIROS A PUERTA'];
+  G.VAL = [[58, 42, '%'], [12, 7, ''], [6, 3, '']];
+  G.rows = [0, 1, 2].map(i => {
+    const y0 = G.ROW0 + i * G.ROWD;
+    const pl = D(uic, { left: '110px', top: y0 + 'px', background: BLUE, color: WHITE, transformOrigin: '72px 36px' }, '', 'pill');
+    const pr = D(uic, { left: '826px', top: y0 + 'px', background: WHITE, color: NAVY, transformOrigin: '72px 36px' }, '', 'pill');
+    const lb = D(uic, { left: '240px', top: y0 + 'px', width: '600px', height: '72px', lineHeight: '72px', textAlign: 'center', fontSize: '40px', letterSpacing: '0.06em', transformOrigin: '300px 36px' }, LAB[i], 'lbl');
+    return { pl, pr, lb };
+  });
+  // news
+  G.news = D(uic, { left: '0', top: '0', width: '1080px', height: '1920px' });
+  D(G.news, { left: '110px', top: '1166px', width: '8px', height: '38px', borderRadius: '4px', background: BLUE });
+  D(G.news, { left: '134px', top: '1160px', height: '50px', lineHeight: '50px', fontSize: '36px', letterSpacing: '0.14em' }, 'NOTICIAS', 'lbl');
+  const nc = D(G.news, { left: '110px', top: '1232px', width: '860px', height: '300px', borderRadius: '36px', background: 'rgba(255,255,255,0.06)', overflow: 'hidden' });
+  const img = D(nc, { left: '24px', top: '24px', width: '252px', height: '252px', borderRadius: '24px', background: BLUE, overflow: 'hidden' });
+  // mini pitch (lines only)
+  D(img, { left: '26px', top: '26px', width: '200px', height: '200px', border: '4px solid rgba(255,255,255,0.9)', borderRadius: '6px' });
+  D(img, { left: '26px', top: '124px', width: '200px', height: '4px', background: 'rgba(255,255,255,0.9)' });
+  D(img, { left: '86px', top: '86px', width: '80px', height: '80px', border: '4px solid rgba(255,255,255,0.9)', borderRadius: '40px' });
+  D(img, { left: '86px', top: '26px', width: '80px', height: '34px', border: '4px solid rgba(255,255,255,0.9)', borderTop: 'none' });
+  D(img, { left: '86px', top: '192px', width: '80px', height: '34px', border: '4px solid rgba(255,255,255,0.9)', borderBottom: 'none' });
+  // headline rendered as bars (no invented copy)
+  D(nc, { left: '310px', top: '44px', width: '500px', height: '34px', borderRadius: '8px', background: WHITE });
+  D(nc, { left: '310px', top: '94px', width: '430px', height: '34px', borderRadius: '8px', background: WHITE });
+  D(nc, { left: '310px', top: '144px', width: '300px', height: '34px', borderRadius: '8px', background: WHITE });
+  D(nc, { left: '310px', top: '222px', width: '180px', height: '20px', borderRadius: '6px', background: 'rgba(255,255,255,0.3)' });
+  // tab bar
+  G.tab = D(uic, { left: '0', top: '0', width: '1080px', height: '1920px' });
+  D(G.tab, { left: '60px', top: '1602px', width: '960px', height: '2px', background: 'rgba(255,255,255,0.08)' });
+  const iconSVG = [
+    '<rect x="6" y="2" width="48" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="5"/><line x1="6" y1="32" x2="54" y2="32" stroke="currentColor" stroke-width="5"/><circle cx="30" cy="32" r="8" fill="none" stroke="currentColor" stroke-width="5"/>',
+    '<polygon points="30,3 38,22 58,23 42,36 48,56 30,45 12,56 18,36 2,23 22,22" fill="none" stroke="currentColor" stroke-width="5" stroke-linejoin="round"/>',
+    '<rect x="6" y="4" width="48" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="5"/><line x1="16" y1="20" x2="44" y2="20" stroke="currentColor" stroke-width="5"/><line x1="16" y1="32" x2="44" y2="32" stroke="currentColor" stroke-width="5"/><line x1="16" y1="44" x2="34" y2="44" stroke="currentColor" stroke-width="5"/>',
+    '<circle cx="30" cy="18" r="13" fill="currentColor"/><path d="M6 60 C6 40 54 40 54 60 Z" fill="currentColor"/>'
+  ];
+  G.tabX = [180, 420, 660, 900];
+  G.icons = iconSVG.map((s, i) => {
+    const d = D(G.tab, { left: (G.tabX[i] - 30) + 'px', top: '1660px', width: '60px', height: '64px' });
+    d.innerHTML = `<svg width="60" height="64" viewBox="0 0 60 64" style="overflow:visible;display:block">${s}</svg>`;
+    return d;
+  });
+  G.tabInd = D(G.tab, { left: '0', top: '1748px', width: '56px', height: '7px', borderRadius: '4px', background: BLUE });
+}
+
+/* =====================================================================
+   SEEK — the whole film as a function of t
+   ===================================================================== */
+function seek(tIn) {
+  const t = ((tIn % DUR) + DUR) % DUR;
+  FX.setTransform(1, 0, 0, 1, 0, 0); FX.clearRect(0, 0, W, H);
+  renderBar1(t);
+  renderBar2(t);
+  renderBar3(t);
+  renderBar4(t);
+  renderEnd(t);
+}
+window.seek = seek;
+
+/* ---------- BAR 1 ---------- */
+const font1 = t => lerp(G.jGOL.fs, G.jL1.fs, spring(t, 0.5, 26));
+const L1top = t => G.topA + (G.topB - G.topA) * spring(t, 0.5, 26) + (G.topC - G.topB) * spring(t, 0.75, 28) + (G.topD - G.topC) * spring(t, 1.0, 28);
+const golScale = t => t < 0.055 ? 1.8 : lerp(1.8, 1, expoOut(prog(t, 0.055, 0.24)));
+const esOff = t => 760 * (1 - expoOut(prog(t, 0.5, 0.26)));
+const alOff = t => G.c[1] * 1.15 * (1 - expoOut(prog(t, 0.75, 0.26)));
+const inOff = t => 1180 * (1 - expoOut(prog(t, 1.0, 0.24)));
+const cntExit = t => -130 * expoIn(prog(t, 1.0, 0.14));
+
+function renderBar1(t) {
+  const on = t >= 0.055 && t < M1_T0;
+  sshow(G.t1, on);
+  for (let i = 0; i < 3; i++) sshow(G.m[i], false);
+  if (t >= 1.5 && t < 2.0) renderMorph1(t);
+  if (!on) return;
+  const fs = font1(t), top = L1top(t), base = top + CAP * fs;
+  // GOL / GOLES line
+  const sc = golScale(t);
+  const xG = X0f() + G.jGOL.m.aL * fs / 100;
+  // slam scales about the word centre
+  const cxw = X0f() + 450, cyw = top + CAP * fs / 2;
+  const gx = cxw + (xG - cxw) * sc, gy = cyw + (base - cyw) * sc;
+  G.gGOL.setAttribute('transform', `translate(${gx.toFixed(2)} ${gy.toFixed(2)}) scale(${(fs / 100 * sc).toFixed(4)})`);
+  const slamV = vel(golScale, t) * 500;
+  blurSVG(G.gGOL, 'fGOL', mb(slamV, 0.003, 9), mb(slamV, 0.003, 9));
+  G.wipeRect.setAttribute('width', (1.1 * expoOut(prog(t, 0.5, 0.14))).toFixed(4));
+  // ES
+  sshow(G.gES, t >= 0.5);
+  if (t >= 0.5) {
+    const ex = xG + G.advGOL * fs / 100 + esOff(t);
+    G.gES.setAttribute('transform', `translate(${ex.toFixed(2)} ${base.toFixed(2)}) scale(${(fs / 100).toFixed(4)})`);
+    blurSVG(G.gES, 'fES', mb(vel(esOff, t)), 0);
+  }
+  // live counter (63' -> 67' on 16ths), attached above line 1, exits at 1.0
+  sshow(G.cntAnchor, t < 1.16);
+  if (t < 1.16) {
+    const cs = golScale(t);
+    G.cntAnchor.setAttribute('transform', `translate(0 ${(top - 46 - (cs - 1) * 120).toFixed(2)})`);
+    G.cntRoll.setAttribute('transform', `translate(0 ${cntExit(t).toFixed(2)})`);
+    const ticks = [0.125, 0.25, 0.375, 0.5];
+    let n = 0; for (const k of ticks) if (t >= k) n++;
+    const r = n ? expoOut(prog(t, ticks[n - 1], 0.09)) : 1;
+    G.cntA.textContent = (63 + Math.max(0, n - 1)) + "'";
+    G.cntB.textContent = (63 + n) + "'";
+    G.cntA.setAttribute('y', (-86 * r).toFixed(2)); sshow(G.cntA, n > 0 && r < 1);
+    G.cntB.setAttribute('y', (86 * (1 - r)).toFixed(2));
+    const rv = n ? 86 * vel(tt => expoOut(prog(tt, ticks[n - 1], 0.09)), t) : 0;
+    blurSVG(G.cntRoll, 'fCNT', 0, mb(rv, 0.004, 14) + mb(vel(cntExit, t), 0.004, 20));
+  }
+  // AL
+  sshow(G.alAnchor, t >= 0.75);
+  if (t >= 0.75) {
+    const top2 = top + CAP * fs + G.gap;
+    G.alAnchor.setAttribute('transform', `translate(0 ${top2.toFixed(2)})`);
+    G.gAL.setAttribute('transform', `translate(${G.jAL.x.toFixed(2)} ${(G.c[1] + alOff(t)).toFixed(2)}) scale(${(G.jAL.fs / 100).toFixed(4)})`);
+    blurSVG(G.gAL, 'fAL', 0, mb(vel(alOff, t)));
+  }
+  // INSTANTE
+  sshow(G.gIN, t >= 1.0);
+  if (t >= 1.0) {
+    const top3 = top + CAP * fs + G.gap + G.c[1] + G.gap;
+    G.gIN.setAttribute('transform', `translate(${(G.jIN.x + inOff(t)).toFixed(2)} ${(top3 + G.c[2]).toFixed(2)}) scale(${(G.jIN.fs / 100).toFixed(4)})`);
+    blurSVG(G.gIN, 'fINST', mb(vel(inOff, t), 0.0045, 45), 0);
+  }
+  // text disappears once the redaction bars fully cover it
+
+}
+const X0f = () => 90;
+
+// redaction sweep (1.64–1.78) then rotate-morph bars -> shield stripes (1.78–2.0)
+const RED_T = [1.5, 1.58, 1.66], M1_T0 = 1.76;
+const m1p = t => expoInOut(prog(t, M1_T0, 2.0 - M1_T0));
+function renderMorph1(t) {
+  for (let i = 0; i < 3; i++) {
+    const el = G.m[i]; sshow(el, true);
+    if (t < M1_T0) {
+      const b = G.redBars[i];
+      const w = b.w * expoOut(prog(t, RED_T[i], 0.08));
+      sshow(el, w > 0.5);
+      el.setAttribute('d', pathOf(rectPoly(b.x, b.y, w, b.h)));
+      el.removeAttribute('filter');
+    } else sshow(el, false);
+  }
+  if (t >= M1_T0) smear(t, (ctx, tk) => { ctx.fillStyle = WHITE; for (let i = 0; i < 3; i++) { fillPoly(ctx, morphAt(G.morph1[i], m1p(tk))); ctx.fill(); } });
+}
+
+/* ---------- BAR 2 ---------- */
+const colH = (i, t) => { let h = G.DATA[0][i]; for (let k = 1; k < 4; k++) h += (G.DATA[k][i] - G.DATA[k - 1][i]) * spring(t, 2.5 + 0.5 * k, 24); return h; };
+const m2p = t => expoOut(prog(t, 2.5, 0.3));
+const lgOff = (i, t) => { // slot-reel offset of league i
+  const tin = G.lg[i].t0, tout = i < 4 ? G.lg[i].t0 + 0.5 : 4.5;
+  const ein = 300 * (1 - expoOut(prog(t, tin, 0.26)));
+  const eout = -300 * expoOut(prog(t, tout, 0.26));
+  return ein + eout;
+};
+function renderBar2(t) {
+  // shapes 2.0 – 4.0
+  if (t >= 2.0 && t < 4.0) {
+    for (let i = 0; i < 3; i++) {
+      const el = G.m[i]; sshow(el, true); el.removeAttribute('filter');
+      let P;
+      if (t < 2.5) P = G.stripes2[i];
+      else if (t < 2.8) P = morphAt(G.morph2[i], m2p(t));
+      else P = G.colRect(i, colH(i, t));
+      el.setAttribute('d', pathOf(P));
+    }
+  }
+  // baseline 2.0 – 4.0 (then lives in 3D)
+  const blOn = t >= 2.0 && t < 4.0;
+  sshow(G.baseline, blOn);
+  if (blOn) { const w = 620 * expoOut(prog(t, 2.0, 0.3)); G.baseline.setAttribute('x', (540 - w / 2).toFixed(2)); G.baseline.setAttribute('width', w.toFixed(2)); }
+  // league names
+  const lgOn = t >= 2.0 && t < 4.8;
+  sshow(G.lgG, lgOn);
+  if (lgOn) G.lg.forEach((L, i) => {
+    const vis = t >= L.t0 && t < (i < 4 ? L.t0 + 0.8 : 4.8);
+    sshow(L.g, vis);
+    if (!vis) return;
+    const off = lgOff(i, t);
+    const y = G.lgY + L.cap / 2 + off;
+    L.g.setAttribute('transform', `translate(${L.j.x.toFixed(2)} ${y.toFixed(2)}) scale(${(L.j.fs / 100).toFixed(4)})`);
+    blurSVG(L.g, 'fLG' + i, 0, mb(vel(tt => lgOff(i, tt), t), 0.0045, 30));
+  });
+}
+
+/* ---------- BAR 3 : 2D -> 3D, one camera move ---------- */
+const camP = t => cubicInOut(prog(t, 4.0, 2.0));
+const depth = t => 150 * spring(t, 4.0, 20) + 110 * spring(t, 4.5, 22) + 110 * spring(t, 5.0, 22) + 130 * spring(t, 5.5, 22);
+const flat = t => 1 - expoIn(prog(t, 5.68, 0.32));      // extrusion collapses into the drop
+const resolveP = t => expoIn(prog(t, 5.62, 0.38));      // columns -> track geometry
+function renderBar3(t) {
+  const on = t >= 4.0 && t < 6.0;
+  show($('persp'), on);
+  if (!on) return;
+  const p = camP(t);
+  const roll = 90 * p, tilt = 56 * Math.pow(Math.sin(Math.PI * p), 1.15), sc = 1 - 0.05 * Math.sin(Math.PI * p);
+  const dy = 200 * Math.sin(Math.PI * p), dx = -20 * Math.sin(Math.PI * p);
+  const [Px, Py] = G.P3;
+  $('world').style.transform = `translate(${(Px + dx).toFixed(2)}px,${(Py + dy).toFixed(2)}px) rotateX(${tilt.toFixed(3)}deg) rotateZ(${roll.toFixed(3)}deg) scale3d(${sc.toFixed(4)},${sc.toFixed(4)},${sc.toFixed(4)}) translate(${-Px}px,${-Py}px)`;
+  const mult = [0.78, 1.0, 0.9];
+  const rp = resolveP(t), fl = flat(t);
+  G.boxes.forEach((B, i) => {
+    const h0 = colH(i, t);
+    const a = { x: G.colX[i] - G.colW / 2, y: G.colB - h0, w: G.colW, h: h0 };
+    const b = G.worldTrack(i);
+    const x = lerp(a.x, b.x, rp), y = lerp(a.y, b.y, rp), w = lerp(a.w, b.w, rp), h = lerp(a.h, b.h, rp);
+    const Dp = depth(t) * mult[i] * fl;
+    B.b.style.transform = `translate3d(${x.toFixed(2)}px,${y.toFixed(2)}px,0)`;
+    Object.assign(B.fr.style, { width: w + 'px', height: h + 'px', transform: `translateZ(${Dp.toFixed(2)}px)` });
+    const sideOn = Dp > 0.5;
+    [B.tp, B.bt, B.lf, B.rt].forEach(e => show(e, sideOn));
+    if (sideOn) {
+      Object.assign(B.tp.style, { width: w + 'px', height: Dp + 'px', transform: 'rotateX(90deg)' });
+      Object.assign(B.bt.style, { width: w + 'px', height: Dp + 'px', transform: `translateY(${h}px) rotateX(90deg)` });
+      Object.assign(B.lf.style, { width: Dp + 'px', height: h + 'px', transform: 'rotateY(-90deg)' });
+      Object.assign(B.rt.style, { width: Dp + 'px', height: h + 'px', transform: `translateX(${w}px) rotateY(-90deg)` });
+    }
+  });
+  const fw = 1 - expoIn(prog(t, 5.45, 0.25));
+  show(G.floor, fw > 0.001);
+  G.floor.style.transform = `scaleX(${fw.toFixed(4)})`;
+}
+
+/* ---------- BAR 4 : live match screen ---------- */
+const cardP = t => expoOut(prog(t, 6.0, 0.34));
+const popS = (t, t0, d = 0.3) => expoOut(prog(t, t0, d));
+const newsOff = t => 1000 * (1 - expoOut(prog(t, 7.5, 0.34)));
+const collapse = t => cubicIn(prog(t, 8.0, 0.13));
+function renderBar4(t) {
+  const on = t >= 6.0 && t < 8.13;
+  show($('ui'), on);
+  if (!on) return;
+  const pre = t < 8.0;
+  // card
+  show(G.card, pre);
+  if (pre) {
+    const p = cardP(t);
+    const x0 = lerp(96, 60, p), y0 = lerp(680, 110, p), x1 = lerp(984, 1020, p), y1 = lerp(1084, 1810, p);
+    Object.assign(G.card.style, { left: x0 + 'px', top: y0 + 'px', width: (x1 - x0) + 'px', height: (y1 - y0) + 'px' });
+  }
+  // tracks
+  G.tracks.forEach((T, i) => {
+    show(T.tr, pre);
+    if (!pre) return;
+    const tb = 6.0 + 0.5 * i;
+    const slab = 1 - expoOut(prog(t, tb, 0.2));
+    T.slab.style.transform = `scaleX(${slab.toFixed(4)})`;
+    show(T.slab, slab > 0.001);
+    const f = expoOut(prog(t, tb + 0.04, 0.42));
+    const [a, b] = G.VAL[i], sa = a / (a + b), sb = b / (a + b);
+    const half = G.trackLen / 2, gap = 3;
+    const wl = (half - gap) * sa * f, wr = (half - gap) * sb * f;
+    Object.assign(T.bl.style, { left: (half - gap - wl) + 'px', width: wl + 'px' });
+    Object.assign(T.wh.style, { left: (half + gap) + 'px', width: wr + 'px' });
+  });
+  // content collapse into the shield at 8.0
+  const cp = collapse(t);
+  const cs = 1 - cp;
+  G.uic.style.transform = `scale(${Math.max(0.0001, cs).toFixed(4)})`;
+  G.uic.style.filter = t >= 8.0 ? `blur(${mb(vel(collapse, t) * 700, 0.004, 24).toFixed(2)}px)` : 'none';
+  // header
+  const sLOC = popS(t, 6.04), sVIS = popS(t, 6.1), sSc = popS(t, 6.0, 0.28);
+  G.hLOC.style.transform = `scale(${sLOC})`; G.hVIS.style.transform = `scale(${sVIS})`;
+  G.score.style.transform = `scale(${sSc})`;
+  // goal: LOC 1 -> 2 at 7.0
+  const gr = expoOut(prog(t, 7.0, 0.26));
+  G.dL.a.style.transform = `translateY(${(-180 * gr).toFixed(2)}px)`;
+  G.dL.b.style.transform = `translateY(${(180 * (1 - gr)).toFixed(2)}px)`;
+  blurHTML(G.dL.slot, 'fSCORE', 0, mb(180 * vel(tt => expoOut(prog(tt, 7.0, 0.26)), t), 0.004, 18));
+  // live row: [GOL pill] ● 67'
+  const lv = popS(t, 6.14);
+  const gp = expoOut(prog(t, 7.0, 0.22));
+  const rowW = lerp(0, 136, gp) + 34 + 82;
+  G.liveIn.style.left = (540 - rowW / 2) + 'px';
+  G.liveIn.style.transform = `scale(${lv})`; G.liveIn.style.transformOrigin = `${rowW / 2}px 30px`;
+  show(G.golPill, t >= 7.0);
+  G.golPill.style.transform = `scale(${gp.toFixed(4)})`; G.golPill.style.transformOrigin = '120px 26px';
+  const dotX = lerp(0, 136, gp);
+  G.liveDot.style.left = dotX + 'px'; G.liveMin.style.left = (dotX + 34) + 'px';
+  // rows
+  G.rows.forEach((R, i) => {
+    const tb = 6.0 + 0.5 * i;
+    const s = popS(t, tb, 0.28), s2 = popS(t, tb + 0.03, 0.28);
+    show(R.pl, t >= tb); show(R.pr, t >= tb); show(R.lb, t >= tb);
+    R.pl.style.transform = `scale(${s})`; R.pr.style.transform = `scale(${s2})`;
+    R.lb.style.transform = `translateY(${(24 * (1 - s)).toFixed(2)}px) scale(${lerp(0.7, 1, s)})`;
+    const c = expoOut(prog(t, tb, 0.4));
+    const [a, b, u] = G.VAL[i];
+    R.pl.textContent = Math.round(a * c) + u; R.pr.textContent = Math.round(b * c) + u;
+  });
+  // news card slides in on 7.5
+  show(G.news, t >= 7.5);
+  G.news.style.transform = `translateX(${newsOff(t).toFixed(2)}px)`;
+  blurHTML(G.news, 'fNEWS', mb(vel(newsOff, t), 0.0045, 40), 0);
+  // tab bar rises in, indicator moves to "Noticias" on 7.5
+  const tp = expoOut(prog(t, 6.1, 0.34));
+  G.tab.style.transform = `translateY(${(260 * (1 - tp)).toFixed(2)}px)`;
+  const ip = expoOut(prog(t, 7.5, 0.3));
+  const ix = lerp(G.tabX[0], G.tabX[2], ip);
+  G.tabInd.style.left = (ix - 28) + 'px';
+  G.icons.forEach((ic, i) => { const active = (t >= 7.5 ? 2 : 0) === i; ic.style.color = active ? WHITE : 'rgba(255,255,255,0.35)'; });
+}
+
+/* ---------- BAR 5 : end title (and t=0 loop frame) ---------- */
+function drawEndCardCanvas(ctx, ps) {
+  const [ox, oy] = G.punchO, M = endMatrix(DUR);
+  ctx.setTransform(ps, 0, 0, ps, ox - ps * ox, oy - ps * oy);
+  ctx.save(); ctx.transform(M.s, 0, 0, M.s, M.e, M.f);
+  ctx.fillStyle = WHITE; ctx.fill(G.p2Ring, 'evenodd'); ctx.fill(G.p2Crown);
+  G.p2Stripes.forEach(p => ctx.fill(p));
+  ctx.fillStyle = NAVY; ctx.fillRect(56, 446.6, 634, 170.3);
+  ctx.fillStyle = WHITE; ctx.fill(G.p2Rules); ctx.fill(G.p2Letters, 'evenodd');
+  ctx.restore();
+  ctx.font = '800 66px Montserrat'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  G.TAG.forEach((parts, i) => {
+    const w0 = ctx.measureText(parts[0]).width, w = ctx.measureText(parts[0] + parts[1]).width, x = 540 - w / 2;
+    ctx.fillStyle = WHITE; ctx.fillText(parts[0], x, G.tagY[i]);
+    ctx.fillStyle = BLUE; ctx.fillText(parts[1], x + w0, G.tagY[i]);
+  });
+}
+const endP = t => expoOut(prog(t, 8.0, 0.45));
+const crownOff = t => 170 * (1 - expoOut(prog(t, 8.2, 0.3)));
+const tagOff = (i, t) => 92 * (1 - expoOut(prog(t, 8.5 + 0.5 * i, 0.3)));
+const PUNCH_T0 = 1 / 120, PUNCH_D = 0.085;
+const punch = t => Math.exp(Math.log(30) * Math.pow(prog(t, PUNCH_T0, PUNCH_D), 2));
+function renderEnd(tIn) {
+  const inPunch = tIn < PUNCH_T0 + PUNCH_D;
+  const on = tIn >= 8.0 || inPunch;
+  const punching = inPunch && tIn > PUNCH_T0;
+  sshow(G.end, on && !punching);
+  if (punching) { smear(tIn, (ctx, tk) => drawEndCardCanvas(ctx, punch(tk)), 24); return; }
+  if (!on) return;
+  const t = inPunch ? DUR : tIn;
+  // punch-through at the loop point
+  G.end.removeAttribute('transform'); G.end.removeAttribute('filter');
+  const M = endMatrix(t);
+  const z = endZoom(t);
+  G.endT.setAttribute('transform', `matrix(${M.s} 0 0 ${M.s} ${M.e} ${M.f})`);
+  G.tag.setAttribute('transform', `translate(${ENDZ_ORIGIN[0]} ${ENDZ_ORIGIN[1]}) scale(${z}) translate(${-ENDZ_ORIGIN[0]} ${-ENDZ_ORIGIN[1]})`);
+  const p = endP(t);
+  const morphing = p < 1;
+  // ring
+  sshow(G.ringExact, !morphing); sshow(G.ringMorph, false);
+  G.stripesExact.forEach(e => sshow(e, !morphing));
+  G.eMorph.forEach(e => sshow(e, false));
+  if (morphing) {
+    // card border -> shield frame, stat bars rotate back into the stripes (smeared along their path)
+    const mms = [0, 1, 2].map(i => makeMorph(G.trackRects[i], applyM(M, STRIPES_LOGO[i]), -Math.PI / 2, 160));
+    smear(t, (ctx, tk) => {
+      const pk = endP(tk), Mk = endMatrix(tk);
+      const oT = applyM(Mk, G.ringOutL), iT = applyM(Mk, G.ringInL);
+      ctx.fillStyle = WHITE;
+      ctx.beginPath();
+      [[G.cardOut, oT], [G.cardIn, iT]].forEach(([A, B]) => {
+        ctx.moveTo(lerp(A[0][0], B[0][0], pk), lerp(A[0][1], B[0][1], pk));
+        for (let k = 1; k < A.length; k++) ctx.lineTo(lerp(A[k][0], B[k][0], pk), lerp(A[k][1], B[k][1], pk));
+        ctx.closePath();
+      });
+      ctx.fill('evenodd');
+      mms.forEach(mm => { fillPoly(ctx, morphAt(mm, pk)); ctx.fill(); });
+    });
+  }
+  // crown rises out of the frame
+  sshow(G.crown, t >= 8.2);
+  G.crown.setAttribute('transform', `translate(0 ${crownOff(t).toFixed(2)})`);
+  // band stamps across on 8.5
+  G.bandClipRect.setAttribute('width', (634 * expoOut(prog(t, 8.5, 0.2))).toFixed(2));
+  // tagline, one phrase per beat
+  G.tags.forEach((g, i) => {
+    const vis = t >= 8.5 + 0.5 * i;
+    sshow(g, vis);
+    g.setAttribute('transform', `translate(0 ${tagOff(i, t).toFixed(2)})`);
+    blurSVG(g, 'fTG' + i, 0, mb(vel(tt => tagOff(i, tt), t), 0.0045, 20));
+  });
+}
+
+/* =====================================================================
+   SOUNDTRACK — Web Audio API, rendered offline (deterministic, seeded)
+   120 BPM: kick every beat, hit on every scene change, riser into bar 4,
+   crowd-like swell on the goal hook.
+   ===================================================================== */
+window.renderAudio = async function () {
+  const SR = 48000, LOOKAHEAD = 0.006; // DynamicsCompressorNode pre-delay, trimmed below
+  const NS = Math.round(SR * (DUR + LOOKAHEAD));
+  const ctx = new OfflineAudioContext(2, NS, SR);
+  let seed = 0x5EED1234;
+  const rnd = () => { seed = (seed + 0x6D2B79F5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+  const NB = (() => { const b = ctx.createBuffer(2, SR * 3, SR); for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] = rnd() * 2 - 1; } return b; })();
+  const master = ctx.createGain(); master.gain.value = 0.85;
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -18; comp.knee.value = 10; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.16;
+  master.connect(comp); comp.connect(ctx.destination);
+  const verb = ctx.createConvolver();
+  const ir = ctx.createBuffer(2, Math.floor(SR * 1.6), SR);
+  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.pow(1 - i / d.length, 4) * 0.5; }
+  verb.buffer = ir; const vsend = ctx.createGain(); vsend.gain.value = 0.28; vsend.connect(verb); verb.connect(master);
+
+  const env = (g, t, peak, a, d, curve = 'exp') => {
+    g.gain.setValueAtTime(0.0001, Math.max(0, t));
+    g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t + a);
+    if (curve === 'exp') g.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
+    else g.gain.linearRampToValueAtTime(0, t + a + d);
+  };
+  const out = (node, send = 0, pan = 0) => {
+    const p = ctx.createStereoPanner(); p.pan.value = pan; node.connect(p); p.connect(master);
+    if (send) { const s = ctx.createGain(); s.gain.value = send; p.connect(s); s.connect(vsend); }
+  };
+  const noiseSrc = (t, dur) => { const s = ctx.createBufferSource(); s.buffer = NB; s.start(t, (rnd() * 1.5), dur + 0.05); return s; };
+  const filt = (type, f, Q = 0.7) => { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = Q; return b; };
+
+  function kick(t, v = 1) {
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(170, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.07); o.frequency.exponentialRampToValueAtTime(42, t + 0.32);
+    const g = ctx.createGain(); env(g, t, 0.95 * v, 0.002, 0.42); o.connect(g); out(g); o.start(t); o.stop(t + 0.5);
+    const n = noiseSrc(t, 0.02), hp = filt('highpass', 3000), gn = ctx.createGain(); env(gn, t, 0.18 * v, 0.001, 0.015);
+    n.connect(hp); hp.connect(gn); out(gn);
+  }
+  function hat(t, v = 0.12, len = 0.035, pan = 0.15) {
+    const n = noiseSrc(t, len + 0.02), hp = filt('highpass', 8000), g = ctx.createGain(); env(g, t, v, 0.001, len);
+    n.connect(hp); hp.connect(g); out(g, 0.05, pan);
+  }
+  function snare(t, v = 0.4, f = 1700) {
+    const n = noiseSrc(t, 0.25), bp = filt('bandpass', f, 0.8), g = ctx.createGain(); env(g, t, v, 0.001, 0.16);
+    n.connect(bp); bp.connect(g); out(g, 0.35);
+    const o = ctx.createOscillator(); o.frequency.setValueAtTime(210, t); o.frequency.exponentialRampToValueAtTime(150, t + 0.08);
+    const go = ctx.createGain(); env(go, t, v * 0.5, 0.001, 0.08); o.connect(go); out(go); o.start(t); o.stop(t + 0.15);
+  }
+  function hit(t, v = 1) {
+    const n = noiseSrc(t, 0.9), lp = filt('lowpass', 9000, 0.9);
+    lp.frequency.setValueAtTime(9000, t); lp.frequency.exponentialRampToValueAtTime(250, t + 0.6);
+    const g = ctx.createGain(); env(g, t, 0.55 * v, 0.002, 0.7); n.connect(lp); lp.connect(g); out(g, 0.6);
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(70, t); o.frequency.exponentialRampToValueAtTime(34, t + 0.8);
+    const go = ctx.createGain(); env(go, t, 0.8 * v, 0.003, 0.9); o.connect(go); out(go); o.start(t); o.stop(t + 1);
+    // short minor stab (A minor) through a closing filter
+    const lp2 = filt('lowpass', 3200, 2); lp2.frequency.setValueAtTime(3200, t); lp2.frequency.exponentialRampToValueAtTime(380, t + 0.35);
+    const gs = ctx.createGain(); env(gs, t, 0.09 * v, 0.003, 0.42); lp2.connect(gs); out(gs, 0.5);
+    [110, 220, 261.63, 329.63].forEach((f, k) => { [-6, 6].forEach(dt => { const s = ctx.createOscillator(); s.type = 'sawtooth'; s.frequency.value = f; s.detune.value = dt + k; s.connect(lp2); s.start(t); s.stop(t + 0.5); }); });
+  }
+  function tick(t, f = 2600, v = 0.12) {
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+    const g = ctx.createGain(); env(g, t, v, 0.001, 0.035); o.connect(g); out(g, 0.15, 0.2); o.start(t); o.stop(t + 0.06);
+  }
+  function blip(t, f = 1320, v = 0.1) {
+    [f, f * 1.5].forEach((ff, k) => { const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = ff; const g = ctx.createGain(); env(g, t + k * 0.04, v, 0.002, 0.09); o.connect(g); out(g, 0.25, k ? 0.25 : -0.25); o.start(t + k * 0.04); o.stop(t + k * 0.04 + 0.15); });
+  }
+  function whoosh(t, dur = 0.18, f0 = 600, f1 = 4500, v = 0.22, pan = 0) {
+    const n = noiseSrc(t, dur + 0.05), bp = filt('bandpass', f0, 1.2);
+    bp.frequency.setValueAtTime(f0, t); bp.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + dur * 0.45); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    n.connect(bp); bp.connect(g); out(g, 0.2, pan);
+  }
+  function bass(t, f, len = 0.2, v = 0.2) {
+    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f;
+    const o2 = ctx.createOscillator(); o2.type = 'square'; o2.frequency.value = f / 2;
+    const lp = filt('lowpass', 900, 5); lp.frequency.setValueAtTime(1400, t); lp.frequency.exponentialRampToValueAtTime(220, t + len);
+    const g = ctx.createGain(); env(g, t, v, 0.004, len);
+    o.connect(lp); o2.connect(lp); lp.connect(g); out(g); o.start(t); o2.start(t); o.stop(t + len + 0.05); o2.stop(t + len + 0.05);
+  }
+  function crowd(t0, peak, att, hold, rel) {
+    const end = t0 + att + hold + rel;
+    // slow random amplitude movement so it breathes like many voices
+    const lfo = ctx.createBuffer(1, Math.ceil(SR * (end - t0 + 0.1)), SR);
+    { const d = lfo.getChannelData(0); let a = 0.8, b = 0.8; const step = Math.floor(SR / 9);
+      for (let i = 0; i < d.length; i++) { if (i % step === 0) { a = b; b = 0.55 + rnd() * 0.45; } const u = (i % step) / step; d[i] = a + (b - a) * (u * u * (3 - 2 * u)); } }
+    const ls = ctx.createBufferSource(); ls.buffer = lfo;
+    const am = ctx.createGain(); am.gain.value = 0; ls.connect(am.gain);
+    const e = ctx.createGain(); e.gain.setValueAtTime(0.0001, t0); e.gain.exponentialRampToValueAtTime(peak, t0 + att);
+    e.gain.setValueAtTime(peak, t0 + att + hold); e.gain.exponentialRampToValueAtTime(0.0001, end);
+    [[320, 0.9, 1.0], [700, 1.1, 0.85], [1250, 1.3, 0.55], [2600, 1.6, 0.25]].forEach(([f, Q, v]) => {
+      const n = noiseSrc(t0, end - t0 + 0.05), bp = filt('bandpass', f, Q);
+      bp.frequency.setValueAtTime(f * 0.85, t0); bp.frequency.exponentialRampToValueAtTime(f * 1.12, t0 + att + hold);
+      const g = ctx.createGain(); g.gain.value = v; n.connect(bp); bp.connect(g); g.connect(am);
+    });
+    am.connect(e); out(e, 0.45);
+    ls.start(t0); ls.stop(end + 0.05);
+  }
+
+  const B = BEAT;
+  // kick on every beat
+  for (let k = 0; k < 20; k++) kick(k * B, k === 12 ? 1.1 : (k >= 8 && k < 12 ? 0.85 : 1));
+  // scene-change hits
+  [0, 2, 4, 6, 8].forEach(t => hit(t, t === 6 ? 1.15 : (t === 0 ? 1.05 : 0.8)));
+  // goal hook: crowd swell + minute ticks
+  crowd(0.0, 0.55, 0.16, 0.35, 1.25);
+  [0.125, 0.25, 0.375, 0.5].forEach((t, i) => tick(t, 2400 + i * 120));
+  // bar 1 type moves
+  whoosh(0.46, 0.14, 900, 5000, 0.18, 0.3); snare(0.75, 0.32); whoosh(0.96, 0.12, 700, 6000, 0.24, -0.3);
+  [1.5, 1.625, 1.75].forEach((t, i) => whoosh(t, 0.08, 2000, 7000, 0.12, -0.3 + 0.3 * i));
+  whoosh(1.8, 0.2, 500, 3000, 0.2);
+  // groove: offbeat hats + bass (A | F G | riser | A F G | F G)
+  const bassNotes = { 0: 110, 1: 110, 2: 110, 3: 110, 4: 87.31, 5: 87.31, 6: 98, 7: 98, 12: 110, 13: 110, 14: 87.31, 15: 98, 16: 87.31, 17: 87.31, 18: 98, 19: 98 };
+  for (let k = 0; k < 20; k++) {
+    if (k >= 8 && k < 12) continue;
+    hat(k * B + 0.25, 0.11);
+    if (bassNotes[k]) bass(k * B + 0.25, bassNotes[k], 0.2, 0.17);
+  }
+  // league rolls: one tick per beat
+  for (let k = 4; k <= 8; k++) { tick(k * B, 1800 + (k - 4) * 220, 0.1); whoosh(k * B - 0.02, 0.12, 1200, 5000, 0.08, 0); }
+  // riser into bar 4 (4.0 -> 6.0)
+  {
+    const t0 = 4.0, t1 = 5.985;
+    const n = noiseSrc(t0, 2.05), bp = filt('bandpass', 300, 2.2);
+    bp.frequency.setValueAtTime(300, t0); bp.frequency.exponentialRampToValueAtTime(7500, t1);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.02, t0); g.gain.exponentialRampToValueAtTime(0.5, t1); g.gain.linearRampToValueAtTime(0, 6.0);
+    n.connect(bp); bp.connect(g); out(g, 0.3);
+    const lp = filt('lowpass', 400, 3); lp.frequency.setValueAtTime(400, t0); lp.frequency.exponentialRampToValueAtTime(6000, t1);
+    const gs = ctx.createGain(); gs.gain.setValueAtTime(0.012, t0); gs.gain.exponentialRampToValueAtTime(0.14, t1); gs.gain.linearRampToValueAtTime(0, 6.0);
+    lp.connect(gs); out(gs, 0.2);
+    [-9, 9].forEach(dt => { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.detune.value = dt; o.frequency.setValueAtTime(110, t0); o.frequency.exponentialRampToValueAtTime(880, t1); o.connect(lp); o.start(t0); o.stop(6.0); });
+    // snare roll accelerating: 8ths -> 16ths -> 32nds
+    const roll = [];
+    for (let t = 4.0; t < 5.0 - 1e-6; t += 0.25) roll.push(t);
+    for (let t = 5.0; t < 5.5 - 1e-6; t += 0.125) roll.push(t);
+    for (let t = 5.5; t < 6.0 - 1e-6; t += 0.0625) roll.push(t);
+    roll.forEach(t => snare(t, 0.1 + 0.36 * Math.pow((t - 4) / 2, 1.3), 1500 + 1500 * ((t - 4) / 2)));
+  }
+  // bar 4: UI blips on every stat, goal, news
+  blip(6.0, 1320); blip(6.5, 1480); blip(7.0, 1660); 
+  crowd(7.0, 0.28, 0.1, 0.25, 0.8); snare(7.0, 0.35);
+  whoosh(7.48, 0.2, 800, 5000, 0.2, 0.4);
+  for (let k = 0; k < 16; k++) if (k % 4 !== 2) hat(6.0 + k * 0.125, 0.05, 0.02, -0.2);
+  // bar 5: band stamp + tagline
+  snare(8.5, 0.4, 1300); tick(9.0, 1760, 0.1); tick(9.5, 1975, 0.1); whoosh(8.18, 0.25, 400, 2500, 0.15);
+
+  const buf = await ctx.startRendering();
+  // normalise to -1 dBFS and encode 16-bit WAV
+  const off = Math.round(SR * LOOKAHEAD), NOUT = SR * DUR;
+  const L = buf.getChannelData(0).subarray(off, off + NOUT), R = buf.getChannelData(1).subarray(off, off + NOUT);
+  let pk = 0; for (let i = 0; i < L.length; i++) pk = Math.max(pk, Math.abs(L[i]), Math.abs(R[i]));
+  const gN = Math.pow(10, -1 / 20) / (pk || 1);
+  const bytes = new ArrayBuffer(44 + L.length * 4), dv = new DataView(bytes);
+  const wstr = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  wstr(0, 'RIFF'); dv.setUint32(4, 36 + L.length * 4, true); wstr(8, 'WAVE'); wstr(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 2, true); dv.setUint32(24, SR, true);
+  dv.setUint32(28, SR * 4, true); dv.setUint16(32, 4, true); dv.setUint16(34, 16, true); wstr(36, 'data'); dv.setUint32(40, L.length * 4, true);
+  for (let i = 0, o = 44; i < L.length; i++, o += 4) {
+    dv.setInt16(o, Math.max(-32767, Math.min(32767, Math.round(L[i] * gN * 32767))), true);
+    dv.setInt16(o + 2, Math.max(-32767, Math.min(32767, Math.round(R[i] * gN * 32767))), true);
+  }
+  const u8 = new Uint8Array(bytes); let bin = '';
+  for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return { b64: btoa(bin), peak: pk };
+};
+
+build();
+</script>
+</body>
+</html>
