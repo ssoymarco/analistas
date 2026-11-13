@@ -1,0 +1,801 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Analistas — Modo Estadio</title>
+<meta name="viewport" content="width=1080">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=block" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #0D1F35; }
+  #c { display: block; width: 1080px; height: 1920px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+/* =====================================================================
+   ANALISTAS — "Modo Estadio"   16 s · 120 BPM · 1080x1920 · 60 fps
+   Everything is drawn from scratch by window.seek(t): a pure function
+   of time. No CSS animation, no timers, no state between frames.
+   ===================================================================== */
+const LOGO_SUBPATHS = ["M364.5 26.16C362.2 27.14 358.8 29.44 356.71 31.5C354.63 33.56 352.78 35.67 352 38.5C351.22 41.33 351.37 45.5 352.02 48.5C352.68 51.5 355.27 54.67 355.93 56.5C356.34 57.63 356 59.5 356 59.5C356 59.5 323.25 103.25 315 113.5C312.16 117.03 309.42 119.08 306.5 121C303.58 122.92 301.17 124.19 297.5 125C293.83 125.81 288.67 126.42 284.5 125.88C280.33 125.34 276 123.6 272.5 121.76C269 119.93 266.82 117.97 263.5 114.88C258.08 109.84 240 91.5 240 91.5C240 91.5 243.64 87 244.79 84.5C245.94 82 246.87 79.33 246.9 76.5C246.92 73.67 246.15 70.08 244.91 67.5C243.68 64.92 241.74 62.75 239.5 61C237.26 59.25 234 57.69 231.5 57.02C229 56.36 226.67 56.67 224.5 57C222.33 57.33 220.42 57.92 218.5 59C216.58 60.08 214.58 61.58 213 63.5C211.42 65.42 209.78 67.83 209 70.5C208.22 73.17 207.85 76.67 208.35 79.5C208.85 82.33 209.89 85 212 87.5C214.11 90 219.17 92.5 221 94.5C222.46 96.09 222.52 97.4 223 99.5C226 112.5 239 172.5 239 172.5C239 172.5 239.89 173.15 240.5 173C244.75 171.93 255.83 167.91 264.5 166.07C273.17 164.24 282.83 163.17 292.5 162C302.17 160.83 310.83 159.86 322.5 159.03C334.17 158.19 350.67 157.34 362.5 157C374.33 156.66 382.33 156.66 393.5 157C404.67 157.34 419.17 158.19 429.5 159.03C439.83 159.87 445.15 160.46 455.5 162.04C467.33 163.85 500.5 169.88 500.5 169.88C500.5 169.88 501.72 168.59 502 167.5C505.1 155.27 515.87 108.92 519.12 96.5C519.55 94.86 520.25 94.14 521.5 93C522.97 91.67 526.17 90.58 527.92 88.5C529.67 86.42 531.32 83.33 532 80.5C532.68 77.67 532.83 74.5 532 71.5C531.17 68.5 528.58 64.58 527 62.5C525.62 60.7 524.25 59.96 522.5 59.05C520.75 58.13 518.67 57.34 516.5 57C514.33 56.66 511.83 56.51 509.5 57.01C507.17 57.51 504.58 58.59 502.5 60C500.42 61.41 498.42 63.08 497.01 65.5C495.59 67.92 494.31 71.67 494 74.5C493.69 77.33 494.12 80 495.12 82.5C496.12 85 499.18 88 499.99 89.5C500.37 90.2 500 91.5 500 91.5C500 91.5 486.72 105.43 481.47 110.5C476.5 115.3 472.66 119.33 468.5 121.9C464.34 124.48 460.67 125.43 456.5 125.95C452.33 126.46 447.5 126.03 443.5 125C439.5 123.97 435.42 121.69 432.5 119.77C429.58 117.85 428.23 116.34 426 113.5C418.27 103.62 392.93 70 386.1 60.5C385.13 59.15 385 56.5 385 56.5C385 56.5 388.3 51.67 389 49.5C389.7 47.33 389.19 45.17 389.19 43.5C389.19 41.9 389.49 41.03 389 39.5C388.47 37.83 387.73 35.55 386 33.5C384.25 31.42 381.08 28.31 378.5 27C375.92 25.69 372.83 25.79 370.5 25.65C368.17 25.51 366.72 25.22 364.5 26.16Z","M365.5 173.47C355.9 173.47 351.08 173.4 341.5 174.01C329.67 174.77 307 176.67 294.5 178C283.25 179.2 274.67 180.5 266.5 182C258.33 183.5 249.85 185.58 245.5 187C243.14 187.77 241.79 188.92 240.39 190.5C238.98 192.08 237.39 193.78 237.05 196.5C236.4 201.58 236.5 221 236.5 221C236.5 221 226.23 222.44 219.5 224C212.33 225.67 203.72 227.59 193.5 231C182.5 234.67 164.5 241.33 153.5 246C142.79 250.55 134.83 255.01 127.5 259.02C120.17 263.03 115.67 265.88 109.5 270.06C103.33 274.24 94.92 280.36 90.5 284.1C87.06 287.01 84.92 289.93 83 292.5C81.08 295.07 80.16 296.83 79 299.5C77.84 302.17 76.72 305.33 76.07 308.5C75.41 311.67 75.07 314.48 75.07 318.5C75.06 334.17 76 402.5 76 402.5C76 402.5 41.14 420.67 33.5 425C31.81 425.96 31.14 426.83 30.14 428.5C28.9 430.58 26.13 433.55 26.05 437.5C25.36 472.5 25.66 604 26 638.5C26.03 641.04 27.22 642.83 28.11 644.5C29 646.17 29.76 647.2 31.35 648.5C33.08 649.92 35.16 652.48 38.5 653C45.94 654.17 76 655.5 76 655.5C76 655.5 74.7 685.33 75.03 694.5C75.27 701 76.65 705.83 78 710.5C79.35 715.17 80.77 718.33 83.1 722.5C85.44 726.67 87.82 730.78 92 735.5C97.23 741.41 105.25 749.4 114.5 757.99C123.75 766.57 133.85 775.93 147.5 787C162.5 799.17 184.5 816.66 204.5 830.99C224.5 845.33 242.17 857.33 267.5 873C292.83 888.67 340.17 915.7 356.5 924.99C359.9 926.93 362.67 928.12 365.5 928.79C368.33 929.46 370.83 929.3 373.5 929C376.17 928.7 379.17 927.84 381.5 927C383.83 926.16 385.15 925.27 387.5 923.96C397.33 918.46 424.17 903.65 440.5 893.99C456.83 884.32 469.83 876.12 485.5 865.96C501.17 855.8 520.67 842.67 534.5 833C548.33 823.33 557.5 816.45 568.5 807.95C579.5 799.45 589.33 791.66 600.5 781.99C611.67 772.33 626.09 759.06 635.5 749.98C644.45 741.35 652.55 732.58 656.97 727.5C659.45 724.65 660.51 722.97 662 719.5C663.5 716 665.65 711.93 665.99 706.5C666.65 695.83 666 655.5 666 655.5C666 655.5 697.42 653.76 704.5 653C706.29 652.81 707.08 652.04 708.5 650.96C709.92 649.88 711.75 648.24 713 646.5C714.25 644.76 715.95 643.18 716 640.5C716.63 606.33 716.79 475.67 716.79 441.5C716.79 439.08 716.53 437.33 715.99 435.5C715.45 433.67 714.87 432.29 713.55 430.5C712.13 428.58 710.56 425.8 707.5 424C699.58 419.33 666 402.5 666 402.5C666 402.5 666.83 326.5 666 308.5C665.72 302.56 664.08 299.08 661 294.5C657.92 289.92 653.51 285.72 647.5 281.01C640.58 275.6 629 267.67 619.5 262C610 256.33 601 251.66 590.5 247C580 242.34 570.33 238.39 556.5 234.05C542.67 229.72 507.5 221 507.5 221C507.5 221 507.94 202.25 507.85 197.5C507.81 195.47 507.5 193.91 506.95 192.5C506.39 191.09 505.74 190.12 504.5 189.06C503.26 188 501.77 186.6 499.5 186.15C488.33 183.98 452 178.05 437.5 176.03C427.56 174.65 422.53 174.37 412.5 174.02C400.5 173.59 377.33 173.47 365.5 173.47Z","M370.5 189C368.92 190.81 363.9 196.25 362 199.5C360.1 202.75 359.07 208.5 359.07 208.5C359.07 208.5 360.03 213.72 362 216.5C364.07 219.42 371.5 226 371.5 226C371.5 226 378.08 219.25 380 216.5C381.74 214 382.49 211.17 382.99 209.5C383.34 208.35 383.18 207.67 383 206.5C382.82 205.33 382.68 203.98 381.93 202.5C381.08 200.83 379.63 198.81 377.89 196.5C376.15 194.19 371.5 188.61 371.5 188.61C371.5 188.61 370.78 188.68 370.5 189Z","M294.5 193C294.5 193 287.92 200.75 286 203.5C284.47 205.7 283.5 207.33 283 209.5C282.5 211.67 282.67 214.67 283 216.5C283.32 218.26 283.89 219.1 285 220.5C286.92 222.92 294.5 231 294.5 231C294.5 231 302.08 223.08 304 220.5C305.28 218.77 305.85 217.65 306 215.5C306.17 213.17 306.65 209.73 305 206.5C303.08 202.75 294.5 193 294.5 193Z","M447.5 193.12C447.5 193.12 440.93 200.77 439.01 203.5C437.47 205.7 436.5 207.5 436 209.5C435.5 211.5 435.67 213.67 436 215.5C436.33 217.33 436.72 218.77 438 220.5C439.92 223.08 447.5 231 447.5 231C447.5 231 455.08 222.92 457 220.5C458.11 219.1 458.71 218.26 459 216.5C459.33 214.5 460.41 211.37 459 208.5C457.08 204.6 447.5 193.12 447.5 193.12Z","M353.5 239.31C339.67 239.81 325.17 240.72 311.5 242C297.83 243.28 283 245.32 271.5 247C260 248.68 252.67 249.91 242.5 252.07C232.33 254.24 220.33 257.17 210.5 260C200.67 262.83 191.17 266.21 183.5 269.04C175.83 271.88 171.87 273.32 164.5 277C155.5 281.5 138.08 290.77 129.5 296.02C122.44 300.33 116.43 305.25 113.01 308.5C110.67 310.72 109.84 313.5 109 315.5C108.21 317.38 108.02 318.46 108 320.5C107.83 342.33 108 446.5 108 446.5L55 447.5C55 447.5 54.92 587.3 55 615.5C55 616.02 55.5 616.69 55.5 616.69L107.5 616.69C107.5 616.69 107.42 679.7 108 694.5C108.18 699.06 109.5 702.17 111 705.5C112.5 708.83 113.98 711.41 117 714.5C124.25 721.91 140.25 737.57 154.5 749.99C168.75 762.4 185.33 776.03 202.5 789C219.67 801.97 240.67 816.49 257.5 827.83C274.33 839.16 287.83 847.47 303.5 857C319.17 866.53 341.33 879.15 351.5 884.98C356.63 887.92 361 890.66 364.5 892C367.51 893.15 370.33 893 372.5 893C374.54 893 375.61 892.76 377.5 892C380 890.99 383.6 889.16 387.5 886.96C396.33 881.96 416.67 870.33 430.5 862C444.33 853.67 456.17 846.35 470.5 837C484.83 827.65 499.33 818.42 516.5 805.9C533.67 793.39 559.5 773.24 573.5 761.92C584.72 752.85 591.92 746.07 600.5 738C609.08 729.93 619.92 719.25 625 713.5C628.09 710.01 629.67 706.33 631 703.5C632.24 700.87 632.93 699.41 633 696.5C633.34 682.17 633.03 617.5 633.03 617.5L690.5 616.69C690.5 616.69 691.1 616.03 691.1 615.5C691.2 587.47 691.2 476.58 691.1 448.5C691.1 447.85 690.5 447 690.5 447L633.86 446.5C633.86 446.5 634.31 343.83 634 321.5C633.95 317.81 633.42 315.25 632 312.5C630.58 309.75 628.98 306.9 625.5 305C612.25 297.76 568.83 276.55 552.5 269.05C542.84 264.62 536 262.68 527.5 260.02C519 257.36 511.67 255.42 501.5 253.08C491.33 250.75 478.83 248.01 466.5 246C454.17 243.99 439.5 242.2 427.5 241.03C415.5 239.87 406.83 239.31 394.5 239.02C382.17 238.73 367.33 238.82 353.5 239.31Z","M367.5 274C367.5 274 347.08 289.75 339.5 296C332.28 301.95 322 311.5 322 311.5L322.17 446.5L418.5 447L419 312.5C419 312.5 382.08 281.42 373.5 275C371.55 273.54 367.5 274 367.5 274Z","M229.5 284L139 356.5L139.5 447L236 446.5C236 446.5 236.42 315.42 236 288.5C235.97 286.78 233.5 285 233.5 285L229.5 284Z","M512.5 284.03L508 287.5C508 287.5 507.63 289.29 507.63 290.5C507.56 317 507.63 446.5 507.63 446.5L604.5 447L605 356.5C605 356.5 531.92 297.08 516.5 285C515.2 283.98 512.5 284.03 512.5 284.03Z","M66.5 465L66.5 485L680.67 484.5L680.67 466.5L679.5 465L66.5 465Z","M439.5 498.25C436.33 498.75 431.17 500.01 428.5 501C426.27 501.83 425.08 502.78 423.5 504.2C421.92 505.62 420.08 507.95 419 509.5C417.98 510.97 417.22 511.72 417 513.5C416.67 516.17 416.64 522.67 417 525.5C417.28 527.66 417.77 528.83 419.16 530.5C420.75 532.39 423.78 535.28 426.5 536.87C429.22 538.45 432.33 539.31 435.5 540C438.67 540.69 442.67 540.47 445.5 541C448.33 541.53 450.92 542.42 452.5 543.17C453.73 543.76 454.42 544.45 455 545.5C455.58 546.55 456 549.5 456 549.5C456 549.5 454.48 552.81 452.5 553.84C450.42 554.92 446.83 555.97 443.5 555.99C440.17 556.02 435.67 555.16 432.5 554C429.33 552.84 426.17 549.84 424.5 549.01C423.78 548.65 422.5 549 422.5 549L415 560.5C415 560.5 418.01 563.63 420.5 565C423.08 566.42 426.83 568.05 430.5 569C434.17 569.95 438.83 570.52 442.5 570.69C446.17 570.85 449.5 570.61 452.5 570C455.5 569.39 457.75 568.75 460.5 567C463.25 565.25 467.07 562.42 468.99 559.5C470.9 556.58 471.69 552.5 472 549.5C472.31 546.5 471.35 543.5 470.85 541.5C470.42 539.79 470.16 538.82 468.98 537.5C467.42 535.75 464.58 532.71 461.5 531C458.42 529.29 454.67 528.26 450.5 527.21C446.33 526.17 439.42 525.68 436.5 524.73C434.69 524.14 433.75 522.54 433 521.5C432.26 520.48 432.03 518.5 432.03 518.5L435.5 514.05C435.5 514.05 441.33 512.03 444.5 512.02C447.67 512.01 451.67 513 454.5 514C457.33 515 461.5 518 461.5 518L469 506.5C469 506.5 467.73 504.7 466.5 504C464.58 502.92 460.67 501 457.5 500C454.33 499 450.5 498.3 447.5 498.01C444.5 497.72 442.66 497.76 439.5 498.25Z","M637.5 498.25C634.33 498.75 629.17 500.01 626.5 501C624.27 501.83 623.08 502.78 621.5 504.2C619.92 505.62 618.08 507.95 617 509.5C615.98 510.97 615.22 511.72 615 513.5C614.67 516.17 614.64 522.67 615 525.5C615.28 527.66 615.77 528.83 617.16 530.5C618.75 532.39 621.78 535.28 624.5 536.87C627.22 538.45 630.33 539.31 633.5 540C636.67 540.69 640.67 540.47 643.5 541C646.33 541.53 648.92 542.42 650.5 543.17C651.73 543.76 652.42 544.45 653 545.5C653.58 546.55 654 549.5 654 549.5C654 549.5 652.48 552.81 650.5 553.84C648.42 554.92 644.83 555.97 641.5 555.99C638.17 556.02 633.67 555.16 630.5 554C627.33 552.84 624.17 549.84 622.5 549.01C621.78 548.65 620.5 549 620.5 549L613 560.5C613 560.5 616.01 563.63 618.5 565C621.08 566.42 624.83 568.05 628.5 569C632.17 569.95 636.83 570.52 640.5 570.69C644.17 570.85 647.5 570.61 650.5 570C653.5 569.39 655.75 568.75 658.5 567C661.25 565.25 665.07 562.42 666.99 559.5C668.9 556.58 669.69 552.5 670 549.5C670.31 546.5 669.35 543.5 668.85 541.5C668.42 539.79 668.16 538.82 666.98 537.5C665.42 535.75 662.58 532.71 659.5 531C656.42 529.29 652.67 528.26 648.5 527.21C644.33 526.17 637.42 525.68 634.5 524.73C632.69 524.14 631.75 522.54 631 521.5C630.26 520.48 630.03 518.5 630.03 518.5L633.5 514.05C633.5 514.05 639.33 512.03 642.5 512.02C645.67 512.01 649.67 513 652.5 514C655.33 515 659.5 518 659.5 518L667 506.5C667 506.5 665.73 504.7 664.5 504C662.58 502.92 658.67 501 655.5 500C652.33 499 648.5 498.3 645.5 498.01C642.5 497.72 640.66 497.76 637.5 498.25Z","M113.5 500L84 568.5L100.5 569L106.5 557L137.5 557L143.5 569L159.5 569L160 567.5C160 567.5 158.83 564.48 157.98 562.5C153.26 551.5 136.27 511.92 131.69 501.5C131.38 500.8 130.5 500 130.5 500L113.5 500Z","M170.5 500L170 568.5L186 568.5L186.5 528.85L214.69 568.5L229.12 568.5L229.03 500.5L213.06 500.5L213.67 539.5L212.5 540L184.5 500L170.5 500Z","M268.5 500L239 568.5L255.5 569L261.5 557L292.5 557L298.5 569L314.5 569L315 567.5C315 567.5 313.83 564.48 312.98 562.5C308.26 551.5 291.27 511.92 286.69 501.5C286.38 500.8 285.5 500 285.5 500L268.5 500Z","M324.5 500L324 568.5L372.5 569L372.5 554L340 553.5L340 500.5L324.5 500Z","M385.5 500L385 568.5L400.5 569L401 500.5L385.5 500Z","M478.5 500L478.5 514L497.97 514.5L498 568.5L513.5 569L514.05 515.5L515.5 514.03L534.5 513.72L534.61 500.5L478.5 500Z","M561.5 500L532 568.5L548.5 569L554.5 557L585.5 557L591.5 569L607.5 569L608 567.5C608 567.5 606.83 564.48 605.98 562.5C601.26 551.5 584.27 511.92 579.69 501.5C579.38 500.8 578.5 500 578.5 500L561.5 500Z","M122.5 517.4C122.5 517.4 121.28 517.81 121 518.5C119.33 522.6 112.5 542 112.5 542L132 541.5L122.5 517.4Z","M277.5 517.4C277.5 517.4 276.28 517.81 276 518.5C274.33 522.6 267.5 542 267.5 542L287 541.5L277.5 517.4Z","M570.5 517.4C570.5 517.4 569.28 517.81 569 518.5C567.33 522.6 560.5 542 560.5 542L580 541.5L570.5 517.4Z","M66.5 585.13L66.5 602L680.67 601.5L680.67 586.5L679.5 585L66.5 585.13Z","M138.5 616.71L138 718.5C138 718.5 150.11 726.91 158.5 732C172.92 740.75 212.67 764.17 224.5 771C226.37 772.08 228 772.83 229.5 773C231 773.17 233.5 772 233.5 772C233.5 772 236.94 769.11 237 766.5C237.58 740.75 237 617.5 237 617.5L138.5 616.71Z","M322.5 616.71L322 830.5C322 830.5 354.58 853.75 362.5 858.83C364.96 860.4 367 860.76 369.5 860.95C372 861.15 374.62 861.44 377.5 860C382.5 857.5 392.58 850.73 399.5 845.98C406.42 841.23 419 831.5 419 831.5L419 617.5L322.5 616.71Z","M507.5 617.1C507.5 617.1 506.88 734.1 507.13 758.5C507.16 760.63 509 763.5 509 763.5L514.5 766C514.5 766 517.69 765.02 519.5 763.8C534.53 753.72 604.65 705.5 604.65 705.5L605 617.5L507.5 617.1Z"];
+
+const W = 1080, H = 1920, DUR = 16, BEAT = 0.5;
+const OFFW = '#F8FAFC', NAVY = '#0D1F35', BLUE = '#3B82F6', RED = '#EF4444', WHITE = '#FFFFFF';
+const CY = 875;                 // centre of the vertical safe zone (250 .. 1500)
+const FONT = 'Montserrat';
+
+/* ---------------- time helpers ---------------- */
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, t0, d) => clamp((t - t0) / d);
+const E10 = 1 - Math.pow(2, -10);
+const expoOut = p => p <= 0 ? 0 : p >= 1 ? 1 : (1 - Math.pow(2, -10 * p)) / E10;
+const expoIn = p => p <= 0 ? 0 : p >= 1 ? 1 : (Math.pow(2, 10 * p) - 1) / 1023;
+const expoInOut = p => p <= 0 ? 0 : p >= 1 ? 1 : (p < 0.5 ? expoIn(2 * p) / 2 : 0.5 + expoOut(2 * p - 1) / 2);
+const cubicInOut = p => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const smooth = p => { p = clamp(p); return p * p * (3 - 2 * p); };
+const smoother = p => { p = clamp(p); return p * p * p * (p * (p * 6 - 15) + 10); };
+/* Closed-form spring: under-damped step response 0 -> 1 (small overshoot), x = time since start */
+function spring(x, w = 18, z = 0.62) {
+  if (x <= 0) return 0;
+  const s = Math.sqrt(1 - z * z), wd = w * s;
+  return 1 - Math.exp(-z * w * x) * (Math.cos(wd * x) + (z / s) * Math.sin(wd * x));
+}
+// beat pulse: quick attack, exponential decay, re-triggered on each beat in [t0, t1)
+function beatPulse(t, t0, t1, decay = 9) {
+  if (t < t0 || t >= t1 + 0.5) return 0;
+  const k = Math.floor((t - t0) / BEAT), x = t - (t0 + k * BEAT);
+  if (t0 + k * BEAT >= t1) return 0;
+  return Math.min(1, x / 0.03) * Math.exp(-decay * x);
+}
+const D = 1 / 240;
+const deriv = (f, t) => (f(t + D) - f(t - D)) / (2 * D);
+
+/* ---------------- canvas ---------------- */
+const CV = document.getElementById('c');
+const MC = CV.getContext('2d');
+const OFF = document.createElement('canvas'); OFF.width = W; OFF.height = H;
+const OC = OFF.getContext('2d');
+const MASK = document.createElement('canvas'); MASK.width = W; MASK.height = H;
+const KC = MASK.getContext('2d');
+const meas = document.createElement('canvas').getContext('2d');
+
+function font(c, weight, px, spacing = 0) { c.font = `${weight} ${px}px ${FONT}`; c.letterSpacing = spacing + 'px'; }
+function rrect(c, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+}
+function disc(c, x, y, r, color) { if (r <= 0) return; c.fillStyle = color; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); }
+
+/* =====================================================================
+   LAYOUT (measured once after fonts load)
+   ===================================================================== */
+const L = {};
+async function build() {
+  const sample = 'Modo Estadio.ıÍÓ·+5MIN:0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ,';
+  for (const w of [700, 800, 900]) await document.fonts.load(`${w} 100px ${FONT}`, sample);
+  await document.fonts.ready;
+
+  // ---- label "Modo Estadio" + toggle row ----
+  L.label = 'Modo Estadio';
+  L.fsL = 88;
+  font(meas, 800, 100);
+  L.adv = [...L.label].map(ch => meas.measureText(ch).width);              // per-glyph advance @100
+  L.pre = []; for (let k = 0; k <= L.label.length; k++) L.pre.push(meas.measureText(L.label.slice(0, k)).width); // kerned prefix @100
+  L.capEm = meas.measureText('H').actualBoundingBoxAscent / 100;
+  const labelW = L.pre[12] * L.fsL / 100;
+  L.labelW = labelW;
+  L.trackW = 176; L.trackH = 100; L.gap = 48;
+  const rowW = labelW + L.gap + L.trackW;
+  L.lx0 = 540 - rowW / 2;
+  L.baseL = CY + L.capEm * L.fsL / 2;
+  L.trackX = L.lx0 + labelW + L.gap; L.trackY = CY - L.trackH / 2;
+  L.knobOff = L.trackX + 50; L.knobOn = L.trackX + L.trackW - 50; L.knobR = 38; L.ringW = 6;
+
+  // ---- hero "Estadio" ----
+  const wE100 = L.pre[12] - L.pre[5];
+  L.fsH = 800 * 100 / wE100;
+  L.heroX0 = 540 - 400;
+  L.baseH = CY + L.capEm * L.fsH / 2;
+  L.labelPos = k => ({ x: L.lx0 + L.pre[k] * L.fsL / 100, y: L.baseL, fs: L.fsL });
+  L.heroPos = k => ({ x: L.heroX0 + (L.pre[k] - L.pre[5]) * L.fsH / 100, y: L.baseH, fs: L.fsH });
+
+  // ---- tittle of the "i" (em units, relative to glyph origin & baseline) ----
+  L.tit = tittle();
+
+  // ---- graph ----
+  L.gx0 = L.heroX0; L.gxEnd = 960; L.gy0 = L.baseH; L.gH = 330; L.gyT = L.gy0 - L.gH;
+  L.gx1 = 640; L.gT = 1.4;
+  L.ZETA = 0.5; L.WD = 2 * Math.PI; L.WN = L.WD / Math.sqrt(1 - L.ZETA * L.ZETA);   // peak exactly 0.5 s after landing
+
+  // ---- sentence (word by word) ----
+  font(meas, 800, 62, 0.5);
+  const words = 'RETRASA LAS NOTIFICACIONES DE LOS GOLES PARA QUE NO TE ROBEN EL MOMENTO.'.split(' ');
+  const maxW = 800, sp = meas.measureText(' ').width;
+  L.words = []; let line = 0, x = 0;
+  words.forEach(w => {
+    const ww = meas.measureText(w).width;
+    if (x > 0 && x + ww > maxW) { line++; x = 0; }
+    L.words.push({ w, x: L.gx0 + x, line }); x += ww + sp;
+  });
+  L.lineBase = l => 1070 + l * 80;
+  L.nLines = line + 1;
+
+  // ---- callout ----
+  font(meas, 900, 76);
+  L.callCap = meas.measureText('M').actualBoundingBoxAscent;
+
+  // ---- ring of type ----
+  L.ringText = 'SIGUE A TU EQUIPO FAVORITO · SIGUE A TUS JUGADORES FAVORITOS · SIGUE A TUS LIGAS FAVORITAS · ';
+  L.ringR = 452;                                   // baseline radius; cap tops reach ~R+33 -> fits 1080 wide
+  font(meas, 800, 100, 2);
+  const chars = [...L.ringText];
+  const advs = chars.map(ch => meas.measureText(ch).width);
+  const tot = advs.reduce((a, b) => a + b, 0);
+  L.ringFs = 2 * Math.PI * L.ringR / tot * 100;
+  let acc = 0; L.ring = chars.map((ch, k) => { const a = (acc + advs[k] / 2) / tot * Math.PI * 2; acc += advs[k]; return { ch, a, adv: advs[k] }; });
+  // phrase ranges for highlighting
+  const parts = L.ringText.split(' · ');
+  let idx = 0; L.phrase = [];
+  for (let p = 0; p < 3; p++) { L.phrase.push([idx, idx + parts[p].length]); idx += parts[p].length + 3; }
+
+  // ---- halftone lattice (45° square grid) ----
+  L.hs = 34; const hs = L.hs, q = hs / Math.SQRT2;
+  L.dots = [];
+  for (let i = -70; i <= 70; i++) for (let j = -70; j <= 70; j++) {
+    const x0 = 540 + (i - j) * q, y0 = CY + (i + j) * q;
+    if (x0 > -80 && x0 < W + 80 && y0 > -80 && y0 < H + 80) L.dots.push([x0, y0]);
+  }
+  L.rFull = hs / Math.SQRT2 + 1.2;
+
+  // ---- end card ----
+  const sp2 = LOGO_SUBPATHS;
+  L.p2 = {
+    ring: new Path2D([sp2[1], sp2[2], sp2[3], sp2[4], sp2[5]].join('')),
+    crown: new Path2D(sp2[0]),
+    rules: new Path2D(sp2[9] + sp2[22]),
+    letters: new Path2D(sp2.slice(10, 22).join('')),
+    up: [6, 7, 8].map(k => new Path2D(sp2[k])),
+    low: [23, 24, 25].map(k => new Path2D(sp2[k]))
+  };
+  L.logoS = 0.5; L.logoTop = 372;
+  L.endTitle = 'Modo Estadio.'; L.fsE = 100; L.baseE = 968;
+  font(meas, 800, 100);
+  L.preE = []; for (let k = 0; k <= L.endTitle.length; k++) L.preE.push(meas.measureText(L.endTitle.slice(0, k)).width);
+  L.advE = [...L.endTitle].map(ch => meas.measureText(ch).width);
+  L.ex0 = 540 - L.preE[L.endTitle.length] * L.fsE / 200;
+  L.tag = 'QUE NADIE TE ROBE EL MOMENTO.'; L.baseTag = 1048;
+  L.small = ['GOLES AL INSTANTE', 'ESTADÍSTICAS', 'NOTICIAS']; L.baseSmall = 1118;
+  L.cta = 'DESCARGA LA APP, ES GRATIS';
+  font(meas, 900, 40, 1.6);
+  L.ctaW = meas.measureText(L.cta).width + 130; L.ctaH = 112; L.ctaY = 1210;
+
+  // ---- cursor ----
+  L.curRest = { x: L.knobOff + 170, y: CY + 260 };
+  L.curOut = { x: 1190, y: 1720 };
+
+  window.__ready = true;
+}
+
+function tittle() {
+  const c = document.createElement('canvas'); c.width = 600; c.height = 700;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  x.font = `800 400px ${FONT}`; x.fillStyle = '#000'; x.fillText('i', 200, 560);
+  const xh = x.measureText('x').actualBoundingBoxAscent;
+  const d = x.getImageData(0, 0, 600, 700).data;
+  let y0 = 1e9, y1 = -1, x0 = 1e9, x1 = -1;
+  for (let yy = 0; yy < 560 - xh - 6; yy++) for (let xx = 0; xx < 600; xx++) if (d[(yy * 600 + xx) * 4 + 3] > 127) {
+    y0 = Math.min(y0, yy); y1 = Math.max(y1, yy); x0 = Math.min(x0, xx); x1 = Math.max(x1, xx);
+  }
+  const cyEm = ((y0 + y1) / 2 - 560) / 400, rEm = (x1 - x0 + 1) / 2 / 400;
+  return { cx: ((x0 + x1) / 2 - 200) / 400, cy: cyEm, r: rEm, clip: ((y1 - 560) / 400 + (-xh / 400)) / 2 };
+}
+
+/* =====================================================================
+   GLYPH DRAWING — individual letters with their own transform
+   ===================================================================== */
+// returns the 2D matrix used for a glyph so the tittle can be tracked exactly
+function glyphMatrix(x, base, fs, adv, o) {
+  const m = new DOMMatrix();
+  m.translateSelf(x + adv * fs / 200 + (o.dx || 0), base + (o.dy || 0));
+  if (o.rot) m.rotateSelf(o.rot * 180 / Math.PI);
+  if (o.skew) m.multiplySelf(new DOMMatrix([1, 0, Math.tan(o.skew), 1, 0, 0]));
+  m.scaleSelf((o.sx ?? 1) * fs / 100, (o.sy ?? 1) * fs / 100);
+  m.translateSelf(-adv / 2, 0);
+  return m;
+}
+function drawGlyph(c, ch, M, color, weight = 800, dotless = false, clipEm = 0) {
+  c.save(); c.setTransform(c.getTransform().multiply(M));
+  font(c, weight, 100); c.fillStyle = color;
+  if (dotless) { c.beginPath(); c.rect(-200, clipEm * 100, 600, 1000); c.clip(); }
+  c.fillText(ch, 0, 0);
+  c.restore();
+}
+const applyM = (M, x, y) => ({ x: M.a * x + M.c * y + M.e, y: M.b * x + M.d * y + M.f });
+
+/* =====================================================================
+   THE BLUE DOT — one entity, one function of time
+   ===================================================================== */
+// spring step response used BOTH to move the dot and to draw the graph
+const gStep = tau => tau <= 0 ? 0 : 1 - Math.exp(-L.ZETA * L.WN * tau) * (Math.cos(L.WD * tau) + (L.ZETA / Math.sqrt(1 - L.ZETA * L.ZETA)) * Math.sin(L.WD * tau));
+const gU = tau => 1 - Math.pow(1 - clamp(tau / L.gT), 2);
+const graphPt = tau => ({ x: L.gx0 + (L.gx1 - L.gx0) * gU(tau), y: L.gy0 - L.gH * gStep(Math.min(tau, L.gT)) });
+// closed-form spring; its last ~1% tail is eased to exact rest so the loop frames match pixel for pixel
+const settle = x => 1 - (1 - spring(x, 22, 0.65)) * (1 - smoother(prog(x, 0.25, 0.15)));
+const knobF = t => t < 15.0 ? settle(t - 0.5) : 1 - settle(t - 15.5);
+const knobX = t => lerp(L.knobOff, L.knobOn, knobF(t));
+// arc between two points (parabolic hop)
+function hop(p, a, b, h) { const e = p; return { x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e) - h * 4 * e * (1 - e) }; }
+
+// "Estadio" letter state during the open (index k in label)
+function openLetter(t, k) {
+  if (k < 5) { // "Modo " folds into its baseline (bends as it goes)
+    const p = expoIn(prog(t, 1.38 + 0.045 * k, 0.16));
+    const P = L.labelPos(k);
+    return { ...P, o: { sy: 1 - p, skew: -0.9 * p, dx: -14 * p }, gone: p >= 1 };
+  }
+  const pos = tt => { const s = spring(tt - (1.6 + 0.012 * (k - 5)), 15, 0.62); const A = L.labelPos(k), B = L.heroPos(k); return { x: lerp(A.x, B.x, s), y: lerp(A.y, B.y, s), fs: lerp(A.fs, B.fs, s) }; };
+  const P = pos(t);
+  const vx = deriv(tt => pos(tt).x, t), vy = deriv(tt => pos(tt).y, t);
+  let o = { rot: clamp(vx * 0.00009 + vy * 0.00006, -0.22, 0.22), dy: -26 * Math.sin(Math.PI * clamp(pos(t).fs > 0 ? (pos(t).fs - L.fsL) / (L.fsH - L.fsL) : 0)) * (k % 2 ? 1 : -0.6) };   // letters bend: lean into their own motion + a small wave
+  // fold of the hero word into its baseline at 2.5
+  const fp = expoIn(prog(t, 2.56 + 0.03 * (k - 5), 0.15));
+  if (fp > 0) o = { sy: 1 - fp, skew: 0.7 * fp };
+  return { ...P, o, gone: fp >= 1 };
+}
+function iMatrix(t) { const s = openLetter(t, 10); return glyphMatrix(s.x, s.y, s.fs, L.adv[10], s.o); }
+function iTittle(t) { const M = iMatrix(t); const p = applyM(M, L.tit.cx * 100, L.tit.cy * 100); return { x: p.x, y: p.y, r: L.tit.r * Math.hypot(M.a, M.b) * 100 * 1.32 }; }
+// end-card tittle
+function endTittle(t) {
+  const k = 10; // "Modo Estadio." -> index of the i
+  const M = endGlyphMatrix(t, k);
+  const p = applyM(M, L.tit.cx * 100, L.tit.cy * 100);
+  return { x: p.x, y: p.y, r: L.tit.r * Math.hypot(M.a, M.b) * 100 * 1.4 };
+}
+
+function dotState(t) {
+  // 0.0 – 1.0 : toggle knob
+  if (t < 1.0) return { x: knobX(t), y: CY, r: L.knobR, ring: L.ringW };
+  if (t < 1.12) return { x: knobX(t), y: CY, r: L.knobR, ring: L.ringW * (1 - expoOut(prog(t, 1.04, 0.08))) };
+  if (t < 1.38) { // hop onto the i (label size)
+    const p = expoInOut(prog(t, 1.12, 0.26)), a = { x: L.knobOn, y: CY }, b = iTittle(1.38);
+    const q = hop(p, a, b, 150);
+    return { x: q.x, y: q.y, r: lerp(L.knobR, b.r, expoInOut(prog(t, 1.12, 0.22))), ring: 0 };
+  }
+  if (t < 2.5) return { ...iTittle(t), ring: 0 };          // attached to the "i"
+  if (t < 3.0) { // jump from the word to the graph origin
+    const a = iTittle(2.5), b = graphPt(0), p = cubicInOut(prog(t, 2.5, 0.5));
+    const q = hop(p, a, b, 230);
+    return { x: q.x, y: q.y, r: lerp(a.r, 20, p), ring: 0 };
+  }
+  if (t < 5.0) { const g = graphPt(t - 3.0); return { x: g.x, y: g.y, r: 20, ring: 0 }; }
+  if (t < 7.5) return null;                                 // the dot is the shape now
+  if (t < 10.0) { const pu = beatPulse(t, 8.0, 10.0); return { x: 540, y: CY, r: 26 * (1 + 0.22 * pu), ring: 0 }; }
+  if (t < 11.0) { const g = smooth(prog(t, 10.0, 0.9)); return { x: 540, y: CY, r: 26 + 38 * g + 6 * beatPulse(t, 10.0, 11.0), ring: 0 }; }
+  if (t < 11.5) { const a = { x: 540, y: CY, r: 64 }, b = endTittle(11.5), p = expoInOut(prog(t, 11.0, 0.5)); const q = hop(p, a, b, 120); return { x: q.x, y: q.y, r: lerp(a.r, b.r, p), ring: 0 }; }
+  if (t < 14.0) { const b = endTittle(t); return { x: b.x, y: b.y, r: b.r * (1 + 0.5 * beatPulse(t, 12.0, 14.0, 7)), ring: 0 }; }
+  if (t < 14.5) { const a = endTittle(14.0), b = graphPt(L.gT), p = cubicInOut(prog(t, 14.0, 0.5)); const q = hop(p, a, b, 200); return { x: q.x, y: q.y, r: lerp(a.r, 20, p), ring: 0 }; }
+  if (t < 14.95) { const g = graphPt(L.gT * (1 - cubicInOut(prog(t, 14.5, 0.45)))); return { x: g.x, y: g.y, r: 20, ring: 0 }; }
+  if (t < 15.3) { const a = graphPt(0), b = { x: L.knobOn, y: CY }, p = cubicInOut(prog(t, 14.98, 0.32)); const q = hop(p, a, b, 160); return { x: q.x, y: q.y, r: lerp(20, L.knobR, p), ring: L.ringW * expoOut(prog(t, 15.2, 0.15)) }; }
+  return { x: knobX(t), y: CY, r: L.knobR, ring: L.ringW };
+}
+function drawDot(c, d) {
+  if (!d) return;
+  if (d.ring > 0.05) disc(c, d.x, d.y, d.r + d.ring, WHITE);
+  disc(c, d.x, d.y, d.r, BLUE);
+}
+
+/* =====================================================================
+   SCENES
+   ===================================================================== */
+// ---------- toggle ----------
+function drawToggle(c, t) {
+  let x0 = L.trackX, x1 = L.trackX + L.trackW, alpha = 1;
+  if (t >= 1.0 && t < 2.0) { // retracts into the knob
+    const p = expoOut(prog(t, 1.0, 0.12));
+    x0 = lerp(L.trackX, L.knobOn - 50, p);
+    if (t >= 1.12) return;
+  }
+  if (t >= 14.0 && t < 15.5) { // grows back out of the knob
+    if (t < 15.22) return;
+    const p = expoOut(prog(t, 15.22, 0.2));
+    x0 = lerp(L.knobOn - 50, L.trackX, p);
+  }
+  const y = L.trackY, h = L.trackH;
+  rrect(c, x0, y, x1 - x0, h, h / 2); c.fillStyle = WHITE; c.fill();
+  c.lineWidth = 5; c.strokeStyle = NAVY; c.stroke();
+  // blue floods outward from the knob's OFF position as the knob travels
+  const f = clamp(knobF(t));
+  const rho = (t >= 1.0 && t < 15.5) ? 400 : 200 * f;
+  if (rho > 0.5) {
+    c.save(); rrect(c, x0 - 3, y - 3, x1 - x0 + 6, h + 6, h / 2 + 3); c.clip();
+    disc(c, L.knobOff, CY, rho, BLUE); c.restore();
+  }
+}
+// ---------- cursor ----------
+const CUR = [[0, 0], [0, 52], [12.5, 40.5], [21.5, 60], [31, 55.5], [22, 36.5], [38.5, 36.5]];
+function cursorState(t) {
+  const tipOff = { x: L.knobOff + 4, y: CY + 6 }, tipOn = { x: L.knobOn + 4, y: CY + 6 };
+  if (t < 0.5) { const p = smoother(prog(t, 0.03, 0.42)); return { x: lerp(L.curRest.x, tipOff.x, p), y: lerp(L.curRest.y, tipOff.y, p), s: 1 }; }
+  if (t < 1.1) { const press = Math.sin(Math.PI * prog(t, 0.5, 0.14)); const p = expoIn(prog(t, 0.64, 0.4)); return { x: lerp(tipOff.x, L.curOut.x, p), y: lerp(tipOff.y, L.curOut.y, p), s: 1 - 0.14 * press }; }
+  if (t < 15.0) return null;
+  if (t < 15.5) { const p = expoOut(prog(t, 15.04, 0.42)); return { x: lerp(L.curOut.x, tipOn.x, p), y: lerp(L.curOut.y, tipOn.y, p), s: 1 }; }
+  const press = Math.sin(Math.PI * prog(t, 15.5, 0.14)); const p = smoother(prog(t, 15.56, 0.4));
+  return { x: lerp(tipOn.x, L.curRest.x, p), y: lerp(tipOn.y, L.curRest.y, p), s: 1 - 0.14 * press };
+}
+function drawCursor(c, t) {
+  const s = cursorState(t); if (!s) return;
+  c.save(); c.translate(s.x, s.y); c.scale(1.45 * s.s, 1.45 * s.s);
+  c.beginPath(); CUR.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath();
+  c.lineJoin = 'round'; c.lineWidth = 3.2; c.strokeStyle = WHITE; c.fillStyle = NAVY; c.fill(); c.stroke();
+  c.restore();
+}
+// ---------- open: label & hero word ----------
+function drawOpenWord(c, t) {
+  const dotOnI = t >= 1.38 && t < 2.5 + 0.2;
+  const chars = [...L.label];
+  for (let k = 0; k < chars.length; k++) {
+    if (chars[k] === ' ') continue;
+    const s = openLetter(t, k); if (s.gone) continue;
+    const M = glyphMatrix(s.x, s.y, s.fs, L.adv[k], s.o);
+    drawGlyph(c, chars[k], M, NAVY, 800, k === 10 && dotOnI, L.tit.clip);
+  }
+}
+// label rebuilt in the return (unfolds out of the graph axis)
+function drawReturnLabel(c, t) {
+  const chars = [...L.label];
+  for (let k = 0; k < chars.length; k++) {
+    if (chars[k] === ' ') continue;
+    const p = spring(t - (15.06 + 0.022 * k), 20, 0.62);
+    if (p <= 0) continue;
+    const P = L.labelPos(k);
+    const M = glyphMatrix(P.x, P.y, P.fs, L.adv[k], { sy: p, skew: 0.5 * (1 - Math.min(1, p)) });
+    drawGlyph(c, chars[k], M, NAVY, 800);
+  }
+}
+// ---------- graph ----------
+function drawAxis(c, xa, xb, y, th = 6) { if (xb - xa < 0.5) return; c.fillStyle = NAVY; rrect(c, xa, y - th / 2, xb - xa, th, th / 2); c.fill(); }
+function drawCurve(c, tauA, tauB) {
+  if (tauB - tauA <= 0.002) return;
+  c.beginPath(); const n = Math.max(2, Math.ceil((tauB - tauA) * 240));
+  for (let i = 0; i <= n; i++) { const g = graphPt(lerp(tauA, tauB, i / n)); i ? c.lineTo(g.x, g.y) : c.moveTo(g.x, g.y); }
+  c.lineWidth = 9; c.lineCap = 'round'; c.lineJoin = 'round'; c.strokeStyle = BLUE; c.stroke();
+}
+function drawTargetLine(c, xa, xb) {
+  if (xb - xa < 1) return;
+  c.save(); c.setLineDash([14, 12]); c.lineDashOffset = 0; c.lineWidth = 3; c.strokeStyle = NAVY;
+  c.beginPath(); c.moveTo(xa, L.gyT); c.lineTo(xb, L.gyT); c.stroke(); c.restore();
+}
+function drawGraphScene(c, t) {
+  // axis: the folded hero word becomes it
+  const ax = prog(t, 2.6, 0.3);
+  if (t >= 2.6) {
+    const a0 = L.heroPos(5).x, a1 = L.heroPos(11).x + L.adv[11] * L.fsH / 100;
+    drawAxis(c, lerp(a0, L.gx0, expoOut(ax)), lerp(a1, L.gxEnd, expoOut(ax)), L.gy0);
+  }
+  if (t >= 3.0) {
+    drawTargetLine(c, L.gx0, lerp(L.gx0, L.gx1 + 30, expoOut(prog(t, 3.0, 0.4))));
+    drawCurve(c, 0, Math.min(t - 3.0, L.gT));
+  }
+  // callout
+  if (t >= 4.0) {
+    const p = spring(t - 4.0, 20, 0.6);
+    c.save(); c.translate(L.gx1 + 52, L.gyT); c.scale(lerp(0.6, 1, p), lerp(0.6, 1, p));
+    font(c, 900, 76); c.fillStyle = NAVY; c.textBaseline = 'alphabetic';
+    c.fillText('+5 MIN', 0, L.callCap / 2 + (1 - p) * 30); c.restore();
+  }
+  // sentence, word by word, each line masked so words rise into place
+  for (let l = 0; l < L.nLines; l++) {
+    const b = L.lineBase(l);
+    c.save(); c.beginPath(); c.rect(0, b - 62, W, 80); c.clip();
+    font(c, 800, 62, 0.5); c.fillStyle = NAVY;
+    L.words.forEach((wd, i) => {
+      if (wd.line !== l) return;
+      const p = spring(t - (3.2 + 0.1 * i), 22, 0.64); if (p <= 0) return;
+      c.fillText(wd.w, wd.x, b + 64 * (1 - p));
+    });
+    c.restore();
+  }
+}
+function drawReturnGraph(c, t) {
+  const tau = L.gT * (1 - cubicInOut(prog(t, 14.5, 0.45)));
+  if (t < 14.95) {
+    const dx = graphPt(tau).x;
+    drawAxis(c, Math.min(dx, L.gxEnd), L.gxEnd, L.gy0);
+    drawCurve(c, tau, L.gT);
+    return;
+  }
+  // curve & axis retract into the origin, the axis slides up into the label baseline
+  const p = expoInOut(prog(t, 14.95, 0.2));
+  const end = L.gT * (1 - expoOut(prog(t, 14.95, 0.12)));
+  drawCurve(c, 0, end);
+  const ya = lerp(L.gy0, L.baseL + 3, p), xa = lerp(L.gx0, L.lx0, p), xb = lerp(L.gxEnd, L.lx0 + L.labelW, p);
+  const th = 6 * (1 - prog(t, 15.1, 0.18));
+  if (th > 0.2) drawAxis(c, xa, xb, ya, th);
+}
+// ---------- shape: circle -> rotating square -> GOL pill -> contraction ----------
+function shapeState(t) {
+  const start = graphPt(L.gT), C = { x: 540, y: CY };
+  const sp = expoInOut(prog(t, 5.0, 0.22));
+  const pos = { x: lerp(start.x, C.x, sp), y: lerp(start.y, C.y, sp) };
+  let R = 20;
+  if (t >= 5.1) R = lerp(20, 1160, expoIn(prog(t, 5.1, 0.4)));
+  if (t >= 7.0) R = lerp(1160, 26, cubicInOut(prog(t, 7.0, 0.5)));
+  // inner shape (navy): same object, different states
+  let w = 0, h = 0, r = 0, rot = 0;
+  if (t >= 5.5) {
+    const s = 440 * spring(t - 5.5, 15, 0.62);
+    rot = -Math.PI * 0.75 * (1 - spring(t - 5.5, 9, 0.6));
+    const st = spring(t - 6.0, 16, 0.6);
+    w = lerp(s, 720, st); h = lerp(s, 210, st); r = lerp(0.22 * s, 105, st);
+  }
+  const contract = 1 - expoIn(prog(t, 7.0, 0.3));
+  return { x: pos.x, y: pos.y, R, w: w * contract, h: h * contract, r: r * contract, rot, contract };
+}
+function drawShape(c, t) {
+  const S = shapeState(t);
+  // the shot along a line (streak behind the dot)
+  if (t < 5.25) {
+    const lag = shapeStateXY(t - 0.07);
+    c.lineCap = 'round'; c.strokeStyle = BLUE; c.lineWidth = 2 * Math.min(S.R, 20);
+    c.beginPath(); c.moveTo(lag.x, lag.y); c.lineTo(S.x, S.y); c.stroke();
+  }
+  disc(c, S.x, S.y, S.R, BLUE);
+  if (S.w > 0.5) {
+    c.save(); c.beginPath(); c.arc(S.x, S.y, S.R, 0, Math.PI * 2); c.clip();
+    c.translate(S.x, S.y); c.rotate(S.rot);
+    rrect(c, -S.w / 2, -S.h / 2, S.w, S.h, S.r); c.fillStyle = NAVY; c.fill();
+    // notification content
+    if (t >= 6.06) {
+      const p = spring(t - 6.06, 20, 0.6) * S.contract;
+      font(c, 900, 124, 2); c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+      const tw = c.measureText('GOL').width, gw = 48 + 34 + tw;
+      disc(c, -gw / 2 + 24, 0, 24 * p, RED);
+      c.save(); c.translate(-gw / 2 + 82 + tw / 2, 0); c.scale(p, p); c.fillStyle = WHITE; c.fillText('GOL', 0, 44); c.restore();
+    }
+    c.restore();
+  }
+  // countdown under the pill, ticking on the half beats
+  if (t >= 6.5 && S.contract > 0) {
+    const pop = spring(t - 6.5, 20, 0.6) * S.contract;
+    c.save(); c.beginPath(); c.arc(S.x, S.y, S.R, 0, Math.PI * 2); c.clip();
+    c.translate(540, CY); c.scale(pop, pop); c.translate(-540, -CY);
+    const ticks = [6.75, 7.0], vals = ['5:00', '4:59', '4:58'];
+    let n = 0; ticks.forEach(k => { if (t >= k) n++; });
+    const rp = n ? expoOut(prog(t, ticks[n - 1], 0.14)) : 1;
+    font(c, 900, 150, 3); c.fillStyle = WHITE; c.textAlign = 'center';
+    const by = CY + 290;
+    c.beginPath(); c.rect(0, by - 118, W, 140); c.clip();
+    if (n && rp < 1) c.fillText(vals[n - 1], 540, by - 130 * rp);
+    c.fillText(vals[n], 540, by + 130 * (1 - rp));
+    c.restore();
+  }
+}
+const shapeStateXY = t => { const s = graphPt(L.gT), sp = expoInOut(prog(t, 5.0, 0.22)); return { x: lerp(s.x, 540, sp), y: lerp(s.y, CY, sp) }; };
+// ---------- circular line of type ----------
+function ringRot(t) { return -0.42 * (t - 7.5); }
+function drawRing(c, t) {
+  const N = L.ring.length, rot = ringRot(t);
+  const hl = t >= 8.0 && t < 9.5 ? Math.floor((t - 8.0) / BEAT) : -1;
+  font(c, 800, 100, 2); c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+  for (let k = 0; k < N; k++) {
+    const g = L.ring[k]; if (g.ch === ' ') continue;
+    const app = spring(t - (7.5 + 0.5 * k / N), 24, 0.6);
+    if (app <= 0) continue;
+    const out = expoIn(prog(t, 9.5 + 0.06 * ((k / N + 0.3) % 1), 0.42));
+    const R = L.ringR - 40 * (1 - app) + 950 * out;
+    const a = g.a + rot - Math.PI / 2;
+    const x = 540 + R * Math.cos(a), y = CY + R * Math.sin(a);
+    const inPh = hl >= 0 && k >= L.phrase[hl][0] && k < L.phrase[hl][1];
+    const gs = L.ringFs / 100 * Math.min(app, 1.2) * (1 - out);
+    if (gs > 0.004) {
+      c.save(); c.translate(x, y); c.rotate(a + Math.PI / 2); c.scale(gs, gs);
+      c.fillStyle = inPh ? BLUE : WHITE; c.fillText(g.ch, 0, 0); c.restore();
+    }
+    if (out > 0) disc(c, x, y, 3.2 * out, OFFW);   // each letter becomes a dot
+  }
+}
+// ---------- halftone ----------
+function drift(t) { return t >= 11.0 ? { x: (t - 11.0) * 9, y: (t - 11.0) * 6 } : { x: 0, y: 0 }; }
+function halftone(c, t, color, radiusFn) {
+  const dr = drift(t); c.fillStyle = color; c.beginPath();
+  for (const [x0, y0] of L.dots) {
+    const x = x0 + dr.x, y = y0 + dr.y;
+    const r = radiusFn(x, y, Math.hypot(x - 540, y - CY));
+    if (r > 0.15) { c.moveTo(x + r, y); c.arc(x, y, r, 0, Math.PI * 2); }
+  }
+  c.fill();
+}
+const ringFront = t => L.ringR + 950 * expoIn(prog(t, 9.5, 0.45));
+const W1 = t => 1500 * cubicInOut(prog(t, 10.0, 0.9));
+const W2 = t => 1500 * expoOut(prog(t, 11.0, 0.6));
+const W3 = t => 1500 * (1 - cubicInOut(prog(t, 14.0, 0.46)));
+function rTiny(d, t) { const br = (dotState(t) || { r: 26 }).r; return 2.3 + 4.2 * Math.exp(-Math.max(0, d - br) / 210); }
+function edgeK(y, t) { // halftone gaps that stay alive at the frame edges on the end card (outside the safe zone)
+  const e = Math.max(smooth((210 - y) / 210), smooth((y - 1520) / 400));
+  return 1 - e * (0.26 + 0.1 * beatPulse(t, 12.0, 14.0, 6));
+}
+// ---------- end card ----------
+function endGlyphMatrix(t, k) {
+  const p = spring(t - (11.5 + 0.022 * k), 20, 0.62);
+  const x = L.ex0 + L.preE[k] * L.fsE / 100;
+  return glyphMatrix(x, L.baseE, L.fsE, L.advE[k], { dy: 70 * (1 - p) });
+}
+function drawLogo(c, t) {
+  const s = L.logoS, push = 1 + 0.02 * smooth(prog(t, 11.5, 2.5));
+  const cx = 540, top = L.logoTop;
+  const ring = spring(t - 11.0, 14, 0.62);
+  c.save(); c.translate(cx, top + s * 452); c.scale(s * push, s * push); c.translate(-371, -477);
+  c.fillStyle = WHITE;
+  // frame
+  c.save(); c.translate(371, 477); const rs = lerp(0.82, 1, ring); c.scale(rs, rs); c.translate(-371, -477); c.fill(L.p2.ring, 'evenodd'); c.restore();
+  // crown drops in
+  const cr = spring(t - 11.12, 18, 0.62);
+  if (cr > 0) { c.save(); c.translate(0, -60 * (1 - cr)); c.fill(L.p2.crown); c.restore(); }
+  // stripes grow out of the band
+  [0, 1, 2].forEach(i => {
+    const g = spring(t - (11.15 + 0.05 * i), 18, 0.64);
+    if (g <= 0) return;
+    c.save(); c.translate(0, 447); c.scale(1, g); c.translate(0, -447); c.fill(L.p2.up[i]); c.restore();
+    c.save(); c.translate(0, 617); c.scale(1, g); c.translate(0, -617); c.fill(L.p2.low[i]); c.restore();
+  });
+  // band wipes across
+  const bw = expoOut(prog(t, 11.25, 0.25));
+  if (bw > 0) { c.save(); c.beginPath(); c.rect(56, 440, 634 * bw, 190); c.clip(); c.fill(L.p2.rules); c.fill(L.p2.letters, 'evenodd'); c.restore(); }
+  c.restore();
+}
+function drawEndCard(c, t) {
+  drawLogo(c, t);
+  // "Modo Estadio." – the blue dot is its tittle
+  const chars = [...L.endTitle];
+  c.save(); c.beginPath(); c.rect(0, L.baseE - 110, W, 140); c.clip();
+  for (let k = 0; k < chars.length; k++) {
+    if (chars[k] === ' ') continue;
+    drawGlyph(c, chars[k], endGlyphMatrix(t, k), WHITE, 800, k === 10 && t >= 11.5 && t < 14.0, L.tit.clip);
+  }
+  c.restore();
+  // tagline
+  const tp = spring(t - 11.75, 20, 0.62);
+  if (tp > 0) {
+    c.save(); c.beginPath(); c.rect(0, L.baseTag - 46, W, 60); c.clip();
+    font(c, 800, 40, 0.8); c.fillStyle = WHITE; c.textAlign = 'center'; c.fillText(L.tag, 540, L.baseTag + 52 * (1 - tp)); c.restore();
+  }
+  // small line
+  const sp = spring(t - 12.0, 20, 0.62);
+  if (sp > 0) {
+    c.save(); c.beginPath(); c.rect(0, L.baseSmall - 32, W, 44); c.clip();
+    font(c, 700, 26, 2.6); c.textAlign = 'left';
+    const sep = '  ·  ';
+    const ws = L.small.map(s => c.measureText(s).width), wsep = c.measureText(sep).width;
+    let x = 540 - (ws[0] + ws[1] + ws[2] + 2 * wsep) / 2; const y = L.baseSmall + 40 * (1 - sp);
+    L.small.forEach((s, i) => { c.fillStyle = WHITE; c.fillText(s, x, y); x += ws[i]; if (i < 2) { c.fillStyle = BLUE; c.fillText(sep, x, y); x += wsep; } });
+    c.restore();
+  }
+  // call to action
+  const cp = spring(t - 12.0, 17, 0.6);
+  if (cp > 0) {
+    const w = L.ctaW * lerp(0.25, 1, Math.min(cp, 1.1)), h = L.ctaH;
+    rrect(c, 540 - w / 2, L.ctaY - h / 2, w, h, h / 2); c.fillStyle = BLUE; c.fill();
+    const tq = spring(t - 12.08, 20, 0.62);
+    if (tq > 0) {
+      c.save(); rrect(c, 540 - w / 2, L.ctaY - h / 2, w, h, h / 2); c.clip();
+      font(c, 900, 40, 1.6); c.fillStyle = WHITE; c.textAlign = 'center';
+      c.fillText(L.cta, 540, L.ctaY + 14 + 50 * (1 - tq)); c.restore();
+    }
+  }
+}
+
+/* =====================================================================
+   FRAME
+   ===================================================================== */
+function drawFrame(c, t) {
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  // --- background
+  const light = t < 7.0 || t >= 14.5;
+  c.fillStyle = light ? OFFW : NAVY; c.fillRect(0, 0, W, H);
+
+  // --- OPEN (0 – 2.9) and RETURN label/toggle (15 – 16)
+  if (t < 1.12) drawToggle(c, t);
+  if (t < 2.9) drawOpenWord(c, t);
+  if (t >= 2.5 && t < 5.6) drawGraphScene(c, t);
+  if (t >= 14.45 && t < 15.3) drawReturnGraph(c, t);
+  if (t >= 15.0) { drawToggle(c, t); drawReturnLabel(c, t); }
+  // --- SHAPE (5.0 – 7.5)
+  if (t >= 5.0 && t < 7.5) drawShape(c, t);
+  // --- TYPE RING + HALFTONE (7.5 – 11.0)
+  if (t >= 9.5 && t < 10.0) halftone(c, t, OFFW, (x, y, d) => d < ringFront(t) - 20 ? rTiny(d, t) : 0);
+  if (t >= 10.0 && t < 11.0) halftone(c, t, OFFW, (x, y, d) => lerp(rTiny(d, t), L.rFull, smooth((W1(t) - d) / 260)));
+  if (t >= 7.5 && t < 10.05) drawRing(c, t);
+  // --- REVEAL + END CARD (11.0 – 14.5): navy halftone over off-white, end card visible only inside navy
+  if (t >= 11.0 && t < 14.5) {
+    c.fillStyle = OFFW; c.fillRect(0, 0, W, H);
+    KC.setTransform(1, 0, 0, 1, 0, 0); KC.globalCompositeOperation = 'source-over'; KC.clearRect(0, 0, W, H);
+    halftone(KC, t, NAVY, (x, y, d) => {
+      let r = L.rFull * smooth((W2(t) - d) / 260) * edgeK(y, t);
+      if (t >= 14.0) r *= 1 - smooth((d - W3(t)) / 260);
+      return r;
+    });
+    KC.globalCompositeOperation = 'source-atop';
+    drawEndCard(KC, t);
+    KC.globalCompositeOperation = 'source-over';
+    c.drawImage(MASK, 0, 0);
+  }
+  // --- the blue dot, always on top
+  drawDot(c, dotState(t));
+  // --- cursor
+  drawCursor(c, t);
+}
+
+/* temporal supersampling: K samples spread over one tmix subframe (1/240 s),
+   averaged exactly (running mean) -> motion blur that follows the true path */
+const SUBWIN = 1 / 240;
+function seek(tIn, K = 4) {
+  const wrap = x => ((x % DUR) + DUR) % DUR;
+  if (K <= 1) { drawFrame(MC, wrap(tIn)); return; }
+  for (let j = 0; j < K; j++) {
+    const tj = wrap(tIn + ((j + 0.5) / K - 0.5) * SUBWIN);
+    drawFrame(OC, tj);
+    MC.setTransform(1, 0, 0, 1, 0, 0); MC.globalCompositeOperation = 'source-over';
+    MC.globalAlpha = 1 / (j + 1); MC.drawImage(OFF, 0, 0); MC.globalAlpha = 1;
+  }
+}
+window.seek = seek;
+
+/* =====================================================================
+   SOUNDTRACK — Web Audio API, OfflineAudioContext, 120 BPM, 16 s.
+   Kick on every beat · tick on the click · rising hit on the dot landing
+   · short low thud on the GOL pill · clean hit when the end card lands.
+   Deterministic (seeded noise). Rendered to 16-bit WAV.
+   ===================================================================== */
+window.renderAudio = async function () {
+  const SR = 48000, LOOK = 0.006;                // DynamicsCompressor pre-delay, trimmed at the end
+  const NS = Math.round(SR * (DUR + LOOK));
+  const ctx = new OfflineAudioContext(2, NS, SR);
+  let seed = 0x0DDBA11;
+  const rnd = () => { seed = (seed + 0x6D2B79F5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+  const NB = (() => { const b = ctx.createBuffer(2, SR * 3, SR); for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] = rnd() * 2 - 1; } return b; })();
+
+  const master = ctx.createGain(); master.gain.value = 0.8;
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -18; comp.knee.value = 10; comp.ratio.value = 3.5; comp.attack.value = 0.004; comp.release.value = 0.18;
+  master.connect(comp); comp.connect(ctx.destination);
+  const verb = ctx.createConvolver();
+  const ir = ctx.createBuffer(2, Math.floor(SR * 1.4), SR);
+  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.pow(1 - i / d.length, 4.5) * 0.45; }
+  verb.buffer = ir; const vs = ctx.createGain(); vs.gain.value = 0.3; vs.connect(verb); verb.connect(master);
+
+  const env = (g, t, peak, a, d) => { g.gain.setValueAtTime(0.0001, Math.max(0, t)); g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); };
+  const out = (node, send = 0, pan = 0) => { const p = ctx.createStereoPanner(); p.pan.value = pan; node.connect(p); p.connect(master); if (send) { const s = ctx.createGain(); s.gain.value = send; p.connect(s); s.connect(vs); } };
+  const noise = (t, dur) => { const s = ctx.createBufferSource(); s.buffer = NB; s.start(Math.max(0, t), rnd() * 1.5, dur + 0.05); return s; };
+  const filt = (type, f, Q = 0.7) => { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = Q; return b; };
+  const osc = (type, f, t, dur) => { const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, Math.max(0, t)); o.start(Math.max(0, t)); o.stop(t + dur); return o; };
+
+  function kick(t, v = 1) {
+    const o = osc('sine', 150, t, 0.45); o.frequency.exponentialRampToValueAtTime(52, t + 0.06); o.frequency.exponentialRampToValueAtTime(44, t + 0.3);
+    const g = ctx.createGain(); env(g, t, 0.85 * v, 0.002, 0.34); o.connect(g); out(g);
+    const n = noise(t, 0.02), hp = filt('highpass', 3500), gn = ctx.createGain(); env(gn, t, 0.12 * v, 0.001, 0.012); n.connect(hp); hp.connect(gn); out(gn);
+  }
+  function hat(t, v = 0.08, len = 0.03, pan = 0.2) { const n = noise(t, len + 0.02), hp = filt('highpass', 8500), g = ctx.createGain(); env(g, t, v, 0.001, len); n.connect(hp); hp.connect(g); out(g, 0.04, pan); }
+  function click(t) { // UI tick on the toggle click
+    const o = osc('sine', 3400, t, 0.05); const g = ctx.createGain(); env(g, t, 0.22, 0.0008, 0.018); o.connect(g); out(g, 0.1);
+    const n = noise(t, 0.01), bp = filt('bandpass', 5200, 1.5), gn = ctx.createGain(); env(gn, t, 0.3, 0.0005, 0.008); n.connect(bp); bp.connect(gn); out(gn);
+    const o2 = osc('triangle', 1250, t + 0.03, 0.06); const g2 = ctx.createGain(); env(g2, t + 0.03, 0.08, 0.001, 0.03); o2.connect(g2); out(g2, 0.1);
+  }
+  function blip(t, f, v = 0.09, pan = 0) { const o = osc('triangle', f, t, 0.2); const g = ctx.createGain(); env(g, t, v, 0.002, 0.12); o.connect(g); out(g, 0.3, pan); }
+  function pluck(t, f, v = 0.07, pan = 0) {
+    const o = osc('sawtooth', f, t, 0.3), lp = filt('lowpass', 3000, 3); lp.frequency.setValueAtTime(3200, t); lp.frequency.exponentialRampToValueAtTime(500, t + 0.18);
+    const g = ctx.createGain(); env(g, t, v, 0.002, 0.2); o.connect(lp); lp.connect(g); out(g, 0.35, pan);
+  }
+  function whoosh(t, dur, f0, f1, v = 0.15, pan = 0) {
+    const n = noise(t, dur + 0.05), bp = filt('bandpass', f0, 1.3); bp.frequency.setValueAtTime(f0, t); bp.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + dur * 0.6); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    n.connect(bp); bp.connect(g); out(g, 0.2, pan);
+  }
+  function boop(t, f0, f1, dur = 0.16, v = 0.12) { const o = osc('sine', f0, t, dur + 0.05); o.frequency.exponentialRampToValueAtTime(f1, t + dur); const g = ctx.createGain(); env(g, t, v, 0.004, dur); o.connect(g); out(g, 0.2); }
+  function risingHit(t) { // into the dot landing on the graph
+    const pre = 0.32;
+    const o = osc('sine', 220, t - pre, pre + 0.02); o.frequency.exponentialRampToValueAtTime(880, t);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t - pre); g.gain.exponentialRampToValueAtTime(0.1, t - 0.01); g.gain.linearRampToValueAtTime(0, t + 0.01); o.connect(g); out(g, 0.2);
+    whoosh(t - pre, pre, 600, 6000, 0.14);
+    const n = noise(t, 0.4), lp = filt('lowpass', 7000, 0.8); lp.frequency.setValueAtTime(7000, t); lp.frequency.exponentialRampToValueAtTime(600, t + 0.3);
+    const gn = ctx.createGain(); env(gn, t, 0.32, 0.002, 0.32); n.connect(lp); lp.connect(gn); out(gn, 0.4);
+    const s = osc('sine', 90, t, 0.5); s.frequency.exponentialRampToValueAtTime(48, t + 0.4); const gs = ctx.createGain(); env(gs, t, 0.6, 0.003, 0.42); s.connect(gs); out(gs);
+    [880, 1318.5].forEach((f, i) => { const b = osc('sine', f, t, 0.8); const gb = ctx.createGain(); env(gb, t, 0.06, 0.002, 0.6); b.connect(gb); out(gb, 0.5, i ? 0.3 : -0.3); });
+  }
+  function thud(t) { // GOL pill: short, low
+    const s = osc('sine', 75, t, 0.35); s.frequency.exponentialRampToValueAtTime(38, t + 0.25);
+    const g = ctx.createGain(); env(g, t, 0.95, 0.002, 0.24); s.connect(g); out(g);
+    const n = noise(t, 0.08), lp = filt('lowpass', 900, 1), gn = ctx.createGain(); env(gn, t, 0.35, 0.001, 0.06); n.connect(lp); lp.connect(gn); out(gn);
+  }
+  function fillHit(t) { // circle fills the frame
+    const n = noise(t, 0.6), lp = filt('lowpass', 5000, 0.9); lp.frequency.setValueAtTime(5000, t); lp.frequency.exponentialRampToValueAtTime(300, t + 0.45);
+    const g = ctx.createGain(); env(g, t, 0.3, 0.003, 0.45); n.connect(lp); lp.connect(g); out(g, 0.5);
+    const s = osc('sine', 60, t, 0.6); s.frequency.exponentialRampToValueAtTime(36, t + 0.5); const gs = ctx.createGain(); env(gs, t, 0.55, 0.003, 0.5); s.connect(gs); out(gs);
+  }
+  function tock(t, v = 0.2) { const n = noise(t, 0.05), bp = filt('bandpass', 2400, 6), g = ctx.createGain(); env(g, t, v, 0.0008, 0.04); n.connect(bp); bp.connect(g); out(g, 0.15); const o = osc('sine', 1600, t, 0.05); const go = ctx.createGain(); env(go, t, 0.05, 0.001, 0.03); o.connect(go); out(go); }
+  function cleanHit(t) { // end card lands
+    const notes = [220, 329.63, 440, 523.25, 659.25];
+    notes.forEach((f, i) => { const o = osc('sine', f, t, 1.6); const o2 = osc('sine', f * 2.0, t, 0.6); const g = ctx.createGain(); env(g, t, 0.07, 0.004, 1.3); const g2 = ctx.createGain(); env(g2, t, 0.025, 0.002, 0.35); o.connect(g); o2.connect(g2); out(g, 0.5, (i - 2) * 0.15); out(g2, 0.5, (i - 2) * 0.15); });
+    const s = osc('sine', 110, t, 0.7); s.frequency.exponentialRampToValueAtTime(55, t + 0.5); const gs = ctx.createGain(); env(gs, t, 0.55, 0.002, 0.55); s.connect(gs); out(gs);
+    const n = noise(t, 0.05), hp = filt('highpass', 6000), gn = ctx.createGain(); env(gn, t, 0.18, 0.0005, 0.04); n.connect(hp); hp.connect(gn); out(gn, 0.3);
+  }
+  function bass(t, f, len = 0.2, v = 0.15) {
+    const o = osc('sawtooth', f, t, len + 0.05), o2 = osc('sine', f / 2, t, len + 0.05);
+    const lp = filt('lowpass', 800, 4); lp.frequency.setValueAtTime(1300, t); lp.frequency.exponentialRampToValueAtTime(200, t + len);
+    const g = ctx.createGain(); env(g, t, v, 0.004, len); o.connect(lp); o2.connect(lp); lp.connect(g); out(g);
+  }
+  function swell(t0, t1, f0, f1, v) {
+    const n = noise(t0, t1 - t0 + 0.05), bp = filt('bandpass', f0, 1.6); bp.frequency.setValueAtTime(f0, t0); bp.frequency.exponentialRampToValueAtTime(f1, t1);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(v, t1 - 0.02); g.gain.linearRampToValueAtTime(0, t1);
+    n.connect(bp); bp.connect(g); out(g, 0.3);
+  }
+
+  const B = BEAT;
+  // groove: kick every beat, offbeat hats, offbeat bass (Am F C G | Am F C G)
+  for (let k = 0; k < 32; k++) kick(k * B, (k === 6 || k === 23) ? 1.1 : 1);
+  const prog8 = [110, 87.31, 130.81, 98, 110, 87.31, 130.81, 98];
+  for (let k = 0; k < 32; k++) {
+    const t = k * B + 0.25;
+    if (k >= 2) hat(t, 0.075);
+    if (k >= 12 && k < 15) hat(t - 0.125, 0.04, 0.02, -0.2);
+    if (k >= 2 && !(k >= 20 && k < 22)) bass(t, prog8[Math.floor(k / 4)], 0.18, 0.13);
+  }
+  // OPEN
+  click(0.5); whoosh(0.5, 0.25, 900, 3000, 0.07, 0.2);
+  boop(1.12, 520, 1040, 0.24, 0.09); blip(1.38, 1760, 0.07);
+  whoosh(1.4, 0.55, 500, 2600, 0.08, -0.2); blip(2.0, 1318.5, 0.06);
+  // SPRING
+  boop(2.5, 700, 1400, 0.3, 0.08);
+  risingHit(3.0); blip(3.5, 2093, 0.06, 0.2);
+  const penta = [880, 1046.5, 1174.7, 1318.5, 1568, 1760];
+  for (let i = 0; i < 13; i++) pluck(3.2 + 0.1 * i, penta[i % 6], 0.035, (i % 2 ? 0.25 : -0.25));
+  blip(4.0, 1568, 0.08); blip(4.06, 2349, 0.05);
+  // SHAPE
+  whoosh(4.98, 0.22, 800, 5000, 0.16); swell(5.1, 5.5, 300, 4000, 0.18); fillHit(5.5);
+  whoosh(5.5, 0.4, 1800, 600, 0.06);
+  thud(6.0);
+  tock(6.5); tock(6.75, 0.16); tock(7.0);
+  swell(7.0, 7.5, 4000, 400, 0.12);
+  // TYPE RING
+  for (let i = 0; i < 8; i++) pluck(7.5 + i * 0.0625, penta[(i * 2) % 6] * 0.5, 0.03, (i % 2 ? 0.3 : -0.3));
+  blip(8.0, 1046.5, 0.06, -0.3); blip(8.5, 1174.7, 0.06, 0); blip(9.0, 1318.5, 0.06, 0.3);
+  // HALFTONE
+  swell(9.5, 10.98, 400, 7000, 0.16);
+  whoosh(11.0, 0.4, 5000, 600, 0.1);
+  cleanHit(11.5); blip(12.0, 1760, 0.06); blip(12.06, 2637, 0.04);
+  // RETURN
+  swell(14.0, 14.5, 6000, 500, 0.12); boop(14.0, 1400, 700, 0.4, 0.07);
+  for (let i = 0; i < 6; i++) pluck(14.5 + i * 0.075, penta[5 - i], 0.03, (i % 2 ? 0.25 : -0.25));
+  boop(14.98, 600, 1100, 0.3, 0.07);
+  click(15.5); whoosh(15.5, 0.25, 3000, 900, 0.06, -0.2);
+
+  const buf = await ctx.startRendering();
+  const off = Math.round(SR * LOOK), NOUT = SR * DUR;
+  const Lc = buf.getChannelData(0).subarray(off, off + NOUT), Rc = buf.getChannelData(1).subarray(off, off + NOUT);
+  let pk = 0; for (let i = 0; i < NOUT; i++) pk = Math.max(pk, Math.abs(Lc[i]), Math.abs(Rc[i]));
+  const gN = Math.pow(10, -1 / 20) / (pk || 1);
+  const bytes = new ArrayBuffer(44 + NOUT * 4), dv = new DataView(bytes);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); dv.setUint32(4, 36 + NOUT * 4, true); ws(8, 'WAVE'); ws(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+  dv.setUint16(22, 2, true); dv.setUint32(24, SR, true); dv.setUint32(28, SR * 4, true); dv.setUint16(32, 4, true); dv.setUint16(34, 16, true);
+  ws(36, 'data'); dv.setUint32(40, NOUT * 4, true);
+  for (let i = 0, o = 44; i < NOUT; i++, o += 4) {
+    dv.setInt16(o, Math.max(-32767, Math.min(32767, Math.round(Lc[i] * gN * 32767))), true);
+    dv.setInt16(o + 2, Math.max(-32767, Math.min(32767, Math.round(Rc[i] * gN * 32767))), true);
+  }
+  const u8 = new Uint8Array(bytes); let bin = '';
+  for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return { b64: btoa(bin), peak: pk };
+};
+
+
+build();
+</script>
+</body>
+</html>

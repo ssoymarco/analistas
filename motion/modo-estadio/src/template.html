@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Analistas — Modo Estadio</title>
+<meta name="viewport" content="width=1080">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=block" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #0D1F35; }
+  #c { display: block; width: 1080px; height: 1920px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+/* =====================================================================
+   ANALISTAS — "Modo Estadio"   16 s · 120 BPM · 1080x1920 · 60 fps
+   Everything is drawn from scratch by window.seek(t): a pure function
+   of time. No CSS animation, no timers, no state between frames.
+   ===================================================================== */
+const LOGO_SUBPATHS = %%LOGO_SUBPATHS%%;
+
+const W = 1080, H = 1920, DUR = 16, BEAT = 0.5;
+const OFFW = '#F8FAFC', NAVY = '#0D1F35', BLUE = '#3B82F6', RED = '#EF4444', WHITE = '#FFFFFF';
+const CY = 875;                 // centre of the vertical safe zone (250 .. 1500)
+const FONT = 'Montserrat';
+
+/* ---------------- time helpers ---------------- */
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, t0, d) => clamp((t - t0) / d);
+const E10 = 1 - Math.pow(2, -10);
+const expoOut = p => p <= 0 ? 0 : p >= 1 ? 1 : (1 - Math.pow(2, -10 * p)) / E10;
+const expoIn = p => p <= 0 ? 0 : p >= 1 ? 1 : (Math.pow(2, 10 * p) - 1) / 1023;
+const expoInOut = p => p <= 0 ? 0 : p >= 1 ? 1 : (p < 0.5 ? expoIn(2 * p) / 2 : 0.5 + expoOut(2 * p - 1) / 2);
+const cubicInOut = p => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const smooth = p => { p = clamp(p); return p * p * (3 - 2 * p); };
+const smoother = p => { p = clamp(p); return p * p * p * (p * (p * 6 - 15) + 10); };
+/* Closed-form spring: under-damped step response 0 -> 1 (small overshoot), x = time since start */
+function spring(x, w = 18, z = 0.62) {
+  if (x <= 0) return 0;
+  const s = Math.sqrt(1 - z * z), wd = w * s;
+  return 1 - Math.exp(-z * w * x) * (Math.cos(wd * x) + (z / s) * Math.sin(wd * x));
+}
+// beat pulse: quick attack, exponential decay, re-triggered on each beat in [t0, t1)
+function beatPulse(t, t0, t1, decay = 9) {
+  if (t < t0 || t >= t1 + 0.5) return 0;
+  const k = Math.floor((t - t0) / BEAT), x = t - (t0 + k * BEAT);
+  if (t0 + k * BEAT >= t1) return 0;
+  return Math.min(1, x / 0.03) * Math.exp(-decay * x);
+}
+const D = 1 / 240;
+const deriv = (f, t) => (f(t + D) - f(t - D)) / (2 * D);
+
+/* ---------------- canvas ---------------- */
+const CV = document.getElementById('c');
+const MC = CV.getContext('2d');
+const OFF = document.createElement('canvas'); OFF.width = W; OFF.height = H;
+const OC = OFF.getContext('2d');
+const MASK = document.createElement('canvas'); MASK.width = W; MASK.height = H;
+const KC = MASK.getContext('2d');
+const meas = document.createElement('canvas').getContext('2d');
+
+function font(c, weight, px, spacing = 0) { c.font = `${weight} ${px}px ${FONT}`; c.letterSpacing = spacing + 'px'; }
+function rrect(c, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+}
+function disc(c, x, y, r, color) { if (r <= 0) return; c.fillStyle = color; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); }
+
+/* =====================================================================
+   LAYOUT (measured once after fonts load)
+   ===================================================================== */
+const L = {};
+async function build() {
+  const sample = 'Modo Estadio.ıÍÓ·+5MIN:0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ,';
+  for (const w of [700, 800, 900]) await document.fonts.load(`${w} 100px ${FONT}`, sample);
+  await document.fonts.ready;
+
+  // ---- label "Modo Estadio" + toggle row ----
+  L.label = 'Modo Estadio';
+  L.fsL = 88;
+  font(meas, 800, 100);
+  L.adv = [...L.label].map(ch => meas.measureText(ch).width);              // per-glyph advance @100
+  L.pre = []; for (let k = 0; k <= L.label.length; k++) L.pre.push(meas.measureText(L.label.slice(0, k)).width); // kerned prefix @100
+  L.capEm = meas.measureText('H').actualBoundingBoxAscent / 100;
+  const labelW = L.pre[12] * L.fsL / 100;
+  L.labelW = labelW;
+  L.trackW = 176; L.trackH = 100; L.gap = 48;
+  const rowW = labelW + L.gap + L.trackW;
+  L.lx0 = 540 - rowW / 2;
+  L.baseL = CY + L.capEm * L.fsL / 2;
+  L.trackX = L.lx0 + labelW + L.gap; L.trackY = CY - L.trackH / 2;
+  L.knobOff = L.trackX + 50; L.knobOn = L.trackX + L.trackW - 50; L.knobR = 38; L.ringW = 6;
+
+  // ---- hero "Estadio" ----
+  const wE100 = L.pre[12] - L.pre[5];
+  L.fsH = 800 * 100 / wE100;
+  L.heroX0 = 540 - 400;
+  L.baseH = CY + L.capEm * L.fsH / 2;
+  L.labelPos = k => ({ x: L.lx0 + L.pre[k] * L.fsL / 100, y: L.baseL, fs: L.fsL });
+  L.heroPos = k => ({ x: L.heroX0 + (L.pre[k] - L.pre[5]) * L.fsH / 100, y: L.baseH, fs: L.fsH });
+
+  // ---- tittle of the "i" (em units, relative to glyph origin & baseline) ----
+  L.tit = tittle();
+
+  // ---- graph ----
+  L.gx0 = L.heroX0; L.gxEnd = 960; L.gy0 = L.baseH; L.gH = 330; L.gyT = L.gy0 - L.gH;
+  L.gx1 = 640; L.gT = 1.4;
+  L.ZETA = 0.5; L.WD = 2 * Math.PI; L.WN = L.WD / Math.sqrt(1 - L.ZETA * L.ZETA);   // peak exactly 0.5 s after landing
+
+  // ---- sentence (word by word) ----
+  font(meas, 800, 62, 0.5);
+  const words = 'RETRASA LAS NOTIFICACIONES DE LOS GOLES PARA QUE NO TE ROBEN EL MOMENTO.'.split(' ');
+  const maxW = 800, sp = meas.measureText(' ').width;
+  L.words = []; let line = 0, x = 0;
+  words.forEach(w => {
+    const ww = meas.measureText(w).width;
+    if (x > 0 && x + ww > maxW) { line++; x = 0; }
+    L.words.push({ w, x: L.gx0 + x, line }); x += ww + sp;
+  });
+  L.lineBase = l => 1070 + l * 80;
+  L.nLines = line + 1;
+
+  // ---- callout ----
+  font(meas, 900, 76);
+  L.callCap = meas.measureText('M').actualBoundingBoxAscent;
+
+  // ---- ring of type ----
+  L.ringText = 'SIGUE A TU EQUIPO FAVORITO · SIGUE A TUS JUGADORES FAVORITOS · SIGUE A TUS LIGAS FAVORITAS · ';
+  L.ringR = 452;                                   // baseline radius; cap tops reach ~R+33 -> fits 1080 wide
+  font(meas, 800, 100, 2);
+  const chars = [...L.ringText];
+  const advs = chars.map(ch => meas.measureText(ch).width);
+  const tot = advs.reduce((a, b) => a + b, 0);
+  L.ringFs = 2 * Math.PI * L.ringR / tot * 100;
+  let acc = 0; L.ring = chars.map((ch, k) => { const a = (acc + advs[k] / 2) / tot * Math.PI * 2; acc += advs[k]; return { ch, a, adv: advs[k] }; });
+  // phrase ranges for highlighting
+  const parts = L.ringText.split(' · ');
+  let idx = 0; L.phrase = [];
+  for (let p = 0; p < 3; p++) { L.phrase.push([idx, idx + parts[p].length]); idx += parts[p].length + 3; }
+
+  // ---- halftone lattice (45° square grid) ----
+  L.hs = 34; const hs = L.hs, q = hs / Math.SQRT2;
+  L.dots = [];
+  for (let i = -70; i <= 70; i++) for (let j = -70; j <= 70; j++) {
+    const x0 = 540 + (i - j) * q, y0 = CY + (i + j) * q;
+    if (x0 > -80 && x0 < W + 80 && y0 > -80 && y0 < H + 80) L.dots.push([x0, y0]);
+  }
+  L.rFull = hs / Math.SQRT2 + 1.2;
+
+  // ---- end card ----
+  const sp2 = LOGO_SUBPATHS;
+  L.p2 = {
+    ring: new Path2D([sp2[1], sp2[2], sp2[3], sp2[4], sp2[5]].join('')),
+    crown: new Path2D(sp2[0]),
+    rules: new Path2D(sp2[9] + sp2[22]),
+    letters: new Path2D(sp2.slice(10, 22).join('')),
+    up: [6, 7, 8].map(k => new Path2D(sp2[k])),
+    low: [23, 24, 25].map(k => new Path2D(sp2[k]))
+  };
+  L.logoS = 0.5; L.logoTop = 372;
+  L.endTitle = 'Modo Estadio.'; L.fsE = 100; L.baseE = 968;
+  font(meas, 800, 100);
+  L.preE = []; for (let k = 0; k <= L.endTitle.length; k++) L.preE.push(meas.measureText(L.endTitle.slice(0, k)).width);
+  L.advE = [...L.endTitle].map(ch => meas.measureText(ch).width);
+  L.ex0 = 540 - L.preE[L.endTitle.length] * L.fsE / 200;
+  L.tag = 'QUE NADIE TE ROBE EL MOMENTO.'; L.baseTag = 1048;
+  L.small = ['GOLES AL INSTANTE', 'ESTADÍSTICAS', 'NOTICIAS']; L.baseSmall = 1118;
+  L.cta = 'DESCARGA LA APP, ES GRATIS';
+  font(meas, 900, 40, 1.6);
+  L.ctaW = meas.measureText(L.cta).width + 130; L.ctaH = 112; L.ctaY = 1210;
+
+  // ---- cursor ----
+  L.curRest = { x: L.knobOff + 170, y: CY + 260 };
+  L.curOut = { x: 1190, y: 1720 };
+
+  window.__ready = true;
+}
+
+function tittle() {
+  const c = document.createElement('canvas'); c.width = 600; c.height = 700;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  x.font = `800 400px ${FONT}`; x.fillStyle = '#000'; x.fillText('i', 200, 560);
+  const xh = x.measureText('x').actualBoundingBoxAscent;
+  const d = x.getImageData(0, 0, 600, 700).data;
+  let y0 = 1e9, y1 = -1, x0 = 1e9, x1 = -1;
+  for (let yy = 0; yy < 560 - xh - 6; yy++) for (let xx = 0; xx < 600; xx++) if (d[(yy * 600 + xx) * 4 + 3] > 127) {
+    y0 = Math.min(y0, yy); y1 = Math.max(y1, yy); x0 = Math.min(x0, xx); x1 = Math.max(x1, xx);
+  }
+  const cyEm = ((y0 + y1) / 2 - 560) / 400, rEm = (x1 - x0 + 1) / 2 / 400;
+  return { cx: ((x0 + x1) / 2 - 200) / 400, cy: cyEm, r: rEm, clip: ((y1 - 560) / 400 + (-xh / 400)) / 2 };
+}
+
+/* =====================================================================
+   GLYPH DRAWING — individual letters with their own transform
+   ===================================================================== */
+// returns the 2D matrix used for a glyph so the tittle can be tracked exactly
+function glyphMatrix(x, base, fs, adv, o) {
+  const m = new DOMMatrix();
+  m.translateSelf(x + adv * fs / 200 + (o.dx || 0), base + (o.dy || 0));
+  if (o.rot) m.rotateSelf(o.rot * 180 / Math.PI);
+  if (o.skew) m.multiplySelf(new DOMMatrix([1, 0, Math.tan(o.skew), 1, 0, 0]));
+  m.scaleSelf((o.sx ?? 1) * fs / 100, (o.sy ?? 1) * fs / 100);
+  m.translateSelf(-adv / 2, 0);
+  return m;
+}
+function drawGlyph(c, ch, M, color, weight = 800, dotless = false, clipEm = 0) {
+  c.save(); c.setTransform(c.getTransform().multiply(M));
+  font(c, weight, 100); c.fillStyle = color;
+  if (dotless) { c.beginPath(); c.rect(-200, clipEm * 100, 600, 1000); c.clip(); }
+  c.fillText(ch, 0, 0);
+  c.restore();
+}
+const applyM = (M, x, y) => ({ x: M.a * x + M.c * y + M.e, y: M.b * x + M.d * y + M.f });
+
+/* =====================================================================
+   THE BLUE DOT — one entity, one function of time
+   ===================================================================== */
+// spring step response used BOTH to move the dot and to draw the graph
+const gStep = tau => tau <= 0 ? 0 : 1 - Math.exp(-L.ZETA * L.WN * tau) * (Math.cos(L.WD * tau) + (L.ZETA / Math.sqrt(1 - L.ZETA * L.ZETA)) * Math.sin(L.WD * tau));
+const gU = tau => 1 - Math.pow(1 - clamp(tau / L.gT), 2);
+const graphPt = tau => ({ x: L.gx0 + (L.gx1 - L.gx0) * gU(tau), y: L.gy0 - L.gH * gStep(Math.min(tau, L.gT)) });
+// closed-form spring; its last ~1% tail is eased to exact rest so the loop frames match pixel for pixel
+const settle = x => 1 - (1 - spring(x, 22, 0.65)) * (1 - smoother(prog(x, 0.25, 0.15)));
+const knobF = t => t < 15.0 ? settle(t - 0.5) : 1 - settle(t - 15.5);
+const knobX = t => lerp(L.knobOff, L.knobOn, knobF(t));
+// arc between two points (parabolic hop)
+function hop(p, a, b, h) { const e = p; return { x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e) - h * 4 * e * (1 - e) }; }
+
+// "Estadio" letter state during the open (index k in label)
+function openLetter(t, k) {
+  if (k < 5) { // "Modo " folds into its baseline (bends as it goes)
+    const p = expoIn(prog(t, 1.38 + 0.045 * k, 0.16));
+    const P = L.labelPos(k);
+    return { ...P, o: { sy: 1 - p, skew: -0.9 * p, dx: -14 * p }, gone: p >= 1 };
+  }
+  const pos = tt => { const s = spring(tt - (1.6 + 0.012 * (k - 5)), 15, 0.62); const A = L.labelPos(k), B = L.heroPos(k); return { x: lerp(A.x, B.x, s), y: lerp(A.y, B.y, s), fs: lerp(A.fs, B.fs, s) }; };
+  const P = pos(t);
+  const vx = deriv(tt => pos(tt).x, t), vy = deriv(tt => pos(tt).y, t);
+  let o = { rot: clamp(vx * 0.00009 + vy * 0.00006, -0.22, 0.22), dy: -26 * Math.sin(Math.PI * clamp(pos(t).fs > 0 ? (pos(t).fs - L.fsL) / (L.fsH - L.fsL) : 0)) * (k % 2 ? 1 : -0.6) };   // letters bend: lean into their own motion + a small wave
+  // fold of the hero word into its baseline at 2.5
+  const fp = expoIn(prog(t, 2.56 + 0.03 * (k - 5), 0.15));
+  if (fp > 0) o = { sy: 1 - fp, skew: 0.7 * fp };
+  return { ...P, o, gone: fp >= 1 };
+}
+function iMatrix(t) { const s = openLetter(t, 10); return glyphMatrix(s.x, s.y, s.fs, L.adv[10], s.o); }
+function iTittle(t) { const M = iMatrix(t); const p = applyM(M, L.tit.cx * 100, L.tit.cy * 100); return { x: p.x, y: p.y, r: L.tit.r * Math.hypot(M.a, M.b) * 100 * 1.32 }; }
+// end-card tittle
+function endTittle(t) {
+  const k = 10; // "Modo Estadio." -> index of the i
+  const M = endGlyphMatrix(t, k);
+  const p = applyM(M, L.tit.cx * 100, L.tit.cy * 100);
+  return { x: p.x, y: p.y, r: L.tit.r * Math.hypot(M.a, M.b) * 100 * 1.4 };
+}
+
+function dotState(t) {
+  // 0.0 – 1.0 : toggle knob
+  if (t < 1.0) return { x: knobX(t), y: CY, r: L.knobR, ring: L.ringW };
+  if (t < 1.12) return { x: knobX(t), y: CY, r: L.knobR, ring: L.ringW * (1 - expoOut(prog(t, 1.04, 0.08))) };
+  if (t < 1.38) { // hop onto the i (label size)
+    const p = expoInOut(prog(t, 1.12, 0.26)), a = { x: L.knobOn, y: CY }, b = iTittle(1.38);
+    const q = hop(p, a, b, 150);
+    return { x: q.x, y: q.y, r: lerp(L.knobR, b.r, expoInOut(prog(t, 1.12, 0.22))), ring: 0 };
+  }
+  if (t < 2.5) return { ...iTittle(t), ring: 0 };          // attached to the "i"
+  if (t < 3.0) { // jump from the word to the graph origin
+    const a = iTittle(2.5), b = graphPt(0), p = cubicInOut(prog(t, 2.5, 0.5));
+    const q = hop(p, a, b, 230);
+    return { x: q.x, y: q.y, r: lerp(a.r, 20, p), ring: 0 };
+  }
+  if (t < 5.0) { const g = graphPt(t - 3.0); return { x: g.x, y: g.y, r: 20, ring: 0 }; }
+  if (t < 7.5) return null;                                 // the dot is the shape now
+  if (t < 10.0) { const pu = beatPulse(t, 8.0, 10.0); return { x: 540, y: CY, r: 26 * (1 + 0.22 * pu), ring: 0 }; }
+  if (t < 11.0) { const g = smooth(prog(t, 10.0, 0.9)); return { x: 540, y: CY, r: 26 + 38 * g + 6 * beatPulse(t, 10.0, 11.0), ring: 0 }; }
+  if (t < 11.5) { const a = { x: 540, y: CY, r: 64 }, b = endTittle(11.5), p = expoInOut(prog(t, 11.0, 0.5)); const q = hop(p, a, b, 120); return { x: q.x, y: q.y, r: lerp(a.r, b.r, p), ring: 0 }; }
+  if (t < 14.0) { const b = endTittle(t); return { x: b.x, y: b.y, r: b.r * (1 + 0.5 * beatPulse(t, 12.0, 14.0, 7)), ring: 0 }; }
+  if (t < 14.5) { const a = endTittle(14.0), b = graphPt(L.gT), p = cubicInOut(prog(t, 14.0, 0.5)); const q = hop(p, a, b, 200); return { x: q.x, y: q.y, r: lerp(a.r, 20, p), ring: 0 }; }
+  if (t < 14.95) { const g = graphPt(L.gT * (1 - cubicInOut(prog(t, 14.5, 0.45)))); return { x: g.x, y: g.y, r: 20, ring: 0 }; }
+  if (t < 15.3) { const a = graphPt(0), b = { x: L.knobOn, y: CY }, p = cubicInOut(prog(t, 14.98, 0.32)); const q = hop(p, a, b, 160); return { x: q.x, y: q.y, r: lerp(20, L.knobR, p), ring: L.ringW * expoOut(prog(t, 15.2, 0.15)) }; }
+  return { x: knobX(t), y: CY, r: L.knobR, ring: L.ringW };
+}
+function drawDot(c, d) {
+  if (!d) return;
+  if (d.ring > 0.05) disc(c, d.x, d.y, d.r + d.ring, WHITE);
+  disc(c, d.x, d.y, d.r, BLUE);
+}
+
+/* =====================================================================
+   SCENES
+   ===================================================================== */
+// ---------- toggle ----------
+function drawToggle(c, t) {
+  let x0 = L.trackX, x1 = L.trackX + L.trackW, alpha = 1;
+  if (t >= 1.0 && t < 2.0) { // retracts into the knob
+    const p = expoOut(prog(t, 1.0, 0.12));
+    x0 = lerp(L.trackX, L.knobOn - 50, p);
+    if (t >= 1.12) return;
+  }
+  if (t >= 14.0 && t < 15.5) { // grows back out of the knob
+    if (t < 15.22) return;
+    const p = expoOut(prog(t, 15.22, 0.2));
+    x0 = lerp(L.knobOn - 50, L.trackX, p);
+  }
+  const y = L.trackY, h = L.trackH;
+  rrect(c, x0, y, x1 - x0, h, h / 2); c.fillStyle = WHITE; c.fill();
+  c.lineWidth = 5; c.strokeStyle = NAVY; c.stroke();
+  // blue floods outward from the knob's OFF position as the knob travels
+  const f = clamp(knobF(t));
+  const rho = (t >= 1.0 && t < 15.5) ? 400 : 200 * f;
+  if (rho > 0.5) {
+    c.save(); rrect(c, x0 - 3, y - 3, x1 - x0 + 6, h + 6, h / 2 + 3); c.clip();
+    disc(c, L.knobOff, CY, rho, BLUE); c.restore();
+  }
+}
+// ---------- cursor ----------
+const CUR = [[0, 0], [0, 52], [12.5, 40.5], [21.5, 60], [31, 55.5], [22, 36.5], [38.5, 36.5]];
+function cursorState(t) {
+  const tipOff = { x: L.knobOff + 4, y: CY + 6 }, tipOn = { x: L.knobOn + 4, y: CY + 6 };
+  if (t < 0.5) { const p = smoother(prog(t, 0.03, 0.42)); return { x: lerp(L.curRest.x, tipOff.x, p), y: lerp(L.curRest.y, tipOff.y, p), s: 1 }; }
+  if (t < 1.1) { const press = Math.sin(Math.PI * prog(t, 0.5, 0.14)); const p = expoIn(prog(t, 0.64, 0.4)); return { x: lerp(tipOff.x, L.curOut.x, p), y: lerp(tipOff.y, L.curOut.y, p), s: 1 - 0.14 * press }; }
+  if (t < 15.0) return null;
+  if (t < 15.5) { const p = expoOut(prog(t, 15.04, 0.42)); return { x: lerp(L.curOut.x, tipOn.x, p), y: lerp(L.curOut.y, tipOn.y, p), s: 1 }; }
+  const press = Math.sin(Math.PI * prog(t, 15.5, 0.14)); const p = smoother(prog(t, 15.56, 0.4));
+  return { x: lerp(tipOn.x, L.curRest.x, p), y: lerp(tipOn.y, L.curRest.y, p), s: 1 - 0.14 * press };
+}
+function drawCursor(c, t) {
+  const s = cursorState(t); if (!s) return;
+  c.save(); c.translate(s.x, s.y); c.scale(1.45 * s.s, 1.45 * s.s);
+  c.beginPath(); CUR.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath();
+  c.lineJoin = 'round'; c.lineWidth = 3.2; c.strokeStyle = WHITE; c.fillStyle = NAVY; c.fill(); c.stroke();
+  c.restore();
+}
+// ---------- open: label & hero word ----------
+function drawOpenWord(c, t) {
+  const dotOnI = t >= 1.38 && t < 2.5 + 0.2;
+  const chars = [...L.label];
+  for (let k = 0; k < chars.length; k++) {
+    if (chars[k] === ' ') continue;
+    const s = openLetter(t, k); if (s.gone) continue;
+    const M = glyphMatrix(s.x, s.y, s.fs, L.adv[k], s.o);
+    drawGlyph(c, chars[k], M, NAVY, 800, k === 10 && dotOnI, L.tit.clip);
+  }
+}
+// label rebuilt in the return (unfolds out of the graph axis)
+function drawReturnLabel(c, t) {
+  const chars = [...L.label];
+  for (let k = 0; k < chars.length; k++) {
+    if (chars[k] === ' ') continue;
+    const p = spring(t - (15.06 + 0.022 * k), 20, 0.62);
+    if (p <= 0) continue;
+    const P = L.labelPos(k);
+    const M = glyphMatrix(P.x, P.y, P.fs, L.adv[k], { sy: p, skew: 0.5 * (1 - Math.min(1, p)) });
+    drawGlyph(c, chars[k], M, NAVY, 800);
+  }
+}
+// ---------- graph ----------
+function drawAxis(c, xa, xb, y, th = 6) { if (xb - xa < 0.5) return; c.fillStyle = NAVY; rrect(c, xa, y - th / 2, xb - xa, th, th / 2); c.fill(); }
+function drawCurve(c, tauA, tauB) {
+  if (tauB - tauA <= 0.002) return;
+  c.beginPath(); const n = Math.max(2, Math.ceil((tauB - tauA) * 240));
+  for (let i = 0; i <= n; i++) { const g = graphPt(lerp(tauA, tauB, i / n)); i ? c.lineTo(g.x, g.y) : c.moveTo(g.x, g.y); }
+  c.lineWidth = 9; c.lineCap = 'round'; c.lineJoin = 'round'; c.strokeStyle = BLUE; c.stroke();
+}
+function drawTargetLine(c, xa, xb) {
+  if (xb - xa < 1) return;
+  c.save(); c.setLineDash([14, 12]); c.lineDashOffset = 0; c.lineWidth = 3; c.strokeStyle = NAVY;
+  c.beginPath(); c.moveTo(xa, L.gyT); c.lineTo(xb, L.gyT); c.stroke(); c.restore();
+}
+function drawGraphScene(c, t) {
+  // axis: the folded hero word becomes it
+  const ax = prog(t, 2.6, 0.3);
+  if (t >= 2.6) {
+    const a0 = L.heroPos(5).x, a1 = L.heroPos(11).x + L.adv[11] * L.fsH / 100;
+    drawAxis(c, lerp(a0, L.gx0, expoOut(ax)), lerp(a1, L.gxEnd, expoOut(ax)), L.gy0);
+  }
+  if (t >= 3.0) {
+    drawTargetLine(c, L.gx0, lerp(L.gx0, L.gx1 + 30, expoOut(prog(t, 3.0, 0.4))));
+    drawCurve(c, 0, Math.min(t - 3.0, L.gT));
+  }
+  // callout
+  if (t >= 4.0) {
+    const p = spring(t - 4.0, 20, 0.6);
+    c.save(); c.translate(L.gx1 + 52, L.gyT); c.scale(lerp(0.6, 1, p), lerp(0.6, 1, p));
+    font(c, 900, 76); c.fillStyle = NAVY; c.textBaseline = 'alphabetic';
+    c.fillText('+5 MIN', 0, L.callCap / 2 + (1 - p) * 30); c.restore();
+  }
+  // sentence, word by word, each line masked so words rise into place
+  for (let l = 0; l < L.nLines; l++) {
+    const b = L.lineBase(l);
+    c.save(); c.beginPath(); c.rect(0, b - 62, W, 80); c.clip();
+    font(c, 800, 62, 0.5); c.fillStyle = NAVY;
+    L.words.forEach((wd, i) => {
+      if (wd.line !== l) return;
+      const p = spring(t - (3.2 + 0.1 * i), 22, 0.64); if (p <= 0) return;
+      c.fillText(wd.w, wd.x, b + 64 * (1 - p));
+    });
+    c.restore();
+  }
+}
+function drawReturnGraph(c, t) {
+  const tau = L.gT * (1 - cubicInOut(prog(t, 14.5, 0.45)));
+  if (t < 14.95) {
+    const dx = graphPt(tau).x;
+    drawAxis(c, Math.min(dx, L.gxEnd), L.gxEnd, L.gy0);
+    drawCurve(c, tau, L.gT);
+    return;
+  }
+  // curve & axis retract into the origin, the axis slides up into the label baseline
+  const p = expoInOut(prog(t, 14.95, 0.2));
+  const end = L.gT * (1 - expoOut(prog(t, 14.95, 0.12)));
+  drawCurve(c, 0, end);
+  const ya = lerp(L.gy0, L.baseL + 3, p), xa = lerp(L.gx0, L.lx0, p), xb = lerp(L.gxEnd, L.lx0 + L.labelW, p);
+  const th = 6 * (1 - prog(t, 15.1, 0.18));
+  if (th > 0.2) drawAxis(c, xa, xb, ya, th);
+}
+// ---------- shape: circle -> rotating square -> GOL pill -> contraction ----------
+function shapeState(t) {
+  const start = graphPt(L.gT), C = { x: 540, y: CY };
+  const sp = expoInOut(prog(t, 5.0, 0.22));
+  const pos = { x: lerp(start.x, C.x, sp), y: lerp(start.y, C.y, sp) };
+  let R = 20;
+  if (t >= 5.1) R = lerp(20, 1160, expoIn(prog(t, 5.1, 0.4)));
+  if (t >= 7.0) R = lerp(1160, 26, cubicInOut(prog(t, 7.0, 0.5)));
+  // inner shape (navy): same object, different states
+  let w = 0, h = 0, r = 0, rot = 0;
+  if (t >= 5.5) {
+    const s = 440 * spring(t - 5.5, 15, 0.62);
+    rot = -Math.PI * 0.75 * (1 - spring(t - 5.5, 9, 0.6));
+    const st = spring(t - 6.0, 16, 0.6);
+    w = lerp(s, 720, st); h = lerp(s, 210, st); r = lerp(0.22 * s, 105, st);
+  }
+  const contract = 1 - expoIn(prog(t, 7.0, 0.3));
+  return { x: pos.x, y: pos.y, R, w: w * contract, h: h * contract, r: r * contract, rot, contract };
+}
+function drawShape(c, t) {
+  const S = shapeState(t);
+  // the shot along a line (streak behind the dot)
+  if (t < 5.25) {
+    const lag = shapeStateXY(t - 0.07);
+    c.lineCap = 'round'; c.strokeStyle = BLUE; c.lineWidth = 2 * Math.min(S.R, 20);
+    c.beginPath(); c.moveTo(lag.x, lag.y); c.lineTo(S.x, S.y); c.stroke();
+  }
+  disc(c, S.x, S.y, S.R, BLUE);
+  if (S.w > 0.5) {
+    c.save(); c.beginPath(); c.arc(S.x, S.y, S.R, 0, Math.PI * 2); c.clip();
+    c.translate(S.x, S.y); c.rotate(S.rot);
+    rrect(c, -S.w / 2, -S.h / 2, S.w, S.h, S.r); c.fillStyle = NAVY; c.fill();
+    // notification content
+    if (t >= 6.06) {
+      const p = spring(t - 6.06, 20, 0.6) * S.contract;
+      font(c, 900, 124, 2); c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+      const tw = c.measureText('GOL').width, gw = 48 + 34 + tw;
+      disc(c, -gw / 2 + 24, 0, 24 * p, RED);
+      c.save(); c.translate(-gw / 2 + 82 + tw / 2, 0); c.scale(p, p); c.fillStyle = WHITE; c.fillText('GOL', 0, 44); c.restore();
+    }
+    c.restore();
+  }
+  // countdown under the pill, ticking on the half beats
+  if (t >= 6.5 && S.contract > 0) {
+    const pop = spring(t - 6.5, 20, 0.6) * S.contract;
+    c.save(); c.beginPath(); c.arc(S.x, S.y, S.R, 0, Math.PI * 2); c.clip();
+    c.translate(540, CY); c.scale(pop, pop); c.translate(-540, -CY);
+    const ticks = [6.75, 7.0], vals = ['5:00', '4:59', '4:58'];
+    let n = 0; ticks.forEach(k => { if (t >= k) n++; });
+    const rp = n ? expoOut(prog(t, ticks[n - 1], 0.14)) : 1;
+    font(c, 900, 150, 3); c.fillStyle = WHITE; c.textAlign = 'center';
+    const by = CY + 290;
+    c.beginPath(); c.rect(0, by - 118, W, 140); c.clip();
+    if (n && rp < 1) c.fillText(vals[n - 1], 540, by - 130 * rp);
+    c.fillText(vals[n], 540, by + 130 * (1 - rp));
+    c.restore();
+  }
+}
+const shapeStateXY = t => { const s = graphPt(L.gT), sp = expoInOut(prog(t, 5.0, 0.22)); return { x: lerp(s.x, 540, sp), y: lerp(s.y, CY, sp) }; };
+// ---------- circular line of type ----------
+function ringRot(t) { return -0.42 * (t - 7.5); }
+function drawRing(c, t) {
+  const N = L.ring.length, rot = ringRot(t);
+  const hl = t >= 8.0 && t < 9.5 ? Math.floor((t - 8.0) / BEAT) : -1;
+  font(c, 800, 100, 2); c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+  for (let k = 0; k < N; k++) {
+    const g = L.ring[k]; if (g.ch === ' ') continue;
+    const app = spring(t - (7.5 + 0.5 * k / N), 24, 0.6);
+    if (app <= 0) continue;
+    const out = expoIn(prog(t, 9.5 + 0.06 * ((k / N + 0.3) % 1), 0.42));
+    const R = L.ringR - 40 * (1 - app) + 950 * out;
+    const a = g.a + rot - Math.PI / 2;
+    const x = 540 + R * Math.cos(a), y = CY + R * Math.sin(a);
+    const inPh = hl >= 0 && k >= L.phrase[hl][0] && k < L.phrase[hl][1];
+    const gs = L.ringFs / 100 * Math.min(app, 1.2) * (1 - out);
+    if (gs > 0.004) {
+      c.save(); c.translate(x, y); c.rotate(a + Math.PI / 2); c.scale(gs, gs);
+      c.fillStyle = inPh ? BLUE : WHITE; c.fillText(g.ch, 0, 0); c.restore();
+    }
+    if (out > 0) disc(c, x, y, 3.2 * out, OFFW);   // each letter becomes a dot
+  }
+}
+// ---------- halftone ----------
+function drift(t) { return t >= 11.0 ? { x: (t - 11.0) * 9, y: (t - 11.0) * 6 } : { x: 0, y: 0 }; }
+function halftone(c, t, color, radiusFn) {
+  const dr = drift(t); c.fillStyle = color; c.beginPath();
+  for (const [x0, y0] of L.dots) {
+    const x = x0 + dr.x, y = y0 + dr.y;
+    const r = radiusFn(x, y, Math.hypot(x - 540, y - CY));
+    if (r > 0.15) { c.moveTo(x + r, y); c.arc(x, y, r, 0, Math.PI * 2); }
+  }
+  c.fill();
+}
+const ringFront = t => L.ringR + 950 * expoIn(prog(t, 9.5, 0.45));
+const W1 = t => 1500 * cubicInOut(prog(t, 10.0, 0.9));
+const W2 = t => 1500 * expoOut(prog(t, 11.0, 0.6));
+const W3 = t => 1500 * (1 - cubicInOut(prog(t, 14.0, 0.46)));
+function rTiny(d, t) { const br = (dotState(t) || { r: 26 }).r; return 2.3 + 4.2 * Math.exp(-Math.max(0, d - br) / 210); }
+function edgeK(y, t) { // halftone gaps that stay alive at the frame edges on the end card (outside the safe zone)
+  const e = Math.max(smooth((210 - y) / 210), smooth((y - 1520) / 400));
+  return 1 - e * (0.26 + 0.1 * beatPulse(t, 12.0, 14.0, 6));
+}
+// ---------- end card ----------
+function endGlyphMatrix(t, k) {
+  const p = spring(t - (11.5 + 0.022 * k), 20, 0.62);
+  const x = L.ex0 + L.preE[k] * L.fsE / 100;
+  return glyphMatrix(x, L.baseE, L.fsE, L.advE[k], { dy: 70 * (1 - p) });
+}
+function drawLogo(c, t) {
+  const s = L.logoS, push = 1 + 0.02 * smooth(prog(t, 11.5, 2.5));
+  const cx = 540, top = L.logoTop;
+  const ring = spring(t - 11.0, 14, 0.62);
+  c.save(); c.translate(cx, top + s * 452); c.scale(s * push, s * push); c.translate(-371, -477);
+  c.fillStyle = WHITE;
+  // frame
+  c.save(); c.translate(371, 477); const rs = lerp(0.82, 1, ring); c.scale(rs, rs); c.translate(-371, -477); c.fill(L.p2.ring, 'evenodd'); c.restore();
+  // crown drops in
+  const cr = spring(t - 11.12, 18, 0.62);
+  if (cr > 0) { c.save(); c.translate(0, -60 * (1 - cr)); c.fill(L.p2.crown); c.restore(); }
+  // stripes grow out of the band
+  [0, 1, 2].forEach(i => {
+    const g = spring(t - (11.15 + 0.05 * i), 18, 0.64);
+    if (g <= 0) return;
+    c.save(); c.translate(0, 447); c.scale(1, g); c.translate(0, -447); c.fill(L.p2.up[i]); c.restore();
+    c.save(); c.translate(0, 617); c.scale(1, g); c.translate(0, -617); c.fill(L.p2.low[i]); c.restore();
+  });
+  // band wipes across
+  const bw = expoOut(prog(t, 11.25, 0.25));
+  if (bw > 0) { c.save(); c.beginPath(); c.rect(56, 440, 634 * bw, 190); c.clip(); c.fill(L.p2.rules); c.fill(L.p2.letters, 'evenodd'); c.restore(); }
+  c.restore();
+}
+function drawEndCard(c, t) {
+  drawLogo(c, t);
+  // "Modo Estadio." – the blue dot is its tittle
+  const chars = [...L.endTitle];
+  c.save(); c.beginPath(); c.rect(0, L.baseE - 110, W, 140); c.clip();
+  for (let k = 0; k < chars.length; k++) {
+    if (chars[k] === ' ') continue;
+    drawGlyph(c, chars[k], endGlyphMatrix(t, k), WHITE, 800, k === 10 && t >= 11.5 && t < 14.0, L.tit.clip);
+  }
+  c.restore();
+  // tagline
+  const tp = spring(t - 11.75, 20, 0.62);
+  if (tp > 0) {
+    c.save(); c.beginPath(); c.rect(0, L.baseTag - 46, W, 60); c.clip();
+    font(c, 800, 40, 0.8); c.fillStyle = WHITE; c.textAlign = 'center'; c.fillText(L.tag, 540, L.baseTag + 52 * (1 - tp)); c.restore();
+  }
+  // small line
+  const sp = spring(t - 12.0, 20, 0.62);
+  if (sp > 0) {
+    c.save(); c.beginPath(); c.rect(0, L.baseSmall - 32, W, 44); c.clip();
+    font(c, 700, 26, 2.6); c.textAlign = 'left';
+    const sep = '  ·  ';
+    const ws = L.small.map(s => c.measureText(s).width), wsep = c.measureText(sep).width;
+    let x = 540 - (ws[0] + ws[1] + ws[2] + 2 * wsep) / 2; const y = L.baseSmall + 40 * (1 - sp);
+    L.small.forEach((s, i) => { c.fillStyle = WHITE; c.fillText(s, x, y); x += ws[i]; if (i < 2) { c.fillStyle = BLUE; c.fillText(sep, x, y); x += wsep; } });
+    c.restore();
+  }
+  // call to action
+  const cp = spring(t - 12.0, 17, 0.6);
+  if (cp > 0) {
+    const w = L.ctaW * lerp(0.25, 1, Math.min(cp, 1.1)), h = L.ctaH;
+    rrect(c, 540 - w / 2, L.ctaY - h / 2, w, h, h / 2); c.fillStyle = BLUE; c.fill();
+    const tq = spring(t - 12.08, 20, 0.62);
+    if (tq > 0) {
+      c.save(); rrect(c, 540 - w / 2, L.ctaY - h / 2, w, h, h / 2); c.clip();
+      font(c, 900, 40, 1.6); c.fillStyle = WHITE; c.textAlign = 'center';
+      c.fillText(L.cta, 540, L.ctaY + 14 + 50 * (1 - tq)); c.restore();
+    }
+  }
+}
+
+/* =====================================================================
+   FRAME
+   ===================================================================== */
+function drawFrame(c, t) {
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  // --- background
+  const light = t < 7.0 || t >= 14.5;
+  c.fillStyle = light ? OFFW : NAVY; c.fillRect(0, 0, W, H);
+
+  // --- OPEN (0 – 2.9) and RETURN label/toggle (15 – 16)
+  if (t < 1.12) drawToggle(c, t);
+  if (t < 2.9) drawOpenWord(c, t);
+  if (t >= 2.5 && t < 5.6) drawGraphScene(c, t);
+  if (t >= 14.45 && t < 15.3) drawReturnGraph(c, t);
+  if (t >= 15.0) { drawToggle(c, t); drawReturnLabel(c, t); }
+  // --- SHAPE (5.0 – 7.5)
+  if (t >= 5.0 && t < 7.5) drawShape(c, t);
+  // --- TYPE RING + HALFTONE (7.5 – 11.0)
+  if (t >= 9.5 && t < 10.0) halftone(c, t, OFFW, (x, y, d) => d < ringFront(t) - 20 ? rTiny(d, t) : 0);
+  if (t >= 10.0 && t < 11.0) halftone(c, t, OFFW, (x, y, d) => lerp(rTiny(d, t), L.rFull, smooth((W1(t) - d) / 260)));
+  if (t >= 7.5 && t < 10.05) drawRing(c, t);
+  // --- REVEAL + END CARD (11.0 – 14.5): navy halftone over off-white, end card visible only inside navy
+  if (t >= 11.0 && t < 14.5) {
+    c.fillStyle = OFFW; c.fillRect(0, 0, W, H);
+    KC.setTransform(1, 0, 0, 1, 0, 0); KC.globalCompositeOperation = 'source-over'; KC.clearRect(0, 0, W, H);
+    halftone(KC, t, NAVY, (x, y, d) => {
+      let r = L.rFull * smooth((W2(t) - d) / 260) * edgeK(y, t);
+      if (t >= 14.0) r *= 1 - smooth((d - W3(t)) / 260);
+      return r;
+    });
+    KC.globalCompositeOperation = 'source-atop';
+    drawEndCard(KC, t);
+    KC.globalCompositeOperation = 'source-over';
+    c.drawImage(MASK, 0, 0);
+  }
+  // --- the blue dot, always on top
+  drawDot(c, dotState(t));
+  // --- cursor
+  drawCursor(c, t);
+}
+
+/* temporal supersampling: K samples spread over one tmix subframe (1/240 s),
+   averaged exactly (running mean) -> motion blur that follows the true path */
+const SUBWIN = 1 / 240;
+function seek(tIn, K = 4) {
+  const wrap = x => ((x % DUR) + DUR) % DUR;
+  if (K <= 1) { drawFrame(MC, wrap(tIn)); return; }
+  for (let j = 0; j < K; j++) {
+    const tj = wrap(tIn + ((j + 0.5) / K - 0.5) * SUBWIN);
+    drawFrame(OC, tj);
+    MC.setTransform(1, 0, 0, 1, 0, 0); MC.globalCompositeOperation = 'source-over';
+    MC.globalAlpha = 1 / (j + 1); MC.drawImage(OFF, 0, 0); MC.globalAlpha = 1;
+  }
+}
+window.seek = seek;
+
+%%AUDIO%%
+
+build();
+</script>
+</body>
+</html>
