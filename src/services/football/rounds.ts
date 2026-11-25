@@ -13,7 +13,7 @@
 
 import { fbTeamLogo, type FbFixtureLite } from '../../../functions/src/shared/football/model';
 import type { MatchStatus, Team } from '../../data/types';
-import { deriveShortName, localDateOf, statusFromShort } from './base';
+import { localDateOf, shortNameFor, statusFromShort } from './base';
 
 // ── Bracket types (rendered by CupBracketView) ───────────────────────────────
 
@@ -169,7 +169,7 @@ function knockoutRank(base: string): number {
 // ── Bracket builder ──────────────────────────────────────────────────────────
 
 function teamOf(id: string, name: string): Team {
-  return { id, name, shortName: deriveShortName(name), logo: fbTeamLogo(id) };
+  return { id, name, shortName: shortNameFor(name), logo: fbTeamLogo(id) };
 }
 
 interface BracketOptions {

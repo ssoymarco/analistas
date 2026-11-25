@@ -12,15 +12,23 @@
  *   _d5  → 5 min delay
  *   _d10 → 10 min delay
  *
+ * Topic names come from `FbTopics` (functions/src/shared/football/model.ts) —
+ * the same object the backend sends with — and carry API-Sports ids:
+ *
  * Live event topics (with bucket):
- *   team_{id}_goals_d{0|2|5|10}  — goals (both teams' followers)
- *   team_{id}_cards_d{0|2|5|10}  — red cards
- *   team_{id}_live_d{0|2|5|10}   — halftime + matchEnd
+ *   fb_team_{id}_goals_d{0|2|5|10}  — goals (both teams' followers)
+ *   fb_team_{id}_cards_d{0|2|5|10}  — cards
+ *   fb_team_{id}_live_d{0|2|5|10}   — halftime + matchEnd…
  *
  * Immediate-only topics (NO bucket — never delayed):
- *   team_{id}_kickoff   — matchStart (NEW; replaces _start for this event)
- *   team_{id}_lineups   — lineups published
- *   team_{id}_reminders — pre-match reminder
+ *   fb_team_{id}_kickoff   — matchStart
+ *   fb_team_{id}_lineups   — lineups published
+ *   fb_team_{id}_reminders — pre-match reminder
+ *
+ * The un-prefixed `team_{id}_*` / `player_{id}_*` / `mute_{id}` topics belong
+ * to the previous data provider's id space. Builds that still use them keep
+ * receiving pushes from the backend's dual-send; this build leaves them once
+ * (unsubscribeLegacyTopics) so nobody gets a push twice.
  *
  * League topics REMOVED: following a league is display-only.
  * Notifications are dispatched ONLY for followed teams.
@@ -37,6 +45,7 @@ import messaging from '@react-native-firebase/messaging';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fcmReady } from './fcmInit';
 import { addBreadcrumb, Sentry } from './sentry';
+import { FbTopics } from '../../functions/src/shared/football/model';
 
 /**
  * Wrapper around messaging().subscribeToTopic that:
@@ -82,62 +91,44 @@ async function safeUnsubscribe(topic: string): Promise<boolean> {
 // but they DO go through the network — skipping a no-op saves battery.
 const SUBSCRIBED_TOPICS_KEY = 'analistas_fcm_subscribed_topics';
 
-// One-time flag: after the v1.1.0 migration window we stopped dual-sending
-// to legacy topics (team_X_goals, team_X_cards, team_X_start). Devices that
-// updated from v1.0.x may still be subscribed to these stale topics. This flag
-// marks that we've already run the cleanup so we don't redo it on every launch.
-const LEGACY_TOPICS_CLEANED_KEY = 'analistas_fcm_legacy_v110_cleaned';
-
 /** Delay bucket type for Modo Estadio. */
 export type DelayBucket = 'd0' | 'd2' | 'd5' | 'd10';
 
-/** Topic name builders — must stay in sync with functions/src/detect-changes.ts. */
+/** Topic name builders — the backend's own (`FbTopics`), so the two can't drift. */
 export const TopicNames = {
   // ── Live event topics (with delay bucket) ──────────────────────────────────
-  teamGoals:    (teamId: string, bucket: DelayBucket) => `team_${teamId}_goals_${bucket}`,
-  teamCards:    (teamId: string, bucket: DelayBucket) => `team_${teamId}_cards_${bucket}`,
-  teamLive:     (teamId: string, bucket: DelayBucket) => `team_${teamId}_live_${bucket}`,
+  teamGoals:    (teamId: string, bucket: DelayBucket) => FbTopics.goals(teamId, bucket),
+  teamCards:    (teamId: string, bucket: DelayBucket) => FbTopics.cards(teamId, bucket),
+  teamLive:     (teamId: string, bucket: DelayBucket) => FbTopics.live(teamId, bucket),
 
   // ── Immediate-only topics (no bucket — never delayed) ──────────────────────
-  teamKickoff:   (teamId: string)   => `team_${teamId}_kickoff`,
-  teamLineups:   (teamId: string)   => `team_${teamId}_lineups`,
-  teamReminders: (teamId: string)   => `team_${teamId}_reminders`,
+  teamKickoff:   (teamId: string)   => FbTopics.kickoff(teamId),
+  teamLineups:   (teamId: string)   => FbTopics.lineups(teamId),
+  teamReminders: (teamId: string)   => FbTopics.reminders(teamId),
 
   // ── Modo Rival topics (immediate, no bucket) ───────────────────────────────
   // "Bad news" about a team the user marked as a RIVAL. Delivered immediately
   // (the delay buckets of Modo Estadio don't apply — schadenfreude isn't a
-  // spoiler-avoidance scenario). Must stay in sync with detect-changes.ts.
-  teamRivalLoss:       (teamId: string) => `team_${teamId}_rival_loss`,
-  teamRivalBigLoss:    (teamId: string) => `team_${teamId}_rival_bigloss`,
-  teamRivalRedCard:    (teamId: string) => `team_${teamId}_rival_redcard`,
-  teamRivalPenMiss:    (teamId: string) => `team_${teamId}_rival_penmiss`,
-  teamRivalEliminated: (teamId: string) => `team_${teamId}_rival_eliminated`,
+  // spoiler-avoidance scenario).
+  teamRivalLoss:    (teamId: string) => FbTopics.rivalLoss(teamId),
+  teamRivalBigLoss: (teamId: string) => FbTopics.rivalBigLoss(teamId),
+  teamRivalRedCard: (teamId: string) => FbTopics.rivalRedCard(teamId),
+  teamRivalPenMiss: (teamId: string) => FbTopics.rivalPenMiss(teamId),
 
-  // ── Player topics (server dispatches goles y rojas desde el 5 jul 2026,
-  // alineación titular desde Fase 2). El servidor excluye con condición FCM
-  // a quienes ya siguen al equipo del jugador — no hay dobles. Ver
-  // functions/src/detect-changes.ts y sync-match-enrichment.ts.
-  playerGoals:   (playerId: string)  => `player_${playerId}_goals`,
-  playerCards:   (playerId: string)  => `player_${playerId}_cards`,
-  playerLineups: (playerId: string)  => `player_${playerId}_lineups`,
+  // ── Player topics: goals, red cards and starting XI of a followed player.
+  // The server excludes (FCM condition) devices that already follow the
+  // player's team — no doubles.
+  playerGoals:   (playerId: string)  => FbTopics.playerGoals(playerId),
+  playerCards:   (playerId: string)  => FbTopics.playerCards(playerId),
+  playerLineups: (playerId: string)  => FbTopics.playerLineups(playerId),
 
-  // ── Mute por partido (Fase 2, 10 jul 2026) ─────────────────────────────────
-  // Al silenciar un partido, el device se SUSCRIBE a este topic; el servidor
-  // agrega "&& !('mute_{matchId}' in topics)" a cada envío de ese partido.
-  // FCM evalúa la condición por dispositivo → silencio real con app cerrada.
-  // (Los pushes de JUGADOR seguido lo ignoran a propósito: seguir al jugador
-  // es un opt-in explícito más fuerte que el mute del partido.)
-  matchMute: (matchId: string) => `mute_${matchId}`,
-
-  // ── Legacy topic builders (for reference / dual-send awareness) ────────────
-  // NOTE: do NOT subscribe to these on new builds. The server dual-sends to them
-  // during the migration window so old builds keep working. These are kept here
-  // only as documentation and to support the FCM_INIT_VERSION wipe.
-  _legacyTeamGoals:  (teamId: string)   => `team_${teamId}_goals`,
-  _legacyTeamCards:  (teamId: string)   => `team_${teamId}_cards`,
-  _legacyTeamStart:  (teamId: string)   => `team_${teamId}_start`,
-  _legacyLeagueStart:(leagueId: string) => `league_${leagueId}_start`,
-  _legacyLeagueFinals:(leagueId: string)=> `league_${leagueId}_finals`,
+  // ── Per-match mute ─────────────────────────────────────────────────────────
+  // Muting a match SUBSCRIBES the device to this topic; the server appends
+  // "&& !('fb_mute_{matchId}' in topics)" to every send of that match. FCM
+  // evaluates the condition per device → real silence with the app closed.
+  // (Followed-PLAYER pushes ignore it on purpose: following the player is a
+  // stronger explicit opt-in than muting the match.)
+  matchMute: (matchId: string) => FbTopics.mute(matchId),
 };
 
 /** Sibling buckets for a given (teamId, event class). Used to defensively
@@ -212,7 +203,7 @@ function allBucketTopicsForTeam(teamId: string): string[] {
   return topics;
 }
 
-/** TODOS los topics posibles de un equipo (buckets + inmediatos + legacy).
+/** TODOS los topics posibles de un equipo (buckets + inmediatos).
  *  Base del sweep autoritativo y del unfollow blindado: se intenta desuscribir
  *  todo lo que no esté en `wanted`, SIN confiar en el caché local (que puede
  *  mentir tras un wipe/fallo). FCM unsubscribe es idempotente y barato. */
@@ -222,9 +213,6 @@ function allPossibleTopicsForTeam(teamId: string): string[] {
     TopicNames.teamKickoff(teamId),
     TopicNames.teamLineups(teamId),
     TopicNames.teamReminders(teamId),
-    TopicNames._legacyTeamGoals(teamId),
-    TopicNames._legacyTeamCards(teamId),
-    TopicNames._legacyTeamStart(teamId),
   ];
 }
 
@@ -240,16 +228,15 @@ function topicsForPlayer(playerId: string): string[] {
 /** Modo Rival event classes (v1). Maps a settings-toggle key → topic builder.
  *  Exported so the notification-settings screen can subscribe/unsubscribe a
  *  single event class across all rival teams. */
-export type RivalEvent = 'loss' | 'bigLoss' | 'redCard' | 'penMiss' | 'eliminated';
+export type RivalEvent = 'loss' | 'bigLoss' | 'redCard' | 'penMiss';
 
-export const RIVAL_EVENTS: RivalEvent[] = ['loss', 'bigLoss', 'redCard', 'penMiss', 'eliminated'];
+export const RIVAL_EVENTS: RivalEvent[] = ['loss', 'bigLoss', 'redCard', 'penMiss'];
 
 const RIVAL_TOPIC_BY_EVENT: Record<RivalEvent, (teamId: string) => string> = {
   loss:       TopicNames.teamRivalLoss,
   bigLoss:    TopicNames.teamRivalBigLoss,
   redCard:    TopicNames.teamRivalRedCard,
   penMiss:    TopicNames.teamRivalPenMiss,
-  eliminated: TopicNames.teamRivalEliminated,
 };
 
 /** All rival "bad news" topics for a team. */
@@ -439,7 +426,7 @@ export async function unsubscribeMatchMute(matchId: string): Promise<void> {
 // ── Modo Rival ──────────────────────────────────────────────────────────────
 
 /** Subscribe to a rival team's "bad news" topics. `events` defaults to all
- *  five; pass a subset to honour the user's per-event settings toggles. */
+ *  of them; pass a subset to honour the user's per-event settings toggles. */
 export async function subscribeRivalTopics(
   teamId: string,
   events: RivalEvent[] = RIVAL_EVENTS,
@@ -454,7 +441,7 @@ export async function subscribeRivalTopics(
   await writeSubscribedTopics(subscribed);
 }
 
-/** Unsubscribe from a rival team's bad-news topics (all five). */
+/** Unsubscribe from a rival team's bad-news topics (all of them). */
 export async function unsubscribeRivalTopics(teamId: string): Promise<void> {
   const subscribed = await readSubscribedTopics();
   // Blindado: sin filtro por caché (ver unsubscribeTeamTopics).
@@ -489,29 +476,75 @@ export async function setRivalEventForTeams(
   await writeSubscribedTopics(subscribed);
 }
 
+// ── Legacy topics (previous data provider's id space) ────────────────────────
+
+/** Set once this device has left every legacy topic. */
+const LEGACY_FB_TOPICS_MIGRATED_KEY = 'analistas_fb_topics_migrated_v1';
+
+const LEGACY_BUCKETS = ['d0', 'd2', 'd5', 'd10'];
+
+/** Every topic an old build could have subscribed for a team (followed or rival). */
+function legacyTopicsForTeam(id: string): string[] {
+  const t: string[] = [];
+  for (const b of LEGACY_BUCKETS) t.push(`team_${id}_goals_${b}`, `team_${id}_cards_${b}`, `team_${id}_live_${b}`);
+  t.push(
+    `team_${id}_kickoff`, `team_${id}_lineups`, `team_${id}_reminders`,
+    // pre-bucket builds
+    `team_${id}_goals`, `team_${id}_cards`, `team_${id}_start`,
+    // Modo Rival
+    `team_${id}_rival_loss`, `team_${id}_rival_bigloss`, `team_${id}_rival_redcard`,
+    `team_${id}_rival_penmiss`, `team_${id}_rival_eliminated`,
+  );
+  return t;
+}
+
+export interface LegacySubscriptions {
+  teamIds: string[];
+  rivalTeamIds: string[];
+  playerIds: string[];
+  muteMatchIds: string[];
+}
+
 /**
- * One-time migration: unsubscribe from legacy topics (no bucket suffix) that
- * were subscribed on v1.0.x builds. The server stopped dual-sending to these
- * in v1.1.0 (June 2026), so they are now dead — but devices that updated from
- * v1.0.x may still be subscribed. Called from reconcileSubscriptions on first
- * run after update; subsequent calls are instant no-ops via the flag key.
+ * Leave every topic of the previous id space, once per install. The backend
+ * still sends to `team_{oldId}_*` for devices on old builds; a device that also
+ * holds the new `fb_*` subscriptions would get those pushes twice.
+ *
+ * `legacy` are the ids this device had saved before the favorites migration.
+ * Topics recorded in the local subscription cache are swept too, whatever
+ * entity they belong to. Returns false (and will run again next time) when
+ * FCM isn't ready or some unsubscribe failed.
  */
-async function migrateFromLegacyTopics(teamIds: string[]): Promise<void> {
+export async function unsubscribeLegacyTopics(legacy: LegacySubscriptions): Promise<boolean> {
   try {
-    const done = await AsyncStorage.getItem(LEGACY_TOPICS_CLEANED_KEY);
-    if (done) return;
+    if (await AsyncStorage.getItem(LEGACY_FB_TOPICS_MIGRATED_KEY)) return true;
+    const token = await fcmReady();
+    if (!token) return false; // no token → nothing is subscribed with it; retry when there is one
 
-    const legacyTopics = teamIds.flatMap(id => [
-      TopicNames._legacyTeamGoals(id),
-      TopicNames._legacyTeamCards(id),
-      TopicNames._legacyTeamStart(id),
-    ]);
+    const cached = await readSubscribedTopics();
+    const topics = new Set<string>();
+    for (const t of cached) if (!t.startsWith('fb_')) topics.add(t);
+    for (const id of new Set([...legacy.teamIds, ...legacy.rivalTeamIds])) {
+      legacyTopicsForTeam(id).forEach(t => topics.add(t));
+    }
+    for (const id of legacy.playerIds) {
+      topics.add(`player_${id}_goals`); topics.add(`player_${id}_cards`); topics.add(`player_${id}_lineups`);
+    }
+    for (const id of legacy.muteMatchIds) topics.add(`mute_${id}`);
 
-    await Promise.all(legacyTopics.map(t => safeUnsubscribe(t)));
-    await AsyncStorage.setItem(LEGACY_TOPICS_CLEANED_KEY, '1');
-    addBreadcrumb('fcm', 'legacy topics cleaned', { count: legacyTopics.length });
+    let allOk = true;
+    await runInBatches([...topics], async t => {
+      if (await safeUnsubscribe(t)) cached.delete(t);
+      else allOk = false;
+    });
+    await writeSubscribedTopics(cached);
+    if (allOk) {
+      await AsyncStorage.setItem(LEGACY_FB_TOPICS_MIGRATED_KEY, '1');
+      addBreadcrumb('fcm', 'legacy topics left', { count: topics.size });
+    }
+    return allOk;
   } catch {
-    // Non-fatal — will retry on next app launch.
+    return false; // retried on the next launch
   }
 }
 
@@ -582,9 +615,6 @@ async function doReconcileSubscriptions(args: ReconcileArgs): Promise<void> {
   const teamEvents  = args.teamEvents ?? ALL_TEAM_EVENT_CLASSES;
   const enabled     = args.enabled !== false;
 
-  // One-time cleanup of v1.0.x legacy (un-bucketed) topic subscriptions.
-  migrateFromLegacyTopics(args.teamIds).catch(() => {});
-
   // ── Desired ("wanted") topic set ──────────────────────────────────────────
   // Gateado por las prefs (auditoría 10 jul 2026): las clases de evento de
   // equipo y el master switch por fin gobiernan la membresía real de topics —
@@ -617,8 +647,8 @@ async function doReconcileSubscriptions(args: ReconcileArgs): Promise<void> {
   //     server-side, orphaning old topics). A pure `current - wanted` diff can
   //     never remove what it doesn't know about — the device stayed in stale
   //     buckets (double push / spoiler) or in event classes the user disabled.
-  //     This sweep covers buckets, immediate topics, legacy topics, player and
-  //     rival topics uniformly. FCM unsubscribe is idempotent and cheap.
+  //     This sweep covers buckets, immediate topics, player and rival topics
+  //     uniformly. FCM unsubscribe is idempotent and cheap.
   const removeSet = new Set<string>();
   for (const t of current) if (!wanted.has(t)) removeSet.add(t);
   for (const id of args.teamIds) {

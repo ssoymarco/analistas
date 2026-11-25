@@ -19,7 +19,7 @@ import type { CupRound, CupTie } from '../../services/football/rounds';
 import { SkeletonLeagueDetail } from '../../components/Skeleton';
 import type { PartidosStackParamList } from '../../navigation/AppNavigator';
 import { getLeagueConfig, getLeagueConfigByName, getLeagueDisplayName, type LeagueZone } from '../../config/leagues';
-import { peekCurrentSeasonId } from '../../services/football/catalog';
+import { isCupLeague, peekCurrentSeasonId } from '../../services/football/catalog';
 import { translateNationalTeam } from '../../utils/nationalTeams';
 import { isImageUri } from '../../utils/imageUri';
 
@@ -345,7 +345,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
   //   (a) explicitly marked isCup in leagues config (UCL, UEL, CONCACAF, etc.), OR
   //   (b) standings return [] after loading (auto-detection fallback)
   // For config-marked cups we fetch bracket immediately (no need to wait for standings).
-  const leagueIsCupConfig = leagueConfig?.isCup ?? false;
+  const leagueIsCupConfig = match.leagueId ? isCupLeague(match.leagueId) : (leagueConfig?.isCup ?? false);
   const isCupFromStandings = !standingsLoading && !standingsError && standings.length === 0;
   const isCup = leagueIsCupConfig || isCupFromStandings;
 

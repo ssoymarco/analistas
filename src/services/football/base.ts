@@ -71,6 +71,49 @@ export function localDayRange(localDate: string): { start: number; end: number }
 
 // ── Teams ────────────────────────────────────────────────────────────────────
 
+/**
+ * FIFA 3-letter codes of national teams, keyed by the English name the data
+ * uses. The app keys national-team colors and flag emoji by this code
+ * (utils/teamColors.ts), and the data only ships it for some endpoints — so
+ * national teams get it from here. Exact-name match only: clubs, women's and
+ * youth sides ("Mexico W", "Mexico U20") keep their derived short name.
+ */
+const NATIONAL_TEAM_CODES: Record<string, string> = {
+  // UEFA
+  'France': 'FRA', 'Belgium': 'BEL', 'Sweden': 'SWE', 'Norway': 'NOR', 'Spain': 'ESP',
+  'Germany': 'GER', 'Portugal': 'POR', 'Italy': 'ITA', 'Netherlands': 'NED', 'England': 'ENG',
+  'Croatia': 'CRO', 'Denmark': 'DEN', 'Switzerland': 'SUI', 'Poland': 'POL', 'Czechia': 'CZE',
+  'Czech Republic': 'CZE', 'Serbia': 'SRB', 'Austria': 'AUT', 'Scotland': 'SCO', 'Wales': 'WAL',
+  'Turkey': 'TUR', 'Türkiye': 'TUR', 'Ukraine': 'UKR', 'Greece': 'GRE', 'Hungary': 'HUN',
+  'Romania': 'ROU', 'Slovakia': 'SVK', 'Slovenia': 'SVN', 'Finland': 'FIN', 'Iceland': 'ISL',
+  'Ireland': 'IRL', 'Rep. Of Ireland': 'IRL', 'Northern Ireland': 'NIR', 'Albania': 'ALB',
+  'Georgia': 'GEO', 'Bosnia & Herzegovina': 'BIH', 'Bosnia and Herzegovina': 'BIH',
+  // CONMEBOL
+  'Argentina': 'ARG', 'Brazil': 'BRA', 'Uruguay': 'URU', 'Colombia': 'COL', 'Ecuador': 'ECU',
+  'Peru': 'PER', 'Chile': 'CHI', 'Paraguay': 'PAR', 'Bolivia': 'BOL', 'Venezuela': 'VEN',
+  // CONCACAF
+  'Mexico': 'MEX', 'USA': 'USA', 'United States': 'USA', 'Canada': 'CAN', 'Costa Rica': 'CRC',
+  'Panama': 'PAN', 'Honduras': 'HON', 'Jamaica': 'JAM', 'El Salvador': 'SLV', 'Guatemala': 'GUA',
+  'Haiti': 'HAI', 'Cuba': 'CUB', 'Trinidad and Tobago': 'TRI', 'Curaçao': 'CUW', 'Curacao': 'CUW',
+  // CAF
+  'Senegal': 'SEN', 'Ivory Coast': 'CIV', 'Morocco': 'MAR', 'Ghana': 'GHA', 'Cameroon': 'CMR',
+  'Nigeria': 'NGA', 'Egypt': 'EGY', 'Tunisia': 'TUN', 'Algeria': 'ALG', 'South Africa': 'RSA',
+  'Mali': 'MLI', 'Cape Verde Islands': 'CPV', 'Cape Verde': 'CPV', 'Congo DR': 'COD',
+  // AFC / OFC
+  'Japan': 'JPN', 'South Korea': 'KOR', 'Saudi Arabia': 'KSA', 'Iran': 'IRN', 'Australia': 'AUS',
+  'Qatar': 'QAT', 'Iraq': 'IRQ', 'United Arab Emirates': 'UAE', 'New Zealand': 'NZL',
+  'Uzbekistan': 'UZB', 'Jordan': 'JOR', 'China': 'CHN',
+};
+
+/**
+ * Short code to show for a team: the FIFA code for national teams, else the
+ * code the data provides, else one derived from the name.
+ */
+export function shortNameFor(name: string, provided?: string | null): string {
+  return NATIONAL_TEAM_CODES[name] ?? (provided || deriveShortName(name));
+}
+
+
 const SHORT_SKIP = new Set(['FC', 'CF', 'AFC', 'SC', 'CD', 'CA', 'AC', 'AS', 'SS', 'US', 'FK', 'SK', 'CLUB', 'DE', 'THE']);
 
 /** 3-letter code from a team name (mirror of the server's deriveShortName). */

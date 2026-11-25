@@ -43,8 +43,9 @@ import type {
   LeagueFixture,
 } from '../hooks/useLeagueDetail';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
-import { getLeagueConfig, getLeagueDisplayName, isCopyrightSensitiveLeague } from '../config/leagues';
-import { peekCurrentSeasonId, peekLeagueLogo } from '../services/football/catalog';
+import { getLeagueConfig, getLeagueDisplayName, isCopyrightSensitiveLeague, WORLD_CUP_LEAGUE_ID } from '../config/leagues';
+import { isCupLeague, peekCurrentSeasonId, peekLeagueLogo } from '../services/football/catalog';
+import { translateRoundName } from '../services/football/rounds';
 import { ChevronRight } from '../components/ChevronRight';
 import type { LeagueZone } from '../config/leagues';
 import type { Match, MatchStatus } from '../data/types';
@@ -790,7 +791,7 @@ const eq = StyleSheet.create({
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MUNDIAL 2026 — Premium hero header (leagueId === 732 only)
+// MUNDIAL 2026 — Premium hero header (World Cup only)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const WC_KICKOFF_UTC = new Date('2026-06-11T16:00:00Z').getTime();
@@ -1128,9 +1129,10 @@ function fixtureToMatch(f: LeagueFixture, leagueName: string, leagueLogo: string
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ── Stage name → i18n key ─────────────────────────────────────────────────────
-// SportMonks returns stage names in English. We map common ones to translation
-// keys (defined under `league.stages.*` in es.ts / en.ts). Unknown stages fall
-// through unchanged so the user still sees a label, just untranslated.
+// Stage names come in English ("Regular Season", "Apertura - Quarter-finals").
+// Each " - " separated part is mapped to a translation key (defined under
+// `league.stages.*` in the locale files); unknown parts — tournament halves
+// such as "Apertura" — pass through unchanged.
 const STAGE_KEY: Record<string, string> = {
   'regular season':   'regularSeason',
   'group stage':      'groupStage',
@@ -1148,13 +1150,17 @@ const STAGE_KEY: Record<string, string> = {
   'final':            'final',
   '3rd place final':  'thirdPlace',
   'third place':      'thirdPlace',
+  'league stage':     'regularSeason',
+  'league phase':     'regularSeason',
+  'knockout round play-offs': 'playoffs',
 };
 function useTranslateStage() {
   const { t } = useTranslation();
-  return (name: string): string => {
-    const key = STAGE_KEY[name.toLowerCase()];
-    return key ? t(`league.stages.${key}`) : name;
-  };
+  return (name: string): string =>
+    name.split(' - ').map(part => {
+      const key = STAGE_KEY[part.toLowerCase()];
+      return key ? t(`league.stages.${key}`) : translateRoundName(part);
+    }).join(' · ');
 }
 
 const CalendarioTab: React.FC<{
@@ -1425,7 +1431,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   const { data, loading } = useLeagueDetail(leagueId, leagueName, leagueLogo, selectedSeasonId ?? seasonId);
 
   const leagueConfig = getLeagueConfig(leagueId);
-  const isCup = leagueConfig?.isCup ?? false;
+  const isCup = isCupLeague(leagueId);
 
   // Active tab — declared early so the bracket fetch can be gated on it.
   const [activeTab, setActiveTab] = useState<Tab>(isCup ? 'partidos' : 'clasificacion');
@@ -1628,7 +1634,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
         {/* Compact center — always rendered as spacer; content appears on scroll */}
         <View style={s.compactCenter}>
           {showCompact
-            ? <Text style={{ fontSize: 15 }}>{leagueId === 732 ? '🏆' : (displayFlag || null)}</Text>
+            ? <Text style={{ fontSize: 15 }}>{leagueId === WORLD_CUP_LEAGUE_ID ? '🏆' : (displayFlag || null)}</Text>
             : null}
           {showCompact
             ? <Text style={[s.compactName, { color: hText }]} numberOfLines={1}>{displayName}</Text>

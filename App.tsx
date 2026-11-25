@@ -14,6 +14,7 @@ import { DarkModeProvider } from './src/contexts/DarkModeContext';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { FavoritesProvider } from './src/contexts/FavoritesContext';
 import { NotificationPrefsProvider } from './src/contexts/NotificationPrefsContext';
+import { DataMigrationGate } from './src/components/DataMigrationGate';
 import { OnboardingProvider } from './src/contexts/OnboardingContext';
 import { UserStatsProvider } from './src/contexts/UserStatsContext';
 import { NetworkProvider } from './src/contexts/NetworkContext';
@@ -152,15 +153,19 @@ function App() {
                 <AuthProvider>
                   <SentryUserSync />
                   <OnboardingProvider>
-                    <NotificationPrefsProvider>
-                      <FavoritesProvider>
-                        <UserStatsProvider>
-                          <SubscriptionProvider>
-                            <AppInner />
-                          </SubscriptionProvider>
-                        </UserStatsProvider>
-                      </FavoritesProvider>
-                    </NotificationPrefsProvider>
+                    {/* Saved team/league/player ids are translated to the current
+                        data source before anything below reads them. */}
+                    <DataMigrationGate>
+                      <NotificationPrefsProvider>
+                        <FavoritesProvider>
+                          <UserStatsProvider>
+                            <SubscriptionProvider>
+                              <AppInner />
+                            </SubscriptionProvider>
+                          </UserStatsProvider>
+                        </FavoritesProvider>
+                      </NotificationPrefsProvider>
+                    </DataMigrationGate>
                   </OnboardingProvider>
                 </AuthProvider>
               </TimeFormatProvider>

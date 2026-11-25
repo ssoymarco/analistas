@@ -60,7 +60,8 @@ type WrappedYearStats = {
   firstOpenDate: string; // ISO date
 };
 
-const WORLD_CUP_LEAGUE_IDS = new Set(['copa_del_mundo', 'world_cup', 'fifa_world_cup']);
+// '1' = FIFA World Cup in the data source; the names are legacy sample ids.
+const WORLD_CUP_LEAGUE_IDS = new Set(['1', 'copa_del_mundo', 'world_cup', 'fifa_world_cup']);
 
 // ── Constants ────────────────────────────────────────────────────────────────
 

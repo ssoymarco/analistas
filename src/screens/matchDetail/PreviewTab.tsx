@@ -88,7 +88,7 @@ function MatchInfoCard({ match, detail }: { match: Match; detail: MatchDetail })
     // (e.g. "Estadio Banorte" → "Estadio Ciudad de México")
     const leagueIdNum = Number(match.leagueId) || 0;
     const displayName = getDisplayVenueName(venueId, leagueIdNum, name) ?? name;
-    const displayCity = getDisplayVenueCity(venueId, leagueIdNum, city) ?? city;
+    const displayCity = getDisplayVenueCity(venueId, leagueIdNum, city, name) ?? city;
     const surfaceStr = !surface ? '' :
       surface.toLowerCase().includes('artif') ? t('matchInfo.surfaceArtificial') :
       surface.toLowerCase().includes('hybrid') ? t('matchInfo.surfaceHybrid') :

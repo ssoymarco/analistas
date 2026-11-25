@@ -39,7 +39,7 @@ import { translateNationalTeam } from '../utils/nationalTeams';
 import { CupBracketView, bracketRoundPillsDragging } from '../components/CupBracketView';
 import { useCupBracket } from '../hooks/useCupBracket';
 import type { CupTie } from '../services/football/rounds';
-import { getLeagueConfig, type LeagueZone } from '../config/leagues';
+import { getLeagueConfig, WORLD_CUP_LEAGUE_ID, type LeagueZone } from '../config/leagues';
 import { MODO_RIVAL_ENABLED } from '../config/features';
 import { isImageUri } from '../utils/imageUri';
 
@@ -197,7 +197,9 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
 
   // Navigate to match detail
   const goToMatch = useCallback((m: RecentMatch) => {
-    const match: Match = {
+    // The calendar row carries the full match (right competition, status,
+    // season); the rebuilt stub is only a fallback.
+    const match: Match = m.match ?? {
       id: String(m.id),
       homeTeam: { id: String(m.homeId), name: m.homeName, shortName: m.homeShort, logo: m.homeLogo },
       awayTeam: { id: String(m.awayId), name: m.awayName, shortName: m.awayShort, logo: m.awayLogo },
@@ -685,7 +687,9 @@ const PartidosTab: React.FC<{
   const previous = data.recentMatches.filter(m => m.isFinished || m.date < today);
 
   const goToMatch = useCallback((m: RecentMatch) => {
-    const match: Match = {
+    // The calendar row carries the full match (right competition, status,
+    // season); the rebuilt stub is only a fallback.
+    const match: Match = m.match ?? {
       id: String(m.id),
       homeTeam: { id: String(m.homeId), name: m.homeName, shortName: m.homeShort, logo: m.homeLogo },
       awayTeam: { id: String(m.awayId), name: m.awayName, shortName: m.awayShort, logo: m.awayLogo },
@@ -1533,8 +1537,8 @@ export const TeamDetailScreen: React.FC<Props> = ({ route }) => {
   const isFollowing = isFollowingTeam(String(teamId));
   const isRival = isRivalTeam(String(teamId));
 
-  // WC bracket — only fetch for WC teams (leagueId 732)
-  const isWCTeam = data?.info.leagueId === 732;
+  // WC bracket — only fetch for teams whose main competition is the World Cup
+  const isWCTeam = data?.info.leagueId === WORLD_CUP_LEAGUE_ID;
   const wcSeasonId = isWCTeam ? (data?.info.currentSeasonId ?? null) : null;
   const { rounds: bracketRoundsAll, loading: bracketLoading } = useCupBracket(wcSeasonId);
   // Filter out Group Stage — already shown in Partidos tab; only knockout in Bracket

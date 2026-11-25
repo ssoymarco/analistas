@@ -52,7 +52,7 @@ service cloud.firestore {
       allow update: if isOwner(uid)
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['displayName', 'username', 'email', 'favorites',
-                         'pushToken', 'updatedAt', 'authMethod',
+                         'favoritesFb', 'pushToken', 'updatedAt', 'authMethod',
                          'notificationPrefs'])
           // notificationPrefs must be a map if changed
           && (!('notificationPrefs' in request.resource.data.diff(resource.data).changedKeys())
@@ -65,7 +65,12 @@ service cloud.firestore {
               || request.resource.data.username.size() <= 20)
           // favorites must match expected shape if changed
           && (!('favorites' in request.resource.data.diff(resource.data).changedKeys())
-              || validFavorites(request.resource.data.favorites));
+              || validFavorites(request.resource.data.favorites))
+          // favoritesFb: the same lists with API-Sports ids (builds since the
+          // Nov 2026 data-provider change write this one; `favorites` keeps the
+          // previous provider's ids for devices that haven't updated).
+          && (!('favoritesFb' in request.resource.data.diff(resource.data).changedKeys())
+              || validFavorites(request.resource.data.favoritesFb));
 
       // El dueño puede borrar su propio doc — deleteAccount (AuthContext) lo
       // intenta ANTES de deleteUser y con 'if false' era rechazado en silencio

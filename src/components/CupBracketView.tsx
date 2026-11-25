@@ -245,7 +245,7 @@ const TieCard: React.FC<{ tie: CupTie; onPress?: (tie: CupTie) => void }> = ({ t
         // México instead of Estadio Banorte, etc.). For other leagues we fall
         // back to the raw SportMonks name.
         const venueLabel = getDisplayVenueName(leg.venueId, leg.leagueId, leg.venueName);
-        const cityRaw = getDisplayVenueCity(leg.venueId, leg.leagueId, leg.venueCity);
+        const cityRaw = getDisplayVenueCity(leg.venueId, leg.leagueId, leg.venueCity, leg.venueName);
         // City names also get the Spanish-localization pass ("New York" →
         // "Nueva York", "Munich" → "Múnich"). The WC overlay already gives
         // Spanish names for known venues so this is mostly a no-op for them.

@@ -3,7 +3,6 @@ import {
   useEffect, useRef, ReactNode,
 } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
-import { AVAILABLE_LEAGUES } from '../config/leagues';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
@@ -16,6 +15,7 @@ import {
   subscribePlayerTopics, unsubscribePlayerTopics,
   subscribeRivalTopics, unsubscribeRivalTopics,
   reconcileSubscriptions,
+  unsubscribeLegacyTopics,
   rivalEventsFromPrefs,
   teamEventsFromPrefs,
   bucketForDelay,
@@ -24,12 +24,24 @@ import {
   type TeamEventClass,
 } from '../services/fcmTopics';
 import { useNotificationPrefs } from './NotificationPrefsContext';
+import {
+  FAVORITES_KEYS, migrateRemoteFavorites, readLegacyBackup, resolvePendingPlayers,
+} from '../services/football/legacyMigration';
+import { SM_TO_AF_LEAGUE } from '../../functions/src/shared/football/leagues';
 
-const MATCH_STORAGE_KEY  = 'analistas_match_favorites';
-const TEAM_STORAGE_KEY   = 'analistas_team_favorites';
-const PLAYER_STORAGE_KEY = 'analistas_player_favorites';
-const LEAGUE_STORAGE_KEY = 'analistas_league_favorites';
-const RIVAL_STORAGE_KEY  = 'analistas_rival_teams';
+// The ids stored under these keys are API-Sports ids. A device that still held
+// ids of the previous data provider was migrated in place before this provider
+// mounted (see services/football/legacyMigration.ts and DataMigrationGate).
+const MATCH_STORAGE_KEY  = FAVORITES_KEYS.matches;
+const TEAM_STORAGE_KEY   = FAVORITES_KEYS.teams;
+const PLAYER_STORAGE_KEY = FAVORITES_KEYS.players;
+const LEAGUE_STORAGE_KEY = FAVORITES_KEYS.leagues;
+const RIVAL_STORAGE_KEY  = FAVORITES_KEYS.rivals;
+
+/** Cloud field holding the favorites in the current id space. The older
+ *  `favorites` field keeps the previous provider's ids for devices still on an
+ *  old build — this build never writes it. */
+const CLOUD_FIELD = 'favoritesFb';
 
 interface FavoritesContextType {
   favoriteIds: string[];
@@ -82,7 +94,7 @@ const FavoritesContext = createContext<FavoritesContextType>({
   isSyncing: false,
 });
 
-// ── Firestore favorites shape (nested under users/{uid}) ─────────────────────
+// ── Firestore favorites shape (users/{uid}.favoritesFb) ──────────────────────
 interface FirestoreFavorites {
   matchIds?:  string[];
   teamIds?:   string[];
@@ -211,9 +223,42 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
     // Purga única de topics league_{id}_start/_finals heredados de builds
     // viejos (persisten en FCM aunque el subscribe sea no-op) — el dueño
-    // recibió kickoffs de Champions por seguir la liga (4-ago-2026).
-    purgeLegacyLeagueTopics(AVAILABLE_LEAGUES.map(l => l.id)).catch(() => {});
+    // recibió kickoffs de Champions por seguir la liga (4-ago-2026). Esos
+    // topics llevan ids de liga del proveedor anterior.
+    purgeLegacyLeagueTopics(Object.keys(SM_TO_AF_LEAGUE).map(Number)).catch(() => {});
   }, [isHydrated, favoritesLoaded, delayBucket, rivalEventsSig, teamEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Tail of the provider migration (background, once per install) ──────────
+  // The favorites lists were translated before this provider mounted. Two
+  // things can't happen offline/instantly and finish here:
+  //   1. leave the push topics of the previous id space (needs the FCM token);
+  //   2. followed players the device couldn't translate on its own — the
+  //      backend matches them and they rejoin the followed list.
+  useEffect(() => {
+    if (!isHydrated || !favoritesLoaded) return;
+    let cancelled = false;
+    (async () => {
+      const legacy = await readLegacyBackup();
+      if (legacy) {
+        unsubscribeLegacyTopics({
+          teamIds: legacy.teamIds,
+          rivalTeamIds: legacy.rivalTeamIds,
+          playerIds: legacy.playerIds,
+          muteMatchIds: legacy.mutedMatchIds,
+        }).catch(() => {});
+      }
+      const recovered = await resolvePendingPlayers().catch(() => [] as string[]);
+      if (cancelled || recovered.length === 0) return;
+      const next = Array.from(new Set([...playerRef.current, ...recovered]));
+      if (next.length === playerRef.current.length) return;
+      playerRef.current = next;
+      setFollowedPlayerIds(next);
+      AsyncStorage.setItem(PLAYER_STORAGE_KEY, JSON.stringify(next)).catch(() => {});
+      persistToFirestore({ playerIds: next });
+      recovered.forEach(id => { subscribePlayerTopics(id).catch(() => {}); });
+    })();
+    return () => { cancelled = true; };
+  }, [isHydrated, favoritesLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── AppState foreground → re-reconcile to heal any mid-flip desync ─────────
   // Heals subscriptions that drifted while backgrounded (e.g. a Modo Estadio
@@ -280,7 +325,16 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       setIsSyncing(true);
       try {
         const snap = await getDoc(doc(db, 'users', newUid));
-        const remote = (snap.exists() ? snap.data().favorites : null) as FirestoreFavorites | null;
+        const cloud = snap.exists() ? snap.data() : null;
+        let remote = (cloud?.[CLOUD_FIELD] ?? null) as FirestoreFavorites | null;
+        // First time this account is opened by a build on the current data
+        // source: its cloud favorites still carry the previous provider's ids.
+        // Translate them once; from here on they live in CLOUD_FIELD.
+        let translatedLegacyCloud = false;
+        if (!remote && cloud?.favorites) {
+          remote = await migrateRemoteFavorites(cloud.favorites as FirestoreFavorites);
+          translatedLegacyCloud = true;
+        }
 
         // Caché local leído DIRECTO de AsyncStorage — no de los refs: este
         // handler puede disparar antes de que la hidratación de arranque
@@ -323,9 +377,9 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
             p.length  > (remote.playerIds?.length ?? 0) ||
             l.length  > (remote.leagueIds?.length ?? 0) ||
             rv.length > (remote.rivalTeamIds?.length ?? 0);
-          if (grew) {
+          if (grew || translatedLegacyCloud) {
             updateDoc(doc(db, 'users', newUid), {
-              favorites: { matchIds: m, teamIds: t, playerIds: p, leagueIds: l, rivalTeamIds: rv },
+              [CLOUD_FIELD]: { matchIds: m, teamIds: t, playerIds: p, leagueIds: l, rivalTeamIds: rv },
             }).catch(err => captureFirestoreRejection('favorites.heal', err));
           }
 
@@ -367,7 +421,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
           };
           const userRef = doc(db, 'users', newUid);
           if (snap.exists()) {
-            await updateDoc(userRef, { favorites: favs });
+            await updateDoc(userRef, { [CLOUD_FIELD]: favs });
           } else {
             // users/{uid} aún NO existe: ensureUserProfile (AuthContext) lo
             // está creando en paralelo con displayName/createdAt — que la
@@ -381,7 +435,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
               const unsub = onSnapshot(userRef, s => {
                 if (s.exists()) {
                   clearTimeout(timer); unsub();
-                  updateDoc(userRef, { favorites: favs })
+                  updateDoc(userRef, { [CLOUD_FIELD]: favs })
                     .catch(err => captureFirestoreRejection('favorites.migrate', err));
                   resolve();
                 }
@@ -402,7 +456,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── Firestore write helper ───────────────────────────────────────────────────
-  // Writes replace the entire `favorites` object, so any field the caller omits
+  // Writes replace the entire favorites object, so any field the caller omits
   // would be wiped. To avoid that (and to spare every caller from having to pass
   // every list), missing fields fall back to the current ref value. `?? ref`
   // only triggers on null/undefined — an explicit empty array is preserved.
@@ -422,7 +476,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       rivalTeamIds: favs.rivalTeamIds ?? rivalRef.current,
     };
     const userRef = doc(db, 'users', uid);
-    const write = () => updateDoc(userRef, { favorites: full });
+    const write = () => updateDoc(userRef, { [CLOUD_FIELD]: full });
     write().catch(err => {
       const code = (err as { code?: string })?.code;
       if (code === 'not-found') {

@@ -1427,7 +1427,7 @@ const VenueDetailModal: React.FC<{
   if (!venue) return null;
   // Apply FIFA override (no-op outside the World Cup)
   const displayName = getDisplayVenueName(venue.id, leagueId, venue.name) ?? venue.name;
-  const displayCity = getDisplayVenueCity(venue.id, leagueId, venue.city) ?? venue.city;
+  const displayCity = getDisplayVenueCity(venue.id, leagueId, venue.city, venue.name) ?? venue.city;
   const showCity = !!displayCity
     && !displayName.toLowerCase().includes(displayCity.toLowerCase());
   const sheetBg = isDark ? '#1c1c1e' : '#f2f2f7';
@@ -1678,7 +1678,7 @@ const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match,
       t('matchInfo.surfaceGrass');
     const leagueIdNum = Number(match.leagueId) || 0;
     const vName = getDisplayVenueName(detail.venue.id, leagueIdNum, detail.venue.name) ?? detail.venue.name;
-    const vCity = getDisplayVenueCity(detail.venue.id, leagueIdNum, detail.venue.city) ?? detail.venue.city;
+    const vCity = getDisplayVenueCity(detail.venue.id, leagueIdNum, detail.venue.city, detail.venue.name) ?? detail.venue.city;
     const showCity = !!vCity && !vName.toLowerCase().includes(vCity.toLowerCase());
     rows.push({
       icon: '📍', iconBg: 'rgba(16,185,129,0.15)',

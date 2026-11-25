@@ -21,7 +21,7 @@ import { db } from '../firebase';
 import {
   fbSeasonKey, parseFbSeasonKey, type FbCatalogEntry,
 } from '../../../functions/src/shared/football/model';
-import { COPYRIGHT_SENSITIVE_LEAGUE_IDS } from '../../../functions/src/shared/football/leagues';
+import { COPYRIGHT_SENSITIVE_LEAGUE_IDS, getFootballLeague } from '../../../functions/src/shared/football/leagues';
 
 const STORAGE_KEY = 'fb_league_catalog_v1';
 const REFRESH_MS = 12 * 60 * 60 * 1000;
@@ -97,6 +97,16 @@ export async function getCurrentSeasonId(leagueId: number | string): Promise<num
 export function peekLeagueLogo(leagueId: number | string): string | null {
   if (COPYRIGHT_SENSITIVE_LEAGUE_IDS.has(Number(leagueId))) return null;
   return leagues[String(leagueId)]?.logo ?? null;
+}
+
+/**
+ * Knockout competition (shows a bracket instead of a league table)? Curated
+ * leagues say so in their config; for the rest the catalog's type decides.
+ */
+export function isCupLeague(leagueId: number | string): boolean {
+  const curated = getFootballLeague(leagueId);
+  if (curated) return !!curated.isCup;
+  return leagues[String(leagueId)]?.t === 'Cup';
 }
 
 /** Split a season key back into league and year. */

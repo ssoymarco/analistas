@@ -621,7 +621,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               leagueId: Number(displayMatch.leagueId ?? match.leagueId) || 0,
               leagueName: displayMatch.league || match.league,
               seasonId: displayMatch.seasonId ?? match.seasonId,
-              leagueLogo: `https://cdn.sportmonks.com/images/soccer/leagues/${displayMatch.leagueId ?? match.leagueId}.png`,
+              leagueLogo: displayMatch.leagueLogo ?? match.leagueLogo,
             })}
           >
             <Text style={[scr.navLeague, { color: hText }]} numberOfLines={1}>

@@ -6,6 +6,7 @@ import { Image } from 'expo-image';
 import { useThemeColors } from '../theme/useTheme';
 import type { Match } from '../data/types';
 import type { LeagueWithMatches } from '../services/football/matches';
+import { translateLeagueCountry } from '../utils/nationalTeams';
 import { MatchCard } from './MatchCard';
 import { getLeagueDisplayName, getLeagueDisplayFlag, isCopyrightSensitiveLeague } from '../config/leagues';
 import { isImageUri } from '../utils/imageUri';
@@ -58,7 +59,15 @@ export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPre
   // Resolve display name + flag using the centralised helpers. For
   // trademark-sensitive leagues (e.g. WC 2026) these return the curated
   // config values; for everything else they pass through SportMonks' data.
-  const displayName = getLeagueDisplayName(league.id, league.name);
+  const baseName = getLeagueDisplayName(league.id, league.name);
+  // Leagues outside the curated catalog keep the data's own name, and many
+  // countries share one ("Premier League", "Primera División"): say which.
+  const countryLabel = league.curated === false && league.country && league.country !== 'World'
+    ? translateLeagueCountry(league.country.replace(/-/g, ' '))
+    : '';
+  const displayName = countryLabel && !baseName.toLowerCase().includes(countryLabel.toLowerCase())
+    ? `${baseName} · ${countryLabel}`
+    : baseName;
   const fallbackLogo = league.logo || LEAGUE_FLAGS[league.id] || '🏆';
   const flag = getLeagueDisplayFlag(league.id, fallbackLogo);
 
@@ -92,7 +101,7 @@ export const LeagueSection: React.FC<LeagueSectionProps> = ({ league, onMatchPre
       {/* Header */}
       <TouchableOpacity style={[s.header, { backgroundColor: c.surface, borderBottomColor: c.border }]} activeOpacity={0.7} onPress={() => onLeaguePress?.(league)}>
         <LeagueFlag logo={flag} />
-        <Text style={[s.leagueName, { color: c.textSecondary }]}>{displayName}</Text>
+        <Text style={[s.leagueName, { color: c.textSecondary, flexShrink: 1 }]} numberOfLines={1}>{displayName}</Text>
         {hasLive && (
           <View style={s.liveBadge}>
             <View style={[s.liveDot, { backgroundColor: c.live }]} />

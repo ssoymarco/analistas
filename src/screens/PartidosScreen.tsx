@@ -30,7 +30,7 @@ import { useFixtures } from '../hooks/useFixtures';
 import type { LeagueWithMatches } from '../services/football/matches';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { useFavorites } from '../contexts/FavoritesContext';
-import { getLeaguePopularity, isFriendliesLeague, FRIENDLIES_RE } from '../config/leagues';
+import { getLeaguePopularity, isFriendliesLeague, FRIENDLIES_RE, WORLD_CUP_LEAGUE_ID as WORLD_CUP_ID } from '../config/leagues';
 import { matchNotability } from '../config/notableClubs';
 import { useUserCountry } from '../hooks/useUserCountry';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -50,11 +50,10 @@ function shiftISODate(iso: string, deltaDays: number): string {
 // (FRIENDLIES_RE / isFriendliesLeague viven en config/leagues — compartidos
 // con LeagueSection y getLeagueDisplayName.)
 
-// Mundial 2026 (id 732): anclado ARRIBA del feed durante el torneo. La sección
-// solo existe los días con partidos del Mundial (el filter sobre
-// filteredLeagues lo hace no-op el resto de días) — quitar tras la final
-// (19-20 jul 2026).
-const WORLD_CUP_LEAGUE_ID = '732';
+// Mundial: anclado ARRIBA del feed durante el torneo. La sección solo existe
+// los días con partidos del Mundial (el filter sobre filteredLeagues lo hace
+// no-op el resto de días).
+const WORLD_CUP_LEAGUE_ID = String(WORLD_CUP_ID);
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 export const PartidosScreen: React.FC = () => {
@@ -77,8 +76,11 @@ export const PartidosScreen: React.FC = () => {
   // future version ONLY when a real tracking SDK (AdMob) ships.
 
   // ── Real data via hook ──────────────────────────────────────────────────────
-  const { matches: allMatches, leagues: allLeagues, loading, refreshing, refresh, isPolling } = useFixtures(selectedDate);
   const { followedTeamIds, followedLeagueIds } = useFavorites();
+  const {
+    matches: allMatches, leagues: allLeagues, loading, refreshing, refresh, isPolling,
+    pendingOtherCount, loadAllLeagues,
+  } = useFixtures(selectedDate, followedTeamIds);
   const { country } = useUserCountry();
 
   // ── Live polling dot animation ─────────────────────────────────────────────
@@ -98,7 +100,8 @@ export const PartidosScreen: React.FC = () => {
     return () => pulse.stop();
   }, [isPolling, liveDotOpacity]);
 
-  const totalCount    = allMatches.length;
+  // Loaded matches + the ones in leagues not downloaded yet (see useFixtures).
+  const totalCount    = allMatches.length + pendingOtherCount;
   const liveCount     = useMemo(() => allMatches.filter(m => m.status === 'live').length, [allMatches]);
   const finishedCount = useMemo(() => allMatches.filter(m => m.status === 'finished').length, [allMatches]);
 
@@ -247,7 +250,7 @@ export const PartidosScreen: React.FC = () => {
     const tier2Groups: LeagueWithMatches[] = [];
     const tier3Groups: LeagueWithMatches[] = [];
     for (const lg of remaining) {
-      const pop = getLeaguePopularity(Number(lg.id), country);
+      const pop = getLeaguePopularity(Number(lg.id), country, { name: lg.name, country: lg.country });
       if (pop >= 75)      tier1Groups.push(lg);
       else if (pop >= 50) tier2Groups.push(lg);
       else                tier3Groups.push(lg);
@@ -267,7 +270,8 @@ export const PartidosScreen: React.FC = () => {
       const pb = livePriority(b);
       if (pa !== pb) return pa - pb;
       // Tiebreaker: popularity DESC (country-biased)
-      return getLeaguePopularity(Number(b.id), country) - getLeaguePopularity(Number(a.id), country);
+      return getLeaguePopularity(Number(b.id), country, { name: b.name, country: b.country })
+        - getLeaguePopularity(Number(a.id), country, { name: a.name, country: a.country });
     };
 
     return {
@@ -321,9 +325,19 @@ export const PartidosScreen: React.FC = () => {
     if (!isToday(selectedDate)) setActiveTab('todos');
   }, [selectedDate, activeTab]);
 
-  const visibleGlobalCount  = LEAGUES_PER_BLOCK * (loadMoreClicks + 1);
+  // Each tap doubles what's revealed (4, 8, 16, 32…): the day can carry a
+  // couple hundred leagues and nobody should need fifty taps to reach the end.
+  const visibleGlobalCount  = LEAGUES_PER_BLOCK * (2 ** loadMoreClicks);
   const visibleGlobalLeagues = globalQueue.slice(0, visibleGlobalCount);
   const hiddenGlobalCount    = Math.max(0, globalQueue.length - visibleGlobalCount);
+
+  // The leagues outside the curated catalog are only downloaded when needed:
+  // the user reached the end of what's loaded, or picked a filter (live /
+  // finished / upcoming) that must cover the whole day.
+  useEffect(() => {
+    if (pendingOtherCount === 0 || loading) return;
+    if (activeTab !== 'todos' || visibleGlobalCount >= globalQueue.length && loadMoreClicks > 0) loadAllLeagues();
+  }, [pendingOtherCount, loading, activeTab, visibleGlobalCount, globalQueue.length, loadMoreClicks, loadAllLeagues]);
 
   // Has the user got personal content (followed teams or leagues playing today)?
   // When true, the Caliente banner sits between the personal block and the
@@ -601,7 +615,7 @@ export const PartidosScreen: React.FC = () => {
                 )}
 
                 {/* ── E. "Cargar más partidos" — reveals next 4 leagues ───── */}
-                {hiddenGlobalCount > 0 && (
+                {(hiddenGlobalCount > 0 || pendingOtherCount > 0) && (
                   <View style={{ marginHorizontal: 16, marginBottom: 8, marginTop: 4 }}>
                     <Text style={{
                       fontSize: 12, color: c.textTertiary, textAlign: 'center',

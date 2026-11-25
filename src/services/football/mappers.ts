@@ -18,14 +18,14 @@ import type {
   MatchPrediction, MatchStatus, MissingPlayer, PlayerRating, Team, TeamFormEntry,
 } from '../../data/types';
 import {
-  DEAD_STATE_ID, deriveShortName, localDateOf, localTimeOf, statusFromShort, stateLabelFromShort,
+  DEAD_STATE_ID, localDateOf, localTimeOf, shortNameFor, statusFromShort, stateLabelFromShort,
   utcStringOf,
 } from './base';
 import { parseRound } from './rounds';
 
 export {
-  DEAD_STATE_ID, deriveShortName, localDateOf, localDayRange, localTimeOf, statusFromShort,
-  stateLabelFromShort, utcStringOf,
+  DEAD_STATE_ID, deriveShortName, localDateOf, localDayRange, localTimeOf, shortNameFor,
+  statusFromShort, stateLabelFromShort, utcStringOf,
 } from './base';
 
 // ── Teams ────────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ export function teamFromFb(t: FbTeamRef): Team {
   return {
     id: String(t.id),
     name: t.name,
-    shortName: t.shortName || deriveShortName(t.name),
+    shortName: shortNameFor(t.name, t.shortName),
     logo: t.logo || (t.id ? fbTeamLogo(t.id) : ''),
   };
 }
@@ -107,8 +107,8 @@ export function matchFromLite(
   const hasPens = typeof f.homePen === 'number' && typeof f.awayPen === 'number';
   return {
     id: f.id,
-    homeTeam: { id: f.homeId, name: f.homeName, shortName: deriveShortName(f.homeName), logo: fbTeamLogo(f.homeId) },
-    awayTeam: { id: f.awayId, name: f.awayName, shortName: deriveShortName(f.awayName), logo: fbTeamLogo(f.awayId) },
+    homeTeam: { id: f.homeId, name: f.homeName, shortName: shortNameFor(f.homeName), logo: fbTeamLogo(f.homeId) },
+    awayTeam: { id: f.awayId, name: f.awayName, shortName: shortNameFor(f.awayName), logo: fbTeamLogo(f.awayId) },
     homeScore: f.homeScore ?? 0,
     awayScore: f.awayScore ?? 0,
     status,

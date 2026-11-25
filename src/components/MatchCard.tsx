@@ -15,7 +15,7 @@ import { formatMatchTime } from '../utils/formatMatchTime';
 import { isImageUri } from '../utils/imageUri';
 import { deadStateLabelKey, isPreKickoffStateId } from '../utils/deadState';
 import type { Match } from '../data/types';
-import { getLeagueConfig } from '../config/leagues';
+import { isCupLeague } from '../services/football/catalog';
 import { getDisplayVenueName, getDisplayVenueCity } from '../config/worldCupVenues';
 import { translateNationalTeam } from '../utils/nationalTeams';
 
@@ -62,12 +62,12 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress }) => {
   // (World Cup, Copa Libertadores, FA Cup, etc.). For regular leagues the
   // home team's stadium is implicit, so we omit it to keep the card compact.
   const leagueIdNum = Number(match.leagueId) || 0;
-  const isCup = getLeagueConfig(leagueIdNum)?.isCup === true;
+  const isCup = isCupLeague(leagueIdNum);
   const venueName = isCup
     ? getDisplayVenueName(match.venueId, leagueIdNum, match.venueName)
     : null;
   const venueCity = isCup
-    ? getDisplayVenueCity(match.venueId, leagueIdNum, match.venueCity)
+    ? getDisplayVenueCity(match.venueId, leagueIdNum, match.venueCity, match.venueName)
     : null;
   // For WC matches, the FIFA name already encodes the city ("Estadio Boston"),
   // so showing the city again would be redundant. Hide city when the name and
