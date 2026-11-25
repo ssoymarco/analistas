@@ -31,6 +31,38 @@
         { "fieldPath": "seasonId",      "order": "ASCENDING" },
         { "fieldPath": "startingAtUtc", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "fb_matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "timestamp",  "order": "ASCENDING" },
+        { "fieldPath": "popularity", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fb_matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "homeTeam.id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp",   "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fb_matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "awayTeam.id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp",   "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fb_matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "leagueId",  "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

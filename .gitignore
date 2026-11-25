@@ -46,3 +46,6 @@ yarn-error.*
 # Local experimental copy of the project (not part of the app)
 AnalistasV2/
 workers/**/.wrangler/
+
+# Football data-layer tests (scripts/fb-tests)
+scripts/fb-tests/.build/

@@ -271,7 +271,7 @@ const ClasificacionTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
 
   // ── MULTI-GROUP RENDER (one card per group with letter header) ────────────
   if (isMultiGroup) {
-    // Sort groups by ascending groupId (matches SportMonks' natural order)
+    // Sort groups by ascending groupId (the data's own order)
     groupIdsInOrder.sort((a, b) => a - b);
     return (
       <View style={cl.outer}>
@@ -281,7 +281,7 @@ const ClasificacionTab: React.FC<{ data: LeagueDetailData }> = ({ data }) => {
             <View key={groupId} style={{ marginBottom: idx === groupIdsInOrder.length - 1 ? 0 : 12 }}>
               <SingleGroupTable
                 rows={rows}
-                groupLabel={`${t('league.groupLabel')} ${groupLetter(idx)}`}
+                groupLabel={rows[0]?.groupName ?? `${t('league.groupLabel')} ${groupLetter(idx)}`}
                 showZones
                 onPressTeam={onPressTeam}
               />
@@ -1575,7 +1575,7 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
     if (!Sharing) return;
     try {
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(`https://www.sportmonks.com`, {
+        await Sharing.shareAsync(`https://analistas.app`, {
           dialogTitle: `${displayName} — Analistas`,
         });
       }

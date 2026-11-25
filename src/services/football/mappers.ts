@@ -363,7 +363,7 @@ export function detailFromFb(
 
 // ── Standings ────────────────────────────────────────────────────────────────
 
-function standingsOfGroup(g: FbStandingsGroup, groupId: number | null): LeagueStanding[] {
+function standingsOfGroup(g: FbStandingsGroup, groupId: number | null, groupName?: string): LeagueStanding[] {
   return g.rows.map(r => ({
     position: r.position,
     team: teamFromFb(r.team),
@@ -376,6 +376,7 @@ function standingsOfGroup(g: FbStandingsGroup, groupId: number | null): LeagueSt
     goalDifference: r.goalDifference,
     points: r.points,
     groupId,
+    ...(groupName ? { groupName } : {}),
   }));
 }
 
@@ -388,7 +389,7 @@ export function standingsFromFb(doc: FbStandingsDoc | null | undefined): LeagueS
   const groups = primaryGroups(doc);
   if (groups.length === 0) return [];
   if (groups.length === 1) return standingsOfGroup(groups[0], null);
-  return groups.flatMap((g, i) => standingsOfGroup(g, i + 1));
+  return groups.flatMap((g, i) => standingsOfGroup(g, i + 1, groupDisplayName(g.name, i)));
 }
 
 /**
@@ -414,6 +415,8 @@ const GROUP_NAME_RE = /group\s+([a-z]|\d{1,2})$/i;
 export function groupDisplayName(name: string, index: number): string {
   const m = name.trim().match(GROUP_NAME_RE);
   if (m) return `Grupo ${m[1].toUpperCase()}`;
+  if (/east(ern)? conference/i.test(name)) return 'Conferencia Este';
+  if (/west(ern)? conference/i.test(name)) return 'Conferencia Oeste';
   const afterColon = name.split(':').pop()?.trim();
   return afterColon || `Grupo ${String.fromCharCode(65 + index)}`;
 }
@@ -426,7 +429,7 @@ export function cupGroupsFromFb(doc: FbStandingsDoc | null | undefined): CupGrou
   const out: CupGroup[] = real.map((g, i) => ({
     id: i + 1,
     name: groupDisplayName(g.name, i),
-    standings: standingsOfGroup(g, i + 1),
+    standings: standingsOfGroup(g, i + 1, groupDisplayName(g.name, i)),
   }));
   return { hasGroups: true, groups: out };
 }

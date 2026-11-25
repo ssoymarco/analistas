@@ -1,0 +1,11 @@
+{
+  "name": "analistas-fb-tests",
+  "private": true,
+  "description": "Node tests of the app's football data layer against the Firestore emulator (see docs/MIGRACION_API_SPORTS.md)",
+  "scripts": {
+    "test": "node run.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

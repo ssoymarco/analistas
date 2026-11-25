@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  countOtherFixturesByDate, getTeamsFixturesByDate, groupMatchesByLeague,
+  countFixturesByDate, getTeamsFixturesByDate, groupMatchesByLeague,
   subscribeFixturesByDate, subscribeOtherFixturesByDate, type LeagueWithMatches,
 } from '../services/football/matches';
 import { sortForDisplay } from '../services/football/mappers';
@@ -44,7 +44,7 @@ export function useFixtures(date: string, followedTeamIds: string[] = []): UseFi
   const [curated, setCurated]       = useState<Match[]>([]);
   const [other, setOther]           = useState<Match[]>([]);
   const [mine, setMine]             = useState<Match[]>([]);
-  const [otherCount, setOtherCount] = useState(0);
+  const [dayTotal, setDayTotal]     = useState(0);
   const [wantAll, setWantAll]       = useState(false);
   const [otherLoaded, setOtherLoaded] = useState(false);
   const [loading, setLoading]       = useState(true);
@@ -64,7 +64,7 @@ export function useFixtures(date: string, followedTeamIds: string[] = []): UseFi
     setCurated([]);
     setOther([]);
     setMine([]);
-    setOtherCount(0);
+    setDayTotal(0);
     setWantAll(false);
     setOtherLoaded(false);
 
@@ -81,10 +81,11 @@ export function useFixtures(date: string, followedTeamIds: string[] = []): UseFi
         setLoading(false);
       },
     );
-    // How much is left in the other tier (one aggregate read) — lets the
-    // screen say "and N more matches" without downloading them.
-    countOtherFixturesByDate(date)
-      .then(n => { if (isMounted.current) setOtherCount(n); })
+    // Size of the whole day (one aggregate read): what isn't in the curated
+    // tier is what's left to load — the screen can count it without
+    // downloading it.
+    countFixturesByDate(date)
+      .then(n => { if (isMounted.current) setDayTotal(n); })
       .catch(() => {});
     return unsubscribe;
   }, [date]);
@@ -113,6 +114,9 @@ export function useFixtures(date: string, followedTeamIds: string[] = []): UseFi
       () => { if (isMounted.current) setOtherLoaded(true); },
     );
   }, [date, wantAll]);
+
+  // Fixtures of the day outside the curated leagues, while they aren't loaded.
+  const otherCount = loading ? 0 : Math.max(0, dayTotal - curated.length);
 
   // A day with (almost) nothing in the curated leagues: don't make the user ask.
   useEffect(() => {

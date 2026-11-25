@@ -40,6 +40,8 @@ export interface LeagueStandingRow {
   points: number;
   /** Table index for leagues with several tables (conferences, groups). Null for a single table. */
   groupId?: number | null;
+  /** Display name of that table ("Grupo A", "Conferencia Este"). */
+  groupName?: string;
 }
 
 export interface TopScorerRow {
@@ -123,6 +125,7 @@ function toStandingRow(s: LeagueStanding): LeagueStandingRow {
     goalDifference: s.goalDifference,
     points: s.points,
     groupId: s.groupId ?? null,
+    groupName: s.groupName,
   };
 }
 

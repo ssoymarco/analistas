@@ -100,9 +100,11 @@ export interface LeagueStanding {
   goalsAgainst: number;
   goalDifference: number;
   points: number;
-  /** Group ID for leagues with stage splits (e.g. championship/relegation).
+  /** Table index for competitions with several tables (groups, conferences).
    *  Null for simple single-table leagues. Used for dividers in UI. */
   groupId?: number | null;
+  /** Display name of that table ("Grupo A", "Conferencia Este"). */
+  groupName?: string;
 }
 
 /** One group within a cup group stage (e.g. "Grupo A" in Copa Libertadores) */

@@ -123,16 +123,26 @@ function makeCacheWriter(key: string): { write: (data: Match[]) => void; flush: 
 
 type Tier = 'curated' | 'other';
 
-function dayConstraints(localDate: string, tier: Tier): QueryConstraint[] {
+const inTier = (m: Match, tier: Tier) =>
+  tier === 'curated' ? (m.popularity ?? 0) >= CURATED_MIN_POPULARITY : (m.popularity ?? 0) < CURATED_MIN_POPULARITY;
+
+/**
+ * The tier queries filter on two fields (kickoff range + popularity), which
+ * needs the composite index declared in firestore.indexes.json. If it is
+ * missing or still building, Firestore rejects them with `failed-precondition`;
+ * from then on (this session) each tier reads the whole day through the
+ * always-available single-field index and filters on the device. Slower, but
+ * the match list never depends on an index deploy.
+ */
+let tierIndexUnavailable = false;
+
+function dayQuery(localDate: string, tier: Tier | null) {
   const { start, end } = localDayRange(localDate);
-  return [
-    where('timestamp', '>=', start),
-    where('timestamp', '<', end),
-    tier === 'curated'
-      ? where('popularity', '>=', CURATED_MIN_POPULARITY)
-      : where('popularity', '<', CURATED_MIN_POPULARITY),
-    orderBy('timestamp', 'asc'),
-  ];
+  const constraints: QueryConstraint[] = [where('timestamp', '>=', start), where('timestamp', '<', end)];
+  if (tier === 'curated') constraints.push(where('popularity', '>=', CURATED_MIN_POPULARITY));
+  if (tier === 'other') constraints.push(where('popularity', '<', CURATED_MIN_POPULARITY));
+  constraints.push(orderBy('timestamp', 'asc'));
+  return query(collection(db, MATCHES), ...constraints);
 }
 
 function subscribeDayTier(
@@ -144,19 +154,35 @@ function subscribeDayTier(
   const cacheKey = `day:${localDate}:${tier}`;
   const cache = makeCacheWriter(cacheKey);
   let live = false;
-  readMatchCache(cacheKey).then(cached => { if (cached && !live) onChange(cached); });
+  let closed = false;
+  let unsub: Unsubscribe = () => {};
+  readMatchCache(cacheKey).then(cached => { if (cached && !live && !closed) onChange(cached); });
 
-  const unsub = onSnapshot(
-    query(collection(db, MATCHES), ...dayConstraints(localDate, tier)),
-    snap => {
-      live = true;
-      const matches = snap.docs.map(d => matchFromFb(d.data() as FbMatchDoc));
-      onChange(matches);
-      cache.write(matches);
-    },
-    err => onError?.(err),
-  );
-  return () => { unsub(); cache.flush(); };
+  const listen = (indexed: boolean) => {
+    unsub = onSnapshot(
+      dayQuery(localDate, indexed ? tier : null),
+      snap => {
+        live = true;
+        let matches = snap.docs.map(d => matchFromFb(d.data() as FbMatchDoc));
+        if (!indexed) matches = matches.filter(m => inTier(m, tier));
+        onChange(matches);
+        cache.write(matches);
+      },
+      err => {
+        const code = (err as { code?: string }).code;
+        if (indexed && code === 'failed-precondition' && !closed) {
+          tierIndexUnavailable = true;
+          console.warn('[matches] tier index unavailable — reading the whole day instead:', err.message);
+          listen(false);
+          return;
+        }
+        onError?.(err);
+      },
+    );
+  };
+  listen(!tierIndexUnavailable);
+
+  return () => { closed = true; unsub(); cache.flush(); };
 }
 
 /** Real-time fixtures of a local day in the curated leagues. */
@@ -177,15 +203,13 @@ export function subscribeOtherFixturesByDate(
   return subscribeDayTier(localDate, 'other', onChange, onError);
 }
 
-/** How many fixtures the non-curated tier has that day (one aggregate read, no documents). */
-export async function countOtherFixturesByDate(localDate: string): Promise<number> {
+/** How many fixtures a local day has in all leagues (one aggregate read, no documents). */
+export async function countFixturesByDate(localDate: string): Promise<number> {
   const { start, end } = localDayRange(localDate);
   const snap = await getCountFromServer(query(
     collection(db, MATCHES),
     where('timestamp', '>=', start),
     where('timestamp', '<', end),
-    where('popularity', '<', CURATED_MIN_POPULARITY),
-    orderBy('timestamp', 'asc'), // same (timestamp, popularity) index as the list queries
   ));
   return snap.data().count;
 }

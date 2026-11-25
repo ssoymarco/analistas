@@ -27,8 +27,8 @@ const NOT_FOUND_AFTER_MS = 12_000;
 
 export function useFixtureDetail(
   matchId: string,
-  _homeTeamId?: number,    // kept for call-site compatibility
-  _awayTeamId?: number,
+  _homeTeamId?: number | string,    // kept for call-site compatibility
+  _awayTeamId?: number | string,
   _matchStatus?: string,
 ): UseFixtureDetailResult {
   const [detail, setDetail] = useState<MatchDetail | null>(null);
