@@ -4,6 +4,8 @@
 //
 // Organized by region for easy navigation. Flags use emoji for cross-platform compat.
 
+import i18n from '../i18n';
+
 /** A colored zone band in the standings table */
 export interface LeagueZone {
   /** Label shown in the legend (proper noun — same in all languages) */
@@ -61,21 +63,24 @@ const PO   = '#06b6d4'; // Generic playoffs / liguilla / cuadrangulares (cyan)
 
 export const AVAILABLE_LEAGUES: LeagueConfig[] = [
   // ── Europe — Top 5 ────────────────────────────────────────────────────────
-  { id: 8,    name: 'Premier League',  country: 'England',  flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', currentSeasonId: 25583,
+  { id: 8,    name: 'Premier League',  country: 'England',  flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', currentSeasonId: 28083,
+    searchAliases: ['epl', 'premier', 'premier league inglesa', 'liga inglesa'],
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 4  },
       { label: 'Europa League',    color: EL,  from: 5,  to: 5  },
       { label: 'Conference League',color: ECL, from: 6,  to: 6  },
       { label: 'Descenso',         color: REL, from: 18, to: 20 },
     ] },
-  { id: 564,  name: 'La Liga',         country: 'Spain',    flag: '🇪🇸', currentSeasonId: 25659,
+  { id: 564,  name: 'La Liga',         country: 'Spain',    flag: '🇪🇸', currentSeasonId: 27965,
+    searchAliases: ['laliga', 'la liga', 'liga espanola', 'liga española', 'liga de espana', 'liga de españa'],
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 4  },
       { label: 'Europa League',    color: EL,  from: 5,  to: 6  },
       { label: 'Conference League',color: ECL, from: 7,  to: 7  },
       { label: 'Descenso',         color: REL, from: 18, to: 20 },
     ] },
-  { id: 82,   name: 'Bundesliga',      country: 'Germany',  flag: '🇩🇪', currentSeasonId: 25646,
+  { id: 82,   name: 'Bundesliga',      country: 'Germany',  flag: '🇩🇪', currentSeasonId: 28321,
+    searchAliases: ['bundes', 'bundesliga alemana', 'liga alemana'],
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 4  },
       { label: 'Europa League',    color: EL,  from: 5,  to: 5  },
@@ -83,14 +88,16 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Repechaje',        color: REP, from: 16, to: 16 },
       { label: 'Descenso',         color: REL, from: 17, to: 18 },
     ] },
-  { id: 384,  name: 'Serie A',         country: 'Italy',    flag: '🇮🇹', currentSeasonId: 25533,
+  { id: 384,  name: 'Serie A',         country: 'Italy',    flag: '🇮🇹', currentSeasonId: 27895,
+    searchAliases: ['calcio', 'seria a', 'serie a italiana', 'liga italiana'],
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 4  },
       { label: 'Europa League',    color: EL,  from: 5,  to: 5  },
       { label: 'Conference League',color: ECL, from: 6,  to: 6  },
       { label: 'Descenso',         color: REL, from: 18, to: 20 },
     ] },
-  { id: 301,  name: 'Ligue 1',         country: 'France',   flag: '🇫🇷', currentSeasonId: 25651,
+  { id: 301,  name: 'Ligue 1',         country: 'France',   flag: '🇫🇷', currentSeasonId: 28082,
+    searchAliases: ['ligue1', 'ligue 1', 'liga francesa'],
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 3  },
       { label: 'Europa League',    color: EL,  from: 4,  to: 4  },
@@ -100,32 +107,33 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
     ] },
 
   // ── Europe — Segundas divisiones ──────────────────────────────────────────
-  { id: 9,    name: 'Championship',           country: 'England',     flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', currentSeasonId: 25648,
+  { id: 9,    name: 'Championship',           country: 'England',     flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', currentSeasonId: 27903,
     zones: [
       { label: 'Ascenso',          color: PRO, from: 1,  to: 2  },
       { label: 'Playoff ascenso',  color: PPO, from: 3,  to: 6  },
       { label: 'Descenso',         color: REL, from: 22, to: 24 },
     ] },
-  { id: 567,  name: 'La Liga 2',              country: 'Spain',       flag: '🇪🇸', currentSeasonId: 25673,
+  { id: 567,  name: 'La Liga 2',              country: 'Spain',       flag: '🇪🇸', currentSeasonId: 28479,
+    searchAliases: ['laliga2', 'la liga 2', 'laliga 2', 'segunda division espanola'],
     zones: [
       { label: 'Ascenso',          color: PRO, from: 1,  to: 2  },
       { label: 'Playoff ascenso',  color: PPO, from: 3,  to: 6  },
       { label: 'Descenso',         color: REL, from: 17, to: 22 },
     ] },
-  { id: 85,   name: '2. Bundesliga',          country: 'Germany',     flag: '🇩🇪', currentSeasonId: 25652,
+  { id: 85,   name: '2. Bundesliga',          country: 'Germany',     flag: '🇩🇪', currentSeasonId: 27923,
     zones: [
       { label: 'Ascenso',          color: PRO, from: 1,  to: 2  },
       { label: 'Playoff ascenso',  color: PPO, from: 3,  to: 3  },
       { label: 'Repechaje',        color: REP, from: 16, to: 16 },
       { label: 'Descenso',         color: REL, from: 17, to: 18 },
     ] },
-  { id: 387,  name: 'Serie B',                country: 'Italy',       flag: '🇮🇹', currentSeasonId: 26164,
+  { id: 387,  name: 'Serie B',                country: 'Italy',       flag: '🇮🇹', currentSeasonId: 28379,
     zones: [
       { label: 'Ascenso',          color: PRO, from: 1,  to: 2  },
       { label: 'Playoff ascenso',  color: PPO, from: 3,  to: 8  },
       { label: 'Descenso',         color: REL, from: 16, to: 20 },
     ] },
-  { id: 304,  name: 'Ligue 2',                country: 'France',      flag: '🇫🇷', currentSeasonId: 25658,
+  { id: 304,  name: 'Ligue 2',                country: 'France',      flag: '🇫🇷', currentSeasonId: 28105,
     zones: [
       { label: 'Ascenso',          color: PRO, from: 1,  to: 2  },
       { label: 'Playoff ascenso',  color: PPO, from: 3,  to: 3  },
@@ -134,7 +142,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
     ] },
 
   // ── Europe — Otros ────────────────────────────────────────────────────────
-  { id: 462,  name: 'Liga Portugal',          country: 'Portugal',    flag: '🇵🇹', currentSeasonId: 25745,
+  { id: 462,  name: 'Liga Portugal',          country: 'Portugal',    flag: '🇵🇹', currentSeasonId: 27947,
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 2  },
       { label: 'Europa League',    color: EL,  from: 3,  to: 4  },
@@ -142,7 +150,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Repechaje',        color: REP, from: 16, to: 17 },
       { label: 'Descenso',         color: REL, from: 18, to: 18 },
     ] },
-  { id: 72,   name: 'Eredivisie',             country: 'Netherlands', flag: '🇳🇱', currentSeasonId: 25597,
+  { id: 72,   name: 'Eredivisie',             country: 'Netherlands', flag: '🇳🇱', currentSeasonId: 27958,
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 2  },
       { label: 'Europa League',    color: EL,  from: 3,  to: 4  },
@@ -150,14 +158,14 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Repechaje',        color: REP, from: 16, to: 17 },
       { label: 'Descenso',         color: REL, from: 18, to: 18 },
     ] },
-  { id: 208,  name: 'Pro League',             country: 'Belgium',     flag: '🇧🇪', currentSeasonId: 25600,
+  { id: 208,  name: 'Pro League',             country: 'Belgium',     flag: '🇧🇪', currentSeasonId: 28440,
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 2  },
       { label: 'Europa League',    color: EL,  from: 3,  to: 4  },
       { label: 'Conference League',color: ECL, from: 5,  to: 6  },
       { label: 'Descenso',         color: REL, from: 16, to: 16 },
     ] },
-  { id: 600,  name: 'Süper Lig',              country: 'Turkey',      flag: '🇹🇷', currentSeasonId: 25682,
+  { id: 600,  name: 'Süper Lig',              country: 'Turkey',      flag: '🇹🇷', currentSeasonId: 28203,
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 2  },
       { label: 'Europa League',    color: EL,  from: 3,  to: 4  },
@@ -165,7 +173,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Repechaje',        color: REP, from: 17, to: 18 },
       { label: 'Descenso',         color: REL, from: 19, to: 19 },
     ] },
-  { id: 501,  name: 'Premiership',            country: 'Scotland',    flag: '🏴󠁧󠁢󠁳󠁣󠁴󠁿', currentSeasonId: 25598,
+  { id: 501,  name: 'Premiership',            country: 'Scotland',    flag: '🏴󠁧󠁢󠁳󠁣󠁴󠁿', currentSeasonId: 28275,
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 1  },
       { label: 'Europa League',    color: EL,  from: 2,  to: 3  },
@@ -173,14 +181,14 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Repechaje',        color: REP, from: 10, to: 11 },
       { label: 'Descenso',         color: REL, from: 12, to: 12 },
     ] },
-  { id: 271,  name: 'Superliga',              country: 'Denmark',     flag: '🇩🇰', currentSeasonId: 25536,
+  { id: 271,  name: 'Superliga',              country: 'Denmark',     flag: '🇩🇰', currentSeasonId: 27897,
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 2  },
       { label: 'Europa League',    color: EL,  from: 3,  to: 4  },
       { label: 'Conference League',color: ECL, from: 5,  to: 5  },
       { label: 'Descenso',         color: REL, from: 13, to: 14 },
     ] },
-  { id: 486,  name: 'Premier League',         country: 'Russia',      flag: '🇷🇺', currentSeasonId: 25599,
+  { id: 486,  name: 'Premier League',         country: 'Russia',      flag: '🇷🇺', currentSeasonId: 27990,
     zones: [
       { label: 'Champions League', color: CL,  from: 1,  to: 3  },
       { label: 'Europa League',    color: EL,  from: 4,  to: 4  },
@@ -201,21 +209,23 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
     ] },
 
   // ── Europe — Copas ────────────────────────────────────────────────────────
-  { id: 24,   name: 'FA Cup',                 country: 'England',     flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', currentSeasonId: 25919,  isCup: true },
-  { id: 570,  name: 'Copa del Rey',           country: 'Spain',       flag: '🇪🇸', currentSeasonId: 26557,  isCup: true },
-  { id: 109,  name: 'DFB Pokal',              country: 'Germany',     flag: '🇩🇪', currentSeasonId: 25548,  isCup: true },
-  { id: 390,  name: 'Coppa Italia',           country: 'Italy',       flag: '🇮🇹', currentSeasonId: 25642,  isCup: true },
-  { id: 307,  name: 'Coupe de France',        country: 'France',      flag: '🇫🇷', currentSeasonId: 26654,  isCup: true },
-  { id: 27,   name: 'Carabao Cup',            country: 'England',     flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', currentSeasonId: 25654,  isCup: true },
+  { id: 24,   name: 'FA Cup',                 country: 'England',     flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', currentSeasonId: 28020,  isCup: true },
+  { id: 570,  name: 'Copa del Rey',           country: 'Spain',       flag: '🇪🇸', currentSeasonId: 28138,  isCup: true },
+  { id: 109,  name: 'DFB Pokal',              country: 'Germany',     flag: '🇩🇪', currentSeasonId: 27898,  isCup: true },
+  { id: 390,  name: 'Coppa Italia',           country: 'Italy',       flag: '🇮🇹', currentSeasonId: 28279,  isCup: true },
+  { id: 307,  name: 'Coupe de France',        country: 'France',      flag: '🇫🇷', currentSeasonId: 28289,  isCup: true },
+  { id: 27,   name: 'Carabao Cup',            country: 'England',     flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', currentSeasonId: 27917,  isCup: true },
 
   // ── Américas — Ligas principales ──────────────────────────────────────────
-  { id: 743,  name: 'Liga MX',             country: 'Mexico',    flag: '🇲🇽', currentSeasonId: 25539,
+  { id: 743,  name: 'Liga MX',             country: 'Mexico',    flag: '🇲🇽', currentSeasonId: 28009,
+    searchAliases: ['ligamx', 'liga mx', 'liga mexicana', 'apertura', 'clausura'],
     hasPlayoffs: true, playoffsLabel: 'Liguilla',
     zones: [
       // Top 8 qualify for Liguilla. Relegation is by cociente (average), not by position.
       { label: 'Liguilla',  color: PO, from: 1,  to: 8 },
     ] },
   { id: 779,  name: 'Major League Soccer', country: 'USA',       flag: '🇺🇸', currentSeasonId: 26720,
+    searchAliases: ['mls', 'major league', 'liga de estados unidos'],
     hasPlayoffs: true, playoffsLabel: 'Playoffs',
     zones: [
       // Top 9 from each conference qualify for playoffs (shown generically here)
@@ -273,7 +283,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Playoffs',           color: PO,  from: 5,  to: 8  },
       { label: 'Descenso',           color: REL, from: 15, to: 16 },
     ] },
-  { id: 734,  name: 'Liga Nacional',      country: 'Honduras',  flag: '🇭🇳', currentSeasonId: 25763,
+  { id: 734,  name: 'Liga Nacional',      country: 'Honduras',  flag: '🇭🇳', currentSeasonId: 27974,
     hasPlayoffs: true, playoffsLabel: 'Playoffs',
     zones: [
       { label: 'Playoffs',           color: PO,  from: 1,  to: 8  },
@@ -281,7 +291,8 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
     ] },
 
   // ── Américas — Segundas divisiones + copas ────────────────────────────────
-  { id: 749,  name: 'Liga de Expansión MX',   country: 'Mexico',      flag: '🇲🇽', currentSeasonId: 25886,
+  { id: 749,  name: 'Liga de Expansión MX',   country: 'Mexico',      flag: '🇲🇽', currentSeasonId: 27900,
+    searchAliases: ['expansion', 'liga de expansion', 'expansión'],
     hasPlayoffs: true, playoffsLabel: 'Playoffs',
     zones: [
       { label: 'Playoffs',           color: PO,  from: 1,  to: 8  },
@@ -299,13 +310,15 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
   { id: 654,  name: 'Copa do Brasil',         country: 'Brazil',      flag: '🇧🇷', currentSeasonId: 27151, isCup: true },
 
   // ── Asia + Medio Oriente ──────────────────────────────────────────────────
-  { id: 944,  name: 'Saudi Pro League',       country: 'Saudi Arabia', flag: '🇸🇦', currentSeasonId: 26276,
+  { id: 944,  name: 'Saudi Pro League',       country: 'Saudi Arabia', flag: '🇸🇦', currentSeasonId: 27951,
+    searchAliases: ['liga saudi', 'liga arabe', 'saudi league'],
     zones: [
       { label: 'AFC Champions League Elite', color: CL,  from: 1,  to: 3  },
       { label: 'AFC Champions League',       color: EL,  from: 4,  to: 5  },
       { label: 'Descenso',                   color: REL, from: 16, to: 18 },
     ] },
   { id: 968,  name: 'J1 League',              country: 'Japan',       flag: '🇯🇵', currentSeasonId: 26810,
+    searchAliases: ['jleague', 'j league', 'liga japonesa'],
     zones: [
       { label: 'AFC Champions League Elite', color: CL,  from: 1,  to: 2  },
       { label: 'AFC Champions League',       color: EL,  from: 3,  to: 5  },
@@ -327,16 +340,21 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
     ] },
 
   // ── UEFA ──────────────────────────────────────────────────────────────────
-  { id: 2,    name: 'Champions League',        country: 'Europe',        flag: '⭐', currentSeasonId: 25580, isCup: true },
-  { id: 5,    name: 'Europa League',           country: 'Europe',        flag: '🟠', currentSeasonId: 25582, isCup: true },
-  { id: 2286, name: 'Europa Conference League', country: 'Europe',       flag: '🟢', currentSeasonId: 25581, isCup: true },
+  { id: 2,    name: 'Champions League',        country: 'Europe',        flag: '⭐', currentSeasonId: 28155,
+    searchAliases: ['ucl', 'champions', 'champions league', 'liga de campeones'], isCup: true },
+  { id: 5,    name: 'Europa League',           country: 'Europe',        flag: '🟠', currentSeasonId: 27913,
+    searchAliases: ['uel', 'europa league'], isCup: true },
+  { id: 2286, name: 'Europa Conference League', country: 'Europe',       flag: '🟢', currentSeasonId: 27911, isCup: true },
 
   // ── Competiciones internacionales ─────────────────────────────────────────
-  { id: 1122, name: 'Copa Libertadores',      country: 'South America', flag: '🏆', currentSeasonId: 26784, isCup: true },
-  { id: 1116, name: 'Copa Sudamericana',      country: 'South America', flag: '🏆', currentSeasonId: 26783, isCup: true },
-  { id: 1111, name: 'CONCACAF Champions Cup', country: 'North America', flag: '🏆', currentSeasonId: 26750, isCup: true },
+  { id: 1122, name: 'Copa Libertadores',      country: 'South America', flag: '🏆', currentSeasonId: 26784,
+    searchAliases: ['libertadores', 'copa libertadores'], isCup: true },
+  { id: 1116, name: 'Copa Sudamericana',      country: 'South America', flag: '🏆', currentSeasonId: 26783,
+    searchAliases: ['sudamericana', 'copa sudamericana'], isCup: true },
+  { id: 1111, name: 'CONCACAF Champions Cup', country: 'North America', flag: '🏆', currentSeasonId: 28239,
+    searchAliases: ['concachampions', 'concacaf'], isCup: true },
   { id: 1741, name: 'CONCACAF Nations League', country: 'North America', flag: '🏆', currentSeasonId: 27491, isCup: true },
-  { id: 1107, name: 'CAF Champions League',   country: 'Africa',      flag: '🏆', currentSeasonId: 26228, isCup: true },
+  { id: 1107, name: 'CAF Champions League',   country: 'Africa',      flag: '🏆', currentSeasonId: 27915, isCup: true },
   { id: 1108, name: 'CAF Confederation Cup', country: 'Africa',      flag: '🏆', currentSeasonId: 26264, isCup: true },
 
   // ── Otros ─────────────────────────────────────────────────────────────────
@@ -352,7 +370,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
   { id: 1082, name: 'Amistosos Internacionales', country: 'World',    flag: '🌍', currentSeasonId: 26758 },
 
   // ── Femenil ───────────────────────────────────────────────────────────────
-  { id: 1579, name: 'Liga MX Femenil',        country: 'Mexico',      flag: '🇲🇽', currentSeasonId: 25595,
+  { id: 1579, name: 'Liga MX Femenil',        country: 'Mexico',      flag: '🇲🇽', currentSeasonId: 28036,
     hasPlayoffs: true, playoffsLabel: 'Liguilla',
     zones: [
       { label: 'Liguilla',           color: PO,  from: 1,  to: 8  },
@@ -363,7 +381,7 @@ export const AVAILABLE_LEAGUES: LeagueConfig[] = [
       { label: 'Europa League',      color: EL,  from: 5,  to: 6  },
       { label: 'Descenso',           color: REL, from: 15, to: 16 },
     ] },
-  { id: 1419, name: 'UEFA Women\'s Champions League', country: 'Europe', flag: '🏆', currentSeasonId: 25515, isCup: true },
+  { id: 1419, name: 'UEFA Women\'s Champions League', country: 'Europe', flag: '🏆', currentSeasonId: 27955, isCup: true },
 
   // ── Additional leagues added May 2026 (SportMonks Pro coverage expansion) ──
   // High-value tournaments + niche but covered leagues. All IDs + currentSeasonId
@@ -418,7 +436,20 @@ export function isCopyrightSensitiveLeague(id: number | string): boolean {
  * already produced for everything else). Pass the SportMonks-supplied
  * `fallback` so non-sensitive leagues render exactly as before.
  */
+/** Amistosos: SM los parte en varias "ligas" internas ("Club Friendlies 1-4",
+ *  "Friendlies", "Amistosos Internacionales"...) — detalle de su modelo de
+ *  datos que el usuario no debe ver (reporte del dueño, 4 jul 2026). Detectar
+ *  por NOMBRE, no por id (los ids de friendlies son abiertos). OJO: "friendl"
+ *  y no "friendly" — "Friendlies" (plural) no contiene "friendly". */
+export const FRIENDLIES_RE = /friendl|amistoso/i;
+
+export function isFriendliesLeague(name: string | null | undefined): boolean {
+  return !!name && FRIENDLIES_RE.test(name);
+}
+
 export function getLeagueDisplayName(id: number | string, fallback: string): string {
+  // "Club Friendlies 3" → "Amistosos" (fuera de componentes React: i18n.t()).
+  if (isFriendliesLeague(fallback)) return i18n.t('league.friendlies');
   if (!isCopyrightSensitiveLeague(id)) return fallback;
   const numId = typeof id === 'string' ? Number(id) : id;
   return getLeagueConfig(numId)?.name ?? fallback;

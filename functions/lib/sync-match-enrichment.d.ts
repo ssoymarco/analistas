@@ -26,6 +26,11 @@
  *   - status === 'scheduled' AND kickoff is within next 6 hours
  *   - status === 'finished' AND kickoff was within last 2 hours
  */
+export interface MatchVenueOverride {
+    name?: string;
+    city?: string;
+}
+export declare function loadMatchVenueOverrides(): Promise<Map<string, MatchVenueOverride>>;
 /**
  * Enrich a specific list of match IDs regardless of the hot window.
  * Used by the `backfillEnrichmentByMatchIds` callable to repair historical

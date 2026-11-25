@@ -61,11 +61,41 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.loadMatchVenueOverrides = loadMatchVenueOverrides;
 exports.enrichMatchesByIds = enrichMatchesByIds;
 exports.syncMatchEnrichmentHandler = syncMatchEnrichmentHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
+const crypto_1 = require("crypto");
+const detect_changes_1 = require("./detect-changes");
+const mappers_1 = require("./mappers");
+async function loadMatchVenueOverrides() {
+    const map = new Map();
+    try {
+        const snap = await admin_init_1.db.doc('_meta/matchVenueOverrides').get();
+        if (!snap.exists)
+            return map;
+        for (const [id, ov] of Object.entries(snap.data() ?? {})) {
+            if (ov && typeof ov === 'object')
+                map.set(id, ov);
+        }
+    }
+    catch (err) {
+        logger.warn('matchVenueOverrides: lectura falló — se usan los datos de SM', { err: String(err) });
+    }
+    return map;
+}
 const sportmonks_1 = require("./sportmonks");
+// ── Filtro de cadenas de TV (auditoría de costos, 8 jul 2026) ────────────────
+// SM manda TODAS las cadenas del mundo por partido de Mundial: 276 entradas de
+// 84 países = 130 KB — la MITAD del documento matches/{id}. Cada escritura del
+// doc abanicaba ese peso a cada listener. La audiencia real es MX + mexicanos
+// en EE.UU., así que solo conservamos esos dos países (IDs verificados
+// empíricamente contra datos reales: 458 = México → TUDN/ViX/Televisa;
+// 3483 = EE.UU. → Telemundo/Peacock/FOX). Resultado: ~130 KB → ~5 KB.
+const TVSTATION_COUNTRY_IDS = new Set([458, 3483]);
+// Tope defensivo por si SM duplica entradas dentro de esos países.
+const TVSTATION_MAX_ENTRIES = 25;
 const HOT_WINDOW_FUTURE_HOURS = 6;
 const HOT_WINDOW_PAST_HOURS = 2;
 const H2H_REFRESH_HOURS = 24;
@@ -127,6 +157,7 @@ async function queryHotMatches() {
                 lastDetailUpdate: lastDetail,
                 lastH2hUpdate: lastH2h,
                 lineupsSent: data?.lineupsSent ?? false,
+                detailHash: data?.detailHash ?? null,
             });
         }
     }
@@ -137,7 +168,7 @@ async function queryHotMatches() {
  * These are the fields useFixtureDetail consumes that aren't already on the
  * lean /livescores/inplay payload.
  */
-function extractStaticEnrichment(fixture) {
+function extractStaticEnrichment(fixture, venueOverride) {
     const f = fixture;
     const out = {};
     if (Array.isArray(f.events))
@@ -150,12 +181,31 @@ function extractStaticEnrichment(fixture) {
         out.expectedLineups = f.expectedLineups;
     if (Array.isArray(f.coaches))
         out.coaches = f.coaches;
-    if (f.venue != null)
+    // Venue del detail (el que pinta "INFORMACIÓN DEL PARTIDO" en el cliente):
+    //  1) override curado (_meta/matchVenueOverrides) → sede real conocida;
+    //  2) sede neutral en liga no confiable (Leagues Cup) → null EXPLÍCITO,
+    //     el venue que manda SM es el estadio del "local" y es mentira;
+    //  3) lo que diga SM.
+    if (venueOverride) {
+        out.venue = {
+            ...(f.venue ?? {}),
+            name: venueOverride.name ?? f.venue?.name ?? null,
+            city_name: venueOverride.city ?? f.venue?.city_name ?? null,
+        };
+    }
+    else if ((0, mappers_1.shouldDiscardFixtureVenue)(fixture)) {
+        out.venue = null;
+    }
+    else if (f.venue != null) {
         out.venue = f.venue;
+    }
     if (Array.isArray(f.referees))
         out.referees = f.referees;
-    if (Array.isArray(f.tvstations))
-        out.tvstations = f.tvstations;
+    if (Array.isArray(f.tvstations)) {
+        out.tvstations = f.tvstations
+            .filter((t) => TVSTATION_COUNTRY_IDS.has(Number(t?.country_id)))
+            .slice(0, TVSTATION_MAX_ENTRIES);
+    }
     if (f.weatherreport != null)
         out.weatherreport = f.weatherreport;
     if (Array.isArray(f.predictions))
@@ -226,18 +276,20 @@ async function enrichMatchesByIds(matchIds) {
                 lastDetailUpdate: null,
                 lastH2hUpdate: null,
                 lineupsSent: d?.lineupsSent ?? false,
+                detailHash: null, // backfill: siempre reescribe
             });
         });
     }
     const now = new Date();
     const h2hSkipCutoff = new Date(now.getTime() - H2H_REFRESH_HOURS * 3600_000);
+    const venueOverrides = await loadMatchVenueOverrides();
     let enriched = 0;
     let errors = 0;
     for (const m of hot) {
         try {
             const fixture = await (0, sportmonks_1.fetchFixtureFullDetail)(Number(m.id));
             if (fixture) {
-                await writeEnrichment(m, fixture, h2hSkipCutoff);
+                await writeEnrichment(m, fixture, h2hSkipCutoff, venueOverrides.get(m.id));
                 enriched++;
             }
         }
@@ -261,15 +313,20 @@ async function syncMatchEnrichmentHandler() {
     }
     const now = new Date();
     const h2hSkipCutoff = new Date(now.getTime() - H2H_REFRESH_HOURS * 3600_000);
+    const venueOverrides = await loadMatchVenueOverrides();
     let detailsWritten = 0;
+    let detailsSkipped = 0;
     let h2hWritten = 0;
     let errors = 0;
     for (const m of hot) {
         try {
             const fixture = await (0, sportmonks_1.fetchFixtureFullDetail)(Number(m.id));
             if (fixture) {
-                const wrote = await writeEnrichment(m, fixture, h2hSkipCutoff);
-                detailsWritten++;
+                const wrote = await writeEnrichment(m, fixture, h2hSkipCutoff, venueOverrides.get(m.id));
+                if (wrote.detail)
+                    detailsWritten++;
+                else
+                    detailsSkipped++;
                 if (wrote.h2h)
                     h2hWritten++;
             }
@@ -281,16 +338,16 @@ async function syncMatchEnrichmentHandler() {
         }
     }
     const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
-    logger.info(`✅ syncMatchEnrichment: ${detailsWritten} details + ${h2hWritten} h2h written ` +
+    logger.info(`✅ syncMatchEnrichment: ${detailsWritten} details written, ${detailsSkipped} skipped (sin cambios) + ${h2hWritten} h2h ` +
         `(${errors} errors) in ${elapsed}s`);
 }
 /** Shared enrichment write — used by both the scheduled handler and the
  *  ad-hoc backfill. Returns flags for what was written. */
-async function writeEnrichment(m, fixture, h2hSkipCutoff) {
+async function writeEnrichment(m, fixture, h2hSkipCutoff, venueOverride) {
     const seasonId = fixture?.season_id ?? null;
     const result = { detail: false, h2h: false };
     // ── Detail (events, lineups, statistics, venue, predictions, …) ──
-    const enrichment = extractStaticEnrichment(fixture);
+    const enrichment = extractStaticEnrichment(fixture, venueOverride);
     // ── Lineup notification (one-time, fires when official lineups arrive) ──
     // Condition: match is scheduled/upcoming, lineups not yet notified, and
     // the fixture now has ≥ 11 confirmed lineup entries (at least one full XI).
@@ -298,57 +355,107 @@ async function writeEnrichment(m, fixture, h2hSkipCutoff) {
         ? enrichment.lineups
         : [];
     const hasRealLineups = newLineups.length >= 11;
-    if (!m.lineupsSent && hasRealLineups && m.status === 'scheduled') {
+    // Ventana de confirmación: las alineaciones OFICIALES se anuncian ~60-75
+    // min antes del silbatazo. SM a veces publica un XI proyectado con muchas
+    // horas de antelación (Mundial: 15h antes, 11-jul-2026) — notificar eso
+    // como "confirmada" es mentirle al usuario. Solo empujamos cuando el XI
+    // está presente DENTRO de las 2h previas al kickoff; el sync corre cada
+    // 4 min, así que el push sale minutos después del anuncio real. El cliente
+    // aplica la misma ventana para el banner (AlineacionTab).
+    const kickoffMs = m.startingAtUtc
+        ? new Date(m.startingAtUtc.replace(' ', 'T') + 'Z').getTime()
+        : NaN;
+    const insideConfirmWindow = Number.isFinite(kickoffMs) && Date.now() >= kickoffMs - 2 * 60 * 60 * 1000;
+    if (!m.lineupsSent && hasRealLineups && insideConfirmWindow && m.status === 'scheduled') {
         try {
             const messaging = admin_init_1.admin.messaging();
             const homeId = m.homeTeamId;
             const awayId = m.awayTeamId;
             const title = '📋 Alineaciones confirmadas';
-            const body = `${m.homeTeamName} vs ${m.awayTeamName} · ${m.league}`;
+            const body = `${(0, detect_changes_1.loc)(m.homeTeamName)} vs ${(0, detect_changes_1.loc)(m.awayTeamName)} · ${m.league}`;
             const data = {
                 type: 'lineups',
                 matchId: m.id,
                 homeTeam: m.homeTeamName,
                 awayTeam: m.awayTeamName,
             };
-            // Send to both teams' lineup topics (no delay — lineups are pre-match info)
-            await Promise.allSettled([
-                messaging.send({
-                    topic: `team_${homeId}_lineups`,
-                    notification: { title, body }, data,
+            // Una sola condición (Fase 2, 10 jul 2026) en vez de dos sends:
+            //  1. quien sigue a AMBOS equipos recibe UNA notificación, no dos
+            //     (hallazgo de la auditoría), y
+            //  2. quien silenció este partido (topic mute_{matchId}) no recibe nada.
+            await messaging.send({
+                condition: `('team_${homeId}_lineups' in topics || 'team_${awayId}_lineups' in topics)` +
+                    ` && !('mute_${m.id}' in topics)`,
+                notification: { title, body }, data,
+                android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
+                apns: { payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } } },
+            }).catch(err => {
+                const code = err.code;
+                if (code !== 'messaging/invalid-argument') {
+                    logger.warn(`📋 Lineup push failed for match ${m.id}`, { err });
+                }
+            });
+            // ── Seguidores del JUGADOR: alineación titular confirmada (Fase 2, 5 jul
+            // 2026). Un push por cada titular de las 22 plazas — la condición FCM
+            // excluye a quien ya sigue al EQUIPO (ese usuario ya recibió el push de
+            // arriba). Igual que goles/rojas: sin buckets de Modo Estadio, es
+            // información pre-partido, no hay nada que spoilear.
+            const starters = newLineups.filter(e => e.type_id === 11 && e.player_id && e.team_id);
+            const playerSends = starters.map(e => {
+                const teamId = e.team_id;
+                const teamName = teamId === homeId ? m.homeTeamName : m.awayTeamName;
+                const rival = teamId === homeId ? m.awayTeamName : m.homeTeamName;
+                const topic = `player_${e.player_id}_lineups`;
+                const teamBase = `team_${teamId}_lineups`;
+                return messaging.send({
+                    condition: `'${topic}' in topics && !('${teamBase}' in topics)`,
+                    notification: {
+                        title: `📋 ${e.player_name} es titular`,
+                        body: `${(0, detect_changes_1.loc)(teamName)} vs ${(0, detect_changes_1.loc)(rival)} · ${m.league}`,
+                    },
+                    data: { type: 'playerLineup', matchId: m.id, playerId: String(e.player_id) },
                     android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
-                    apns: { payload: { aps: { sound: 'default', badge: 0 } } },
-                }),
-                messaging.send({
-                    topic: `team_${awayId}_lineups`,
-                    notification: { title, body }, data,
-                    android: { priority: 'high', notification: { channelId: 'analistas-live', sound: 'default' } },
-                    apns: { payload: { aps: { sound: 'default', badge: 0 } } },
-                }),
-            ]);
+                    apns: { payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } } },
+                }).catch(err => {
+                    const code = err.code;
+                    if (code !== 'messaging/invalid-argument') {
+                        logger.warn(`📋 Player lineup push failed (player ${e.player_id})`, { err });
+                    }
+                });
+            });
+            await Promise.allSettled(playerSends);
             // Persist the flag so future enrichment runs don't re-notify
             await admin_init_1.db.collection('matches').doc(m.id).set({ lineupsSent: true }, { merge: true });
             m.lineupsSent = true;
-            logger.info(`📋 Lineup notification sent for match ${m.id}: ${m.homeTeamName} vs ${m.awayTeamName}`);
+            logger.info(`📋 Lineup notification sent for match ${m.id}: ${m.homeTeamName} vs ${m.awayTeamName} (+${starters.length} player pushes)`);
         }
         catch (err) {
             logger.warn(`📋 Lineup notification failed for match ${m.id}:`, err);
             // Non-fatal — enrichment continues normally
         }
     }
-    await admin_init_1.db.collection('matches').doc(m.id).set({ detail: enrichment, detailUpdatedAt: admin_init_1.admin.firestore.Timestamp.now() }, { merge: true });
-    result.detail = true;
-    // ── Sidelined ──
-    if (seasonId) {
-        const [sidelinedHome, sidelinedAway] = await Promise.all([
-            (0, sportmonks_1.fetchSidelined)(seasonId, m.homeTeamId),
-            (0, sportmonks_1.fetchSidelined)(seasonId, m.awayTeamId),
-        ]);
-        await admin_init_1.db.collection('matches').doc(m.id).set({ sidelinedHome, sidelinedAway }, { merge: true });
+    // ── Detail: solo escribir si el contenido REALMENTE cambió ──────────────
+    // Antes se reescribían ~260 KB cada 4 min por partido caliente aunque nada
+    // hubiera cambiado — y cada escritura abanica el doc completo a cada
+    // listener. El hash viaja en la misma escritura (cero costo extra).
+    const newHash = (0, crypto_1.createHash)('sha256').update(JSON.stringify(enrichment)).digest('hex');
+    if (newHash !== m.detailHash) {
+        await admin_init_1.db.collection('matches').doc(m.id).set({ detail: enrichment, detailUpdatedAt: admin_init_1.admin.firestore.Timestamp.now(), detailHash: newHash }, { merge: true });
+        result.detail = true;
     }
-    // ── H2H ──
+    // ── Sidelined + H2H (cadencia de 24h, no cada 4 min) ────────────────────
+    // Las bajas/lesiones cambian a lo mucho una vez al día — refrescarlas cada
+    // 4 min eran 2 llamadas SM + 1 escritura (fan-out) por partido caliente por
+    // ciclo, para datos idénticos. Ahora comparten la cadencia diaria del H2H.
     const needsH2h = !m.lastH2hUpdate || m.lastH2hUpdate < h2hSkipCutoff;
     if (needsH2h) {
+        if (seasonId) {
+            const [sidelinedHome, sidelinedAway] = await Promise.all([
+                (0, sportmonks_1.fetchSidelined)(seasonId, m.homeTeamId),
+                (0, sportmonks_1.fetchSidelined)(seasonId, m.awayTeamId),
+            ]);
+            await admin_init_1.db.collection('matches').doc(m.id).set({ sidelinedHome, sidelinedAway }, { merge: true });
+        }
         const h2h = await (0, sportmonks_1.fetchH2H)(m.homeTeamId, m.awayTeamId).catch(() => []);
         await admin_init_1.db.collection('matches').doc(m.id).set({ h2h, h2hUpdatedAt: admin_init_1.admin.firestore.Timestamp.now() }, { merge: true });
         result.h2h = true;

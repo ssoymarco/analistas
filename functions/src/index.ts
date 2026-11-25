@@ -20,6 +20,9 @@ import './admin-init';
 // ── Football (API-Sports) ───────────────────────────────────────────────────
 export { fbPollLive, fbSyncFixtures, fbSyncStandings, fbDailyLeagues, fbAdmin } from './football/functions';
 
+// ── Wallpapers contest (Firestore trigger, provider-agnostic) ────────────────
+export { onWallpaperEntryCreated } from './wallpaper-entries';
+
 // ── Modo Estadio — delayed push via Cloud Tasks (provider-agnostic) ──────────
 export { deliverDelayedPush } from './deliver-delayed-push';
 

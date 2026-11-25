@@ -11,6 +11,7 @@
  * - syncTopScorers:   Every 15 min → top scorers for all configured leagues
  */
 import './admin-init';
+export { onWallpaperEntryCreated } from './wallpaper-entries';
 export { deliverDelayedPush } from './deliver-delayed-push';
 /**
  * Poll livescores every 1 minute.
@@ -126,6 +127,24 @@ export declare const sendTestPush: import("firebase-functions/v2/https").Callabl
  * Cost: 51 leagues × 24 executions/day = 1,224 calls/day (1.7% of Pro limit).
  * Future improvement: switch to event-driven sync from pollLivescores matchEnd.
  */
+/**
+ * Resolución dinámica liga→temporada actual (_meta/leagueSeasons) + crawl
+ * automático del calendario completo cuando una liga estrena temporada.
+ * 2×/día es suficiente: SM voltea `is_current` días antes del primer partido.
+ * Costo: ~51 calls a /leagues (2×/día) + crawl one-shot por cambio real.
+ */
+export declare const syncLeagueSeasons: import("firebase-functions/v2/scheduler").ScheduleFunction;
+/**
+ * Disparo manual de syncLeagueSeasons (mismo gate adminToken que los demás
+ * callables de mantenimiento). Para correr la resolución + crawl inicial sin
+ * esperar a la próxima corrida programada.
+ */
+export declare const runLeagueSeasonsSync: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    checked: number;
+    changed: number;
+    crawledFixtures: number;
+    ok: boolean;
+}>, unknown>;
 export declare const syncStandings: import("firebase-functions/v2/scheduler").ScheduleFunction;
 /**
  * Sync top scorers for all configured leagues.

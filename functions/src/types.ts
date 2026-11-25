@@ -59,6 +59,14 @@ export interface MatchDoc {
   stage?: unknown;
   round?: unknown;
   group?: unknown;
+  /** Expulsados por lado (roja directa + doble amarilla), ya descontadas las
+   *  revocadas por VAR. El cliente los pinta en MatchCard. */
+  homeRedCards?: number;
+  awayRedCards?: number;
+  /** true si SM marcó el fixture como sede neutral (metadata type 35). En
+   *  ligas donde SM rellena el venue con el estadio del "local" (Leagues
+   *  Cup), los campos venue* van en null — ver shouldDiscardFixtureVenue. */
+  venueNeutral?: boolean;
   venueId?: number | null;
   venueName?: string | null;
   venueCity?: string | null;
@@ -67,12 +75,14 @@ export interface MatchDoc {
   // Lets the client smoothly tick the displayed minute between server polls.
   // periodStartedAt = unix seconds when the current period kicked off.
   // periodMinuteOffset = base minute for the period (0 for 1H, 45 for 2H, etc.).
-  // Absent for scheduled, halftime, and finished matches (the client falls back
-  // to `minute` in those cases).
+  // NULL (escrito explícito) para programados, descansos/breaks y terminados —
+  // el doc se escribe con merge:true, así que omitir el campo dejaba el ancla
+  // VIEJA viva durante los descansos (LA contando en el break de la prórroga,
+  // ARG-SUI 11 jul 2026). El cliente cae a `minute` cuando es null.
   liveClock?: {
     periodStartedAt: number;
     periodMinuteOffset: number;
-  };
+  } | null;
 
   // ── Enrichment (populated by syncMatchEnrichment + pollLivescores) ──
   // Raw SM fixture payload with all includes. Stored as opaque JSON because
@@ -217,12 +227,44 @@ export interface LivescoresSnapshot {
     halftimeSent?:      boolean;
     secondHalfSent?:    boolean;
     suspendedSent?:     boolean;
+    /** Aviso de retraso PRE-partido ya enviado (state_id → DELAYED/POSTPONED
+     *  antes del pitido inicial). Latch propio: SM hace flapping entre
+     *  NOT_STARTED y DELAYED mientras dura la tormenta. */
+    kickoffDelaySent?:  boolean;
+    /** Rojas por lado que REALMENTE notificamos. La anulación se mide contra
+     *  esta marca de agua, no contra el conteo del poll anterior. */
+    redPushedHome?:     number;
+    redPushedAway?:     number;
+    /** Polls consecutivos viendo el conteo por debajo de la marca. Debe llegar
+     *  a RED_CANCEL_CONFIRM_POLLS antes de notificar — un parpadeo del feed lo
+     *  regresa a 0 y no dispara nada. */
+    redDropPollsHome?:  number;
+    redDropPollsAway?:  number;
+    /** Polls que este partido lleva 'live' pero FUERA del feed inplay de SM
+     *  (suspendido por tormenta, o SM lo soltó antes del FT). Mantiene viva la
+     *  entrada del snapshot para que el rescate de poll-livescores lo
+     *  re-consulte por id; expira a ~2h. */
+    goneChecks?:        number;
+    /** Polls desde que el partido TERMINÓ y salió del feed. SM publica datos
+     *  tardíos DESPUÉS del pitido (atribución del anotador de un gol al 90+,
+     *  expulsiones post-final por bronca) y para entonces ya no hay escrituras
+     *  del poll ni ventana hot del enrichment (si el kickoff se retrasó, la
+     *  ventana por kickoff expira antes del final — Cuypers 90+9 invisible,
+     *  Monterrey vs Orlando 5 ago 2026). Dispara re-enriquecimientos a ~1, 2,
+     *  5, 10 y 20 min post-final; expira a ~20 min. */
+    settleChecks?:      number;
     extraTimeSent?:     boolean;
     penaltiesSent?:     boolean;
     // Modo Rival diff state
     penMissHome?:       number;   // in-play missed-penalty count (home)
     penMissAway?:       number;   // in-play missed-penalty count (away)
     rivalResultSent?:   boolean;  // rival loss/big-loss push already fired this match
+    /** SHA-256 del matchDoc SIN los campos volátiles (updatedAt,
+     *  detailUpdatedAt) NI `detail`. pollLivescores solo escribe el doc a
+     *  Firestore cuando este hash cambia — antes escribía TODOS los partidos
+     *  vivos cada 4s y cada escritura abanicaba el doc completo (~260 KB) a
+     *  cada listener (auditoría de costos, 8 jul 2026: 708 GiB egress). */
+    docHash?:           string;
   }>;
   updatedAt: Timestamp;
 }
@@ -239,9 +281,11 @@ export type ChangeType =
   | 'extraTimeStart'  // Start of extra time
   | 'penaltiesStart'  // Start of penalty shootout
   | 'redCard'         // Red card or second yellow (sent-off)
+  | 'redCardCancelled'// Expulsión revocada (VAR / corrección del feed)
   | 'yellowCard'      // First yellow card shown
   | 'substitution'    // Player substituted
   | 'matchSuspended'  // Match suspended or postponed mid-game
+  | 'kickoffDelayed'  // Retraso ANTES del pitido inicial (SM state_id 16/10)
   | 'matchReminder'   // Pre-match reminder (~15 min before kickoff)
   | 'lineups'         // Confirmed starting lineups published
   // ── Modo Rival ("bad news" about a team the user marked as rival) ──────────
@@ -262,13 +306,28 @@ export interface DetectedChange {
   leagueId: string;
   /** Which side caused the event (goal / card / substitution) */
   scoringTeamSide?: 'home' | 'away';
+  /** Expulsados por lado al momento del evento. Solo se llena en 'redCard':
+   *  viaja en la tarea retrasada para que el guard de VAR pueda comparar
+   *  contra el estado actual al entregarla. */
+  homeRedCards?: number;
+  awayRedCards?: number;
   /** Subtype for goals: 'normal' | 'penalty' | 'own'. Default = 'normal'. */
   goalKind?: 'normal' | 'penalty' | 'own';
+  /** Solo en goalCancelled: true si SM registró una revisión del VAR (evento
+   *  type 24) cerca del minuto actual. Decide el copy "El VAR anula" vs el
+   *  neutro "Gol anulado" (anulación inmediata del árbitro, sin revisión). */
+  varConfirmed?: boolean;
   /** Goal scorer / card recipient (best-effort, may be missing). */
   scorerName?: string;
-  /** Player involved in the event (red cards, yellow cards). */
+  /** Player involved in the event (red cards, yellow cards). Para
+   *  sustituciones: el que ENTRA (semántica real de SM v3 — `player_name` es
+   *  el que entra; verificado 6 ago 2026, ver findRecentSubstitution). */
   playerName?: string;
-  /** For substitutions: the player coming ON (replacing playerName). */
+  /** SM player_id of the scorer (goal) or carded player (redCard) — used to
+   *  notify followers of the PLAYER via player_{id}_goals / player_{id}_cards. */
+  playerId?: number | null;
+  /** For substitutions: el que SALE (SM `related_player_name`). El comentario
+   *  anterior decía "coming ON" — esa premisa invertía las flechas del push. */
   relatedPlayerName?: string;
   /** Match minute when the event occurred. */
   minute?: number | null;

@@ -26,7 +26,7 @@ import {
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../services/firebase';
-import { captureError } from '../services/sentry';
+import { captureError, captureFirestoreRejection } from '../services/sentry';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -155,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (isNowReal && hasRealName && (wasGuest || hasDefaultName)) {
         const updates = {
-          displayName: fbUser.displayName!,
+          displayName: fbUser.displayName!.slice(0, 50),
           authMethod:  fbUser.providerData[0]?.providerId ?? profile.authMethod,
           email:       fbUser.email ?? profile.email ?? null,
           updatedAt:   serverTimestamp(),
@@ -167,8 +167,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return mapFirebaseUser(fbUser, profile);
     }
 
-    // First sign-in — create profile
-    const baseName = displayNameOverride || fbUser.displayName || 'Analista';
+    // First sign-in — create profile. Truncado a 50: la rule de create exige
+    // displayName.size() <= 50 — un nombre de Google/Apple más largo rompía la
+    // creación del perfil completo (y en cascada favoritos/prefs de esa
+    // sesión). Auditoría 3 jul 2026.
+    const baseName = (displayNameOverride || fbUser.displayName || 'Analista').slice(0, 50);
     const username = await generateUniqueUsername(baseName);
 
     const profile: Record<string, unknown> = {
@@ -299,10 +302,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // 1) Firestore cleanup — username doc first, then user doc.
     //    Wrapped in try/catch individually so a missing/already-gone doc
     //    doesn't block the deletion chain.
+    // ⚠️ Estos catch fueron silenciosos durante meses mientras las rules
+    // tenían 'allow delete: if false' en users/{uid} — el perfil (email,
+    // nombre) quedaba huérfano PARA SIEMPRE tras borrar la cuenta (Apple
+    // 5.1.1(v)). Rules corregidas el 3 jul 2026; reportar cualquier rechazo
+    // futuro para que nunca vuelva a pasar inadvertido.
     if (user.username) {
-      try { await deleteDoc(doc(db, 'usernames', user.username)); } catch {}
+      try { await deleteDoc(doc(db, 'usernames', user.username)); }
+      catch (e) { captureFirestoreRejection('deleteAccount.username', e); }
     }
-    try { await deleteDoc(doc(db, 'users', user.id)); } catch {}
+    try { await deleteDoc(doc(db, 'users', user.id)); }
+    catch (e) { captureFirestoreRejection('deleteAccount.userDoc', e); }
 
     // 2) Local AsyncStorage cleanup — wipe everything under the `analistas`
     //    prefix except the device-level preferences listed above.

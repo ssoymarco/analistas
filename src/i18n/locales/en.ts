@@ -34,7 +34,31 @@ const en: TranslationKeys = {
     matches: 'Matches',
     favorites: 'Favorites',
     news: 'News',
+    wallpapers: 'Wallpapers',
     profile: 'Profile',
+  },
+
+  // ── Wallpapers + jersey giveaway ───────────────────────────────────────────
+  wallpapers: {
+    title: 'Wallpapers',
+    subtitle: 'Download exclusive wallpapers of your stars',
+    prizeKicker: 'Prize of the week',
+    participate: 'Enter',
+    participating: 'Entered',
+    save: 'Save',
+    seeDynamic: 'See how to enter',
+    terms: 'Terms & conditions',
+    announceInDays: 'Winner in {{days}}d {{hours}}h',
+    announceInHours: 'Winner in {{hours}}h',
+    signInTitle: 'Create an account to enter',
+    signInBody: 'You need an Analistas account to enter the signed jersey giveaway.',
+    signInCta: 'Create account',
+    empty: 'New wallpapers coming soon',
+    unit_d: 'days',
+    unit_h: 'hrs',
+    unit_m: 'min',
+    unit_s: 'sec',
+    savedOk: 'Wallpaper saved to your photos',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────
@@ -75,6 +99,7 @@ const en: TranslationKeys = {
 
   // ── Match statuses ─────────────────────────────────────────────────────────
   matchStatus: {
+    etBreak: 'Extra time',
     finished: 'FT',
     live: 'LIVE',
     halfTime: 'HT',
@@ -101,6 +126,27 @@ const en: TranslationKeys = {
     androidNote: 'On Android, changing the icon may briefly close the app.',
   },
 
+  liveActivity: {
+    title: 'Live score on your lock screen',
+    on: 'On',
+    off: 'Off',
+    channelName: 'Live score',
+    limitedCoverageBody: 'The data provider is not covering this match live. The score on your lock screen may not update.',
+    activateAnyway: 'Activate anyway',
+  },
+
+  matchShare: {
+    live: '⚽ {{score}} · {{league}}\nPlaying RIGHT NOW! Follow it live on Analistas 👉 {{url}}',
+    finished: '⚽ Full time: {{score}} · {{league}}\nRelive the match on Analistas 👉 {{url}}',
+    scheduled: '⚽ {{match}} · {{league}}\nFollow it live on Analistas 👉 {{url}}',
+  },
+
+  promoBanner: {
+    title: 'The World Cup Round of 32 is here!',
+    body: 'Make sure you follow your favorite national teams to get their goals, lineups and results.',
+    cta: 'Follow my teams',
+  },
+
   notifications: {
     title: 'Notifications',
     introTitle: 'You decide what interrupts you',
@@ -115,6 +161,11 @@ const en: TranslationKeys = {
     sectionMatchState: 'Match state',
     sectionEstadio: 'Stadium Mode',
     goals: 'Goals',
+    goalsDescription: 'Includes goals disallowed by VAR.',
+    cards: 'Cards',
+    cardsDescription: 'Yellow and red cards.',
+    matchFlow: 'Match flow & final result',
+    matchFlowDescription: 'Halftime, second half, full-time, substitutions, extra time and penalties.',
     yellowCards: 'Yellow cards',
     redCards: 'Red cards',
     substitutions: 'Substitutions',
@@ -489,6 +540,7 @@ const en: TranslationKeys = {
     trialBannerBold: 'Try 7 days for free',
     trialBannerBody: 'on the annual plan — cancel before day 7 and pay nothing.',
     cancelAnytime: 'Cancel anytime · No commitment',
+    storeUnavailable: 'Subscriptions are unavailable right now. Please try again later.',
     restore: 'Already a Starter? Restore your purchase',
     termsPrivacy: 'Terms of use · Privacy policy',
     iconCardTitle: 'Customize your icon',
@@ -694,6 +746,9 @@ const en: TranslationKeys = {
     noTeams: 'No teams available',
     teamsTitle: 'Teams ({{count}})',
     noFixtures: 'No recent or upcoming matches',
+    friendlies: 'Friendlies',
+    friendly: 'Friendly',
+    showMoreMatches: 'Show more matches ({{count}})',
     upcomingFixtures: 'Upcoming matches',
     recentResults: 'Recent results',
     live: 'LIVE',
@@ -740,6 +795,8 @@ const en: TranslationKeys = {
 
   // ── Lineup tab ─────────────────────────────────────────────────────────────
   lineup: {
+    saveImage: 'Save',
+    savedOk: 'Lineup saved to your photos',
     shareLineup: 'Share lineup',
     noLineup: 'No lineups available',
     confirmed: 'Confirmed lineup',
@@ -759,6 +816,14 @@ const en: TranslationKeys = {
     sidelinedOther: 'Unavailable',
   },
 
+  // ── Low data coverage (pre-season friendlies, minor leagues) ───────────────
+  dataCoverage: {
+    limitedFriendly: 'Pre-season friendly — limited data coverage',
+    limitedGeneric: 'Limited data coverage',
+    lineupBody: 'The data provider did not publish lineups for this match. The score stays up to date.',
+    statsBody: 'The data provider did not record detailed statistics for this match. The score stays up to date.',
+  },
+
   // ── Match info detail modals ──────────────────────────────────────────────
   matchInfo: {
     coachDetail: 'Coach Profile',
@@ -774,6 +839,7 @@ const en: TranslationKeys = {
     foulsPerMatch: 'Fouls / match',
     penaltiesPerMatch: 'Penalties / match',
     totalMatches: 'Matches refereed',
+    whereToWatch: 'Where to watch',
     nationality: 'Nationality',
     birthDate: 'Date of birth',
     loadingProfile: 'Loading profile...',

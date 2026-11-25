@@ -2,7 +2,7 @@
  * Feature flags — compile-time switches for gating features that aren't ready
  * for a given release.
  */
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 
 /**
  * Master switch for the premium / subscription feature (the HazteTitular
@@ -26,13 +26,25 @@ import { Platform } from 'react-native';
 // set false for the 1.2.x public builds that lack the native purchases module.
 export const PREMIUM_MASTER_ENABLED = true;
 
-// Effective flag used across the app. Premium is live on iOS (StoreKit +
-// RevenueCat wired). On Android it stays OFF until Play Billing + RevenueCat
-// Android (RC_ANDROID_KEY) are configured — otherwise the SHARED 1.3.0 OTA
-// bundle would surface a non-purchasable paywall on Android (Google rejection,
-// same reason 1.2.x ships premium off). When Android billing is ready, extend
-// the platform check here.
-export const PREMIUM_ENABLED = PREMIUM_MASTER_ENABLED && Platform.OS === 'ios';
+// Deliberate per-platform launch switch. Android's 1.3.0 binary DOES contain
+// the native purchases module (built from the shared codebase), so the
+// native-presence guard alone would turn premium ON in Android production the
+// moment this bundle ships via OTA — before a single Play Billing purchase has
+// ever been tested and with the Play payments profile still incomplete (KYC).
+// Flip to true as a conscious launch decision (it's OTA-able anytime).
+const PREMIUM_ANDROID_LAUNCHED = false;
+
+// Effective flag used across the app. This JS bundle is shared via OTA across
+// EVERY runtime — a platform check alone would surface a non-purchasable
+// paywall on old binaries without the native purchases module (the exact
+// store-rejection this flag exists to prevent), so we key off the NATIVE
+// MODULE actually being present (same guard as SubscriptionContext's
+// PURCHASES_AVAILABLE). On Android, the additional launch switch above must
+// also be flipped — presence of the module isn't a launch decision.
+export const PREMIUM_ENABLED =
+  PREMIUM_MASTER_ENABLED &&
+  !!(NativeModules as { RNPurchases?: unknown }).RNPurchases &&
+  (Platform.OS === 'ios' || PREMIUM_ANDROID_LAUNCHED);
 
 /**
  * Master switch for betting / gambling content: the Caliente.mx banner ads, the

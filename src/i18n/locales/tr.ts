@@ -31,7 +31,30 @@ const tr: TranslationKeys = {
     matches: 'Maçlar',
     favorites: 'Favoriler',
     news: 'Haberler',
+    wallpapers: 'Duvar Kağıtları',
     profile: 'Profil',
+  },
+
+  wallpapers: {
+    title: 'Duvar Kağıtları',
+    subtitle: 'Yıldızlarının özel duvar kağıtlarını indir',
+    prizeKicker: 'Haftanın ödülü',
+    participate: 'Katıl',
+    participating: 'Katıldın',
+    save: 'Kaydet',
+    seeDynamic: 'Nasıl katılırım',
+    terms: 'Şartlar ve koşullar',
+    announceInDays: 'Kazanan {{days}}g {{hours}}s sonra',
+    announceInHours: 'Kazanan {{hours}}s sonra',
+    signInTitle: 'Katılmak için hesap oluştur',
+    signInBody: 'İmzalı forma çekilişine katılmak için Analistas hesabı gerekli.',
+    signInCta: 'Hesap oluştur',
+    empty: 'Yakında yeni duvar kağıtları burada',
+    unit_d: 'gün',
+    unit_h: 'sa',
+    unit_m: 'dk',
+    unit_s: 'sn',
+    savedOk: 'Duvar kağıdı fotoğraflarına kaydedildi',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────
@@ -72,6 +95,7 @@ const tr: TranslationKeys = {
 
   // ── Match statuses ─────────────────────────────────────────────────────────
   matchStatus: {
+    etBreak: 'Uzatma',
     finished: 'MS',
     live: 'CANLI',
     halfTime: 'DY',
@@ -91,6 +115,27 @@ const tr: TranslationKeys = {
     unmute: 'Bu maç için bildirimleri etkinleştir',
   },
 
+  liveActivity: {
+    title: 'Skor kilit ekranında',
+    on: 'Açık',
+    off: 'Kapalı',
+    channelName: 'Canlı skor',
+    limitedCoverageBody: 'Veri sağlayıcı bu maçı canlı olarak kapsamıyor. Kilit ekranınızdaki skor güncellenmeyebilir.',
+    activateAnyway: 'Yine de etkinleştir',
+  },
+
+  matchShare: {
+    live: '⚽ {{score}} · {{league}}\nŞU AN oynanıyor! Analistas ile canlı takip et 👉 {{url}}',
+    finished: '⚽ Maç sonucu: {{score}} · {{league}}\nMaçı Analistas ile yeniden yaşa 👉 {{url}}',
+    scheduled: '⚽ {{match}} · {{league}}\nAnalistas ile canlı takip et 👉 {{url}}',
+  },
+
+  promoBanner: {
+    title: 'Dünya Kupası son 32 turu başlıyor!',
+    body: 'Favori millî takımlarını takip et; goller, kadrolar ve sonuçlar sana gelsin.',
+    cta: 'Takımlarımı takip et',
+  },
+
   notifications: {
     title: 'Bildirimler',
     introTitle: 'Seni neyin böleceğine sen karar ver',
@@ -105,6 +150,11 @@ const tr: TranslationKeys = {
     sectionMatchState: 'Maç durumu',
     sectionEstadio: 'Stadyum Modu',
     goals: 'Goller',
+    goalsDescription: 'VAR tarafından iptal edilen goller dahil.',
+    cards: 'Kartlar',
+    cardsDescription: 'Sarı ve kırmızı kartlar.',
+    matchFlow: 'Maç akışı ve sonucu',
+    matchFlowDescription: 'Devre arası, ikinci yarı, maç sonu, oyuncu değişiklikleri, uzatmalar ve penaltılar.',
     yellowCards: 'Sarı kartlar',
     redCards: 'Kırmızı kartlar',
     substitutions: 'Oyuncu değişiklikleri',
@@ -453,6 +503,7 @@ const tr: TranslationKeys = {
     trialBannerBold: '7 gün ücretsiz dene',
     trialBannerBody: 'yıllık planda — 7. günden önce iptal et ve hiçbir şey ödemezsin.',
     cancelAnytime: 'İstediğin zaman iptal et · Bağlayıcılık yok',
+    storeUnavailable: 'Abonelikler şu anda kullanılamıyor. Lütfen daha sonra tekrar dene.',
     restore: 'Zaten üyeydin mi? Satın alımını geri yükle',
     termsPrivacy: 'Kullanım şartları · Gizlilik politikası',
     iconCardTitle: 'İkonunu özelleştir',
@@ -632,6 +683,9 @@ const tr: TranslationKeys = {
     noTeams: 'Mevcut takım yok',
     teamsTitle: 'Takımlar ({{count}})',
     noFixtures: 'Son veya yaklaşan maç yok',
+    friendlies: 'Hazırlık maçları',
+    friendly: 'Hazırlık maçı',
+    showMoreMatches: 'Daha fazla maç göster ({{count}})',
     upcomingFixtures: 'Yaklaşan maçlar',
     recentResults: 'Son sonuçlar',
     live: 'CANLI',
@@ -658,6 +712,8 @@ const tr: TranslationKeys = {
 
   // ── Lineup tab ─────────────────────────────────────────────────────────────
   lineup: {
+    saveImage: 'Kaydet',
+    savedOk: 'Kadro fotoğraflarına kaydedildi',
     shareLineup: 'Kadroyu paylaş',
     noLineup: 'Kadro mevcut değil',
     confirmed: 'Kesinleşmiş kadro',
@@ -677,6 +733,14 @@ const tr: TranslationKeys = {
     sidelinedOther: 'Mevcut değil',
   },
 
+  // ── Low data coverage ───────────────
+  dataCoverage: {
+    limitedFriendly: 'Hazırlık maçı — sınırlı veri kapsamı',
+    limitedGeneric: 'Sınırlı veri kapsamı',
+    lineupBody: 'Veri sağlayıcı bu maç için kadroları yayınlamadı. Skor güncel kalır.',
+    statsBody: 'Veri sağlayıcı bu maç için ayrıntılı istatistik kaydetmedi. Skor güncel kalır.',
+  },
+
   // ── Match info tab ─────────────────────────────────────────────────────────
   matchInfo: {
     coachDetail: 'Teknik Direktör Profili',
@@ -692,6 +756,7 @@ const tr: TranslationKeys = {
     foulsPerMatch: 'Faul / maç',
     penaltiesPerMatch: 'Penaltı / maç',
     totalMatches: 'Yönetilen maçlar',
+    whereToWatch: 'Maç nerede izlenir',
     nationality: 'Milliyet',
     birthDate: 'Doğum tarihi',
     loadingProfile: 'Profil yükleniyor...',

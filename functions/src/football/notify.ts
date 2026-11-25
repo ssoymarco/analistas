@@ -1,19 +1,30 @@
 /**
  * football/notify.ts
  *
- * Push delivery for football changes detected by live-detect.ts.
+ * Push delivery for football changes detected by live-detect.ts. Ports the
+ * Sportmonks-era dispatch rules (feature/live-activities branch) 1:1 onto the
+ * `fb_` topic namespace (see FbTopics in shared/football/model.ts):
  *
- * Topic taxonomy = the legacy one with an `fb_` prefix (see FbTopics in
- * shared/football/model.ts). Modo Estadio (delay buckets d0/d2/d5/d10) and
- * Modo Rival work exactly as before; delayed buckets reuse the existing
- * `deliverDelayedPush` task queue.
+ *  - Modo Estadio: retrasable events go to <base>_d0 now and to _d2/_d5/_d10
+ *    through the `deliverDelayedPush` task queue (VAR guard for goals AND reds).
+ *  - Modo Rival: immediate, single team topic.
+ *  - "Silenciar este partido": every condition carries
+ *    `&& !('fb_mute_{matchId}' in topics)` so muted devices are excluded in FCM
+ *    (real silence with the app closed). Followed-player pushes omit it on
+ *    purpose — following a player is a stronger opt-in, and their condition
+ *    already uses FCM's 5-topic limit.
+ *  - Followed players: goals (never own goals) and red cards, immediate, to
+ *    devices that follow the player but NOT that player's team (those already
+ *    get the team push, which names the scorer).
+ *  - iOS category MATCH_EVENT → long-press action "Silenciar este partido".
+ *  - dedupId includes the minute so two different same-type events at the same
+ *    score don't replace each other in the notification center.
  *
  * LEGACY DUAL-SEND (transition window): users still on a Sportmonks-era build
- * are subscribed to `team_{sportmonksId}_*` topics. For every change we also
- * send the IMMEDIATE (_d0 / kickoff / reminders / lineups / rival) push to the
- * legacy topic of each team we can map back (legacy.ts). The payload omits
- * `matchId` so tapping it opens the app (and its update prompt) instead of a
- * match screen the old build can no longer load. Disable with
+ * are subscribed to `team_{sportmonksId}_*` topics. Immediate pushes are also
+ * sent to the legacy topic of every team we can map back (legacy.ts). The
+ * payload omits `matchId` so tapping opens the app (and its update prompt)
+ * instead of a match screen the old build can no longer load. Disable with
  * FB_LEGACY_DUAL_SEND=false once adoption of the new build is high.
  */
 
@@ -50,14 +61,21 @@ const TEAMS_ES: Record<string, string> = {
   'USA': 'Estados Unidos', 'United States': 'Estados Unidos', 'Wales': 'Gales', 'Zimbabwe': 'Zimbabue',
   'Northern Ireland': 'Irlanda del Norte', 'Haiti': 'Haití', 'Uzbekistan': 'Uzbekistán',
 };
-const loc = (name: string): string => TEAMS_ES[name] ?? name;
+export const loc = (name: string): string => TEAMS_ES[name] ?? name;
+
+/** Friendlies are one match in a push → singular "Amistoso". */
+export function displayLeague(name: string | null | undefined): string {
+  if (!name) return '';
+  return /friendl|amistoso/i.test(name) ? 'Amistoso' : name;
+}
 
 // ── Copy ─────────────────────────────────────────────────────────────────────
 
-interface Copy { title: string; body: string }
+export interface Copy { title: string; body: string }
 
 const H = (c: FbChange) => loc(c.homeTeam.name);
 const A = (c: FbChange) => loc(c.awayTeam.name);
+const L = (c: FbChange) => displayLeague(c.league);
 const scoreLine = (c: FbChange) => `${H(c)} ${c.homeScore}-${c.awayScore} ${A(c)}`;
 const sideName = (c: FbChange) => (c.side === 'home' ? H(c) : A(c));
 const min = (c: FbChange) => (c.minute != null ? `${c.minute}' ` : '');
@@ -75,36 +93,48 @@ export function buildCopy(c: FbChange): Copy {
       return { title, body: `${min(c)}${scorer}${H(c)} ${h}-${a} ${A(c)}`.trim() };
     }
     case 'goalCancelled':
-      return { title: `🚫 El VAR anula gol de ${sideName(c)}`, body: `${min(c)}${scoreLine(c)}`.trim() };
+      // "El VAR anula" only when a VAR review backs it; otherwise neutral copy
+      // (clear offside on the pitch, data correction). Never claim more than we know.
+      return {
+        title: c.varConfirmed ? `🚫 El VAR anula gol de ${sideName(c)}` : `🚫 Gol anulado de ${sideName(c)}`,
+        body: `${min(c)}${scoreLine(c)}`.trim(),
+      };
     case 'matchStart':
-      return { title: '⚽ ¡Empieza el partido!', body: `${H(c)} vs ${A(c)} · ${c.league}` };
+      return { title: '⚽ ¡Empieza el partido!', body: `${H(c)} vs ${A(c)} · ${L(c)}` };
+    case 'kickoffDelayed':
+      return c.delay === 'postponed'
+        ? { title: '⏰ Partido aplazado', body: `${H(c)} vs ${A(c)} · ${L(c)} · se jugará en otra fecha` }
+        : { title: '⏰ Partido retrasado', body: `${H(c)} vs ${A(c)} · ${L(c)} · ${c.delay ? `+${c.delay}` : 'el inicio se retrasó'}` };
     case 'halftime':
       return { title: '⏱️ Medio tiempo · Marcador:', body: scoreLine(c) };
     case 'secondHalfStart':
-      return { title: '¡Arranca el segundo tiempo!', body: `${scoreLine(c)} · ${c.league}` };
+      return { title: '¡Arranca el segundo tiempo!', body: `${scoreLine(c)} · ${L(c)}` };
     case 'matchEnd': {
       const pen = c.homePenScore != null && c.awayPenScore != null ? ` (pen. ${c.homePenScore}-${c.awayPenScore})` : '';
-      return { title: '🏁 Final del partido', body: `${H(c)} ${c.homeScore}-${c.awayScore}${pen} ${A(c)} · ${c.league}` };
+      return { title: '🏁 Final del partido', body: `${H(c)} ${c.homeScore}-${c.awayScore}${pen} ${A(c)} · ${L(c)}` };
     }
     case 'redCard':
       return { title: '🟥 TARJETA ROJA', body: `${min(c)}${c.playerName ? c.playerName + ' ' : ''}(${sideName(c)}) · ${scoreLine(c)}`.trim() };
+    case 'redCardCancelled':
+      return { title: `🟥↩️ Se anula la expulsión de ${sideName(c)}`, body: `${min(c)}${scoreLine(c)}`.trim() };
     case 'yellowCard':
       return { title: '🟨 Tarjeta amarilla', body: `${min(c)}${c.playerName ? c.playerName + ' ' : ''}(${sideName(c)}) · ${scoreLine(c)}`.trim() };
     case 'substitution': {
+      // Off first, then on — the way a commentator reads it.
       const out = c.playerName ? `↓ ${c.playerName}` : '';
       const inn = c.relatedPlayerName ? ` ↑ ${c.relatedPlayerName}` : '';
       return { title: `🔄 Cambio · ${sideName(c)}`, body: `${min(c)}${out}${inn}`.trim() || scoreLine(c) };
     }
     case 'extraTimeStart':
-      return { title: '⏱️ ¡Prórroga!', body: `${scoreLine(c)} · ${c.league}` };
+      return { title: '⏱️ ¡Prórroga!', body: `${scoreLine(c)} · ${L(c)}` };
     case 'penaltiesStart':
-      return { title: '🥅 ¡Tanda de penaltis!', body: `${scoreLine(c)} · ${c.league}` };
+      return { title: '🥅 ¡Tanda de penaltis!', body: `${scoreLine(c)} · ${L(c)}` };
     case 'matchSuspended':
       return { title: '⚠️ Partido suspendido', body: scoreLine(c) };
     case 'matchReminder':
-      return { title: '⏰ ¡El partido comienza pronto!', body: `${H(c)} vs ${A(c)} · ${c.league} · en ~15 min` };
+      return { title: '⏰ ¡El partido comienza pronto!', body: `${H(c)} vs ${A(c)} · ${L(c)} · en ~15 min` };
     case 'lineups':
-      return { title: '📋 Alineaciones confirmadas', body: `${H(c)} vs ${A(c)} · ${c.league}` };
+      return { title: '📋 Alineaciones confirmadas', body: `${H(c)} vs ${A(c)} · ${L(c)}` };
     case 'rivalLoss':
       return { title: `😈 ${sideName(c)} perdió`, body: `${scoreLine(c)} · a disfrutar 🍿` };
     case 'rivalBigLoss':
@@ -135,46 +165,50 @@ function route(c: FbChange): Route {
   const a = c.awayTeam.id;
   const s = c.side === 'home' ? h : a;
   switch (c.type) {
-    case 'goal':            return { bucketed: { topic: FbTopics.goals, teams: [h, a], delayed: true } };
-    case 'goalCancelled':   return { bucketed: { topic: FbTopics.goals, teams: [h, a], delayed: false } };
+    case 'goal':             return { bucketed: { topic: FbTopics.goals, teams: [h, a], delayed: true } };
+    // Corrections only reach _d0: delayed buckets never saw the event (the
+    // VAR guard in deliverDelayedPush drops their copy).
+    case 'goalCancelled':    return { bucketed: { topic: FbTopics.goals, teams: [h, a], delayed: false } };
+    case 'redCardCancelled': return { bucketed: { topic: FbTopics.cards, teams: [h, a], delayed: false } };
     case 'halftime':
     case 'secondHalfStart':
     case 'matchEnd':
     case 'extraTimeStart':
-    case 'penaltiesStart':  return { bucketed: { topic: FbTopics.live, teams: [h, a], delayed: true } };
+    case 'penaltiesStart':
+    case 'matchSuspended':   return { bucketed: { topic: FbTopics.live, teams: [h, a], delayed: true } };
     case 'redCard':
-    case 'yellowCard':      return { bucketed: { topic: FbTopics.cards, teams: [s], delayed: true } };
-    case 'substitution':    return { bucketed: { topic: FbTopics.live, teams: [s], delayed: true } };
-    case 'matchStart':      return { immediate: { topic: FbTopics.kickoff, teams: [h, a] } };
-    case 'matchSuspended':  return { immediate: { topic: FbTopics.kickoff, teams: [h, a] } };
-    case 'matchReminder':   return { immediate: { topic: FbTopics.reminders, teams: [h, a] } };
-    case 'lineups':         return { immediate: { topic: FbTopics.lineups, teams: [h, a] } };
-    case 'rivalLoss':       return { immediate: { topic: FbTopics.rivalLoss, teams: [s] } };
-    case 'rivalBigLoss':    return { immediate: { topic: FbTopics.rivalBigLoss, teams: [s] } };
-    case 'rivalRedCard':    return { immediate: { topic: FbTopics.rivalRedCard, teams: [s] } };
-    case 'rivalPenMiss':    return { immediate: { topic: FbTopics.rivalPenMiss, teams: [s] } };
-    default:                return {};
+    case 'yellowCard':       return { bucketed: { topic: FbTopics.cards, teams: [s], delayed: true } };
+    case 'substitution':     return { bucketed: { topic: FbTopics.live, teams: [s], delayed: true } };
+    case 'matchStart':
+    case 'kickoffDelayed':   return { immediate: { topic: FbTopics.kickoff, teams: [h, a] } };
+    case 'matchReminder':    return { immediate: { topic: FbTopics.reminders, teams: [h, a] } };
+    case 'lineups':          return { immediate: { topic: FbTopics.lineups, teams: [h, a] } };
+    case 'rivalLoss':        return { immediate: { topic: FbTopics.rivalLoss, teams: [s] } };
+    case 'rivalBigLoss':     return { immediate: { topic: FbTopics.rivalBigLoss, teams: [s] } };
+    case 'rivalRedCard':     return { immediate: { topic: FbTopics.rivalRedCard, teams: [s] } };
+    case 'rivalPenMiss':     return { immediate: { topic: FbTopics.rivalPenMiss, teams: [s] } };
+    default:                 return {};
   }
 }
 
-/** Legacy (Sportmonks-era) topic for a new-format topic, or null when unmappable. */
+/** Legacy (Sportmonks-era) topic for a new-format team topic, or null when unmappable. */
 export function legacyTopicFor(fbTopic: string): string | null {
   const m = /^fb_team_(\d+)_(.+)$/.exec(fbTopic);
   if (!m) return null;
   const smId = legacyTeamIdFor(m[1]);
-  if (!smId) return null;
-  // Old builds have no `matchSuspended` routing on _kickoff — they used _start.
-  return `team_${smId}_${m[2]}`;
+  return smId ? `team_${smId}_${m[2]}` : null;
 }
 
 // ── FCM helpers ──────────────────────────────────────────────────────────────
 
-/** FCM allows at most 5 topics per condition. */
-function condition(topics: string[]): string {
-  return topics.map(t => `'${t}' in topics`).join(' || ');
+/** `(a || b) && !mute` — FCM allows at most 5 topics per condition. */
+export function conditionFor(topics: string[], muteMatchId?: string): string {
+  const any = topics.map(t => `'${t}' in topics`).join(' || ');
+  const grouped = topics.length > 1 ? `(${any})` : any;
+  return muteMatchId ? `${grouped} && !('${FbTopics.mute(muteMatchId)}' in topics)` : grouped;
 }
 
-async function send(
+export async function sendFcm(
   target: { topic: string } | { condition: string },
   copy: Copy,
   data: Record<string, string>,
@@ -192,7 +226,8 @@ async function send(
       },
       apns: {
         headers: { 'apns-collapse-id': dedupId },
-        payload: { aps: { sound: 'default', badge: 0 } },
+        // MATCH_EVENT → iOS long-press action "Silenciar este partido".
+        payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } },
       },
     });
   } catch (err) {
@@ -231,28 +266,80 @@ function legacyPayloadFor(c: FbChange): Record<string, string> {
   return { ...rest, legacy: '1' };
 }
 
+function dedupFor(c: FbChange): string {
+  return `fb${c.matchId}_${c.type}_${c.homeScore}-${c.awayScore}_m${c.minute ?? ''}`.slice(0, 64);
+}
+
+// ── Followed players ─────────────────────────────────────────────────────────
+
+function playerPush(c: FbChange): Promise<void> | null {
+  if (!c.playerId || !c.side) return null;
+  const isGoal = c.type === 'goal' && c.goalKind !== 'own';
+  const isRed = c.type === 'redCard';
+  if (!isGoal && !isRed) return null;
+  const teamId = c.side === 'home' ? c.homeTeam.id : c.awayTeam.id;
+  const pid = String(c.playerId);
+  const playerTopic = isGoal ? FbTopics.playerGoals(pid) : FbTopics.playerCards(pid);
+  const teamTopic = isGoal ? FbTopics.goals : FbTopics.cards;
+  // player AND NOT any of the 4 team buckets = exactly FCM's 5-topic limit.
+  const condition = `'${playerTopic}' in topics` +
+    (['d0', 'd2', 'd5', 'd10'] as FbDelayBucket[]).map(b => ` && !('${teamTopic(teamId, b)}' in topics)`).join('');
+  const name = isGoal ? c.scorerName : c.playerName;
+  const title = isGoal
+    ? (c.goalKind === 'penalty' ? `⚽ ¡Gol de penal de ${name ?? 'tu jugador'}!` : `⚽ ¡Gol de ${name ?? 'tu jugador'}!`)
+    : `🟥 Expulsado: ${name ?? 'tu jugador'}`;
+  const body = `${scoreLine(c)}${c.minute != null ? ` · ${c.minute}'` : ''}`;
+  return sendFcm({ condition }, { title, body },
+    { ...payloadFor(c), type: isGoal ? 'playerGoal' : 'playerRedCard', playerId: pid },
+    `${dedupFor(c)}_p${pid}`.slice(0, 64));
+}
+
+/**
+ * Starting XI confirmed → one push per starter to devices following that
+ * player but not their team (team followers got the "Alineaciones" push).
+ */
+export async function dispatchPlayerLineups(
+  match: { matchId: string; homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string }; league: string },
+  starters: Array<{ playerId: number; name: string; teamId: string }>,
+): Promise<void> {
+  await Promise.allSettled(starters.map(s => {
+    const own = s.teamId === match.homeTeam.id ? match.homeTeam : match.awayTeam;
+    const rival = s.teamId === match.homeTeam.id ? match.awayTeam : match.homeTeam;
+    const pid = String(s.playerId);
+    return sendFcm(
+      { condition: `'${FbTopics.playerLineups(pid)}' in topics && !('${FbTopics.lineups(s.teamId)}' in topics)` },
+      { title: `📋 ${s.name} es titular`, body: `${loc(own.name)} vs ${loc(rival.name)} · ${displayLeague(match.league)}` },
+      { sport: 'football', v: '2', type: 'playerLineup', matchId: match.matchId, playerId: pid },
+      `fb${match.matchId}_lineup_p${pid}`.slice(0, 64),
+    );
+  }));
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 export async function dispatchFootballChanges(changes: FbChange[]): Promise<void> {
   if (!changes.length) return;
-  const sends: Promise<void>[] = [];
+  const sends: Array<Promise<void>> = [];
   const queue = ESTADIO_DELAY_ENABLED ? getFunctions().taskQueue('deliverDelayedPush') : null;
 
   for (const c of changes) {
     const copy = buildCopy(c);
     const data = payloadFor(c);
-    const dedupId = `fb${c.matchId}_${c.type}_${c.homeScore}-${c.awayScore}`.slice(0, 64);
+    const dedupId = dedupFor(c);
     const r = route(c);
 
-    // Immediate (d0 / plain) topics for this change.
-    const immediateTopics = r.bucketed
+    // Immediate (d0 / plain) topics.
+    const immediate = [...new Set(r.bucketed
       ? r.bucketed.teams.map(t => r.bucketed!.topic(t, 'd0'))
-      : (r.immediate?.teams.map(t => r.immediate!.topic(t)) ?? []);
-    const uniq = [...new Set(immediateTopics)];
-    if (!uniq.length) continue;
+      : (r.immediate?.teams.map(t => r.immediate!.topic(t)) ?? []))];
+    if (!immediate.length) continue;
 
     // One condition → a user following both teams gets exactly one push.
-    sends.push(send(uniq.length === 1 ? { topic: uniq[0] } : { condition: condition(uniq) }, copy, data, dedupId));
+    sends.push(sendFcm({ condition: conditionFor(immediate, c.matchId) }, copy, data, dedupId));
+
+    // Followed player (goals, reds).
+    const pp = playerPush(c);
+    if (pp) sends.push(pp);
 
     // Modo Estadio delayed buckets.
     if (queue && r.bucketed?.delayed) {
@@ -260,11 +347,12 @@ export async function dispatchFootballChanges(changes: FbChange[]): Promise<void
         const bucket = `d${delayMin}` as FbDelayBucket;
         const topics = [...new Set(r.bucketed.teams.map(t => r.bucketed!.topic(t, bucket)))];
         const payload: DelayedPushPayload = {
-          ...(topics.length === 1 ? { topic: topics[0] } : { condition: condition(topics) }),
+          condition: conditionFor(topics, c.matchId),
           title: copy.title, body: copy.body, data, dedupId,
           changeType: c.type, matchId: c.matchId,
           homeScore: c.homeScore, awayScore: c.awayScore,
           matchCollection: 'fb_matches',
+          ...(c.type === 'redCard' ? { homeRedCards: c.homeRedCards, awayRedCards: c.awayRedCards } : {}),
         };
         const taskId = `fb_${dedupId}_${r.bucketed.teams.join('_')}_d${delayMin}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 499);
         queue.enqueue(payload, { scheduleDelaySeconds: delayMin * 60, id: taskId }).catch((err: unknown) => {
@@ -274,16 +362,16 @@ export async function dispatchFootballChanges(changes: FbChange[]): Promise<void
       }
     }
 
-    // Legacy dual-send (immediate only).
+    // Legacy dual-send (immediate only; old builds' per-match mute ids are
+    // Sportmonks ids we can't map, so no mute guard there).
     if (LEGACY_DUAL_SEND) {
-      const legacy = [...new Set(uniq.map(legacyTopicFor).filter((t): t is string => !!t))];
+      const legacy = [...new Set(immediate.map(legacyTopicFor).filter((t): t is string => !!t))];
       if (legacy.length) {
-        sends.push(send(legacy.length === 1 ? { topic: legacy[0] } : { condition: condition(legacy) },
-          copy, legacyPayloadFor(c), `l${dedupId}`.slice(0, 64)));
+        sends.push(sendFcm({ condition: conditionFor(legacy) }, copy, legacyPayloadFor(c), `l${dedupId}`.slice(0, 64)));
       }
     }
 
-    logger.info(`📣 ${c.type} — ${copy.title} · ${copy.body}`, { matchId: c.matchId, topics: uniq });
+    logger.info(`📣 ${c.type} — ${copy.title} · ${copy.body}`, { matchId: c.matchId, topics: immediate });
   }
 
   await Promise.allSettled(sends);

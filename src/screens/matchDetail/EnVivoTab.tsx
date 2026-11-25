@@ -16,7 +16,7 @@ import { haptics } from '../../utils/haptics';
 import { AnimatedPressable } from '../../components/AnimatedPressable';
 import { GOAL_OPTIONS } from '../../components/GoalPicker';
 import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupVenues';
-import { getLeagueDisplayName } from '../../config/leagues';
+import { getLeagueDisplayName, isFriendliesLeague } from '../../config/leagues';
 import type {
   Match, MatchDetail, MatchEvent, H2HResult, TeamFormEntry,
   OddsMarket, MatchPrediction, MissingPlayer, PressureIndex, MatchStatCategory,
@@ -33,7 +33,9 @@ import { translateCountry } from '../../i18n/countries';
 import { getRefereeProfile, type RefereeProfile } from '../../services/sportsApi';
 import { BETTING_CONTENT_ENABLED, ADMOB_ENABLED } from '../../config/features';
 import MediumRectangleBannerAd from '../../components/MediumRectangleBannerAd';
+import { LiveActivityButton } from '../../components/LiveActivityButton';
 import { useLiveTick, computeLiveMinuteSeconds } from '../../hooks/useLiveTick';
+import { useUserCountry } from '../../hooks/useUserCountry';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH   = SCREEN_WIDTH - 72; // prediction card width
@@ -457,6 +459,82 @@ async function saveVote(
   return { votes: newVotes, counts: newCounts };
 }
 
+// ── Dónde ver (cadenas de TV) ────────────────────────────────────────────────
+// Muestra SOLO las cadenas del país del usuario (MX o US) — un usuario en
+// México no necesita ver Peacock, ni uno en EE.UU. a Canal 5. El mapper
+// (mapTVStations en sportsApi) ya filtró a MX+US, quitó radios/agregadores y
+// colapsó variantes ("TUDN En Vivo" → "TUDN"). Se oculta sola sin datos.
+// Compartida por PreviewTab (previa) y EnVivoTab (en vivo).
+export const WhereToWatchSection: React.FC<{ detail: MatchDetail }> = ({ detail }) => {
+  const c = useThemeColors();
+  const { t } = useTranslation();
+  const { country } = useUserCountry();
+
+  const stations = useMemo(() => {
+    const all = detail.tvStations ?? [];
+    // EE.UU. ve cadenas US; todos los demás (MX y resto del mundo) ven las MX
+    // — la audiencia default es mexicana. Si el país elegido no tiene cadenas
+    // registradas, caer a la lista completa antes que mostrar tarjeta vacía.
+    const preferred = country === 'US' ? 'US' : 'MX';
+    const local = all.filter(s => s.country === preferred);
+    return local.length > 0 ? local : all;
+  }, [detail.tvStations, country]);
+
+  if (stations.length === 0) return null;
+
+  return (
+    <View style={[ww.card, { backgroundColor: c.card, borderColor: c.border }]}>
+      <View style={[ww.header, { borderBottomColor: c.border }]}>
+        <View style={[ww.accent, { backgroundColor: c.accent }]} />
+        <Text style={[ww.title, { color: c.textTertiary }]}>
+          📺 {t('matchInfo.whereToWatch').toUpperCase()}
+        </Text>
+      </View>
+      <View style={ww.chipsWrap}>
+        {stations.map((s, i) => (
+          <View key={`${s.name}-${i}`} style={[ww.chip, { backgroundColor: c.surface, borderColor: c.border }]}>
+            {s.logo && isImageUri(s.logo) ? (
+              <View style={ww.logoWrap}>
+                <Image source={{ uri: s.logo }} style={ww.logo} contentFit="contain" recyclingKey={s.logo} />
+              </View>
+            ) : null}
+            <Text style={[ww.chipText, { color: c.textPrimary }]} numberOfLines={1}>{s.name}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+};
+
+const ww = StyleSheet.create({
+  card: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+  header: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  accent: { width: 3, height: 13, borderRadius: 1.5, opacity: 0.8 },
+  title: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9 },
+  chipsWrap: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    borderRadius: 20, borderWidth: 1,
+    paddingLeft: 6, paddingRight: 12, paddingVertical: 5,
+    maxWidth: 200,
+  },
+  // Fondo blanco fijo: los logos de SM son PNG pensados para fondo claro y
+  // varios se pierden sobre superficie oscura.
+  logoWrap: {
+    width: 24, height: 24, borderRadius: 12, backgroundColor: '#FFFFFF',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  logo: { width: 18, height: 18 },
+  chipText: { fontSize: 12, fontWeight: '600', flexShrink: 1 },
+});
+
 // ── Predictions carousel (6 interactive polls) ─────────────────────────────
 // Shared flag: true while the user is actively touching the predictions
 // carousel. MatchDetailScreen's tab-swipe gesture checks this and yields, so
@@ -468,6 +546,12 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
   const { t } = useTranslation();
   const [activeDot, setActiveDot] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
+
+  // Pre-season friendlies: no poll. These matches draw few voters and usually
+  // have limited data coverage; a dead poll makes the app look worse than no
+  // poll. (Pre-match we can't yet know if data will arrive, so the league name
+  // is the only available signal — decisión del dueño, 5 jul 2026.)
+  const isFriendly = isFriendliesLeague(match.league ?? '');
 
   // ── Vote state ──
   const [votes, setVotes] = useState<VoteState>({});
@@ -652,6 +736,9 @@ export const PredictionsCarousel: React.FC<{ match: Match }> = ({ match }) => {
   const cards = shownPolls
     .map(pk => allCards.find(el => el.key === pk))
     .filter((el): el is React.ReactElement => el != null);
+
+  // After all hooks (league name can hydrate late; hook count must not change)
+  if (isFriendly) return null;
 
   return (
     <View style={pc.outer}>
@@ -2590,6 +2677,9 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
   return (
     <View style={{ paddingHorizontal: 16, gap: 12 }}>
 
+      {/* ── Live Activity: "Seguir en pantalla de bloqueo" (solo live + módulo presente) ── */}
+      <LiveActivityButton match={match} />
+
       {/* ── SCHEDULED: Previa layout ── */}
       {isScheduled && (
         <>
@@ -2619,6 +2709,9 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
             <InjuriesSection home={detail.missingPlayers!.home} away={detail.missingPlayers!.away} match={match} />
           )}
 
+          {/* Dónde ver */}
+          <WhereToWatchSection detail={detail} />
+
           {/* Match info */}
           <MatchInfoCard match={match} detail={detail} />
         </>
@@ -2639,8 +2732,10 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
           {/* Pressure index */}
           {detail.pressureIndex && <PressureSection pressure={detail.pressureIndex} match={match} events={detail.events} statistics={detail.statistics} />}
 
-          {/* Poll results (locked after match) */}
-          <PollResultsSection match={match} />
+          {/* Poll results (PollResultsSection): RETIRADO por completo del
+              en-vivo Y del final (decisión del dueño, 4-5 jul 2026) — la
+              votación solo vive en la previa (PredictionsCarousel). El
+              componente queda definido por si se quiere revivir. */}
 
           {/* Odds — betting content, gated off for v1.0 (Apple 2.3.6) */}
           {BETTING_CONTENT_ENABLED && detail.odds && detail.odds.length > 0 && (
@@ -2667,6 +2762,9 @@ export const EnVivoTab: React.FC<{ match: Match; detail: MatchDetail }> = ({ mat
           {hasMissing && (
             <InjuriesSection home={detail.missingPlayers!.home} away={detail.missingPlayers!.away} match={match} />
           )}
+
+          {/* Dónde ver — solo mientras el partido importa (no en el resumen final) */}
+          {!isFinished && <WhereToWatchSection detail={detail} />}
 
           {/* Match info */}
           <MatchInfoCard match={match} detail={detail} />

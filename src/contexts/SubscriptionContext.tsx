@@ -3,7 +3,7 @@ import { Platform, NativeModules } from 'react-native';
 import type { PurchasesPackage, CustomerInfo } from 'react-native-purchases';
 
 const RC_IOS_KEY = 'appl_KztCtepDGxgNLhSoRNPuWKuFvHc';
-const RC_ANDROID_KEY = ''; // TODO: agregar cuando se conecte Google Play
+const RC_ANDROID_KEY = 'goog_eDySEBlsPgJVVfOnOWtmwIomDEj';
 
 // ── Native-module guard (OTA cross-runtime safety) ───────────────────────────
 // `react-native-purchases` is a NATIVE module — it only exists in binaries
@@ -31,6 +31,12 @@ interface SubscriptionContextValue {
   isLoading: boolean;
   monthlyPackage: PurchasesPackage | null;
   yearlyPackage: PurchasesPackage | null;
+  /** true solo cuando la tienda ENTREGÓ productos comprables. Si Apple/Google
+   *  no devuelven offerings (suscripciones sin aprobar, acuerdo de pagos
+   *  incompleto, outage), toda la UI de premium debe ocultarse — un paywall
+   *  con botón muerto es lo que vieron los usuarios de 1.3.0 el 4 jul 2026.
+   *  Auto-sana: en cuanto la tienda responda, premium aparece sin OTA. */
+  storeReady: boolean;
   purchasePackage: (pkg: PurchasesPackage) => Promise<boolean>;
   restorePurchases: () => Promise<boolean>;
 }
@@ -40,6 +46,7 @@ const SubscriptionContext = createContext<SubscriptionContextValue>({
   isLoading: true,
   monthlyPackage: null,
   yearlyPackage: null,
+  storeReady: false,
   purchasePackage: async () => false,
   restorePurchases: async () => false,
 });
@@ -64,7 +71,20 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
       return;
     }
 
-    if (__DEV__ && LOG_LEVEL) Purchases.setLogLevel(LOG_LEVEL.DEBUG);
+    if (__DEV__ && LOG_LEVEL) {
+      Purchases.setLogLevel(LOG_LEVEL.DEBUG);
+      // En dev, RevenueCat loguea errores vía console.error → LogBox pinta un
+      // full-screen rojo en cada arranque ("Error fetching offerings" — ruido
+      // de sandbox/StoreKit en dev builds). Ruteamos su log a console.log:
+      // misma visibilidad en Metro, sin pantalla roja. Solo afecta __DEV__.
+      try {
+        (Purchases as unknown as {
+          setLogHandler?: (h: (level: string, msg: string) => void) => void;
+        }).setLogHandler?.((level, msg) => {
+          console.log(`[RevenueCat:${level}] ${msg}`);
+        });
+      } catch {}
+    }
     Purchases.configure({ apiKey });
 
     const init = async () => {
@@ -122,7 +142,11 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   return (
     <SubscriptionContext.Provider
-      value={{ isProUser, isLoading, monthlyPackage, yearlyPackage, purchasePackage, restorePurchases }}
+      value={{
+        isProUser, isLoading, monthlyPackage, yearlyPackage,
+        storeReady: !!(monthlyPackage || yearlyPackage),
+        purchasePackage, restorePurchases,
+      }}
     >
       {children}
     </SubscriptionContext.Provider>

@@ -84,6 +84,7 @@ import {
 
 import type { NewsArticle, CupGroup, CupGroupsResult } from '../data/types';
 import { AVAILABLE_LEAGUES, getLeagueConfig, LEAGUE_IDS } from '../config/leagues';
+import { getCurrentSeasonId, peekCurrentSeasonId, peekLeagueLogo } from './seasonResolver';
 import i18n from '../i18n';
 import { normalize } from '../utils/normalize';
 import { resolveTeamLogo } from '../utils/teamLogoOverrides';
@@ -145,7 +146,11 @@ function mapStateToStatus(stateId: number, startingAt?: string): MatchStatus {
   if (LIVE_STATE_IDS.has(stateId)) return 'live';
   if (FINISHED_STATE_IDS.has(stateId)) return 'finished';
   if (INTERRUPTED_STATE_IDS.has(stateId)) return 'interrupted';
-  if (DEAD_STATE_IDS.has(stateId)) return 'scheduled'; // postponed/cancelled → never infer live
+  // Estados MUERTOS → 'finished' (terminal). Antes 'scheduled', pero la
+  // heurística reapplyLiveStatus (firestoreApi.ts) revivía esos docs como
+  // 'live' por 135 min → reloj desbocado (Chivas vs U. de G., 11 jul 2026).
+  // Espejo de getMatchStatus en functions/src/mappers.ts.
+  if (DEAD_STATE_IDS.has(stateId)) return 'finished';
   // Time-based live inference (applies to NOT_STARTED, 0, undefined, or any unexpected id)
   if (startingAt) {
     const kickoff = new Date(startingAt.replace(' ', 'T') + 'Z');
@@ -362,11 +367,34 @@ function getLiveClockAnchor(fixture: SMFixture):
   if (!periods || periods.length === 0) return undefined;
   const ticking = periods.find(p => p.ticking);
   if (!ticking) return undefined;
+  // Ancla SINTÉTICA desde el minuto oficial de SM (espejo del server) —
+  // ver functions/src/mappers.ts: la prórroga es un solo periodo cuyo
+  // `started` no descuenta el descanso; minutes/seconds es el reloj de TV.
+  {
+    const offset = Math.max(0, typeof (ticking as any).counts_from === 'number' ? (ticking as any).counts_from : 0);
+    const mins = (ticking as any).minutes;
+    if (typeof mins === 'number' && mins >= offset) {
+      const playedSec = (mins - offset) * 60 +
+        (typeof (ticking as any).seconds === 'number' ? (ticking as any).seconds : 0);
+      return {
+        periodStartedAt: Math.round((Date.now() / 1000 - playedSec) / 30) * 30,
+        periodMinuteOffset: offset,
+      };
+    }
+  }
   if (typeof ticking.started !== 'number' || ticking.started <= 0) return undefined;
-  const offset = typeof ticking.counts_from === 'number' ? ticking.counts_from : 0;
+  const offset = Math.max(0, typeof ticking.counts_from === 'number' ? ticking.counts_from : 0);
+  // Guard de plausibilidad (espejo de functions/src/mappers.ts): un partido
+  // REANUDADO tras suspensión trae counts_from = minuto de la pausa pero
+  // `started` = inicio original del periodo → el ancla doble-cuenta (96+78 =
+  // "174'", Inter Miami vs San Luis, 5 ago 2026). Ancla implausible → sin
+  // ancla: el minuto se congela en el último valor bueno.
+  const derivedMin = offset + Math.floor((Date.now() / 1000 - ticking.started) / 60);
+  const periodCap = offset >= 90 ? 120 : offset >= 45 ? 90 : 45;
+  if (derivedMin > periodCap + 20) return undefined;
   return {
     periodStartedAt: ticking.started,
-    periodMinuteOffset: Math.max(0, offset),
+    periodMinuteOffset: offset,
   };
 }
 
@@ -821,7 +849,12 @@ function positionShort(posId: number): string {
 function mapVenue(v: SMVenue | undefined, venueId?: number): MatchVenue {
   return {
     id: v?.id ?? venueId,
-    name: v?.name ?? 'Estadio desconocido',
+    // Sin nombre → '' para que PreviewTab OCULTE la fila (hasVenue). Antes el
+    // fallback 'Estadio desconocido' forzaba una fila fea con dato nulo
+    // (Inter Miami vs San Luis, 5 ago 2026) — y peor: en Leagues Cup el
+    // servidor ahora BORRA a propósito venues mentirosos de sede neutral, así
+    // que "sin venue" es un estado normal, no un error que anunciar.
+    name: v?.name ?? '',
     city: v?.city_name ?? '',
     capacity: v?.capacity ?? 0,
     surface: v?.surface ?? 'grass',
@@ -1134,13 +1167,55 @@ function mapWeather(w: SMWeatherReport | undefined): MatchDetail['weather'] | un
 
 // ── TV Station Mapper ───────────────────────────────────────────────────────
 
+// Solo cadenas de México (458) y EE.UU. (3483) — la audiencia real. El servidor
+// ya filtra igual (sync-match-enrichment), pero los docs enriquecidos ANTES del
+// filtro traen las ~276 cadenas de 84 países hasta que el partido re-entra a la
+// ventana caliente — este candado del cliente cubre esa generación vieja para
+// que la tarjeta "Dónde ver" nunca muestre el catálogo mundial completo.
+const TVSTATION_COUNTRY_BY_ID: Record<number, 'MX' | 'US'> = { 458: 'MX', 3483: 'US' };
+const TVSTATION_MAX = 16;
+
+// Radios y agregadores que no son "prender la tele": el `type` de SM no sirve
+// para detectarlos (Futbol de Primera Radio viene como type='stream'), así que
+// va por nombre. Decisión del dueño, 9 jul 2026: solo cadenas de TV.
+const TVSTATION_NAME_BLACKLIST = /radio|siriusxm|fubo/i;
+
+/** "TUDN En Vivo" → "tudnenvivo" — para colapsar variantes por prefijo. */
+const normalizeStationName = (name: string) =>
+  name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+
 function mapTVStations(stations: SMFixtureTVStation[] | undefined): MatchDetail['tvStations'] {
   if (!stations || stations.length === 0) return undefined;
-  return stations
-    .filter(s => s.tvstation?.name)
+
+  const relevant = stations.filter(s =>
+    s.tvstation?.name &&
+    TVSTATION_COUNTRY_BY_ID[Number(s.country_id)] !== undefined &&
+    !TVSTATION_NAME_BLACKLIST.test(s.tvstation.name),
+  );
+
+  // Colapsar variantes de la misma cadena: "TUDN" absorbe "TUDN En Vivo",
+  // "ViX" absorbe "VIX+", "Telemundo" absorbe "Telemundo Deportes En Vivo".
+  // Se decide de nombre más corto a más largo; la salida conserva el orden
+  // original de SM (que ya trae MX primero).
+  const byLength = [...relevant].sort(
+    (a, b) => normalizeStationName(a.tvstation!.name).length - normalizeStationName(b.tvstation!.name).length,
+  );
+  const keptNorms: string[] = [];
+  const keptIds = new Set<number>();
+  for (const s of byLength) {
+    const norm = normalizeStationName(s.tvstation!.name);
+    if (keptNorms.some(k => norm.startsWith(k))) continue;
+    keptNorms.push(norm);
+    keptIds.add(s.id);
+  }
+
+  return relevant
+    .filter(s => keptIds.has(s.id))
+    .slice(0, TVSTATION_MAX)
     .map(s => ({
       name: s.tvstation!.name,
       logo: s.tvstation!.image_path ?? undefined,
+      country: TVSTATION_COUNTRY_BY_ID[Number(s.country_id)],
     }));
 }
 
@@ -3308,10 +3383,13 @@ export function getSearchableLeagues(): SearchableLeague[] {
     name: l.name,
     country: l.country,
     flag: l.flag,
+    // Logo REAL vía _meta/leagueSeasons (image_path de SM, con subcarpeta).
+    // La convención plana leagues/{id}.png sirve el asset VIEJO — solo queda
+    // de fallback (Liga MX/La Liga desactualizados, 11-jul-2026).
     image: COPYRIGHT_SENSITIVE_LEAGUE_IDS.has(l.id)
       ? ''
-      : `https://cdn.sportmonks.com/images/soccer/leagues/${l.id}.png`,
-    seasonId: l.currentSeasonId ?? undefined,
+      : (peekLeagueLogo(l.id) ?? `https://cdn.sportmonks.com/images/soccer/leagues/${l.id}.png`),
+    seasonId: peekCurrentSeasonId(l.id) ?? l.currentSeasonId ?? undefined,
     searchAliases: l.searchAliases,
     suppressLogo: COPYRIGHT_SENSITIVE_LEAGUE_IDS.has(l.id),
   }));
@@ -3323,47 +3401,47 @@ export function getSearchableLeagues(): SearchableLeague[] {
 // All IDs verified against SportMonks API (April 2026)
 export const POPULAR_TEAMS: SearchableTeam[] = [
   // Liga MX — México (first for Mexican market)
-  { id: 2687,   name: 'América',              shortName: 'AME', logo: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 427,    name: 'Guadalajara',          shortName: 'GUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539, searchTerms: ['Chivas', 'Chivas de Guadalajara'] },
-  { id: 2626,   name: 'Cruz Azul',            shortName: 'CAZ', logo: 'https://cdn.sportmonks.com/images/soccer/teams/2/2626.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 609,    name: 'Tigres UANL',          shortName: 'TUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/1/609.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 2662,   name: 'Monterrey',            shortName: 'MNT', logo: 'https://cdn.sportmonks.com/images/soccer/teams/6/2662.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 2989,   name: 'Pumas UNAM',           shortName: 'PUM', logo: 'https://cdn.sportmonks.com/images/soccer/teams/13/2989.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 2844,   name: 'Santos Laguna',        shortName: 'SLA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/28/2844.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 967,    name: 'Toluca',               shortName: 'TOL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/7/967.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 10036,  name: 'Pachuca',              shortName: 'PCH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/20/10036.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
-  { id: 680,    name: 'Atlas',                shortName: 'ATS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/680.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 25539 },
+  { id: 2687,   name: 'América',              shortName: 'AME', logo: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 28009 },
+  { id: 427,    name: 'Guadalajara',          shortName: 'GUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 28009, searchTerms: ['Chivas', 'Chivas de Guadalajara'] },
+  { id: 2626,   name: 'Cruz Azul',            shortName: 'CAZ', logo: 'https://cdn.sportmonks.com/images/soccer/teams/2/2626.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 28009 },
+  { id: 609,    name: 'Tigres UANL',          shortName: 'TUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/1/609.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 28009 },
+  { id: 2662,   name: 'Monterrey',            shortName: 'MNT', logo: 'https://cdn.sportmonks.com/images/soccer/teams/6/2662.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 28009 },
+  { id: 2989,   name: 'Pumas UNAM',           shortName: 'PUM', logo: 'https://cdn.sportmonks.com/images/soccer/teams/13/2989.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 28009 },
+  { id: 2844,   name: 'Santos Laguna',        shortName: 'SLA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/28/2844.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 28009 },
+  { id: 967,    name: 'Toluca',               shortName: 'TOL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/7/967.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 28009 },
+  { id: 10036,  name: 'Pachuca',              shortName: 'PCH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/20/10036.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 28009 },
+  { id: 680,    name: 'Atlas',                shortName: 'ATS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/680.png', leagueName: 'Liga MX', leagueId: 743, seasonId: 28009 },
   // Europe — Top clubs
-  { id: 3468,   name: 'Real Madrid',          shortName: 'RMA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/12/3468.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
-  { id: 83,     name: 'FC Barcelona',         shortName: 'BAR', logo: 'https://cdn.sportmonks.com/images/soccer/teams/19/83.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
-  { id: 9,      name: 'Manchester City',      shortName: 'MCI', logo: 'https://cdn.sportmonks.com/images/soccer/teams/9/9.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
-  { id: 14,     name: 'Manchester United',    shortName: 'MUN', logo: 'https://cdn.sportmonks.com/images/soccer/teams/14/14.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
-  { id: 8,      name: 'Liverpool',            shortName: 'LIV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/8.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
-  { id: 19,     name: 'Arsenal',              shortName: 'ARS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/19/19.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
-  { id: 18,     name: 'Chelsea',              shortName: 'CHE', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/18.png', leagueName: 'Premier League', leagueId: 8, seasonId: 25583 },
-  { id: 503,    name: 'Bayern München',       shortName: 'BAY', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/503.png', leagueName: 'Bundesliga', leagueId: 82, seasonId: 25646 },
-  { id: 625,    name: 'Juventus',             shortName: 'JUV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/17/625.png', leagueName: 'Serie A', leagueId: 384, seasonId: 25533 },
-  { id: 113,    name: 'AC Milan',             shortName: 'MIL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/17/113.png', leagueName: 'Serie A', leagueId: 384, seasonId: 25533 },
-  { id: 2930,   name: 'Inter',                shortName: 'INT', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/2930.png', leagueName: 'Serie A', leagueId: 384, seasonId: 25533 },
-  { id: 591,    name: 'Paris Saint-Germain',  shortName: 'PSG', logo: 'https://cdn.sportmonks.com/images/soccer/teams/15/591.png', leagueName: 'Ligue 1', leagueId: 301, seasonId: 25651 },
+  { id: 3468,   name: 'Real Madrid',          shortName: 'RMA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/12/3468.png', leagueName: 'La Liga', leagueId: 564, seasonId: 27965 },
+  { id: 83,     name: 'FC Barcelona',         shortName: 'BAR', logo: 'https://cdn.sportmonks.com/images/soccer/teams/19/83.png', leagueName: 'La Liga', leagueId: 564, seasonId: 27965 },
+  { id: 9,      name: 'Manchester City',      shortName: 'MCI', logo: 'https://cdn.sportmonks.com/images/soccer/teams/9/9.png', leagueName: 'Premier League', leagueId: 8, seasonId: 28083 },
+  { id: 14,     name: 'Manchester United',    shortName: 'MUN', logo: 'https://cdn.sportmonks.com/images/soccer/teams/14/14.png', leagueName: 'Premier League', leagueId: 8, seasonId: 28083 },
+  { id: 8,      name: 'Liverpool',            shortName: 'LIV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/8.png', leagueName: 'Premier League', leagueId: 8, seasonId: 28083 },
+  { id: 19,     name: 'Arsenal',              shortName: 'ARS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/19/19.png', leagueName: 'Premier League', leagueId: 8, seasonId: 28083 },
+  { id: 18,     name: 'Chelsea',              shortName: 'CHE', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/18.png', leagueName: 'Premier League', leagueId: 8, seasonId: 28083 },
+  { id: 503,    name: 'Bayern München',       shortName: 'BAY', logo: 'https://cdn.sportmonks.com/images/soccer/teams/23/503.png', leagueName: 'Bundesliga', leagueId: 82, seasonId: 28321 },
+  { id: 625,    name: 'Juventus',             shortName: 'JUV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/17/625.png', leagueName: 'Serie A', leagueId: 384, seasonId: 27895 },
+  { id: 113,    name: 'AC Milan',             shortName: 'MIL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/17/113.png', leagueName: 'Serie A', leagueId: 384, seasonId: 27895 },
+  { id: 2930,   name: 'Inter',                shortName: 'INT', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/2930.png', leagueName: 'Serie A', leagueId: 384, seasonId: 27895 },
+  { id: 591,    name: 'Paris Saint-Germain',  shortName: 'PSG', logo: 'https://cdn.sportmonks.com/images/soccer/teams/15/591.png', leagueName: 'Ligue 1', leagueId: 301, seasonId: 28082 },
   // Americas — Other
   { id: 239235, name: 'Inter Miami',          shortName: 'MIA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/3/239235.png', leagueName: 'MLS', leagueId: 779, seasonId: 26720 },
   { id: 587,    name: 'Boca Juniors',         shortName: 'BOC', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/587.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
   { id: 10002,  name: 'River Plate',          shortName: 'RIV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/10002.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
   { id: 1024,   name: 'Flamengo',             shortName: 'FLA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/0/1024.png', leagueName: 'Brasileirão', leagueId: 648, seasonId: 26763 },
   // Saudi Arabia
-  { id: 2506,   name: 'Al Nassr',             shortName: 'ANA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/10/2506.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
-  { id: 7011,   name: 'Al Hilal',             shortName: 'ALH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/3/7011.png',  leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 26276 },
+  { id: 2506,   name: 'Al Nassr',             shortName: 'ANA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/10/2506.png', leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 27951 },
+  { id: 7011,   name: 'Al Hilal',             shortName: 'ALH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/3/7011.png',  leagueName: 'Saudi Pro League', leagueId: 944, seasonId: 27951 },
 
   // ── Country-preset additions (May 2026) — added for onboarding country presets ──
   // La Liga extras
-  { id: 7980,   name: 'Atlético Madrid',      shortName: 'ATM', logo: 'https://cdn.sportmonks.com/images/soccer/teams/12/7980.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
-  { id: 676,    name: 'Sevilla',              shortName: 'SEV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/4/676.png',   leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
-  { id: 13258,  name: 'Athletic Club',        shortName: 'ATH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/10/13258.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
-  { id: 594,    name: 'Real Sociedad',        shortName: 'RSO', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/594.png',  leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
-  { id: 214,    name: 'Valencia',             shortName: 'VAL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/22/214.png',  leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
-  { id: 485,    name: 'Real Betis',           shortName: 'BET', logo: 'https://cdn.sportmonks.com/images/soccer/teams/5/485.png',   leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
-  { id: 3477,   name: 'Villarreal',           shortName: 'VIL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/21/3477.png', leagueName: 'La Liga', leagueId: 564, seasonId: 25659 },
+  { id: 7980,   name: 'Atlético Madrid',      shortName: 'ATM', logo: 'https://cdn.sportmonks.com/images/soccer/teams/12/7980.png', leagueName: 'La Liga', leagueId: 564, seasonId: 27965 },
+  { id: 676,    name: 'Sevilla',              shortName: 'SEV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/4/676.png',   leagueName: 'La Liga', leagueId: 564, seasonId: 27965 },
+  { id: 13258,  name: 'Athletic Club',        shortName: 'ATH', logo: 'https://cdn.sportmonks.com/images/soccer/teams/10/13258.png', leagueName: 'La Liga', leagueId: 564, seasonId: 27965 },
+  { id: 594,    name: 'Real Sociedad',        shortName: 'RSO', logo: 'https://cdn.sportmonks.com/images/soccer/teams/18/594.png',  leagueName: 'La Liga', leagueId: 564, seasonId: 27965 },
+  { id: 214,    name: 'Valencia',             shortName: 'VAL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/22/214.png',  leagueName: 'La Liga', leagueId: 564, seasonId: 27965 },
+  { id: 485,    name: 'Real Betis',           shortName: 'BET', logo: 'https://cdn.sportmonks.com/images/soccer/teams/5/485.png',   leagueName: 'La Liga', leagueId: 564, seasonId: 27965 },
+  { id: 3477,   name: 'Villarreal',           shortName: 'VIL', logo: 'https://cdn.sportmonks.com/images/soccer/teams/21/3477.png', leagueName: 'La Liga', leagueId: 564, seasonId: 27965 },
   // Liga Profesional Argentina extras
   { id: 3608,   name: 'Racing Club',          shortName: 'RAC', logo: 'https://cdn.sportmonks.com/images/soccer/teams/24/3608.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
   { id: 10840,  name: 'Independiente',        shortName: 'IND', logo: 'https://cdn.sportmonks.com/images/soccer/teams/24/10840.png', leagueName: 'Liga Profesional', leagueId: 636, seasonId: 26808 },
@@ -4037,7 +4115,10 @@ export async function loadMoreTeams(leagueConfigs: typeof AVAILABLE_LEAGUES): Pr
       Promise.all(
         batch.filter(l => l.currentSeasonId).map(async (league) => {
           try {
-            const smTeams = await fetchTeamsBySeasonId(league.currentSeasonId!);
+            // Temporada actual dinámica (_meta/leagueSeasons); el hardcode de
+            // la config queda de fallback (bug 11-jul-2026).
+            const seasonId = (await getCurrentSeasonId(league.id)) ?? league.currentSeasonId!;
+            const smTeams = await fetchTeamsBySeasonId(seasonId);
             return smTeams.map(t => ({
               id: t.id,
               name: t.name,
@@ -4045,7 +4126,7 @@ export async function loadMoreTeams(leagueConfigs: typeof AVAILABLE_LEAGUES): Pr
               logo: t.image_path || '⚽',
               leagueName: league.name,
               leagueId: league.id,
-              seasonId: league.currentSeasonId!,
+              seasonId,
             }));
           } catch {
             return [] as SearchableTeam[];

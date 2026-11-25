@@ -3,20 +3,25 @@ import {
   useEffect, useRef, ReactNode,
 } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
+import { AVAILABLE_LEAGUES } from '../config/leagues';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { logEvent, ANALYTICS_EVENTS } from '../services/analytics';
+import { captureFirestoreRejection } from '../services/sentry';
 import {
   subscribeTeamTopics, unsubscribeTeamTopics,
-  subscribeLeagueTopics, unsubscribeLeagueTopics,
+  subscribeLeagueTopics, unsubscribeLeagueTopics, purgeLegacyLeagueTopics,
   subscribePlayerTopics, unsubscribePlayerTopics,
   subscribeRivalTopics, unsubscribeRivalTopics,
   reconcileSubscriptions,
   rivalEventsFromPrefs,
+  teamEventsFromPrefs,
+  bucketForDelay,
   type DelayBucket,
   type RivalEvent,
+  type TeamEventClass,
 } from '../services/fcmTopics';
 import { useNotificationPrefs } from './NotificationPrefsContext';
 
@@ -96,13 +101,33 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
   // Modo Estadio prefs — FavoritesProvider is nested INSIDE NotificationPrefsProvider
   // (see App.tsx), so this hook call is always valid.
-  const { prefs, isHydrated } = useNotificationPrefs();
+  const { prefs, isHydrated, mutedMatchIds } = useNotificationPrefs();
+  // bucketForDelay garantiza un bucket que el servidor SÍ publica (d2/d5/d10).
+  // El viejo `d${prefs.estadioDelay}` fabricaba 'd1' cuando la UI ofrecía
+  // "1 min" — un topic fantasma que silenciaba todo (auditoría 10 jul 2026).
   const delayBucket: DelayBucket = prefs.estadioMode
-    ? (`d${prefs.estadioDelay}` as DelayBucket)
+    ? bucketForDelay(prefs.estadioDelay)
     : 'd0';
   // Keep a ref so async callbacks can read the current bucket without stale closures
   const delayBucketRef = useRef<DelayBucket>(delayBucket);
   useEffect(() => { delayBucketRef.current = delayBucket; }, [delayBucket]);
+
+  // ── Clases de evento de equipo habilitadas (derivadas de prefs) ──
+  // El enforcement real de los toggles de notificaciones: gatean qué topics
+  // FCM se suscriben por equipo. Antes eran decorativos (auditoría 10 jul).
+  const teamEvents: TeamEventClass[] = teamEventsFromPrefs(prefs);
+  const teamEventsSig = `${teamEvents.join(',')}|${prefs.notificationsEnabled}`;
+  const teamEventsRef = useRef<TeamEventClass[]>(teamEvents);
+  useEffect(() => { teamEventsRef.current = teamEvents; }, [teamEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  const notifsEnabledRef = useRef<boolean>(prefs.notificationsEnabled);
+  useEffect(() => { notifsEnabledRef.current = prefs.notificationsEnabled; }, [prefs.notificationsEnabled]);
+
+  // Partidos silenciados (Fase 2): sus topics mute_{id} viajan en el reconcile
+  // para que el sweep no los desuscriba. La suscripción/desuscripción directa
+  // la hace toggleMatchMute; aquí solo se preservan.
+  const mutedSig = [...mutedMatchIds].sort().join(',');
+  const mutedRef = useRef<string[]>([...mutedMatchIds]);
+  useEffect(() => { mutedRef.current = [...mutedMatchIds]; }, [mutedSig]); // eslint-disable-line react-hooks/exhaustive-deps
   // Ref mirror of isHydrated for async/event callbacks (foreground handler).
   const isHydratedRef = useRef(isHydrated);
   useEffect(() => { isHydratedRef.current = isHydrated; }, [isHydrated]);
@@ -179,9 +204,16 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       playerIds:    playerRef.current,
       rivalTeamIds: rivalRef.current,
       rivalEvents:  rivalEventsRef.current,
+      teamEvents:   teamEventsRef.current,
+      enabled:      notifsEnabledRef.current,
+      muteMatchIds: mutedRef.current,
       delayBucket:  delayBucket,
     }).catch(() => {});
-  }, [isHydrated, favoritesLoaded, delayBucket, rivalEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Purga única de topics league_{id}_start/_finals heredados de builds
+    // viejos (persisten en FCM aunque el subscribe sea no-op) — el dueño
+    // recibió kickoffs de Champions por seguir la liga (4-ago-2026).
+    purgeLegacyLeagueTopics(AVAILABLE_LEAGUES.map(l => l.id)).catch(() => {});
+  }, [isHydrated, favoritesLoaded, delayBucket, rivalEventsSig, teamEventsSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── AppState foreground → re-reconcile to heal any mid-flip desync ─────────
   // Heals subscriptions that drifted while backgrounded (e.g. a Modo Estadio
@@ -196,6 +228,9 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
           playerIds:    playerRef.current,
           rivalTeamIds: rivalRef.current,
           rivalEvents:  rivalEventsRef.current,
+          teamEvents:   teamEventsRef.current,
+          enabled:      notifsEnabledRef.current,
+          muteMatchIds: mutedRef.current,
           delayBucket:  delayBucketRef.current,
         }).catch(() => {});
       }
@@ -209,25 +244,90 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async fbUser => {
       const newUid = (fbUser && !fbUser.isAnonymous) ? fbUser.uid : null;
 
-      if (newUid === uidRef.current) return;
+      const prevUid = uidRef.current;
+      if (newUid === prevUid) return;
       uidRef.current = newUid;
 
-      if (!newUid) return; // guest or logged out — AsyncStorage is enough
+      if (!newUid) {
+        // Transición logueado → sign-out: limpiar los favoritos locales para
+        // que el siguiente usuario del dispositivo no los herede (la rama de
+        // migración los subiría a SU cuenta). Los invitados y el arranque en
+        // frío nunca pasan por aquí (prevUid es null en ambos).
+        if (prevUid) {
+          setFavoriteIds([]); setFollowedTeamIds([]); setFollowedPlayerIds([]);
+          setFollowedLeagueIds([]); setRivalTeamIds([]);
+          matchRef.current = []; teamRef.current = []; playerRef.current = [];
+          leagueRef.current = []; rivalRef.current = [];
+          Promise.all([
+            AsyncStorage.removeItem(MATCH_STORAGE_KEY),
+            AsyncStorage.removeItem(TEAM_STORAGE_KEY),
+            AsyncStorage.removeItem(PLAYER_STORAGE_KEY),
+            AsyncStorage.removeItem(LEAGUE_STORAGE_KEY),
+            AsyncStorage.removeItem(RIVAL_STORAGE_KEY),
+          ]).catch(() => {});
+          // Desuscribir los topics FCM del usuario saliente — sin esto el
+          // device seguía recibiendo los pushes de la cuenta anterior
+          // (auditoría 10 jul 2026). Con listas vacías, el reconcile remueve
+          // todo lo que el caché conoce.
+          reconcileSubscriptions({
+            teamIds: [], leagueIds: [], playerIds: [], rivalTeamIds: [],
+            delayBucket: delayBucketRef.current,
+          }).catch(() => {});
+        }
+        return; // guest or logged out — AsyncStorage is enough
+      }
 
       setIsSyncing(true);
       try {
         const snap = await getDoc(doc(db, 'users', newUid));
         const remote = (snap.exists() ? snap.data().favorites : null) as FirestoreFavorites | null;
 
+        // Caché local leído DIRECTO de AsyncStorage — no de los refs: este
+        // handler puede disparar antes de que la hidratación de arranque
+        // resuelva, cuando los refs aún están vacíos (usarlos aquí haría ver
+        // "local vacío" y adoptar un remoto rancio aunque el teléfono sí
+        // tuviera datos).
+        const parse = (raw: string | null): string[] => {
+          try { const v = JSON.parse(raw ?? '[]'); return Array.isArray(v) ? v.map(String) : []; }
+          catch { return []; }
+        };
+        const [lm, lt, lp, ll, lr] = await Promise.all([
+          AsyncStorage.getItem(MATCH_STORAGE_KEY),
+          AsyncStorage.getItem(TEAM_STORAGE_KEY),
+          AsyncStorage.getItem(PLAYER_STORAGE_KEY),
+          AsyncStorage.getItem(LEAGUE_STORAGE_KEY),
+          AsyncStorage.getItem(RIVAL_STORAGE_KEY),
+        ]);
+        const local = { m: parse(lm), t: parse(lt), p: parse(lp), l: parse(ll), rv: parse(lr) };
+
         if (remote && (remote.matchIds?.length || remote.teamIds?.length ||
                        remote.playerIds?.length || remote.leagueIds?.length ||
                        remote.rivalTeamIds?.length)) {
-          // Firestore is authoritative — replace local state
-          const m = remote.matchIds  ?? [];
-          const t = remote.teamIds   ?? [];
-          const p = remote.playerIds ?? [];
-          const l = remote.leagueIds ?? [];
-          const rv = remote.rivalTeamIds ?? [];
+          // Unión local ∪ remoto por lista. Si lo local tiene elementos que el
+          // remoto no (cambios que nunca llegaron a la nube: el bug de rules
+          // del 3 jul 2026, escrituras offline, la carrera pre-auth), NO se
+          // adopta el remoto rancio: se SANA la nube con la unión. Trade-off
+          // aceptado y acotado: un unfollow hecho en otro device puede
+          // resucitar desde este — preferible mil veces a borrar favoritos
+          // legítimos en silencio.
+          const union = (a: string[], b: string[]) => Array.from(new Set([...b, ...a]));
+          const m  = union(local.m,  (remote.matchIds  ?? []).map(String));
+          const t  = union(local.t,  (remote.teamIds   ?? []).map(String));
+          const p  = union(local.p,  (remote.playerIds ?? []).map(String));
+          const l  = union(local.l,  (remote.leagueIds ?? []).map(String));
+          const rv = union(local.rv, (remote.rivalTeamIds ?? []).map(String));
+
+          const grew =
+            m.length  > (remote.matchIds?.length  ?? 0) ||
+            t.length  > (remote.teamIds?.length   ?? 0) ||
+            p.length  > (remote.playerIds?.length ?? 0) ||
+            l.length  > (remote.leagueIds?.length ?? 0) ||
+            rv.length > (remote.rivalTeamIds?.length ?? 0);
+          if (grew) {
+            updateDoc(doc(db, 'users', newUid), {
+              favorites: { matchIds: m, teamIds: t, playerIds: p, leagueIds: l, rivalTeamIds: rv },
+            }).catch(err => captureFirestoreRejection('favorites.heal', err));
+          }
 
           setFavoriteIds(m);
           setFollowedTeamIds(t);
@@ -251,26 +351,49 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
           reconcileSubscriptions({
             teamIds: t, leagueIds: l, playerIds: p, rivalTeamIds: rv,
             rivalEvents: rivalEventsRef.current,
+            teamEvents:  teamEventsRef.current,
+            enabled:     notifsEnabledRef.current,
+            muteMatchIds: mutedRef.current,
             delayBucket: delayBucketRef.current,
           }).catch(() => {});
         } else {
           // First login (or empty cloud) — migrate local favorites to Firestore
           const favs: FirestoreFavorites = {
-            matchIds:  matchRef.current,
-            teamIds:   teamRef.current,
-            playerIds: playerRef.current,
-            leagueIds: leagueRef.current,
-            rivalTeamIds: rivalRef.current,
+            matchIds:  local.m,
+            teamIds:   local.t,
+            playerIds: local.p,
+            leagueIds: local.l,
+            rivalTeamIds: local.rv,
           };
           const userRef = doc(db, 'users', newUid);
           if (snap.exists()) {
             await updateDoc(userRef, { favorites: favs });
           } else {
-            await setDoc(userRef, { favorites: favs }, { merge: true });
+            // users/{uid} aún NO existe: ensureUserProfile (AuthContext) lo
+            // está creando en paralelo con displayName/createdAt — que la
+            // rule de create EXIGE, así que escribir aquí un create con solo
+            // {favorites} sería rechazado (setDoc+merge sobre doc inexistente
+            // ES un create para las rules — bug de primer login, 3 jul 2026).
+            // Esperar a que exista y entonces update; si el timeout vence, el
+            // siguiente arranque auto-repara por la rama updateDoc.
+            await new Promise<void>(resolve => {
+              const timer = setTimeout(() => { unsub(); resolve(); }, 15000);
+              const unsub = onSnapshot(userRef, s => {
+                if (s.exists()) {
+                  clearTimeout(timer); unsub();
+                  updateDoc(userRef, { favorites: favs })
+                    .catch(err => captureFirestoreRejection('favorites.migrate', err));
+                  resolve();
+                }
+              }, () => { clearTimeout(timer); resolve(); });
+            });
           }
         }
-      } catch {
-        // Firestore unavailable — continue offline with local data
+      } catch (err) {
+        // Firestore unavailable — continue offline with local data. Reportar
+        // (filtro-safe) para que un fallo sistémico nunca vuelva a ser
+        // invisible como el bug de rules.
+        captureFirestoreRejection('favorites.reconcile', err);
       } finally {
         setIsSyncing(false);
       }
@@ -284,7 +407,12 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   // every list), missing fields fall back to the current ref value. `?? ref`
   // only triggers on null/undefined — an explicit empty array is preserved.
   function persistToFirestore(favs: FirestoreFavorites) {
-    const uid = uidRef.current;
+    // uid al momento de la llamada, con fallback a auth.currentUser: cubre el
+    // upgrade invitado→Google/Apple vía linkWithCredential, que puede no
+    // re-disparar onAuthStateChanged (uidRef se quedaría null toda la sesión).
+    const uid =
+      uidRef.current ??
+      ((auth.currentUser && !auth.currentUser.isAnonymous) ? auth.currentUser.uid : null);
     if (!uid) return;
     const full: FirestoreFavorites = {
       matchIds:     favs.matchIds     ?? matchRef.current,
@@ -293,7 +421,29 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       leagueIds:    favs.leagueIds    ?? leagueRef.current,
       rivalTeamIds: favs.rivalTeamIds ?? rivalRef.current,
     };
-    updateDoc(doc(db, 'users', uid), { favorites: full }).catch(() => {});
+    const userRef = doc(db, 'users', uid);
+    const write = () => updateDoc(userRef, { favorites: full });
+    write().catch(err => {
+      const code = (err as { code?: string })?.code;
+      if (code === 'not-found') {
+        // users/{uid} aún no existe (ensureUserProfile en vuelo durante el
+        // primer sign-in — el token de Auth tarda en propagarse a Firestore).
+        // Un timeout fijo de 2.5s no alcanzaba a cubrir esta carrera (infló
+        // Sentry con pushToken.persist el 4 jul 2026) — esperar a que el doc
+        // EXISTA (onSnapshot, hasta 20s) en vez de adivinar un tiempo fijo.
+        const timer = setTimeout(() => { unsub(); }, 20000);
+        const unsub = onSnapshot(userRef, snap => {
+          if (snap.exists()) {
+            clearTimeout(timer); unsub();
+            write().catch(e2 => captureFirestoreRejection('favorites.persist.retry', e2));
+          }
+        }, () => clearTimeout(timer));
+        return;
+      }
+      // NUNCA tragar esto en silencio: así fue invisible durante semanas el
+      // bug de rules que borraba favoritos (3 jul 2026).
+      captureFirestoreRejection('favorites.persist', err);
+    });
   }
 
   // ── Match favorites ──────────────────────────────────────────────────────────
@@ -330,7 +480,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
         unsubscribeTeamTopics(teamId).catch(() => {});
         logEvent(ANALYTICS_EVENTS.UNFOLLOW_TEAM, { team_id: teamId });
       } else {
-        subscribeTeamTopics(teamId, delayBucketRef.current).catch(() => {});
+        subscribeTeamTopics(teamId, delayBucketRef.current, teamEventsRef.current).catch(() => {});
         logEvent(ANALYTICS_EVENTS.FOLLOW_TEAM, { team_id: teamId });
         // Mutual exclusivity: you don't "follow" a rival — drop it if present.
         if (rivalRef.current.includes(teamId)) {
@@ -452,6 +602,9 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       playerIds:    playerRef.current,
       rivalTeamIds: rivalRef.current,
       rivalEvents:  rivalEventsRef.current,
+      teamEvents:   teamEventsRef.current,
+      enabled:      notifsEnabledRef.current,
+      muteMatchIds: mutedRef.current,
       delayBucket:  delayBucketRef.current,
     }).catch(() => {});
   }, []);

@@ -6,6 +6,9 @@
  * Mirrors the client-side sportsApi.ts mapping logic for server-side use.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.isNeutralVenueFixture = isNeutralVenueFixture;
+exports.shouldDiscardFixtureVenue = shouldDiscardFixtureVenue;
+exports.countRedCardsForSide = countRedCardsForSide;
 exports.mapFixtureToMatchDoc = mapFixtureToMatchDoc;
 exports.mapStandingsToDoc = mapStandingsToDoc;
 exports.mapTopScorersToDoc = mapTopScorersToDoc;
@@ -20,7 +23,12 @@ function getStateLabel(stateId) {
         case types_1.SM_STATE_IDS.SECOND_HALF: return '2T';
         case types_1.SM_STATE_IDS.EXTRA_TIME: return 'ET';
         case types_1.SM_STATE_IDS.PENALTIES: return 'PEN';
-        case types_1.SM_STATE_IDS.BREAK: return 'HT';
+        // BREAK (4) = terminaron los 90', viene PRÓRROGA — NO es medio tiempo.
+        // Mapearlo a 'HT' hacía que app y Live Activity dijeran "MT/DESCANSO"
+        // al final del tiempo regular (ARG-SUI 11 jul 2026, reporte del dueño).
+        case types_1.SM_STATE_IDS.BREAK: return 'ETB';
+        case types_1.SM_STATE_IDS.EXTRA_TIME_BREAK: return 'ETB'; // entre tiempos extra
+        case types_1.SM_STATE_IDS.PEN_BREAK: return 'PEN'; // dentro de la tanda
         case types_1.SM_STATE_IDS.SUSPENDED: return 'SUSP';
         case types_1.SM_STATE_IDS.INTERRUPTED: return 'INT';
         default: return null;
@@ -71,8 +79,16 @@ function getMatchStatus(stateId, startingAt) {
     // the scheduled bucket so the client never reverts to the pre-match view.
     if (PAUSED_LIVE_STATE_IDS.has(stateId))
         return 'live';
+    // Estados MUERTOS (cancelado/pospuesto/abandonado/eliminado) → 'finished',
+    // que es TERMINAL. Antes se mapeaban a 'scheduled' con la idea de "nunca
+    // inferir en vivo", PERO la heurística del cliente (reapplyLiveStatus en
+    // firestoreApi.ts) revive cualquier 'scheduled' con kickoff pasado como
+    // 'live' por 135 min → reloj desbocado (incidente Chivas vs U. de G.,
+    // 11 jul 2026: SM canceló un amistoso que sí se jugaba y la app mostró
+    // "EN VIVO · 119:08'"). 'finished' corta la cadena: el cliente jamás
+    // revive un partido terminado, y si SM lo resucita, el sync lo re-mapea.
     if (types_1.DEAD_STATE_IDS.has(stateId))
-        return 'scheduled';
+        return 'finished';
     // Time-based inference for NOT_STARTED, unknown IDs, or lagging feeds.
     if (startingAt) {
         const kickoffMs = new Date(startingAt.replace(' ', 'T') + 'Z').getTime();
@@ -83,6 +99,56 @@ function getMatchStatus(stateId, startingAt) {
         }
     }
     return 'scheduled';
+}
+// ── Sede neutral (metadata type 35) ─────────────────────────────────────────
+/** Ligas donde el venue del fixture es BASURA cuando neutral=true: SM rellena
+ *  con el estadio del equipo listado como local aunque el partido sea en otro
+ *  país. Probado en Leagues Cup (Monterrey "en Monterrey Stadium" jugándose en
+ *  Orlando, 5 ago 2026). Acotado por liga — misma prudencia que
+ *  venueOverrides: en un torneo tipo Mundial la sede neutral SÍ viene bien y
+ *  borrarla sería destruir datos correctos. */
+const NEUTRAL_VENUE_UNRELIABLE_LEAGUE_IDS = new Set([3211]);
+/** ¿SM marcó este fixture como sede neutral? (metadata type_id 35) */
+function isNeutralVenueFixture(fixture) {
+    const md = fixture.metadata;
+    if (!Array.isArray(md))
+        return false;
+    return md.some(m => m?.type_id === 35 && m?.values?.neutral === true);
+}
+/** ¿Hay que DESCARTAR el venue que manda SM para este fixture? */
+function shouldDiscardFixtureVenue(fixture) {
+    return isNeutralVenueFixture(fixture) &&
+        NEUTRAL_VENUE_UNRELIABLE_LEAGUE_IDS.has(fixture.league_id);
+}
+// ── Red cards ───────────────────────────────────────────────────────────────
+/**
+ * Expulsados de un lado (roja directa + doble amarilla).
+ *
+ * ⚠️ Filtra `cancelled`. Cuando el VAR revoca una expulsión, SportMonks
+ * normalmente BORRA el evento del arreglo (verificado en Atlante vs América,
+ * 24 jul 2026, fixture 19715303: tras la revocación de la roja a Rodolfo Cota
+ * no queda ningún evento tipo 20/21). Pero el payload define `cancelled` y
+ * algunos feeds lo usan en vez de borrar — contar un evento cancelado dejaría
+ * al jugador expulsado para siempre en la UI. Cubrimos ambas variantes.
+ *
+ * Fuente única: detect-changes.ts importa esta misma función para que el
+ * conteo del doc y el de la detección de cambios no puedan divergir.
+ */
+function countRedCardsForSide(fixture, participantId) {
+    if (!fixture.events || !participantId)
+        return 0;
+    let count = 0;
+    for (const ev of fixture.events) {
+        if (ev.participant_id !== participantId)
+            continue;
+        if (ev.cancelled === true)
+            continue;
+        if (ev.type_id === types_1.SM_EVENT_TYPES.RED_CARD ||
+            ev.type_id === types_1.SM_EVENT_TYPES.SECOND_YELLOW) {
+            count++;
+        }
+    }
+    return count;
 }
 // ── Live Minute Calculation ─────────────────────────────────────────────────
 function calculateLiveMinute(fixture) {
@@ -110,16 +176,31 @@ function calculateLiveMinute(fixture) {
         const elapsedMin = Math.floor((nowSec - anchor.periodStartedAt) / 60);
         return Math.max(1, anchor.periodMinuteOffset + elapsedMin);
     }
-    // Fallback: wall-clock from kickoff when no usable period anchor is present.
+    // SM SÍ mandó periodos pero ninguno da ancla usable (ninguno ticking, o el
+    // ticking es basura — guard de plausibilidad). Eso significa reloj parado o
+    // datos rotos: CONGELAR (null → el merge conserva el último minuto bueno).
+    // Caer al estimador de pared aquí es lo que infló el minuto contando la
+    // suspensión por tormenta como juego (Inter Miami 5 ago 2026, "174'"). El
+    // estimador queda SOLO para feeds que no traen periodos en absoluto.
+    if (fixture.periods && fixture.periods.length > 0)
+        return null;
+    // Fallback: wall-clock from kickoff when the feed has no period data at all.
     const kickoffTs = fixture.starting_at_timestamp;
     if (!kickoffTs)
         return null;
     const nowSec = Math.floor(Date.now() / 1000);
     const elapsedMin = Math.floor((nowSec - kickoffTs) / 60);
-    // If second half (or beyond), subtract 15 min half-time break
+    // If second half (or beyond), subtract 15 min half-time break.
+    // Tope 105 (90' + descuento récord ~14'): sin él, cualquier retraso del
+    // kickoff o pausa larga se cuenta como juego y el minuto se desboca.
     if (fixture.state_id === types_1.SM_STATE_IDS.SECOND_HALF) {
-        return Math.max(46, elapsedMin - 15);
+        return Math.max(46, Math.min(elapsedMin - 15, 105));
     }
+    // Prórroga sin datos de periodos: el estimador de pared no sabe descontar
+    // los DOS descansos — el clamp de abajo inventaba "45'" (Isla Dinámica,
+    // ARG-SUI 11 jul 2026). Mejor null: el merge conserva el minuto bueno.
+    if (fixture.state_id === types_1.SM_STATE_IDS.EXTRA_TIME)
+        return null;
     return Math.max(1, Math.min(elapsedMin, 45));
 }
 // ── Time Display ────────────────────────────────────────────────────────────
@@ -200,12 +281,41 @@ function getLiveClockAnchor(fixture) {
     const ticking = periods.find(p => p.ticking);
     if (!ticking)
         return undefined;
+    const offset = Math.max(0, typeof ticking.counts_from === 'number' ? ticking.counts_from : 0);
+    // ANCLA SINTÉTICA desde el minuto OFICIAL de SM (minutes/seconds) — es el
+    // mismo reloj de la TV. Anclar a `started` sobrecontaba: la prórroga es UN
+    // periodo (counts_from 90, ambos tiempos) cuyo `started` no descuenta el
+    // descanso entre TE1 y TE2 → la app iba ~5 min adelante de la transmisión
+    // (116' vs 111:39, ARG-SUI 11 jul 2026). Cuantizada a 30s para no churnear
+    // el fingerprint del doc (jitter de polling ±s no cambia el ancla).
+    if (typeof ticking.minutes === 'number' && ticking.minutes >= offset) {
+        const playedSec = (ticking.minutes - offset) * 60 +
+            (typeof ticking.seconds === 'number' ? ticking.seconds : 0);
+        const synthetic = Math.floor(Date.now() / 1000) - playedSec;
+        return {
+            periodStartedAt: Math.round(synthetic / 30) * 30,
+            periodMinuteOffset: offset,
+        };
+    }
+    // Fallback legado: timestamp real de inicio del periodo.
     if (typeof ticking.started !== 'number' || ticking.started <= 0)
         return undefined;
-    const offset = typeof ticking.counts_from === 'number' ? ticking.counts_from : 0;
+    // ── Guard de plausibilidad ──
+    // Un partido REANUDADO tras suspensión por tormenta llega con counts_from =
+    // minuto real de la pausa (p. ej. 96) pero `started` = inicio ORIGINAL del
+    // periodo — el ancla doble-cuenta: offset + (now − started) = 96 + 78 = 174
+    // (Inter Miami vs San Luis, 5 ago 2026: la app dijo "174:00'" con el
+    // partido en ~96'; ver también el comentario del incidente "177'" arriba).
+    // Si el minuto derivado rebasa el tope del periodo + descuento récord, el
+    // ancla es basura → undefined. El caller congela el minuto (mejor el último
+    // bueno que uno inventado).
+    const derivedMin = offset + Math.floor((Date.now() / 1000 - ticking.started) / 60);
+    const periodCap = offset >= 90 ? 120 : offset >= 45 ? 90 : 45;
+    if (derivedMin > periodCap + 20)
+        return undefined;
     return {
         periodStartedAt: ticking.started,
-        periodMinuteOffset: Math.max(0, offset),
+        periodMinuteOffset: offset,
     };
 }
 // ── Live enrichment extractor ───────────────────────────────────────────────
@@ -276,6 +386,10 @@ function mapFixtureToMatchDoc(fixture) {
         stateLabel: status === 'finished' ? null : getStateLabel(fixture.state_id),
         minute,
         time,
+        // ⚠️ Si el reloj está CONGELADO (minute null en vivo, sin etiqueta propia
+        // tipo HT/PEN/Suspendido), estos dos campos se ELIMINAN del doc más abajo
+        // — escribir null con merge:true no conserva nada: pisa el último minuto
+        // bueno y `time` cae al string de kickoff ("23:30") en pleno partido.
         league: leagueCfg?.name ?? league?.name ?? 'Unknown',
         leagueId: String(fixture.league_id),
         leagueLogo: league?.image_path ?? '',
@@ -308,19 +422,47 @@ function mapFixtureToMatchDoc(fixture) {
     const group = fixture.group;
     if (group)
         doc.group = group;
-    if (fixture.venue_id)
-        doc.venueId = fixture.venue_id;
-    const venue = fixture.venue;
-    if (venue?.name)
-        doc.venueName = venue.name;
-    if (venue?.city_name)
-        doc.venueCity = venue.city_name;
+    // Expulsados por lado. El cliente ya los pintaba (`<RedCards>` en
+    // MatchCard.tsx) pero el servidor NUNCA escribió estos campos desde la
+    // migración a Firestore-first: el indicador de roja llevaba meses muerto en
+    // el feed. Además le da al guard de VAR (deliver-delayed-push.ts) una fuente
+    // barata para saber si una roja sigue vigente al momento de entregar un push
+    // retrasado de Modo Estadio.
+    doc.homeRedCards = countRedCardsForSide(fixture, home.id);
+    doc.awayRedCards = countRedCardsForSide(fixture, away.id);
+    // Sede: si SM marcó neutral y la liga es de las que rellenan con el estadio
+    // del "local" (Leagues Cup), NULL EXPLÍCITO — con merge:true, omitir dejaría
+    // vivo el venue mentiroso ya escrito. El flag viaja al doc para el cliente.
+    if (isNeutralVenueFixture(fixture))
+        doc.venueNeutral = true;
+    if (shouldDiscardFixtureVenue(fixture)) {
+        doc.venueId = null;
+        doc.venueName = null;
+        doc.venueCity = null;
+    }
+    else {
+        if (fixture.venue_id)
+            doc.venueId = fixture.venue_id;
+        const venue = fixture.venue;
+        if (venue?.name)
+            doc.venueName = venue.name;
+        if (venue?.city_name)
+            doc.venueCity = venue.city_name;
+    }
     // Live clock anchor — populated only when a period is actively ticking.
     // Without this the client UI freezes the minute between server polls (15s
     // intervals); with it the displayed minute advances smoothly every second.
-    const liveClock = getLiveClockAnchor(fixture);
-    if (liveClock) {
-        doc.liveClock = liveClock;
+    //
+    // ⚠️ SIEMPRE escribir el campo (null cuando no corre): el doc se escribe
+    // con merge:true, así que OMITIRLO dejaba el ancla VIEJA viva en Firestore
+    // durante descansos/breaks — la Live Activity seguía contando (109:01 en
+    // el descanso de la prórroga, ARG-SUI 11 jul 2026, reporte del dueño).
+    // Solo cuando el feed TRAE periodos podemos afirmar algo del reloj:
+    // syncFixtures/crawls (sin include=periods... hasta hoy) NO deben pisar el
+    // ancla buena del poll ni con null ni con basura.
+    if (Array.isArray(fixture.periods)) {
+        const liveClock = getLiveClockAnchor(fixture);
+        doc.liveClock = liveClock ?? null;
     }
     // Optional live enrichment — only present when called from pollLivescores
     // (which pulls events/statistics/periods on /livescores/inplay).
@@ -328,6 +470,23 @@ function mapFixtureToMatchDoc(fixture) {
     if (liveEnrich) {
         doc.detail = liveEnrich;
         doc.detailUpdatedAt = firestore_1.Timestamp.now();
+    }
+    // ── Reloj congelado: OMITIR minute/time, no escribir null ──────────────────
+    // calculateLiveMinute devuelve null cuando el reloj no debe avanzar (pausa
+    // por tormenta, ancla implausible de un partido reanudado, prórroga sin
+    // periodos). Con merge:true, escribir null PISA el último minuto bueno y
+    // `time` cae al HH:MM de kickoff en pleno partido. Al eliminar los campos,
+    // Firestore conserva el último valor bueno — congelado de verdad (Inter
+    // Miami vs San Luis, 5 ago 2026). Estados con etiqueta propia (HT/PEN/
+    // Suspendido/Interrumpido) NO se tocan: su `time` es la etiqueta, no un
+    // minuto, y debe escribirse.
+    const FROZEN_LABEL_STATES = [
+        types_1.SM_STATE_IDS.HALF_TIME, types_1.SM_STATE_IDS.PENALTIES,
+        types_1.SM_STATE_IDS.SUSPENDED, types_1.SM_STATE_IDS.INTERRUPTED,
+    ];
+    if (status === 'live' && minute === null && !FROZEN_LABEL_STATES.includes(fixture.state_id)) {
+        delete doc.minute;
+        delete doc.time;
     }
     return doc;
 }

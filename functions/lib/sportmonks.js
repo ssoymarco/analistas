@@ -8,7 +8,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.fetchLivescores = fetchLivescores;
 exports.fetchFixturesByDate = fetchFixturesByDate;
+exports.fetchLeagueCurrentSeason = fetchLeagueCurrentSeason;
+exports.fetchSeasonsListForLeague = fetchSeasonsListForLeague;
+exports.fetchFixturesBySeason = fetchFixturesBySeason;
 exports.fetchFixtureById = fetchFixtureById;
+exports.fetchVenueById = fetchVenueById;
 exports.fetchStandings = fetchStandings;
 exports.fetchTopScorers = fetchTopScorers;
 exports.fetchFixtureFullDetail = fetchFixtureFullDetail;
@@ -101,12 +105,64 @@ async function fetchLivescores() {
  */
 async function fetchFixturesByDate(date, leagueIds) {
     const params = {
-        include: 'participants;scores;league;state;stage;round;venue',
+        // `periods` incluido (11 jul 2026): sin él, syncFixtures no podía calcular
+        // reloj/minuto de partidos en vivo y contaminaba los docs del poll.
+        // `metadata` (6 ago 2026): trae la bandera neutral (type 35) — en Leagues
+        // Cup, SM rellena el venue con el estadio del "local" aunque el partido
+        // sea en sede neutral, y la bandera es la única señal para descartarlo.
+        include: 'participants;scores;league;state;stage;round;venue;periods;metadata',
     };
     if (leagueIds) {
         params.filters = `fixtureLeagues:${leagueIds}`;
     }
     return fetchAllPages(`/fixtures/date/${date}`, params);
+}
+/**
+ * GET /leagues/{id}?include=currentSeason — la temporada VIGENTE según SM.
+ * Fuente de verdad para syncLeagueSeasons: SM voltea `is_current` a la nueva
+ * temporada en cuanto la publica (2026/27 apareció semanas antes del arranque),
+ * mientras nuestros currentSeasonId hardcodeados se quedan en la anterior.
+ */
+async function fetchLeagueCurrentSeason(leagueId) {
+    try {
+        const res = await fetchApi(`/leagues/${leagueId}`, {
+            include: 'currentSeason',
+        });
+        const data = res.data;
+        const cs = data?.currentseason;
+        if (!cs || typeof cs.id !== 'number')
+            return null;
+        // image_path lleva la URL REAL del logo (con subcarpeta, p.ej.
+        // leagues/7/743.png). La convención sin subcarpeta (leagues/743.png)
+        // sirve un asset viejo — es el "logo desactualizado" de Liga MX/La Liga.
+        return { id: cs.id, name: cs.name ?? null, leagueLogo: data.image_path ?? null };
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * GET /seasons?filters=seasonLeagues:{id} — TODAS las temporadas de una liga.
+ * Alimenta season_index/{leagueId} (selector "Elegir temporada" del cliente),
+ * que antes solo se poblaba con un script manual y se quedaba stale (mostraba
+ * "2025/2026 EN CURSO" tras el arranque de 2026/27).
+ */
+async function fetchSeasonsListForLeague(leagueId) {
+    return fetchAllPages('/seasons', {
+        filters: `seasonLeagues:${leagueId}`,
+    }, 5);
+}
+/**
+ * GET /fixtures?filters=fixtureSeasons:{id} — TODOS los fixtures de una
+ * temporada, paginado. Mismos includes que fetchFixturesByDate para que
+ * mapFixtureToMatchDoc produzca docs idénticos a los del sync normal.
+ * Una liga grande son ~380 fixtures = 8 páginas.
+ */
+async function fetchFixturesBySeason(seasonId) {
+    return fetchAllPages('/fixtures', {
+        filters: `fixtureSeasons:${seasonId}`,
+        include: 'participants;scores;league;state;stage;round;venue;periods;metadata',
+    });
 }
 /**
  * GET /fixtures/{id} — single match with full detail.
@@ -115,8 +171,24 @@ async function fetchFixturesByDate(date, leagueIds) {
 async function fetchFixtureById(id) {
     try {
         const res = await fetchApi(`/fixtures/${id}`, {
-            include: 'participants;scores;events;statistics;lineups.player;venue;league;referees.referee;tvstations.tvstation;weatherreport',
+            include: 'participants;scores;events;statistics;lineups.player;venue;league;referees.referee;tvstations.tvstation;weatherreport;metadata;periods',
         });
+        return res.data ?? null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * GET /venues/{id} — ficha completa de un estadio.
+ *
+ * Se usa cuando detectamos que el `venue` a nivel EQUIPO que publica SM está
+ * viejo (ver deriveHomeVenue en sync-teams.ts): de los fixtures sacamos el
+ * venue_id correcto, y de aquí el nombre/capacidad/imagen que lo acompañan.
+ */
+async function fetchVenueById(id) {
+    try {
+        const res = await fetchApi(`/venues/${id}`, {});
         return res.data ?? null;
     }
     catch {
@@ -177,6 +249,7 @@ async function fetchFixtureFullDetail(id) {
                 'periods',
                 'aggregate.fixtures.scores',
                 'aggregate.fixtures.participants',
+                'metadata', // bandera neutral (type 35) — descarta venues mentirosos de Leagues Cup
             ].join(';'),
         });
         return res.data ?? null;

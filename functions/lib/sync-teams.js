@@ -57,6 +57,7 @@ exports.syncTeamsHandler = syncTeamsHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
 const config_1 = require("./config");
+const sync_league_seasons_1 = require("./sync-league-seasons");
 const sportmonks_1 = require("./sportmonks");
 const SLEEP_BETWEEN_LEAGUES_MS = 500;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -113,12 +114,41 @@ function mapTeamToDoc(team, leagueId, leagueName, seasonId) {
         updatedAt: admin_init_1.admin.firestore.Timestamp.now(),
     };
 }
+async function loadVenueOverrides() {
+    const map = new Map();
+    try {
+        const snap = await admin_init_1.db.doc('_meta/venueOverrides').get();
+        if (!snap.exists)
+            return map;
+        for (const [teamId, ov] of Object.entries(snap.data() ?? {})) {
+            if (ov && typeof ov === 'object')
+                map.set(teamId, ov);
+        }
+    }
+    catch (err) {
+        logger.warn('venueOverrides: lectura falló — se usan los datos de SM', { err: String(err) });
+    }
+    return map;
+}
+function applyVenueOverride(doc, ov) {
+    if (ov.name !== undefined)
+        doc.venueName = ov.name;
+    if (ov.city !== undefined)
+        doc.venueCity = ov.city;
+    if (ov.capacity !== undefined)
+        doc.venueCapacity = ov.capacity;
+    if (ov.image !== undefined)
+        doc.venueImage = ov.image;
+}
 async function syncTeamsHandler() {
     logger.info(`👥 syncTeams: starting for ${config_1.LEAGUES.length} leagues`);
+    // Temporada actual dinámica (_meta/leagueSeasons); hardcode = fallback.
+    const seasonMap = await (0, sync_league_seasons_1.getCurrentSeasonMap)();
+    const venueOverrides = await loadVenueOverrides();
     let totalTeams = 0;
     let leagueErrors = 0;
     for (const league of config_1.LEAGUES) {
-        const seasonId = league.currentSeasonId;
+        const seasonId = seasonMap.get(league.id) ?? league.currentSeasonId;
         if (seasonId == null) {
             logger.debug(`👥 syncTeams: skipping ${league.name} — no currentSeasonId`);
             continue;
@@ -134,8 +164,14 @@ async function syncTeamsHandler() {
             const batches = [];
             let current = admin_init_1.db.batch();
             let opCount = 0;
+            let venuesFixed = 0;
             for (const team of teams) {
                 const doc = mapTeamToDoc(team, league.id, league.name, seasonId);
+                const ov = venueOverrides.get(doc.id);
+                if (ov) {
+                    applyVenueOverride(doc, ov);
+                    venuesFixed++;
+                }
                 const ref = admin_init_1.db.collection('teams').doc(doc.id);
                 // `merge: true` is intentional — preserves overrides from other
                 // sync paths (e.g. a future syncTeamSocial function adding twitter/
@@ -152,7 +188,8 @@ async function syncTeamsHandler() {
                 batches.push(current);
             await Promise.all(batches.map(b => b.commit()));
             totalTeams += teams.length;
-            logger.info(`  ✓ ${league.name}: ${teams.length} teams`);
+            logger.info(`  ✓ ${league.name}: ${teams.length} teams` +
+                (venuesFixed ? ` (${venuesFixed} override(s) de sede aplicado(s))` : ''));
             await sleep(SLEEP_BETWEEN_LEAGUES_MS); // rate-limit courtesy
         }
         catch (err) {

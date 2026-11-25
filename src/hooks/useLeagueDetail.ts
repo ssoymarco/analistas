@@ -53,6 +53,7 @@ import {
   getFixturesBySeasonFromFirestore,
   type FirestoreTopScorer,
 } from '../services/firestoreApi';
+import { getCurrentSeasonId, peekCurrentSeasonId } from '../services/seasonResolver';
 import type { LeagueStanding, Match } from '../data/types';
 
 // ── Firestore → SM shape shims ──────────────────────────────────────────────
@@ -280,6 +281,10 @@ export interface LeagueDetailData {
   topCards: TopScorerRow[];
   teams: LeagueTeam[];
   fixtures: LeagueFixture[];
+  /** true cuando standings/goleadores ya cargaron (de caché o red). Mientras
+   *  sea false la UI muestra "cargando", NO "no disponible" — el flash de
+   *  "Clasificación no disponible" era este flag inexistente (11-jul-2026). */
+  metaLoaded?: boolean;
 }
 
 // ── Map helpers ────────────────────────────────────────────────────────────
@@ -494,9 +499,11 @@ export function useLeagueDetail(
         try {
           const config = getLeagueConfig(leagueId);
 
-          // 1. Resolve season ID — sync-first (route param → config). Only hit
-          // the network when we genuinely don't know the season.
-          let resolvedSeasonId = seasonId ?? config?.currentSeasonId ?? null;
+          // 1. Resolve season ID — route param → mapa dinámico (_meta/
+          // leagueSeasons; cae al hardcode de config si el doc no está). El
+          // hardcode solo era correcto hasta que la liga estrenaba temporada
+          // (bug 11-jul-2026: tablas y calendarios de la temporada terminada).
+          let resolvedSeasonId = seasonId ?? (await getCurrentSeasonId(leagueId)) ?? null;
           let resolvedSeasonName = '';
           if (!resolvedSeasonId) {
             try {
@@ -543,8 +550,31 @@ export function useLeagueDetail(
             ...slice,
           });
 
-          // 2. FIXTURES FIRST — all the landing "Partidos" tab needs. Painting
-          // these dismisses the full-screen skeleton (gate is loading && !data).
+          // 2. FIXTURES + META EN PARALELO. El orden secuencial original
+          // (fixtures primero, tabla después) se diseñó para copas — que
+          // abren en Partidos — pero las LIGAS abren en Clasificación y el
+          // usuario veía la tabla vacía mientras cargaban partidos que no
+          // estaba mirando (flash "no disponible", 11-jul-2026). Las lecturas
+          // de Firestore son independientes: latencia = max, no suma.
+          const metaPromise = Promise.all([
+            getStandingsFromFirestore(seasonIdNum).catch(() => []),
+            getTopScorersAllCategories(seasonIdNum).catch(() => ({ goals: [], assists: [], cards: [] })),
+          ] as const);
+
+          // SWR de la tabla: pintar el meta cacheado al instante (re-aperturas
+          // = 0 flash) y refrescar abajo con lo fresco de Firestore.
+          const metaKey = `league_meta_v1_${seasonIdNum}`;
+          type CachedMeta = Pick<LeagueDetailData, 'standings' | 'topScorers' | 'topAssists' | 'topCards' | 'teams'>;
+          AppCache.get<CachedMeta>(metaKey).then(cachedMeta => {
+            if (cachedMeta && !cancelled) {
+              setData(prev => {
+                // No pisar meta fresco si la red ganó la carrera.
+                if (prev?.metaLoaded) return prev;
+                return mergeData(prev, { ...cachedMeta, metaLoaded: true });
+              });
+            }
+          }).catch(() => {});
+
           const fixturesKey = `league_fixtures_v2_${seasonIdNum}`;
 
           // 2a. Stale-while-revalidate: paint cached fixtures instantly.
@@ -579,34 +609,44 @@ export function useLeagueDetail(
             }
           }
 
-          // 3. META (standings + scorers + teams) — background; the
-          // Grupos/Goleadores/Asistencias/Equipos tabs need it.
-          const [fsStandings, fsTopScorers] = await Promise.all([
-            getStandingsFromFirestore(seasonIdNum).catch(() => []),
-            getTopScorersAllCategories(seasonIdNum).catch(() => ({ goals: [], assists: [], cards: [] })),
-          ]);
-          const hasFsMeta =
-            fsStandings.length > 0 &&
-            (fsTopScorers.goals.length > 0 || fsTopScorers.assists.length > 0 || fsTopScorers.cards.length > 0);
+          // 3. META (standings + scorers + teams) — la promesa arrancó en
+          // paralelo con los fixtures (arriba); aquí solo se consume.
+          const [fsStandings, fsTopScorers] = await metaPromise;
+          // DESACOPLADO (11-jul-2026): antes hasFsMeta exigía standings Y
+          // goleadores juntos. En temporada recién estrenada hay tabla (en
+          // ceros, sintetizada por syncStandings) pero CERO goleadores → se
+          // descartaba la tabla de Firestore y el proxy devolvía vacío →
+          // "Clasificación no disponible" (La Liga 26/27). Cada pieza decide
+          // su fuente por separado.
+          const hasFsStandings = fsStandings.length > 0;
+          const hasFsTop =
+            fsTopScorers.goals.length > 0 || fsTopScorers.assists.length > 0 || fsTopScorers.cards.length > 0;
 
           let standingsRaw: SMStandingGroup[];
           let topScorersRaw: SMTopScorer[];
           let topAssistsRaw: SMTopScorer[];
           let topCardsRaw: SMTopScorer[];
           let teamsRaw: SMParticipant[];
-          if (hasFsMeta) {
+
+          if (hasFsStandings) {
             standingsRaw = firestoreStandingsToSMGroups(fsStandings);
+            teamsRaw = deriveTeamsFromStandings(fsStandings);
+          } else {
+            [standingsRaw, teamsRaw] = await Promise.all([
+              fetchStandings(seasonIdNum).catch(() => [] as SMStandingGroup[]),
+              fetchTeamsBySeasonId(seasonIdNum).catch(() => [] as SMParticipant[]),
+            ]);
+          }
+
+          if (hasFsTop) {
             topScorersRaw = firestoreTopToSM(fsTopScorers.goals);
             topAssistsRaw = firestoreTopToSM(fsTopScorers.assists);
             topCardsRaw = firestoreTopToSM(fsTopScorers.cards);
-            teamsRaw = deriveTeamsFromStandings(fsStandings);
           } else {
-            [standingsRaw, topScorersRaw, topAssistsRaw, topCardsRaw, teamsRaw] = await Promise.all([
-              fetchStandings(seasonIdNum).catch(() => [] as SMStandingGroup[]),
+            [topScorersRaw, topAssistsRaw, topCardsRaw] = await Promise.all([
               fetchTopScorers(seasonIdNum, 208).catch(() => [] as SMTopScorer[]),
               fetchTopScorers(seasonIdNum, 209).catch(() => [] as SMTopScorer[]),
               fetchTopScorers(seasonIdNum, 84).catch(() => [] as SMTopScorer[]),
-              fetchTeamsBySeasonId(seasonIdNum).catch(() => [] as SMParticipant[]),
             ]);
           }
 
@@ -648,7 +688,8 @@ export function useLeagueDetail(
           const topCards = buildStatRows(topCardsRaw);
 
           if (!cancelled) {
-            setData(prev => mergeData(prev, { standings, topScorers, topAssists, topCards, teams }));
+            setData(prev => mergeData(prev, { standings, topScorers, topAssists, topCards, teams, metaLoaded: true }));
+            AppCache.set(metaKey, { standings, topScorers, topAssists, topCards, teams }, CacheTTL.detailScheduled).catch(() => {});
           }
 
           // 4. League logo — fire-and-forget, OFF the critical path. Skip for
@@ -678,7 +719,7 @@ export function useLeagueDetail(
             leagueLogo: leagueLogo || '',
             country: config?.country || '',
             countryFlag: config?.flag || '',
-            seasonId: seasonId ?? config?.currentSeasonId ?? 0,
+            seasonId: seasonId ?? peekCurrentSeasonId(leagueId) ?? 0,
             seasonName: '',
             standings: [],
             topScorers: [],
@@ -686,6 +727,7 @@ export function useLeagueDetail(
             topCards: [],
             teams: [],
             fixtures: [],
+            metaLoaded: true, // error → mostrar empty state, no skeleton eterno
           });
         } finally {
           if (!cancelled) setLoading(false);

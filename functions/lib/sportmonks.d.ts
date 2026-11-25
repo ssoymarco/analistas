@@ -17,10 +17,59 @@ export declare function fetchLivescores(): Promise<SMFixture[]>;
  */
 export declare function fetchFixturesByDate(date: string, leagueIds?: string): Promise<SMFixture[]>;
 /**
+ * GET /leagues/{id}?include=currentSeason — la temporada VIGENTE según SM.
+ * Fuente de verdad para syncLeagueSeasons: SM voltea `is_current` a la nueva
+ * temporada en cuanto la publica (2026/27 apareció semanas antes del arranque),
+ * mientras nuestros currentSeasonId hardcodeados se quedan en la anterior.
+ */
+export declare function fetchLeagueCurrentSeason(leagueId: number): Promise<{
+    id: number;
+    name: string | null;
+    leagueLogo: string | null;
+} | null>;
+/** Temporada cruda de SM para el índice season_index (dropdown del cliente). */
+export interface SMSeasonListItem {
+    id: number;
+    name: string | null;
+    starting_at: string | null;
+    is_current: boolean;
+    pending: boolean;
+    finished: boolean;
+}
+/**
+ * GET /seasons?filters=seasonLeagues:{id} — TODAS las temporadas de una liga.
+ * Alimenta season_index/{leagueId} (selector "Elegir temporada" del cliente),
+ * que antes solo se poblaba con un script manual y se quedaba stale (mostraba
+ * "2025/2026 EN CURSO" tras el arranque de 2026/27).
+ */
+export declare function fetchSeasonsListForLeague(leagueId: number): Promise<SMSeasonListItem[]>;
+/**
+ * GET /fixtures?filters=fixtureSeasons:{id} — TODOS los fixtures de una
+ * temporada, paginado. Mismos includes que fetchFixturesByDate para que
+ * mapFixtureToMatchDoc produzca docs idénticos a los del sync normal.
+ * Una liga grande son ~380 fixtures = 8 páginas.
+ */
+export declare function fetchFixturesBySeason(seasonId: number): Promise<SMFixture[]>;
+/**
  * GET /fixtures/{id} — single match with full detail.
  * Used for match detail enrichment.
  */
 export declare function fetchFixtureById(id: number): Promise<SMFixture | null>;
+export interface SMVenue {
+    id: number;
+    name?: string;
+    city_name?: string;
+    capacity?: number;
+    image_path?: string;
+}
+/**
+ * GET /venues/{id} — ficha completa de un estadio.
+ *
+ * Se usa cuando detectamos que el `venue` a nivel EQUIPO que publica SM está
+ * viejo (ver deriveHomeVenue en sync-teams.ts): de los fixtures sacamos el
+ * venue_id correcto, y de aquí el nombre/capacidad/imagen que lo acompañan.
+ */
+export declare function fetchVenueById(id: number): Promise<SMVenue | null>;
 /**
  * GET /standings/seasons/{seasonId} — full league standings, all pages.
  * Group-stage cups (WC, UCL) can have many entries — pagination is required.

@@ -14,6 +14,7 @@ import {
   Pressable,
   ScrollView,
   Animated,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
@@ -24,6 +25,7 @@ import type { Match, MatchDetail, LineupPlayer, MatchLineup, MissingPlayer } fro
 import { getCoachProfile, type CoachProfile } from '../../services/sportsApi';
 import { translateCountry } from '../../i18n/countries';
 import { translateNationalTeam } from '../../utils/nationalTeams';
+import { isFriendliesLeague } from '../../config/leagues';
 import { isImageUri } from '../../utils/imageUri';
 import AdMobBanner from '../../components/AdMobBanner';
 import { ADMOB_ENABLED } from '../../config/features';
@@ -31,8 +33,12 @@ import { ADMOB_ENABLED } from '../../config/features';
 // ── Optional packages (graceful degradation if missing) ──────────────────────
 let ViewShot: any = null;
 let Sharing: any   = null;
+let MediaLibrary: any = null;
 try { ViewShot = require('react-native-view-shot').default; } catch {}
 try { Sharing   = require('expo-sharing'); } catch {}
+// Guardado directo a galería — módulo nativo del build 1.4.0+; en binarios
+// sin él, el botón Guardar cae al share sheet (mismo patrón que Wallpapers).
+try { MediaLibrary = require('expo-media-library'); } catch {}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const HOME_COLOR   = '#3b82f6';
@@ -259,13 +265,19 @@ const GhostPlayerDot: React.FC<{ theme: PitchTheme; pulse: Animated.Value }> = (
   );
 };
 
-/** Empty-state skeleton — pitch + 4-3-3 ghosts per side + notice banner. */
-const LineupSkeleton: React.FC<{ theme: PitchTheme }> = ({ theme }) => {
+/** Empty-state skeleton — pitch + 4-3-3 ghosts per side + notice banner.
+ *
+ * `limited` = the match already kicked off (or ended) and the lineup never
+ * arrived — the "1 hour before" promise is broken, so we stop promising and
+ * say honestly that the provider has limited coverage for this match
+ * (typical of pre-season friendlies). No pulse either: pulsing = "arriving". */
+const LineupSkeleton: React.FC<{ theme: PitchTheme; limited?: boolean; friendly?: boolean }> = ({ theme, limited, friendly }) => {
   const c = useThemeColors();
   const { t } = useTranslation();
-  const pulse = useRef(new Animated.Value(0.6)).current;
+  const pulse = useRef(new Animated.Value(limited ? 0.4 : 0.6)).current;
 
   useEffect(() => {
+    if (limited) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1, duration: 1100, useNativeDriver: true }),
@@ -274,7 +286,7 @@ const LineupSkeleton: React.FC<{ theme: PitchTheme }> = ({ theme }) => {
     );
     loop.start();
     return () => loop.stop();
-  }, [pulse]);
+  }, [pulse, limited]);
 
   // 4-3-3 — visible row order from each goal line forward.
   // Home: GK is closest to top edge; Away: GK is closest to bottom edge.
@@ -283,12 +295,24 @@ const LineupSkeleton: React.FC<{ theme: PitchTheme }> = ({ theme }) => {
 
   return (
     <View>
-      {/* Notice banner — sets expectations about when lineups arrive */}
-      <View style={[lsk.notice, { backgroundColor: c.accent + '14', borderColor: c.accent + '30' }]}>
-        <Text style={lsk.noticeIcon}>🏟️</Text>
+      {/* Notice banner — sets expectations about when lineups arrive.
+          `limited` variant: neutral colors, no promise of arrival. */}
+      <View style={[
+        lsk.notice,
+        limited
+          ? { backgroundColor: 'rgba(142,142,147,0.10)', borderColor: c.border }
+          : { backgroundColor: c.accent + '14', borderColor: c.accent + '30' },
+      ]}>
+        <Text style={lsk.noticeIcon}>{limited ? '📡' : '🏟️'}</Text>
         <View style={{ flex: 1 }}>
-          <Text style={[lsk.noticeTitle, { color: c.textPrimary }]}>{t('lineup.noLineup')}</Text>
-          <Text style={[lsk.noticeBody, { color: c.textSecondary }]}>{t('lineup.availableSoon')}</Text>
+          <Text style={[lsk.noticeTitle, { color: c.textPrimary }]}>
+            {limited
+              ? t(friendly ? 'dataCoverage.limitedFriendly' : 'dataCoverage.limitedGeneric')
+              : t('lineup.noLineup')}
+          </Text>
+          <Text style={[lsk.noticeBody, { color: c.textSecondary }]}>
+            {limited ? t('dataCoverage.lineupBody') : t('lineup.availableSoon')}
+          </Text>
         </View>
       </View>
 
@@ -837,6 +861,11 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   const { isDark } = useDarkMode();
   const navigation = useNavigation<any>();
   const captureRef = useRef<any>(null);
+  // Durante la captura, el banner de AdMob se sustituye por la barra de
+  // Analistas: la imagen compartida NO debe llevar publicidad de terceros
+  // (feedback dueño 12-jul-2026) — solo las barras "ANALISTAS APP · DESCARGA
+  // YA" arriba y abajo. En la app el AdMob se ve normal.
+  const [capturing, setCapturing] = useState(false);
   const theme = isDark ? DARK_PITCH : LIGHT_PITCH;
 
   const handlePlayerPress = useCallback((p: LineupPlayer, isHome: boolean) => {
@@ -893,33 +922,88 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
     awayProfile.stats.matchesPlayed > 0
   );
 
-  // Lineup state — three buckets:
-  // • AI predicted (SportMonks expectedlineups add-on) → "🤖 Predicción IA"
-  // • live/finished with real lineup data                → "✅ Confirmada"
-  // • scheduled with non-expected data (rare)            → "ℹ️ Probable"
+  // Lineup state — dos estados honestos (feedback dueño 11-jul-2026):
+  // Las alineaciones OFICIALES se anuncian ~60-75 min antes del silbatazo.
+  // SM a veces publica un XI proyectado con muchas horas de antelación
+  // (Mundial: 15h antes) y el banner decía "✅ Confirmada" — mentira.
+  // • CONFIRMADA = hay XI real Y (partido en vivo/terminado O faltan ≤2h)
+  //   → SIN banner: la alineación habla por sí sola (y recupera espacio).
+  // • Cualquier otro caso (predicción IA o XI temprano de SM) → banner
+  //   morado "Analistas IA · formación esperada".
   const isExpected  = detail.homeLineup?.isExpected ?? detail.awayLineup?.isExpected ?? false;
-  const isConfirmed = !isExpected;
+  const kickoffRaw  = match.startingAtUtc ?? '';
+  const kickoffMs   = kickoffRaw ? new Date(kickoffRaw.replace(' ', 'T') + 'Z').getTime() : NaN;
+  const insideConfirmWindow =
+    match.status === 'live' || match.status === 'finished' ||
+    (Number.isFinite(kickoffMs) && Date.now() >= kickoffMs - 2 * 60 * 60 * 1000);
+  const isConfirmed = !isExpected && insideConfirmWindow;
+
+  const handleSave = async () => {
+    if (!ViewShot || !captureRef.current) return;
+    try {
+      setCapturing(true);
+      await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+      const uri: string = await captureRef.current.capture();
+
+      if (MediaLibrary) {
+        try {
+          const { granted } = await MediaLibrary.requestPermissionsAsync(true); // writeOnly
+          if (granted) {
+            await MediaLibrary.saveToLibraryAsync(uri);
+            Alert.alert('✅', t('lineup.savedOk'));
+            return;
+          }
+        } catch { /* cae al share sheet */ }
+      }
+      if (Sharing && await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          UTI: 'public.png',
+          dialogTitle: t('lineup.saveImage'),
+        });
+      }
+    } catch {}
+    finally { setCapturing(false); }
+  };
 
   const handleShare = async () => {
     if (!ViewShot || !captureRef.current) return;
     try {
+      // Swap AdMob→barra Analistas y esperar a que el re-render pinte antes
+      // de capturar (dos frames para asegurar layout en dispositivos lentos).
+      setCapturing(true);
+      await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
       const uri: string = await captureRef.current.capture();
       if (!Sharing) return;
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: t('lineup.shareLineup') });
+        // UTI 'public.png': sin él iOS trata el archivo como documento y el
+        // share sheet no ofrece "Guardar imagen" (mismo fix que Wallpapers).
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          UTI: 'public.png',
+          dialogTitle: t('lineup.shareLineup'),
+        });
       }
     } catch {}
+    finally { setCapturing(false); }
   };
 
   if (!hasLineups) {
-    return <LineupSkeleton theme={theme} />;
+    return (
+      <LineupSkeleton
+        theme={theme}
+        limited={match.status !== 'scheduled'}
+        friendly={isFriendliesLeague(match.league ?? '')}
+      />
+    );
   }
 
   // ── Pitch block ──────────────────────────────────────────────────────────
   const PitchBlock = (
     <View style={{ overflow: 'hidden', borderRadius: 18 }}>
-      {/* Top advertising banner — AdMob */}
-      {ADMOB_ENABLED && <AdMobBanner />}
+      {/* Banner superior: AdMob en la app; barra Analistas en la CAPTURA
+          (la imagen compartida no lleva publicidad de terceros). */}
+      {capturing ? <MatchBanner /> : (ADMOB_ENABLED && <AdMobBanner />)}
 
       {/* Pitch */}
       <View style={[ms.pitchContainer, { backgroundColor: theme.grassA, borderRadius: 0 }]}>
@@ -961,25 +1045,19 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
   return (
     <View style={ms.outer}>
 
-      {/* ── Confirmation banner ── */}
-      <View style={[
-        ms.banner,
-        isExpected
-          ? { backgroundColor: 'rgba(139,92,246,0.12)', borderColor: 'rgba(139,92,246,0.3)' }
-          : isConfirmed
-          ? { backgroundColor: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.3)' }
-          : { backgroundColor: 'rgba(202,138,4,0.12)', borderColor: 'rgba(202,138,4,0.3)' },
-      ]}>
-        <Text style={{ fontSize: 14 }}>
-          {isExpected ? '🤖' : isConfirmed ? '✅' : 'ℹ️'}
-        </Text>
-        <Text style={[
-          ms.bannerText,
-          { color: isExpected ? '#8b5cf6' : isConfirmed ? '#10b981' : '#ca8a04' },
+      {/* ── Banner solo para formación ESPERADA — la confirmada se muestra
+             sin banner (más espacio, y el dato habla por sí solo) ── */}
+      {!isConfirmed && (
+        <View style={[
+          ms.banner,
+          { backgroundColor: 'rgba(139,92,246,0.12)', borderColor: 'rgba(139,92,246,0.3)' },
         ]}>
-          {isExpected ? t('lineup.aiPrediction') : isConfirmed ? t('lineup.confirmed') : t('lineup.probable')}
-        </Text>
-      </View>
+          <Text style={{ fontSize: 14 }}>🤖</Text>
+          <Text style={[ms.bannerText, { color: '#8b5cf6' }]}>
+            {t('lineup.aiPrediction')}
+          </Text>
+        </View>
+      )}
 
       {/* ── Formation header ── */}
       <View style={[ms.formationHeader, { backgroundColor: c.card, borderColor: c.border }]}>
@@ -1025,16 +1103,27 @@ export const AlineacionTab: React.FC<{ match: Match; detail: MatchDetail }> = ({
           <Text style={[ms.shareCardDesc, { color: c.textSecondary }]}>
             {t('lineup.shareLineupDesc')}
           </Text>
-          <TouchableOpacity
-            style={[ms.shareCardBtn, { backgroundColor: c.accent }]}
-            onPress={handleShare}
-            activeOpacity={0.82}
-          >
-            <ShareIcon color="#000" size={15} />
-            <Text style={ms.shareCardBtnText}>
-              {t('common.share').toUpperCase()}
-            </Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity
+              style={[ms.shareCardBtn, { backgroundColor: c.accent, flex: 1 }]}
+              onPress={handleShare}
+              activeOpacity={0.82}
+            >
+              <ShareIcon color="#000" size={15} />
+              <Text style={ms.shareCardBtnText}>
+                {t('common.share').toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[ms.shareCardBtn, { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: c.accent, flex: 1 }]}
+              onPress={handleSave}
+              activeOpacity={0.82}
+            >
+              <Text style={[ms.shareCardBtnText, { color: c.accent }]}>
+                ⬇️ {t('lineup.saveImage').toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 

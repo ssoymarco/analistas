@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../../theme/useTheme';
+import { isFriendliesLeague } from '../../config/leagues';
 import type { Match, MatchDetail, MatchStatCategory } from '../../data/types';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -207,14 +208,15 @@ function SkeletonSection({ border, card, shimmer }: { border: string; card: stri
 
 // ── Stats empty state ─────────────────────────────────────────────────────────
 
-function StatsEmptyState({ match }: { match: Match }) {
+function StatsEmptyState({ match, limited }: { match: Match; limited?: boolean }) {
   const c  = useThemeColors();
   const { t } = useTranslation();
   const shimmer = useRef(new Animated.Value(0.35)).current;
 
-  // Shimmer pulse — only for scheduled/live
+  // Shimmer pulse — only for scheduled/live, and never for limited-coverage
+  // matches (pulsing implies the data is on its way, which it isn't).
   useEffect(() => {
-    if (match.status === 'finished') return;
+    if (match.status === 'finished' || limited) return;
     const anim = Animated.loop(
       Animated.sequence([
         Animated.timing(shimmer, { toValue: 0.85, duration: 900, useNativeDriver: true }),
@@ -223,19 +225,24 @@ function StatsEmptyState({ match }: { match: Match }) {
     );
     anim.start();
     return () => anim.stop();
-  }, [match.status, shimmer]);
+  }, [match.status, shimmer, limited]);
 
   const isScheduled = match.status === 'scheduled';
   const isLive      = match.status === 'live';
   const isFinished  = match.status === 'finished';
+  const friendly    = isFriendliesLeague(match.league ?? '');
 
-  const emoji   = isScheduled ? '📊' : isLive ? '⚡' : '📉';
-  const title   = isScheduled
+  const emoji   = limited ? '📡' : isScheduled ? '📊' : isLive ? '⚡' : '📉';
+  const title   = limited
+    ? t(friendly ? 'dataCoverage.limitedFriendly' : 'dataCoverage.limitedGeneric')
+    : isScheduled
     ? t('stats.emptyScheduled')
     : isLive
     ? t('stats.emptyLive')
     : t('stats.emptyFinished');
-  const sub     = isScheduled
+  const sub     = limited
+    ? t('dataCoverage.statsBody')
+    : isScheduled
     ? t('stats.emptyScheduledSub')
     : isLive
     ? t('stats.emptyLiveSub')
@@ -248,12 +255,16 @@ function StatsEmptyState({ match }: { match: Match }) {
       <View style={[
         styles.emptyCard,
         {
-          backgroundColor: isScheduled
+          backgroundColor: limited
+            ? 'rgba(142,142,147,0.08)'
+            : isScheduled
             ? 'rgba(59,130,246,0.06)'
             : isLive
             ? 'rgba(255,69,58,0.06)'
             : 'rgba(142,142,147,0.08)',
-          borderColor: isScheduled
+          borderColor: limited
+            ? c.border
+            : isScheduled
             ? 'rgba(59,130,246,0.18)'
             : isLive
             ? 'rgba(255,69,58,0.18)'
@@ -268,7 +279,7 @@ function StatsEmptyState({ match }: { match: Match }) {
       </View>
 
       {/* Category chips — only for scheduled to preview what's coming */}
-      {isScheduled && (
+      {isScheduled && !limited && (
         <View style={styles.chipsRow}>
           {(['⚽ Posesión', '🎯 Tiros', '🛡️ Defensa', '🟨 Disciplina'] as const).map((chip, i) => (
             <View key={i} style={[styles.chip, { backgroundColor: c.card, borderColor: c.border }]}>
@@ -278,8 +289,9 @@ function StatsEmptyState({ match }: { match: Match }) {
         </View>
       )}
 
-      {/* Skeleton preview below the message — only for scheduled/live */}
-      {!isFinished && (
+      {/* Skeleton preview below the message — only for scheduled/live, and
+          never for limited coverage (a skeleton promises data that won't come) */}
+      {!isFinished && !limited && (
         <View style={[styles.skeletonWrap, { gap: 8 }]}>
           <SkeletonSection border={c.border} card={c.card} shimmer={shimmer} />
           <SkeletonSection border={c.border} card={c.card} shimmer={shimmer} />
@@ -297,7 +309,15 @@ export const EstadisticasTab: React.FC<{ match: Match; detail: MatchDetail }> = 
   const { t } = useTranslation();
 
   if (!detail.statistics || detail.statistics.length === 0) {
-    return <StatsEmptyState match={match} />;
+    // Limited-coverage detection: the match already kicked off AND the lineups
+    // never arrived either. Lineups are the hard signal — if they aren't there
+    // by kickoff, the provider isn't covering this match in detail (typical of
+    // pre-season friendlies), so stop promising stats that won't come.
+    const noLineups =
+      (detail.homeLineup?.starters?.length ?? 0) === 0 &&
+      (detail.awayLineup?.starters?.length ?? 0) === 0;
+    const limited = match.status !== 'scheduled' && noLineups;
+    return <StatsEmptyState match={match} limited={limited} />;
   }
 
   return (

@@ -168,6 +168,16 @@ export function translateNationalTeam(name: string): string {
   return LANG_MAP[lang]?.[name] ?? name;
 }
 
+/** true si el nombre (inglés de SM) corresponde a una SELECCIÓN nacional.
+ *  El diccionario TEAMS_ES (el más completo) funciona como lista blanca.
+ *  ⚠️ Existe porque los códigos cortos de CLUBES colisionan con códigos FIFA:
+ *  Cancún FC = "CAN" = Canadá → la Dynamic Island compacta mostraba la
+ *  bandera 🇨🇦 en un Cancún vs Pumas (reporte del dueño, 4 jul 2026). La
+ *  bandera solo aplica si el equipo es una selección de verdad. */
+export function isNationalTeam(name: string | null | undefined): boolean {
+  return !!name && name in TEAMS_ES;
+}
+
 // ── League country labels ─────────────────────────────────────────────────────
 
 const COUNTRY_ES: Record<string, string> = {

@@ -116,6 +116,44 @@ export function teamColor(shortName?: string): string | null {
   return TEAM_COLORS[shortName.toUpperCase()] ?? null;
 }
 
+// ── Flag emoji por código FIFA ────────────────────────────────────────────────
+// Para la Live Activity: WidgetKit no puede descargar imágenes al renderizar,
+// pero los emoji son TEXTO — la bandera viaja en los attributes y el widget la
+// pinta nativa. Solo selecciones; clubes caen al punto de color.
+
+const FIFA_TO_ISO2: Record<string, string> = {
+  FRA: 'FR', BEL: 'BE', SWE: 'SE', NOR: 'NO', ESP: 'ES', GER: 'DE', POR: 'PT',
+  ITA: 'IT', NED: 'NL', CRO: 'HR', DEN: 'DK', SUI: 'CH', POL: 'PL', CZE: 'CZ',
+  SRB: 'RS', AUT: 'AT', TUR: 'TR', UKR: 'UA', GRE: 'GR', HUN: 'HU',
+  ARG: 'AR', BRA: 'BR', URU: 'UY', COL: 'CO', ECU: 'EC', PER: 'PE', CHI: 'CL',
+  PAR: 'PY', BOL: 'BO', VEN: 'VE',
+  MEX: 'MX', USA: 'US', CAN: 'CA', CRC: 'CR', PAN: 'PA', HON: 'HN', JAM: 'JM',
+  SEN: 'SN', CIV: 'CI', MAR: 'MA', GHA: 'GH', CMR: 'CM', NGA: 'NG', EGY: 'EG',
+  TUN: 'TN', ALG: 'DZ', RSA: 'ZA', MLI: 'ML', CPV: 'CV',
+  JPN: 'JP', KOR: 'KR', KSA: 'SA', IRN: 'IR', AUS: 'AU', QAT: 'QA', IRQ: 'IQ',
+  UAE: 'AE', NZL: 'NZ',
+};
+
+// Banderas subnacionales GB (secuencias de tags Unicode, no derivables de ISO2).
+const SPECIAL_FLAGS: Record<string, string> = {
+  ENG: String.fromCodePoint(0x1f3f4, 0xe0067, 0xe0062, 0xe0065, 0xe006e, 0xe0067, 0xe007f),
+  SCO: String.fromCodePoint(0x1f3f4, 0xe0067, 0xe0062, 0xe0073, 0xe0063, 0xe0074, 0xe007f),
+  WAL: String.fromCodePoint(0x1f3f4, 0xe0067, 0xe0062, 0xe0077, 0xe006c, 0xe0073, 0xe007f),
+};
+
+/** Bandera emoji de una selección por código FIFA ("POR" → 🇵🇹); undefined
+ *  para clubes/desconocidos. */
+export function teamFlagEmoji(shortName?: string): string | undefined {
+  if (!shortName) return undefined;
+  const up = shortName.toUpperCase();
+  if (SPECIAL_FLAGS[up]) return SPECIAL_FLAGS[up];
+  const iso2 = FIFA_TO_ISO2[up];
+  if (!iso2) return undefined;
+  return String.fromCodePoint(
+    ...iso2.split('').map(ch => 0x1f1e6 + ch.charCodeAt(0) - 65),
+  );
+}
+
 /**
  * Resolve the two chart colors for a match, guaranteeing they're distinct.
  *  • Each side uses its team color when known, else the classic red/green.

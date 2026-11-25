@@ -15,13 +15,20 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
 
-    // Validates that a favorites map only contains the allowed fields and types
+    // Validates that a favorites map only contains the allowed fields and types.
+    // ⚠️ rivalTeamIds (Modo Rival, en el cliente desde v1.2.1) FALTABA aquí — el
+    // cliente lo incluye en CADA escritura de favoritos, así que estas reglas
+    // rechazaban TODAS las escrituras de favoritos de usuarios logueados en
+    // silencio, y el reconcile de arranque las "deshacía" (bug de favoritos
+    // borrados, reportado 3 jul 2026). Si el cliente agrega un campo nuevo a
+    // FirestoreFavorites, AGREGARLO AQUÍ EN EL MISMO CAMBIO.
     function validFavorites(fav) {
-      return fav.keys().hasOnly(['matchIds', 'teamIds', 'playerIds', 'leagueIds'])
-          && (!('matchIds'  in fav) || fav.matchIds  is list)
-          && (!('teamIds'   in fav) || fav.teamIds   is list)
-          && (!('playerIds' in fav) || fav.playerIds is list)
-          && (!('leagueIds' in fav) || fav.leagueIds is list);
+      return fav.keys().hasOnly(['matchIds', 'teamIds', 'playerIds', 'leagueIds', 'rivalTeamIds'])
+          && (!('matchIds'     in fav) || fav.matchIds     is list)
+          && (!('teamIds'      in fav) || fav.teamIds      is list)
+          && (!('playerIds'    in fav) || fav.playerIds    is list)
+          && (!('leagueIds'    in fav) || fav.leagueIds    is list)
+          && (!('rivalTeamIds' in fav) || fav.rivalTeamIds is list);
     }
 
     // ── users/{uid} ─────────────────────────────────────────────────────────────
@@ -38,10 +45,18 @@ service cloud.firestore {
           && request.resource.data.displayName.size() <= 50;
 
       // Update: owner only; enforce field-level rules
+      // ⚠️ notificationPrefs FALTABA aquí — NotificationPrefsContext lo escribe
+      // (Modo Estadio/Rival) y era rechazado en silencio, mismo bug de clase
+      // que rivalTeamIds en validFavorites (3 jul 2026). Toda key nueva que el
+      // cliente escriba a users/{uid} DEBE agregarse aquí en el mismo cambio.
       allow update: if isOwner(uid)
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['displayName', 'username', 'email', 'favorites',
-                         'pushToken', 'updatedAt', 'authMethod'])
+                         'pushToken', 'updatedAt', 'authMethod',
+                         'notificationPrefs'])
+          // notificationPrefs must be a map if changed
+          && (!('notificationPrefs' in request.resource.data.diff(resource.data).changedKeys())
+              || request.resource.data.notificationPrefs is map)
           // displayName max 50 chars if changed
           && (!('displayName' in request.resource.data.diff(resource.data).changedKeys())
               || request.resource.data.displayName.size() <= 50)
@@ -52,7 +67,11 @@ service cloud.firestore {
           && (!('favorites' in request.resource.data.diff(resource.data).changedKeys())
               || validFavorites(request.resource.data.favorites));
 
-      allow delete: if false; // soft-delete only (handle in Cloud Function later)
+      // El dueño puede borrar su propio doc — deleteAccount (AuthContext) lo
+      // intenta ANTES de deleteUser y con 'if false' era rechazado en silencio
+      // (catch vacío): el perfil con email/nombre quedaba huérfano PARA SIEMPRE
+      // tras borrar la cuenta (Apple 5.1.1(v)). Auditoría 3 jul 2026.
+      allow delete: if isOwner(uid);
     }
 
     // ── usernames/{username} ────────────────────────────────────────────────────
@@ -103,11 +122,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    /// season_fixtures/{seasonId} — lightweight per-season fixtures index.
-    /// One compact doc (no detail/h2h blobs) powering the league-detail
-    /// Partidos list + cup bracket with a single read. Written server-side
-    /// by syncFixtures (see functions/src/season-fixtures-index.ts).
-    match /season_fixtures/{seasonId} {
+    /// season_fixtures/{shardId} — lightweight per-season fixtures index.
+    /// Compact docs (no detail/h2h blobs) powering the league-detail Partidos
+    /// list + cup bracket. Written server-side by syncFixtures (see
+    /// functions/src/season-fixtures-index.ts).
+    /// shardId is `{seasonId}` for shard 0 and `{seasonId}_{n}` for the
+    /// overflow shards a >1 MB season needs — the wildcard covers both.
+    match /season_fixtures/{shardId} {
       allow read: if true;
       allow write: if false;
     }
@@ -194,6 +215,74 @@ service cloud.firestore {
     match /_meta/appVersion {
       allow read: if true;
       allow write: if false;
+    }
+
+    /// _meta/promoBanner — interruptor remoto del banner promocional in-app
+    /// (Mundial etc.). Shape: { enabled: bool, id: string }. El cliente lo lee
+    /// al abrir Partidos; cambiar `id` re-muestra el banner a quien ya lo
+    /// descartó; `enabled:false` lo apaga sin OTA. Escritura solo por consola.
+    match /_meta/promoBanner {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// _meta/wallpapers — config de la sección Wallpapers + concurso de
+    /// jerseys. Shape: { enabled: bool, prize: {id, title, imageUrl,
+    /// announceAt, socialUrl, termsUrl} | null }. Escritura solo server/consola.
+    match /_meta/wallpapers {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// wallpapers/{id} — catálogo de wallpapers (título, imageUrl, likes).
+    /// `likes` lo mantiene la Cloud Function onWallpaperEntryCreated.
+    match /wallpapers/{wallpaperId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// wallpaperEntries/{wallpaperId}_{uid} — participación en la dinámica.
+    /// CREATE-ONCE por el dueño (docId amarrado a su uid, campos exactos,
+    /// uid no-anónimo implícito porque el cliente gatea con isGuest, y el
+    /// server puede filtrar anónimos al elegir ganador). Sin update/delete:
+    /// una participación no se edita ni se retira — auditable para el sorteo.
+    match /wallpaperEntries/{entryId} {
+      allow read: if request.auth != null && entryId.matches('.*_' + request.auth.uid + '$');
+      allow create: if request.auth != null
+        && entryId == request.resource.data.wallpaperId + '_' + request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.wallpaperId is string
+        && request.resource.data.wallpaperId.size() > 0
+        && request.resource.data.keys().hasOnly(['uid', 'wallpaperId', 'prizeId', 'createdAt']);
+      allow update, delete: if false;
+    }
+
+    /// _meta/leagueSeasons — mapa liga→temporada ACTUAL, escrito por
+    /// syncLeagueSeasons (2×/día). Shape: { seasons: { [leagueId]:
+    /// { seasonId, seasonName, leagueName } }, updatedAt }. El cliente lo lee
+    /// para resolver la temporada vigente en vez del hardcode de
+    /// config/leagues.ts (bug 11-jul-2026: tablas/calendarios de la temporada
+    /// terminada). Escritura solo server.
+    match /_meta/leagueSeasons {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ── liveActivities/{regId} ──────────────────────────────────────────────────
+    // Registro de tokens de Live Activity (doc id = `${matchId}_${uid}`).
+    // El cliente crea/actualiza SU registro (incluye invitados — anonymous auth
+    // les da uid real); nadie lee desde el cliente (pollLivescores lee con
+    // admin y empuja los updates por FCM/APNs).
+    match /liveActivities/{regId} {
+      allow read: if false;
+      allow create, update: if request.auth != null
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.matchId is string
+          && request.resource.data.keys().hasOnly([
+               'fcmToken', 'activityPushToken', 'matchId', 'platform',
+               'userId', 'createdAt', 'ended', 'lastState'
+             ]);
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
 
     // ── Deny everything else (including the rest of _meta) ────────────────────

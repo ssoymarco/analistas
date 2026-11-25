@@ -51,6 +51,12 @@ export interface DelayedPushPayload {
   /** Collection holding the match doc for the VAR guard. Defaults to the
    *  legacy 'matches'; API-Sports pushes use 'fb_matches'. */
   matchCollection?: 'matches' | 'fb_matches';
+  /** Expulsados por lado AL MOMENTO DEL EVENTO. Solo se llena para
+   *  changeType 'redCard'; es la referencia del guard de VAR para saber si la
+   *  roja sigue vigente al entregar. Opcional: las tareas encoladas antes de
+   *  este cambio no lo traen y se entregan sin comparar. */
+  homeRedCards?: number;
+  awayRedCards?: number;
 }
 
 // ── Handler ─────────────────────────────────────────────────────────────────────
@@ -66,23 +72,40 @@ export const deliverDelayedPush = onTaskDispatched(
   async (req) => {
     const p = req.data as DelayedPushPayload;
 
-    // ── VAR guard (goal events only) ─────────────────────────────────────────
-    // If the score has decreased since the task was enqueued, the goal was
-    // cancelled by VAR. Skip the notification so delayed-bucket subscribers
-    // never receive a spoiler for a disallowed goal.
-    if (p.changeType === 'goal') {
+    // ── VAR guard (goles Y rojas) ────────────────────────────────────────────
+    // Si el evento fue revocado entre el encolado y la entrega, se descarta el
+    // push: quien está en un bucket retrasado todavía no sabe nada, así que lo
+    // correcto es callar, no corregir algo que nunca vio.
+    //
+    // Las ROJAS no estaban cubiertas (el guard era `changeType === 'goal'`).
+    // Resultado real: en Atlante vs América (24 jul 2026) la roja a Rodolfo
+    // Cota se revocó, y un usuario en `_d10` la habría recibido diez minutos
+    // después, ya revocada, sin nada que lo detuviera. Requiere que mappers.ts
+    // escriba homeRedCards/awayRedCards en el doc — antes no existían.
+    if (p.changeType === 'goal' || p.changeType === 'redCard') {
       try {
         const snap = await db.doc(`${p.matchCollection ?? 'matches'}/${p.matchId}`).get();
         if (snap.exists) {
-          const curr = snap.data() as { homeScore?: number; awayScore?: number };
-          const currTotal = (curr.homeScore ?? 0) + (curr.awayScore ?? 0);
-          const taskTotal = p.homeScore + p.awayScore;
-          if (currTotal < taskTotal) {
+          const curr = snap.data() as {
+            homeScore?: number; awayScore?: number;
+            homeRedCards?: number; awayRedCards?: number;
+          };
+          const isGoal    = p.changeType === 'goal';
+          const currTotal = isGoal
+            ? (curr.homeScore ?? 0) + (curr.awayScore ?? 0)
+            : (curr.homeRedCards ?? 0) + (curr.awayRedCards ?? 0);
+          const taskTotal = isGoal
+            ? p.homeScore + p.awayScore
+            : (p.homeRedCards ?? 0) + (p.awayRedCards ?? 0);
+          // Rojas: si la tarea no trae el conteo (encolada por una versión
+          // anterior del código), no hay contra qué comparar → entregar.
+          const comparable = isGoal || p.homeRedCards != null;
+          if (comparable && currTotal < taskTotal) {
             logger.info('🚫 VAR guard: delayed push suppressed', {
               matchId: p.matchId, topic: p.topic,
-              taskTotal, currTotal,
+              changeType: p.changeType, taskTotal, currTotal,
             });
-            return; // drop — VAR cancelled the goal
+            return; // drop — el evento fue revocado
           }
         }
       } catch (varErr) {
@@ -111,7 +134,7 @@ export const deliverDelayedPush = onTaskDispatched(
         },
         apns: {
           headers:  { 'apns-collapse-id': p.dedupId },
-          payload:  { aps: { sound: 'default', badge: 0 } },
+          payload:  { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } },
         },
       });
       logger.info(`⏰ Delayed push delivered → ${p.topic}`, {

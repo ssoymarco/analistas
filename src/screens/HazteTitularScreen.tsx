@@ -95,6 +95,7 @@ export const HazteTitularScreen: React.FC = () => {
   const {
     monthlyPackage,
     yearlyPackage,
+    storeReady,
     purchasePackage: rcPurchase,
     restorePurchases: rcRestore,
   } = useSubscription();
@@ -628,31 +629,45 @@ export const HazteTitularScreen: React.FC = () => {
           )}
 
           {/* ═══ CTA ═════════════════════════════════════════════════════════ */}
+          {/* storeUnavailable: la tienda no entregó productos (suscripciones
+              sin aprobar en ASC / acuerdo de pagos incompleto / outage). Botón
+              deshabilitado CON explicación — jamás un botón que "no hace nada"
+              (lo que vieron los usuarios de 1.3.0 el 4 jul 2026). */}
+          {(() => {
+            const storeBlocked = selectedPlan !== 'banca' && !storeReady;
+            return (
           <TouchableOpacity
             style={{
-              backgroundColor: loading
+              backgroundColor: loading || storeBlocked
                 ? surface2Bg
                 : selectedPlan === 'banca' ? 'transparent' : BLUE,
               borderRadius: 14, paddingVertical: 17,
               alignItems: 'center', marginBottom: 8,
-              borderWidth: selectedPlan === 'banca' || loading ? 1.5 : 0,
+              borderWidth: selectedPlan === 'banca' || loading || storeBlocked ? 1.5 : 0,
               borderColor: borderMid,
             }}
             activeOpacity={0.85}
             onPress={handleSubscribe}
-            disabled={loading}
+            disabled={loading || storeBlocked}
           >
             <Text style={{
               fontSize: 15, fontWeight: '800', letterSpacing: 1.5,
-              color: loading || selectedPlan === 'banca' ? c.textTertiary : '#fff',
+              color: loading || storeBlocked || selectedPlan === 'banca' ? c.textTertiary : '#fff',
               textTransform: 'uppercase',
             }}>
               {ctaText}
             </Text>
           </TouchableOpacity>
+            );
+          })()}
 
-          {/* Cancel note */}
-          {selectedPlan !== 'banca' && !loading && (
+          {/* Cancel note / store unavailable notice */}
+          {selectedPlan !== 'banca' && !storeReady && (
+            <Text style={{ fontSize: 12, color: '#f59e0b', textAlign: 'center', marginBottom: 16, lineHeight: 17, paddingHorizontal: 12 }}>
+              {t('subscription.storeUnavailable')}
+            </Text>
+          )}
+          {selectedPlan !== 'banca' && !loading && storeReady && (
             <Text style={{ fontSize: 11, color: c.textTertiary, textAlign: 'center', marginBottom: 16, lineHeight: 16 }}>
               {t('subscription.cancelAnytime')}
             </Text>

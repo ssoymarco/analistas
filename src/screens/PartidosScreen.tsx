@@ -24,12 +24,14 @@ import { CategoryTabs, type CategoryTab as PillTab } from '../components/Categor
  *  active tab (e.g. analytics, persisted state). */
 export type FilterTab = 'todos' | 'vivo' | 'finalizados' | 'proximos';
 import { LeagueSection } from '../components/LeagueSection';
+import { PromoBanner } from '../components/PromoBanner';
 import { CalendarPicker } from '../components/CalendarPicker';
 import { useFixtures } from '../hooks/useFixtures';
 import type { LeagueWithMatches } from '../services/sportsApi';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { useFavorites } from '../contexts/FavoritesContext';
-import { getLeaguePopularity } from '../config/leagues';
+import { getLeaguePopularity, isFriendliesLeague, FRIENDLIES_RE } from '../config/leagues';
+import { matchNotability } from '../config/notableClubs';
 import { useUserCountry } from '../hooks/useUserCountry';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -44,6 +46,15 @@ function shiftISODate(iso: string, deltaDays: number): string {
   const dt = new Date(y, m - 1, d + deltaDays);
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 }
+
+// (FRIENDLIES_RE / isFriendliesLeague viven en config/leagues — compartidos
+// con LeagueSection y getLeagueDisplayName.)
+
+// Mundial 2026 (id 732): anclado ARRIBA del feed durante el torneo. La sección
+// solo existe los días con partidos del Mundial (el filter sobre
+// filteredLeagues lo hace no-op el resto de días) — quitar tras la final
+// (19-20 jul 2026).
+const WORLD_CUP_LEAGUE_ID = '732';
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 export const PartidosScreen: React.FC = () => {
@@ -150,6 +161,42 @@ export const PartidosScreen: React.FC = () => {
     const teamSet   = new Set(followedTeamIds);
     const leagueSet = new Set(followedLeagueIds);
 
+    // ── Fusionar los grupos de amistosos de SM en UNA sección "Amistosos" ────
+    // SM parte los amistosos en varias "ligas" internas (Club Friendlies 1-4)
+    // — detalle de su modelo de datos que el usuario no debe ver. Se fusionan
+    // en una sección sintética ordenada por NOTABILIDAD (Liga MX / gigantes de
+    // América y Europa primero — un amistoso del América no puede quedar
+    // enterrado bajo 80 partidos de cuarta división). El nombre se deja como
+    // "Club Friendlies" a propósito: getLeagueDisplayName lo traduce a
+    // "Amistosos" (i18n) en el render. Reporte del dueño, 4 jul 2026.
+    const friendlyMatches: Match[] = [];
+    const nonFriendly: LeagueWithMatches[] = [];
+    for (const lg of filteredLeagues) {
+      if (isFriendliesLeague(lg.name)) friendlyMatches.push(...lg.matches);
+      else nonFriendly.push(lg);
+    }
+    const statusRank: Record<string, number> = { live: 0, interrupted: 0, scheduled: 1, finished: 2 };
+    const workingLeagues: LeagueWithMatches[] = friendlyMatches.length
+      ? [
+          ...nonFriendly,
+          {
+            id: '__friendlies__',
+            name: 'Club Friendlies',
+            logo: '🤝',
+            country: '',
+            matches: friendlyMatches.sort((a, b) => {
+              const notA = matchNotability(a.homeTeam.name, a.awayTeam.name);
+              const notB = matchNotability(b.homeTeam.name, b.awayTeam.name);
+              if (notA !== notB) return notB - notA; // notables primero
+              const stA = statusRank[a.status] ?? 1;
+              const stB = statusRank[b.status] ?? 1;
+              if (stA !== stB) return stA - stB;    // en vivo antes que programados
+              return (a.startingAtUtc ?? '').localeCompare(b.startingAtUtc ?? '');
+            }),
+          } as LeagueWithMatches,
+        ]
+      : nonFriendly;
+
     // ── My team matches + infer their leagues ─────────────────────────────────
     // For each league: if any match involves a followed team, (a) collect that
     // match in myTeamMatches, and (b) mark that league as "inferred" so we show
@@ -158,11 +205,18 @@ export const PartidosScreen: React.FC = () => {
     const myTeamMatches: Match[] = [];
     const inferredLeagueIds = new Set<string>();
 
-    filteredLeagues.forEach(lg => {
+    workingLeagues.forEach(lg => {
       lg.matches.forEach(m => {
         if (teamSet.has(m.homeTeam.id) || teamSet.has(m.awayTeam.id)) {
           myTeamMatches.push(m);
-          inferredLeagueIds.add(lg.id); // mark whole league as relevant
+          // Los AMISTOSOS no infieren liga: que Monterrey juegue un "Club
+          // Friendlies" no significa que esa "liga" le importe al usuario —
+          // promovía la sección completa de amistosos ARRIBA del Mundial
+          // (reporte del 3 jul 2026). El partido del equipo seguido sigue
+          // visible en "Mis equipos" (myTeamMatches es independiente).
+          if (!FRIENDLIES_RE.test(lg.name)) {
+            inferredLeagueIds.add(lg.id); // mark whole league as relevant
+          }
         }
       });
     });
@@ -173,8 +227,13 @@ export const PartidosScreen: React.FC = () => {
 
     // ── Priority leagues = inferred (from teams) ∪ explicitly followed ────────
     const priorityIds = new Set([...inferredLeagueIds, ...leagueSet]);
+    // Mundial 2026 SIEMPRE en el bloque prioritario durante el torneo — sin
+    // esto quedaba hasta abajo del feed para cualquier usuario que siguiera
+    // equipos de liga (sus ligas inferidas iban antes que todo el queue
+    // global). No-op los días sin partidos del Mundial.
+    priorityIds.add(WORLD_CUP_LEAGUE_ID);
     const myTeamMatchIds = new Set(myTeamMatches.map(m => m.id));
-    const priorityLeagueGroups = filteredLeagues
+    const priorityLeagueGroups = workingLeagues
       .filter(lg => priorityIds.has(lg.id))
       .map(lg => ({
         ...lg,
@@ -183,7 +242,7 @@ export const PartidosScreen: React.FC = () => {
       .filter(lg => lg.matches.length > 0);
 
     // ── Remaining leagues — partition by popularity (country-aware) ──────────
-    const remaining = filteredLeagues.filter(lg => !priorityIds.has(lg.id));
+    const remaining = workingLeagues.filter(lg => !priorityIds.has(lg.id));
     const tier1Groups: LeagueWithMatches[] = [];
     const tier2Groups: LeagueWithMatches[] = [];
     const tier3Groups: LeagueWithMatches[] = [];
@@ -436,6 +495,8 @@ export const PartidosScreen: React.FC = () => {
                 index={idx}
                 onMatchPress={m => navigation.navigate('MatchDetail', { match: m })}
                 onLeaguePress={lg => {
+                  // Sección sintética (amistosos fusionados) — no hay detalle.
+                  if (lg.id.startsWith('__')) return;
                   const seasonId = lg.matches[0]?.seasonId;
                   navigation.navigate('LeagueDetail', {
                     leagueId: Number(lg.id),
@@ -449,6 +510,10 @@ export const PartidosScreen: React.FC = () => {
 
             return (
               <>
+                {/* ── Banner promocional (interruptor remoto _meta/promoBanner).
+                    CTA → búsqueda global para seguir selecciones. ─────────── */}
+                <PromoBanner onPress={() => navigation.navigate('GlobalSearch')} />
+
                 {/* ── A. Mis equipos (cross-league highlight) ─────────────── */}
                 {hasPersonalization && myTeamMatches.length > 0 && (
                   <LeagueSection

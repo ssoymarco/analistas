@@ -34,7 +34,30 @@ const it: TranslationKeys = {
     matches: 'Partite',
     favorites: 'Preferiti',
     news: 'Notizie',
+    wallpapers: 'Sfondi',
     profile: 'Profilo',
+  },
+
+  wallpapers: {
+    title: 'Sfondi',
+    subtitle: 'Scarica gli sfondi esclusivi dei tuoi campioni',
+    prizeKicker: 'Premio della settimana',
+    participate: 'Partecipa',
+    participating: 'Iscritto',
+    save: 'Salva',
+    seeDynamic: 'Come partecipare',
+    terms: 'Termini e condizioni',
+    announceInDays: 'Vincitore tra {{days}}g {{hours}}h',
+    announceInHours: 'Vincitore tra {{hours}}h',
+    signInTitle: 'Crea un account per partecipare',
+    signInBody: 'Serve un account Analistas per partecipare al giveaway della maglia firmata.',
+    signInCta: 'Crea account',
+    empty: 'Presto nuovi sfondi qui',
+    unit_d: 'giorni',
+    unit_h: 'ore',
+    unit_m: 'min',
+    unit_s: 'sec',
+    savedOk: 'Sfondo salvato nelle tue foto',
   },
 
   // ── Match detail tabs ──────────────────────────────────────────────────────
@@ -75,6 +98,7 @@ const it: TranslationKeys = {
 
   // ── Match statuses ─────────────────────────────────────────────────────────
   matchStatus: {
+    etBreak: 'Supplementari',
     finished: 'FT',
     live: 'IN DIRETTA',
     halfTime: 'PT',
@@ -94,6 +118,27 @@ const it: TranslationKeys = {
     unmute: 'Attiva le notifiche per questa partita',
   },
 
+  liveActivity: {
+    title: 'Punteggio nella schermata di blocco',
+    on: 'Attivo',
+    off: 'Disattivato',
+    channelName: 'Punteggio in diretta',
+    limitedCoverageBody: 'Il fornitore di dati non copre questa partita in diretta. Il punteggio sulla schermata di blocco potrebbe non aggiornarsi.',
+    activateAnyway: 'Attiva comunque',
+  },
+
+  matchShare: {
+    live: '⚽ {{score}} · {{league}}\nSi gioca ORA! Seguila in diretta su Analistas 👉 {{url}}',
+    finished: '⚽ Finale: {{score}} · {{league}}\nRivivi la partita su Analistas 👉 {{url}}',
+    scheduled: '⚽ {{match}} · {{league}}\nSeguila in diretta su Analistas 👉 {{url}}',
+  },
+
+  promoBanner: {
+    title: 'Iniziano i sedicesimi del Mondiale!',
+    body: 'Segui le tue nazionali preferite per ricevere gol, formazioni e risultati.',
+    cta: 'Segui le mie squadre',
+  },
+
   notifications: {
     title: 'Notifiche',
     introTitle: 'Decidi tu cosa ti interrompe',
@@ -108,6 +153,11 @@ const it: TranslationKeys = {
     sectionMatchState: 'Stato della partita',
     sectionEstadio: 'Modalità Stadio',
     goals: 'Gol',
+    goalsDescription: 'Inclusi i gol annullati dal VAR.',
+    cards: 'Cartellini',
+    cardsDescription: 'Gialli e rossi.',
+    matchFlow: 'Andamento e fine partita',
+    matchFlowDescription: 'Intervallo, secondo tempo, fine partita, sostituzioni, supplementari e rigori.',
     yellowCards: 'Cartellini gialli',
     redCards: 'Cartellini rossi',
     substitutions: 'Sostituzioni',
@@ -456,6 +506,7 @@ const it: TranslationKeys = {
     trialBannerBold: 'Prova 7 giorni gratis',
     trialBannerBody: 'con il piano annuale — cancella prima del 7° giorno e non paghi nulla.',
     cancelAnytime: 'Cancella quando vuoi · Senza vincoli',
+    storeUnavailable: 'Gli abbonamenti non sono al momento disponibili. Riprova più tardi.',
     restore: 'Sei già titolare? Ripristina il tuo acquisto',
     termsPrivacy: "Termini di utilizzo · Informativa sulla privacy",
     iconCardTitle: 'Personalizza la tua icona',
@@ -635,6 +686,9 @@ const it: TranslationKeys = {
     noTeams: 'Nessuna squadra disponibile',
     teamsTitle: 'Squadre ({{count}})',
     noFixtures: 'Nessuna partita recente o in programma',
+    friendlies: 'Amichevoli',
+    friendly: 'Amichevole',
+    showMoreMatches: 'Mostra altre partite ({{count}})',
     upcomingFixtures: 'Prossime partite',
     recentResults: 'Risultati recenti',
     live: 'IN DIRETTA',
@@ -661,6 +715,8 @@ const it: TranslationKeys = {
 
   // ── Lineup tab ─────────────────────────────────────────────────────────────
   lineup: {
+    saveImage: 'Salva',
+    savedOk: 'Formazione salvata nelle tue foto',
     shareLineup: 'Condividi formazione',
     noLineup: 'Nessuna formazione disponibile',
     confirmed: 'Formazione confermata',
@@ -680,6 +736,14 @@ const it: TranslationKeys = {
     sidelinedOther: 'Non disponibile',
   },
 
+  // ── Low data coverage ───────────────
+  dataCoverage: {
+    limitedFriendly: 'Amichevole precampionato — copertura dati limitata',
+    limitedGeneric: 'Copertura dati limitata',
+    lineupBody: 'Il fornitore di dati non ha pubblicato le formazioni di questa partita. Il punteggio resta aggiornato.',
+    statsBody: 'Il fornitore di dati non ha registrato statistiche dettagliate per questa partita. Il punteggio resta aggiornato.',
+  },
+
   // ── Match info tab ─────────────────────────────────────────────────────────
   matchInfo: {
     coachDetail: 'Profilo dell\'allenatore',
@@ -695,6 +759,7 @@ const it: TranslationKeys = {
     foulsPerMatch: 'Falli / partita',
     penaltiesPerMatch: 'Rigori / partita',
     totalMatches: 'Partite arbitrate',
+    whereToWatch: 'Dove vedere la partita',
     nationality: 'Nazionalità',
     birthDate: 'Data di nascita',
     loadingProfile: 'Caricamento profilo...',

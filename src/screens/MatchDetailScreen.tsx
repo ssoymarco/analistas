@@ -14,10 +14,12 @@ import {
   Modal,
   Pressable,
   PanResponder,
+  Share,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import { haptics } from '../utils/haptics';
+import { deadStateLabelKey, isPreKickoffStateId } from '../utils/deadState';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { SkeletonMatchDetail } from '../components/Skeleton';
@@ -36,7 +38,7 @@ import { useLiveTick, computeLiveMinuteSeconds, formatLiveClock } from '../hooks
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
-import { getLeagueConfig, getLeagueDisplayName }  from '../config/leagues';
+import { getLeagueConfig, getLeagueDisplayName, isFriendliesLeague }  from '../config/leagues';
 import { translateNationalTeam } from '../utils/nationalTeams';
 import { EnVivoTab, predictionsCarouselDragging } from './matchDetail/EnVivoTab';
 import { PreviewTab }      from './matchDetail/PreviewTab';
@@ -233,9 +235,17 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   // Prefer the API-fresh match (real score, correct minute) over the prop (may be time-inferred)
   const displayMatch = liveMatch ?? match;
 
-  const rawIsLive        = displayMatch.status === 'live';
-  const rawIsFinished    = displayMatch.status === 'finished';
-  const rawIsScheduled   = displayMatch.status === 'scheduled';
+  // Retraso pre-partido (SM 16 DELAYED / 13 TBA / 26 PENDING): llega como
+  // 'finished' — mapeo deliberado del servidor para que el reloj no se dispare
+  // (ver utils/deadState.ts) — pero el balón NO ha rodado. Se trata como PREVIA
+  // y, crítico, se excluye del latch `startedRef` de abajo: si no, el primer
+  // snapshot retrasado dejaba la pantalla clavada en "Finalizado · 0 – 0" para
+  // siempre, incluso cuando el partido arrancaba de verdad una hora después.
+  const isPreKickoffDelay = isPreKickoffStateId(displayMatch.stateId);
+
+  const rawIsLive        = displayMatch.status === 'live'      && !isPreKickoffDelay;
+  const rawIsFinished    = displayMatch.status === 'finished'  && !isPreKickoffDelay;
+  const rawIsScheduled   = displayMatch.status === 'scheduled' ||  isPreKickoffDelay;
   const rawIsInterrupted = displayMatch.status === 'interrupted';
 
   // ── Sticky "match is past kick-off" ─────────────────────────────────────
@@ -449,6 +459,31 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     setEstadioSheetVisible(true);
   }, []);
 
+  // ── Compartir partido ──────────────────────────────────────────────────────
+  // Hoja nativa con texto según el estado + link universal get.analistasapp.com
+  // (redirige a la tienda correcta por dispositivo — un iPhone puede compartir
+  // a un Android sin link roto). El botón existía sin onPress desde el diseño
+  // original (reporte del dueño, 4 jul 2026).
+  const handleShare = useCallback(async () => {
+    haptics.light();
+    const home = translateNationalTeam(displayMatch.homeTeam.name);
+    const away = translateNationalTeam(displayMatch.awayTeam.name);
+    // Liga: singular "Amistoso" para UN partido (mismo criterio que las
+    // notificaciones del backend); resto vía display name curado.
+    const league = isFriendliesLeague(displayMatch.league)
+      ? t('league.friendly')
+      : getLeagueDisplayName(displayMatch.leagueId ?? match.leagueId, displayMatch.league || match.league);
+    const url = 'https://get.analistasapp.com';
+    const message = isLive
+      ? t('matchShare.live', { score: `${home} ${displayMatch.homeScore}-${displayMatch.awayScore} ${away}`, league, url })
+      : isFinished
+        ? t('matchShare.finished', { score: `${home} ${displayMatch.homeScore}-${displayMatch.awayScore} ${away}`, league, url })
+        : t('matchShare.scheduled', { match: `${home} vs ${away}`, league, url });
+    try {
+      await Share.share({ message });
+    } catch { /* usuario canceló la hoja — no-op */ }
+  }, [displayMatch, match.leagueId, match.league, isLive, isFinished, t]);
+
   // Called from the mini-sheet toggle switch: toggle global Modo Estadio.
   const handleToggleEstadioGlobal = useCallback(() => {
     haptics.medium();
@@ -583,14 +618,18 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
             style={scr.navCenter}
             activeOpacity={0.7}
             onPress={() => navigation.push('LeagueDetail', {
-              leagueId: Number(match.leagueId) || 0,
-              leagueName: match.league,
-              seasonId: match.seasonId,
-              leagueLogo: `https://cdn.sportmonks.com/images/soccer/leagues/${match.leagueId}.png`,
+              leagueId: Number(displayMatch.leagueId ?? match.leagueId) || 0,
+              leagueName: displayMatch.league || match.league,
+              seasonId: displayMatch.seasonId ?? match.seasonId,
+              leagueLogo: `https://cdn.sportmonks.com/images/soccer/leagues/${displayMatch.leagueId ?? match.leagueId}.png`,
             })}
           >
             <Text style={[scr.navLeague, { color: hText }]} numberOfLines={1}>
-              <Text style={[scr.navLeagueBold, { color: hText }]}>{getLeagueDisplayName(match.leagueId, match.league)}</Text>
+              {/* displayMatch (hidratado) primero: al entrar por deep link del
+                  Live Activity o por tap de notificación, el `match` del route
+                  param es un STUB con league vacía — el header quedaba sin
+                  torneo hasta re-entrar normal (reporte del dueño, 4 jul). */}
+              <Text style={[scr.navLeagueBold, { color: hText }]}>{getLeagueDisplayName(displayMatch.leagueId ?? match.leagueId, displayMatch.league || match.league)}</Text>
               {'  '}
               <Text style={[scr.navRound, { color: hTextSoft }]}>·  {t('matches.matchday')}</Text>
             </Text>
@@ -615,7 +654,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           >
             <Text style={{ fontSize: 15, opacity: estadioGlobalActive ? 1 : 0.5 }}>🏟️</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[scr.navBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7}>
+          <TouchableOpacity style={[scr.navBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7} onPress={handleShare}>
             <ShareIcon color={hText} size={16} />
           </TouchableOpacity>
         </View>
@@ -645,6 +684,8 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                 <Text style={scr.livePillText}>
                   {displayMatch.stateLabel === 'HT'
                     ? t('matchStatus.halfTimeLong')
+                    : displayMatch.stateLabel === 'ETB'
+                    ? t('matchStatus.etBreak')
                     : displayMatch.stateLabel === 'PEN'
                     ? `EN VIVO · ${t('matchStatus.penalties', { defaultValue: 'Penales' })}`
                     : `EN VIVO · ${liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`}`}
@@ -678,12 +719,19 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               )
             )}
 
-            {/* Finished label */}
-            {isFinished && (
-              <View style={[scr.timeCapsule, { backgroundColor: hCapsuleBg }]}>
-                <Text style={[scr.timeText, { color: hTextSoft }]}>Finalizado</Text>
-              </View>
-            )}
+            {/* Finished label — "Cancelado"/"Aplazado" si SM lo marcó muerto
+                (el status es 'finished' para no disparar el reloj, pero la
+                etiqueta debe ser honesta). Ver utils/deadState.ts. */}
+            {isFinished && (() => {
+              const deadKey = deadStateLabelKey(displayMatch.stateId);
+              return (
+                <View style={[scr.timeCapsule, { backgroundColor: hCapsuleBg }]}>
+                  <Text style={[scr.timeText, { color: hTextSoft }]}>
+                    {deadKey ? t(deadKey) : 'Finalizado'}
+                  </Text>
+                </View>
+              );
+            })()}
 
             {/* Badges row */}
             <View style={scr.badgesRow}>
@@ -917,6 +965,8 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
               {isLive
                 ? displayMatch.stateLabel === 'HT'
                   ? t('matchStatus.halfTimeLong')
+                  : displayMatch.stateLabel === 'ETB'
+                  ? t('matchStatus.etBreak')
                   : displayMatch.stateLabel === 'PEN'
                   ? t('matchStatus.penalties', { defaultValue: 'Penales' })
                   : liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`

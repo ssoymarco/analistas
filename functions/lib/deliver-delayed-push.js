@@ -74,23 +74,37 @@ exports.deliverDelayedPush = (0, tasks_1.onTaskDispatched)({
     timeoutSeconds: 30,
 }, async (req) => {
     const p = req.data;
-    // ── VAR guard (goal events only) ─────────────────────────────────────────
-    // If the score has decreased since the task was enqueued, the goal was
-    // cancelled by VAR. Skip the notification so delayed-bucket subscribers
-    // never receive a spoiler for a disallowed goal.
-    if (p.changeType === 'goal') {
+    // ── VAR guard (goles Y rojas) ────────────────────────────────────────────
+    // Si el evento fue revocado entre el encolado y la entrega, se descarta el
+    // push: quien está en un bucket retrasado todavía no sabe nada, así que lo
+    // correcto es callar, no corregir algo que nunca vio.
+    //
+    // Las ROJAS no estaban cubiertas (el guard era `changeType === 'goal'`).
+    // Resultado real: en Atlante vs América (24 jul 2026) la roja a Rodolfo
+    // Cota se revocó, y un usuario en `_d10` la habría recibido diez minutos
+    // después, ya revocada, sin nada que lo detuviera. Requiere que mappers.ts
+    // escriba homeRedCards/awayRedCards en el doc — antes no existían.
+    if (p.changeType === 'goal' || p.changeType === 'redCard') {
         try {
             const snap = await admin_init_1.db.doc(`matches/${p.matchId}`).get();
             if (snap.exists) {
                 const curr = snap.data();
-                const currTotal = (curr.homeScore ?? 0) + (curr.awayScore ?? 0);
-                const taskTotal = p.homeScore + p.awayScore;
-                if (currTotal < taskTotal) {
+                const isGoal = p.changeType === 'goal';
+                const currTotal = isGoal
+                    ? (curr.homeScore ?? 0) + (curr.awayScore ?? 0)
+                    : (curr.homeRedCards ?? 0) + (curr.awayRedCards ?? 0);
+                const taskTotal = isGoal
+                    ? p.homeScore + p.awayScore
+                    : (p.homeRedCards ?? 0) + (p.awayRedCards ?? 0);
+                // Rojas: si la tarea no trae el conteo (encolada por una versión
+                // anterior del código), no hay contra qué comparar → entregar.
+                const comparable = isGoal || p.homeRedCards != null;
+                if (comparable && currTotal < taskTotal) {
                     logger.info('🚫 VAR guard: delayed push suppressed', {
                         matchId: p.matchId, topic: p.topic,
-                        taskTotal, currTotal,
+                        changeType: p.changeType, taskTotal, currTotal,
                     });
-                    return; // drop — VAR cancelled the goal
+                    return; // drop — el evento fue revocado
                 }
             }
         }
@@ -119,7 +133,7 @@ exports.deliverDelayedPush = (0, tasks_1.onTaskDispatched)({
             },
             apns: {
                 headers: { 'apns-collapse-id': p.dedupId },
-                payload: { aps: { sound: 'default', badge: 0 } },
+                payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } },
             },
         });
         logger.info(`⏰ Delayed push delivered → ${p.topic}`, {

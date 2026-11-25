@@ -7,6 +7,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, FlatList, SectionList,
+  PanResponder,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { haptics } from '../utils/haptics';
@@ -113,9 +114,9 @@ const POPULAR_TEAMS: FavItem[] = [
 ];
 
 const POPULAR_LEAGUES: FavItem[] = [
-  { id: '743',  name: 'Liga MX',              subtitle: 'México',           emoji: '🇲🇽', smId: 743 },
-  { id: '8',    name: 'Premier League',       subtitle: 'Inglaterra',       emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', smId: 8 },
-  { id: '564',  name: 'La Liga',              subtitle: 'España',           emoji: '🇪🇸', smId: 564 },
+  { id: '743',  name: 'Liga MX',              subtitle: 'México',           emoji: '🇲🇽', smId: 743,  searchAliases: ['ligamx', 'liga mexicana', 'apertura', 'clausura'] },
+  { id: '8',    name: 'Premier League',       subtitle: 'Inglaterra',       emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', smId: 8,    searchAliases: ['epl', 'liga inglesa'] },
+  { id: '564',  name: 'La Liga',              subtitle: 'España',           emoji: '🇪🇸', smId: 564,  searchAliases: ['laliga', 'liga espanola', 'liga española'] },
   { id: '384',  name: 'Serie A',              subtitle: 'Italia',           emoji: '🇮🇹', smId: 384 },
   { id: '82',   name: 'Bundesliga',           subtitle: 'Alemania',         emoji: '🇩🇪', smId: 82 },
   { id: '301',  name: 'Ligue 1',              subtitle: 'Francia',          emoji: '🇫🇷', smId: 301 },
@@ -226,7 +227,8 @@ const LOAD_MORE_COUNT   = 10;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Two-letter abbreviation for initials fallback */
-function abbrev(name: string): string {
+function abbrev(name: string | null | undefined): string {
+  if (!name) return '??';
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return name.slice(0, 2).toUpperCase();
@@ -469,6 +471,29 @@ export const FavoritosScreen: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<Tab>('equipos');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // ── Swipe entre tabs (Equipos ↔ Ligas ↔ Jugadores) ──
+  // Mismo patrón que MatchDetail/LeagueDetail; al cambiar limpia la búsqueda
+  // igual que el tap en CategoryTabs.
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const tabSwipe = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+      onPanResponderRelease: (_, g) => {
+        const dir = g.dx <= -55 ? 1 : g.dx >= 55 ? -1 : 0;
+        if (!dir) return;
+        const keys: Tab[] = ['equipos', 'ligas', 'jugadores'];
+        const next = keys.indexOf(activeTabRef.current) + dir;
+        if (next >= 0 && next < keys.length) {
+          setActiveTab(keys[next]);
+          setSearchQuery('');
+          setDebouncedQuery('');
+        }
+      },
+    }),
+  ).current;
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [suggestedVisible, setSuggestedVisible] = useState(INITIAL_SUGGESTED);
@@ -967,6 +992,7 @@ export const FavoritosScreen: React.FC = () => {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={st.scrollContent}
+          {...tabSwipe.panHandlers}
         >
           {/* ── SEARCH MODE ── */}
           {searchResults !== null && (

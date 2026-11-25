@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as Notifications from 'expo-notifications';
 import { navigationRef, navigateToMatch, buildMatchStubFromPayload, flushPendingMatchNavigation } from '../utils/navigationRef';
+import { requestMatchMuteFromNotification } from '../contexts/NotificationPrefsContext';
 import { logScreenView } from '../services/analytics';
 import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -15,6 +16,8 @@ import { OnboardingScreen } from '../screens/onboarding/OnboardingScreen';
 import { PartidosScreen } from '../screens/PartidosScreen';
 import { FavoritosScreen } from '../screens/FavoritosScreen';
 import { NoticiasScreen } from '../screens/NoticiasScreen';
+import { WallpapersScreen } from '../screens/WallpapersScreen';
+import { useWallpapersFeature } from '../hooks/useWallpapersFeature';
 import { NewsDetailScreen } from '../screens/NewsDetailScreen';
 import { PerfilScreen } from '../screens/PerfilScreen';
 import { HazteTitularScreen } from '../screens/HazteTitularScreen';
@@ -107,6 +110,7 @@ export type RootTabParamList = {
   Partidos: undefined;
   Favoritos: undefined;
   Noticias: undefined;
+  Wallpapers: undefined;
   Perfil: undefined;
 };
 
@@ -316,6 +320,9 @@ const TAB_ICONS: Record<string, (color: string, focused: boolean) => React.React
   Partidos:  (color)          => <PartidosIcon color={color} />,
   Favoritos: (color, focused) => <FavoritosIcon color={color} focused={focused} />,
   Noticias:  (color)          => <NoticiasIcon color={color} />,
+  // Wallpapers ocupa el slot de Noticias cuando el interruptor remoto
+  // _meta/wallpapers.enabled está encendido (Fase 1 concurso de jerseys).
+  Wallpapers: (color)         => <NoticiasIcon color={color} />,
   Perfil:    (color)          => <PerfilIcon color={color} />,
 };
 
@@ -323,6 +330,10 @@ function MainTabs() {
   const c = useThemeColors();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  // Interruptor remoto: Wallpapers (concurso de jerseys) reemplaza Noticias
+  // sin OTA; apagarlo restaura Noticias. Espejado en AsyncStorage para que
+  // el tab correcto aparezca desde el primer frame en arranques posteriores.
+  const { enabled: wallpapersEnabled } = useWallpapersFeature();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -373,7 +384,11 @@ function MainTabs() {
         options={{ tabBarLabel: t('nav.matches') }}
       />
       <Tab.Screen name="Favoritos" component={FavoritosNavigator} options={{ tabBarLabel: t('nav.favorites') }} />
-      <Tab.Screen name="Noticias"  component={NoticiasNavigator}  options={{ tabBarLabel: t('nav.news') }} />
+      {wallpapersEnabled ? (
+        <Tab.Screen name="Wallpapers" component={WallpapersScreen} options={{ tabBarLabel: t('nav.wallpapers') }} />
+      ) : (
+        <Tab.Screen name="Noticias"  component={NoticiasNavigator}  options={{ tabBarLabel: t('nav.news') }} />
+      )}
       <Tab.Screen name="Perfil"    component={PerfilNavigator}     options={{ tabBarLabel: t('nav.profile') }} />
     </Tab.Navigator>
   );
@@ -470,6 +485,15 @@ export const AppNavigator: React.FC = () => {
     Notifications.getLastNotificationResponseAsync().then(response => {
       if (!response) return;
       const data = response.notification.request.content.data as Record<string, unknown>;
+      // La acción "Silenciar este partido" no debe abrir el partido. Además,
+      // si la app estaba MUERTA cuando iOS entregó la acción, el listener
+      // vivo de App.tsx pudo no dispararse — re-aplicar el mute aquí es
+      // idempotente (nunca des-silencia), así que cubre ese hueco sin riesgo.
+      if (response.actionIdentifier === 'MUTE_MATCH') {
+        const matchId = typeof data?.matchId === 'string' ? data.matchId : null;
+        if (matchId) requestMatchMuteFromNotification(matchId);
+        return;
+      }
       const match = buildMatchStubFromPayload(data);
       if (match) navigateToMatch(match);
     }).catch(() => {});

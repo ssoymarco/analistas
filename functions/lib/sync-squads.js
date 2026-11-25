@@ -53,6 +53,7 @@ exports.syncSquadsHandler = syncSquadsHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
 const config_1 = require("./config");
+const sync_league_seasons_1 = require("./sync-league-seasons");
 const sportmonks_1 = require("./sportmonks");
 const SLEEP_BETWEEN_TEAMS_MS = 250;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -77,11 +78,12 @@ function mapPlayerToDoc(sp) {
 }
 async function syncSquadsHandler() {
     logger.info(`📋 syncSquads: starting for ${config_1.LEAGUES.length} leagues`);
+    const seasonMap = await (0, sync_league_seasons_1.getCurrentSeasonMap)();
     let totalSquads = 0;
     let totalPlayers = 0;
     let teamErrors = 0;
     for (const league of config_1.LEAGUES) {
-        const seasonId = league.currentSeasonId;
+        const seasonId = seasonMap.get(league.id) ?? league.currentSeasonId;
         if (seasonId == null)
             continue;
         let teams;

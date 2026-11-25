@@ -166,6 +166,35 @@ export function captureError(error: unknown, context?: Record<string, unknown>):
 }
 
 /**
+ * Reporta un rechazo de escritura Firestore SIN pasar por los filtros de ruido.
+ *
+ * ⚠️ Este helper existe por el bug de favoritos del 3 jul 2026: las reglas
+ * rechazaban todas las escrituras de favoritos durante SEMANAS y fue invisible
+ * porque (a) el cliente los tragaba con catch(() => {}) y (b) beforeSend +
+ * ignoreErrors filtran el string "Missing or insufficient permissions" — que
+ * captureException incluiría. Por eso aquí se usa captureMessage con un string
+ * PROPIO (el código de error, no el mensaje crudo), que sí pasa los filtros.
+ * Úsalo en TODO catch de escritura a Firestore que antes fuera silencioso.
+ */
+export function captureFirestoreRejection(op: string, error: unknown): void {
+  try {
+    const code = (error as { code?: string })?.code ?? 'unknown';
+    // 'unavailable' = el SDK está offline (sin red) — esperado y no accionable,
+    // NO un bug de reglas. Reportarlo solo infla Sentry sin ayudar (visto el
+    // 4 jul 2026: favorites.reconcile [unavailable], ruido puro).
+    if (code === 'unavailable') return;
+    Sentry.withScope(scope => {
+      scope.setTag('firestore_op', op);
+      scope.setExtra('code', code);
+      scope.setExtra('message', String((error as Error)?.message ?? error));
+      Sentry.captureMessage(`firestore_write_rejected: ${op} [${code}]`, 'error');
+    });
+  } catch {
+    // el reporting jamás debe romper al caller
+  }
+}
+
+/**
  * Add a breadcrumb — a breadcrumb trail that appears before a crash.
  * Helps understand WHAT the user did before the error.
  *

@@ -23,8 +23,10 @@ import { radius } from '../theme/tokens';
 // ── Pill picker options ────────────────────────────────────────────────────
 /** Minutes-before-kickoff offered by the pre-match reminder picker. */
 const MATCH_REMINDER_OPTIONS = [5, 15, 30] as const;
-/** Delay options for Modo Estadio (broadcast lag compensation). */
-const ESTADIO_DELAY_OPTIONS  = [1, 2, 5, 10] as const;
+/** Delay options for Modo Estadio. SOLO valores con bucket real en el servidor
+ *  (d2/d5/d10) — la opción "1 min" suscribía al bucket fantasma d1 que el
+ *  servidor jamás publica y silenciaba TODO (auditoría 10 jul 2026). */
+const ESTADIO_DELAY_OPTIONS  = [2, 5, 10] as const;
 
 // ── Row primitives ─────────────────────────────────────────────────────────
 
@@ -111,12 +113,29 @@ export const NotificationSettingsScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const navigation = useNavigation();
-  const { prefs, togglePref, setEstadioDelay, setMatchReminderMinutes } = useNotificationPrefs();
+  const { prefs, togglePref, updatePrefs, setEstadioDelay, setMatchReminderMinutes } = useNotificationPrefs();
 
   const handleClose = useCallback(() => { haptics.light(); navigation.goBack(); }, [navigation]);
 
   type ToggleKey = Parameters<typeof togglePref>[0];
   const toggle = useCallback((key: ToggleKey) => () => togglePref(key), [togglePref]);
+
+  // ── Toggles agrupados a la granularidad REAL de los topics FCM ────────────
+  // El servidor solo distingue 6 clases por equipo; prometer más fino que eso
+  // era mentirle al usuario (los pushes de background no se pueden filtrar).
+  // "Tarjetas" = topic team_X_cards (amarillas Y rojas viajan juntas).
+  const cardsOn = prefs.yellowCards || prefs.redCards;
+  const toggleCards = useCallback(() => {
+    const next = !(prefs.yellowCards || prefs.redCards);
+    updatePrefs({ yellowCards: next, redCards: next });
+  }, [prefs.yellowCards, prefs.redCards, updatePrefs]);
+  // "Desarrollo y final" = topic team_X_live (MT, 2ºT, final, cambios,
+  // prórroga, penales y suspensión viajan juntos).
+  const flowOn = prefs.halftime || prefs.matchEnd || prefs.substitutions;
+  const toggleFlow = useCallback(() => {
+    const next = !(prefs.halftime || prefs.matchEnd || prefs.substitutions);
+    updatePrefs({ halftime: next, matchEnd: next, substitutions: next, var: next });
+  }, [prefs.halftime, prefs.matchEnd, prefs.substitutions, updatePrefs]);
 
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: c.bg }]} edges={['top']}>
@@ -177,22 +196,19 @@ export const NotificationSettingsScreen: React.FC = () => {
           />
         )}
 
-        {/* In-match events */}
+        {/* In-match events — agrupados a la granularidad real de los topics
+            FCM (6 clases por equipo). Ver auditoría 10 jul 2026. */}
         <SectionHeader label={t('notifications.sectionEvents')} />
         <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <ToggleRow icon="⚽" label={t('notifications.goals')} value={prefs.goals} onValueChange={toggle('goals')} c={c} />
-          <ToggleRow icon="🟨" label={t('notifications.yellowCards')} value={prefs.yellowCards} onValueChange={toggle('yellowCards')} c={c} />
-          <ToggleRow icon="🟥" label={t('notifications.redCards')} value={prefs.redCards} onValueChange={toggle('redCards')} c={c} />
-          <ToggleRow icon="🔄" label={t('notifications.substitutions')} value={prefs.substitutions} onValueChange={toggle('substitutions')} c={c} />
-          <ToggleRow icon="🏳️" label={t('notifications.var')} description={t('notifications.varDescription')} value={prefs.var} onValueChange={toggle('var')} c={c} isLast />
+          <ToggleRow icon="⚽" label={t('notifications.goals')} description={t('notifications.goalsDescription')} value={prefs.goals} onValueChange={toggle('goals')} c={c} />
+          <ToggleRow icon="🟨" label={t('notifications.cards')} description={t('notifications.cardsDescription')} value={cardsOn} onValueChange={toggleCards} c={c} />
+          <ToggleRow icon="🔄" label={t('notifications.matchFlow')} description={t('notifications.matchFlowDescription')} value={flowOn} onValueChange={toggleFlow} c={c} isLast />
         </View>
 
         {/* Match state */}
         <SectionHeader label={t('notifications.sectionMatchState')} />
         <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
           <ToggleRow icon="🏁" label={t('notifications.matchStart')} value={prefs.matchStart} onValueChange={toggle('matchStart')} c={c} />
-          <ToggleRow icon="⏱️" label={t('notifications.halftime')} value={prefs.halftime} onValueChange={toggle('halftime')} c={c} />
-          <ToggleRow icon="🏆" label={t('notifications.matchEnd')} value={prefs.matchEnd} onValueChange={toggle('matchEnd')} c={c} />
           <ToggleRow icon="📋" label={t('notifications.lineups')} description={t('notifications.lineupsDescription')} value={prefs.lineups} onValueChange={toggle('lineups')} c={c} isLast />
         </View>
 

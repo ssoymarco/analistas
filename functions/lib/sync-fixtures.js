@@ -47,8 +47,10 @@ exports.syncFixturesHandler = syncFixturesHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
 const sportmonks_1 = require("./sportmonks");
+const sync_match_enrichment_1 = require("./sync-match-enrichment");
 const mappers_1 = require("./mappers");
 const season_fixtures_index_1 = require("./season-fixtures-index");
+const kickoff_delays_1 = require("./kickoff-delays");
 /**
  * Format a Date as 'YYYY-MM-DD' in UTC.
  */
@@ -92,13 +94,26 @@ async function syncFixturesHandler(explicitDates) {
     const dates = explicitDates && explicitDates.length > 0 ? explicitDates : getTargetDates();
     logger.info(`📅 syncFixtures: syncing ${dates.length} dates (all leagues)${explicitDates ? ' [backfill mode]' : ''}`);
     const allMatchDocs = [];
+    const venueOverrides = await (0, sync_match_enrichment_1.loadMatchVenueOverrides)();
     for (const date of dates) {
         try {
             const fixtures = await (0, sportmonks_1.fetchFixturesByDate)(date);
             for (const fixture of fixtures) {
                 const doc = (0, mappers_1.mapFixtureToMatchDoc)(fixture);
-                if (doc)
+                if (doc) {
+                    // Override curado por-partido (_meta/matchVenueOverrides): sede REAL
+                    // de partidos donde SM miente sin bandera (Tigres vs RSL "en el
+                    // Universitario" jugándose en Sandy, Utah — 4 ago 2026). Se re-aplica
+                    // en cada sync para que la ventana de 15 días no lo pise.
+                    const ov = venueOverrides.get(doc.id);
+                    if (ov) {
+                        if (ov.name !== undefined)
+                            doc.venueName = ov.name;
+                        if (ov.city !== undefined)
+                            doc.venueCity = ov.city;
+                    }
                     allMatchDocs.push(doc);
+                }
             }
         }
         catch (err) {
@@ -110,6 +125,9 @@ async function syncFixturesHandler(explicitDates) {
         logger.info('📅 syncFixtures: no fixtures found');
         return;
     }
+    // Aviso de retraso pre-partido: comparar la hora nueva contra la que aún
+    // está en Firestore ANTES de sobrescribirla. No-fatal (nunca frena el sync).
+    await (0, kickoff_delays_1.notifyKickoffDelays)(allMatchDocs).catch(err => logger.error('notifyKickoffDelays falló (non-fatal):', err));
     const batches = [];
     let currentBatch = admin_init_1.db.batch();
     let opCount = 0;

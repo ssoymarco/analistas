@@ -50,13 +50,43 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.pollLivescoresHandler = pollLivescoresHandler;
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
+const crypto_1 = require("crypto");
 const config_1 = require("./config");
 const sportmonks_1 = require("./sportmonks");
 const mappers_1 = require("./mappers");
 const detect_changes_1 = require("./detect-changes");
+const sync_match_enrichment_1 = require("./sync-match-enrichment");
+const live_activities_1 = require("./live-activities");
 /** Utility: sleep for N milliseconds */
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+// ── Skip-unchanged writes (auditoría de costos, 8 jul 2026) ──────────────────
+// Antes: CADA poll (cada ~4s) escribía TODOS los partidos vivos a Firestore,
+// hubiera cambiado algo o no — y `updatedAt`/`detailUpdatedAt` se re-generaban
+// en cada mapeo, así que el doc "siempre cambiaba". Cada escritura abanica el
+// documento COMPLETO (~260 KB con el blob `detail`) a cada listener del feed y
+// de la pantalla de detalle → 708 GiB de egress + 50M lecturas en 8 días.
+//
+// Ahora: se calcula un fingerprint del doc EXCLUYENDO los campos volátiles
+// (updatedAt, detailUpdatedAt) Y el blob `detail` (las estadísticas en vivo
+// micro-cambian casi cada poll y anularían el ahorro). Solo se escribe cuando
+// el fingerprint cambia. Consecuencias deliberadas:
+//   · Goles, tarjetas-por-marcador, cambios de estado/periodo → escritura
+//     INMEDIATA (cambian el core).
+//   · `minute` cambia cada ~60s → cada escritura por minuto lleva de paso el
+//     `detail` fresco (stats/eventos ≤60s de rezago; las notificaciones NO
+//     dependen de esto — salen de detectChanges, que es pre-escritura).
+//   · Medio tiempo / pausas: minuto congelado → CERO escrituras (antes: 15/min
+//     × N partidos abanicando 260 KB a todos, con el partido detenido).
+const FINGERPRINT_EXCLUDED_KEYS = new Set(['updatedAt', 'detailUpdatedAt', 'detail']);
+function liveDocFingerprint(doc) {
+    const clean = {};
+    for (const [k, v] of Object.entries(doc)) {
+        if (!FINGERPRINT_EXCLUDED_KEYS.has(k))
+            clean[k] = v;
+    }
+    return (0, crypto_1.createHash)('sha256').update(JSON.stringify(clean)).digest('hex');
 }
 /**
  * Execute a single livescores poll cycle.
@@ -80,8 +110,15 @@ async function executeSinglePoll(pollIndex) {
     //     We only add each match once (live matches take precedence if somehow
     //     both appear).
     try {
-        const nowIso = new Date(startMs).toISOString();
-        const soonIso = new Date(startMs + 20 * 60 * 1000).toISOString();
+        // ⚠️ startingAtUtc se guarda en formato SM "YYYY-MM-DD HH:MM:SS" (espacio,
+        // sin sufijo). Los bounds DEBEN usar el mismo formato: un ISO con 'T'
+        // ordena lexicográficamente DESPUÉS del espacio (0x20 < 0x54), así que
+        // `startingAtUtc >= nowISO` jamás matcheaba partidos del mismo día — los
+        // recordatorios pre-partido y la fase 'pre' de Live Activities nunca
+        // recibían candidatos. (Hallazgo de la revisión adversarial, 3 jul 2026.)
+        const toSmUtc = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+        const nowIso = toSmUtc(startMs);
+        const soonIso = toSmUtc(startMs + 20 * 60 * 1000);
         const liveIds = new Set(matchDocs.map(m => m.id));
         const upcomingSnap = await admin_init_1.db.collection('matches')
             .where('status', '==', 'scheduled')
@@ -99,6 +136,13 @@ async function executeSinglePoll(pollIndex) {
         logger.warn('pollLivescores: upcoming-matches query failed', { err });
     }
     if (!matchDocs.length) {
+        // Sin partidos en el ciclo, el catch-up de Live Activities debe correr
+        // igual (1×/min): si el ÚLTIMO partido de la noche terminó y SM lo sacó
+        // de la lista antes de entregarse el FINAL, este es el único camino que
+        // rescata la Activity huérfana (incidente España-Bélgica, 10 jul 2026).
+        if (pollIndex === 1) {
+            await (0, live_activities_1.sendLiveActivityUpdates)([], { deepPass: true });
+        }
         logger.debug(`Poll ${pollIndex}: No live or upcoming matches`);
         return 0;
     }
@@ -106,15 +150,82 @@ async function executeSinglePoll(pollIndex) {
     //    too so the detector can pull scorer names and red-card events from
     //    the events array on the same response.
     const prevSnapshot = await (0, detect_changes_1.loadSnapshot)();
+    // 3b. Rescate de partidos que DESAPARECEN del feed inplay.
+    //     Un partido suspendido por tormenta sale del feed de livescores de SM
+    //     mientras dura la pausa — y si termina fuera del feed, nunca vemos la
+    //     transición live→FT: sin push de final, doc congelado en vivo hasta que
+    //     syncFixtures lo flipea en silencio (Inter Miami vs San Luis, 5 ago
+    //     2026: FT real ~02:45, doc en vivo "174'" hasta las 02:49, CERO
+    //     MATCHEND). Mismo patrón que España-Bélgica pero para pushes.
+    //
+    //     1×/min (poll 1), máx 3 por ciclo: cada partido del snapshot que estaba
+    //     'live' y ya no viene en el feed se re-consulta por id y se INYECTA al
+    //     flujo normal — si volvió FT dispara matchEnd por el camino de siempre
+    //     (con el gate de FINISHED_STATE_IDS); si está suspendido, el doc se
+    //     actualiza a Interrumpido (la app deja de tickear); si SM lo borró, el
+    //     fetch da null y la entrada expira del snapshot vía goneChecks.
+    if (pollIndex === 1 && prevSnapshot) {
+        const feedIds = new Set(matchDocs.map(m => m.id));
+        // Asentamiento post-final: re-enriquecer partidos recién terminados que ya
+        // salieron del feed, a ~1, 2, 5, 10 y 20 min del final. SM publica datos
+        // DESPUÉS del pitido — la atribución del anotador de un gol al 90+ y las
+        // rojas post-partido (bronca con el árbitro) — y para entonces ni el poll
+        // escribe (fuera del feed) ni la ventana hot del enrichment aplica si el
+        // kickoff se retrasó (por kickoff nominal expira ANTES del final: Hugo
+        // Cuypers 90+9' invisible en la app, Monterrey vs Orlando, 5 ago 2026).
+        // settleChecks avanza 1 por poll (~15/min) vía el carryover del snapshot.
+        const SETTLE_MARKS = new Set([1, 2, 5, 10, 20]); // minutos post-final
+        const settleIds = Object.entries(prevSnapshot)
+            .filter(([id, m]) => m.status === 'finished' && !feedIds.has(id) &&
+            SETTLE_MARKS.has(Math.round((m.settleChecks ?? 0) / 15)))
+            .map(([id]) => id)
+            .slice(0, 5);
+        if (settleIds.length > 0) {
+            try {
+                const r = await (0, sync_match_enrichment_1.enrichMatchesByIds)(settleIds);
+                logger.info(`🧾 settle post-final: ${settleIds.join(',')} → ${r.enriched} enriquecidos`);
+            }
+            catch (err) {
+                logger.warn('settle post-final falló', { err: String(err) });
+            }
+        }
+        const gone = Object.entries(prevSnapshot)
+            .filter(([id, m]) => m.status === 'live' && !feedIds.has(id))
+            .slice(0, 3);
+        for (const [id] of gone) {
+            try {
+                const fx = await (0, sportmonks_1.fetchFixtureById)(Number(id));
+                if (!fx)
+                    continue;
+                const doc = (0, mappers_1.mapFixtureToMatchDoc)(fx);
+                if (doc) {
+                    matchDocs.push(doc);
+                    smFixtures.push(fx);
+                    logger.info(`🔎 rescate: fixture ${id} fuera del feed → state ${fx.state_id}`);
+                }
+            }
+            catch (err) {
+                logger.warn(`rescate: fetch de fixture ${id} falló`, { err: String(err) });
+            }
+        }
+    }
     const changes = (0, detect_changes_1.detectChanges)(matchDocs, prevSnapshot, smFixtures);
-    // 4. Batch write to Firestore (max 500 per batch)
+    // 4. Batch write to Firestore (max 500 per batch) — SOLO los docs cuyo
+    //    fingerprint cambió desde el poll anterior (ver liveDocFingerprint).
     const batches = [];
     let currentBatch = admin_init_1.db.batch();
     let opCount = 0;
+    let written = 0;
+    const docHashes = new Map();
     for (const matchDoc of matchDocs) {
+        const fp = liveDocFingerprint(matchDoc);
+        docHashes.set(matchDoc.id, fp);
+        if (prevSnapshot?.[matchDoc.id]?.docHash === fp)
+            continue; // sin cambios → sin escritura
         const ref = admin_init_1.db.collection('matches').doc(matchDoc.id);
         currentBatch.set(ref, matchDoc, { merge: true });
         opCount++;
+        written++;
         if (opCount >= 499) {
             batches.push(currentBatch);
             currentBatch = admin_init_1.db.batch();
@@ -126,14 +237,20 @@ async function executeSinglePoll(pollIndex) {
     await Promise.all(batches.map(b => b.commit()));
     // 5. Save snapshot for next poll. The detector reads event counts off
     //    the fixtures' events array; we also pass the previous snapshot so
-    //    one-time flags (reminderSent, lineupsSent) are preserved across polls.
-    await (0, detect_changes_1.saveSnapshot)(matchDocs, smFixtures, prevSnapshot);
+    //    one-time flags (reminderSent, lineupsSent) are preserved across polls,
+    //    plus the doc fingerprints for the skip-unchanged write optimization.
+    await (0, detect_changes_1.saveSnapshot)(matchDocs, smFixtures, prevSnapshot, docHashes);
     // 6. Dispatch notifications for detected changes
     if (changes.length > 0) {
         await (0, detect_changes_1.dispatchNotifications)(changes);
     }
+    // 6b. Live Activities: empujar estado a lock screen / Dynamic Island de
+    //     quien sigue estos partidos. Autoblindada (nunca lanza) y solo envía
+    //     cuando el estado cambió — ver live-activities.ts. El paso profundo
+    //     (huérfanos + sweep TTL) corre 1×/min en el primer poll del ciclo.
+    await (0, live_activities_1.sendLiveActivityUpdates)(matchDocs, { deepPass: pollIndex === 1 });
     const elapsed = Date.now() - startMs;
-    logger.debug(`Poll ${pollIndex}: ${matchDocs.length} matches, ${changes.length} changes, ${elapsed}ms`);
+    logger.debug(`Poll ${pollIndex}: ${matchDocs.length} matches, ${changes.length} changes, ${written} written (${matchDocs.length - written} skipped), ${elapsed}ms`);
     return matchDocs.length;
 }
 /**

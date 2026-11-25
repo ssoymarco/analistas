@@ -289,4 +289,10 @@ export const FbTopics = {
   rivalBigLoss:    (teamId: string) => `fb_team_${teamId}_rival_bigloss`,
   rivalRedCard:    (teamId: string) => `fb_team_${teamId}_rival_redcard`,
   rivalPenMiss:    (teamId: string) => `fb_team_${teamId}_rival_penmiss`,
+  /** Followed PLAYER: goals (not own goals), red cards, starting XI. */
+  playerGoals:   (playerId: string) => `fb_player_${playerId}_goals`,
+  playerCards:   (playerId: string) => `fb_player_${playerId}_cards`,
+  playerLineups: (playerId: string) => `fb_player_${playerId}_lineups`,
+  /** "Silenciar este partido": devices subscribed here are excluded in FCM. */
+  mute: (matchId: string) => `fb_mute_${matchId}`,
 } as const;

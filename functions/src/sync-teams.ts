@@ -22,6 +22,7 @@
 import { admin, db } from './admin-init';
 import * as logger from 'firebase-functions/logger';
 import { LEAGUES } from './config';
+import { getCurrentSeasonMap } from './sync-league-seasons';
 import { fetchTeamsForSeason, type SMTeamFull } from './sportmonks';
 import type { TeamFullDoc } from './types';
 
@@ -87,14 +88,63 @@ function mapTeamToDoc(
   };
 }
 
+// ── Overrides curados de sede (_meta/venueOverrides) ─────────────────────────
+//
+// SportMonks mantiene un `venue` a nivel EQUIPO que se queda viejo cuando un
+// club se muda: el Atlante seguía publicado en el Estadio Olímpico Andrés
+// Quintana Roo (Cancún) mucho después de mudarse a CDMX — reporte del dueño,
+// 5 ago 2026.
+//
+// ⚠️ NO derivar la sede automáticamente de los partidos de local. Se intentó
+// (6 ago 2026, dos iteraciones) y la calidad de datos de SM lo vuelve ruido:
+// con 1 dato corrige Chelsea → Kai Tak Sports Park (amistoso en Hong Kong) y
+// Bayern → Olympiastadion Berlin (final de copa); aun exigiendo mayoría ≥2 y
+// excluyendo amistosos salen Brøndby → Kristianstad (Suecia), Ajax → Kras
+// Stadion (campo de entrenamiento) y Auxerre → Groupama Stadium (cancha del
+// Lyon) — mini-torneos de clasificación y fixtures con venue mal etiquetado.
+// No hay umbral que separe eso de una mudanza real.
+//
+// En su lugar: overrides CURADOS en `_meta/venueOverrides`, editables por REST
+// sin deploy (mismo patrón que el promo banner):
+//   { "7023": { "name": "Estadio Banorte", "city": "Ciudad de México",
+//               "capacity": 0, "image": "" } }
+// capacity 0 / image "" = el cliente oculta esa fila. El sync los re-aplica en
+// cada corrida, así el refresh diario de SM no los pisa.
+
+interface VenueOverride { name?: string; city?: string; capacity?: number; image?: string }
+
+async function loadVenueOverrides(): Promise<Map<string, VenueOverride>> {
+  const map = new Map<string, VenueOverride>();
+  try {
+    const snap = await db.doc('_meta/venueOverrides').get();
+    if (!snap.exists) return map;
+    for (const [teamId, ov] of Object.entries(snap.data() ?? {})) {
+      if (ov && typeof ov === 'object') map.set(teamId, ov as VenueOverride);
+    }
+  } catch (err) {
+    logger.warn('venueOverrides: lectura falló — se usan los datos de SM', { err: String(err) });
+  }
+  return map;
+}
+
+function applyVenueOverride(doc: TeamFullDoc, ov: VenueOverride): void {
+  if (ov.name !== undefined) doc.venueName = ov.name;
+  if (ov.city !== undefined) doc.venueCity = ov.city;
+  if (ov.capacity !== undefined) doc.venueCapacity = ov.capacity;
+  if (ov.image !== undefined) doc.venueImage = ov.image;
+}
+
 export async function syncTeamsHandler(): Promise<void> {
   logger.info(`👥 syncTeams: starting for ${LEAGUES.length} leagues`);
+  // Temporada actual dinámica (_meta/leagueSeasons); hardcode = fallback.
+  const seasonMap = await getCurrentSeasonMap();
+  const venueOverrides = await loadVenueOverrides();
 
   let totalTeams = 0;
   let leagueErrors = 0;
 
   for (const league of LEAGUES) {
-    const seasonId = league.currentSeasonId;
+    const seasonId = seasonMap.get(league.id) ?? league.currentSeasonId;
     if (seasonId == null) {
       logger.debug(`👥 syncTeams: skipping ${league.name} — no currentSeasonId`);
       continue;
@@ -112,8 +162,12 @@ export async function syncTeamsHandler(): Promise<void> {
       let current = db.batch();
       let opCount = 0;
 
+      let venuesFixed = 0;
+
       for (const team of teams) {
         const doc = mapTeamToDoc(team, league.id, league.name, seasonId);
+        const ov = venueOverrides.get(doc.id);
+        if (ov) { applyVenueOverride(doc, ov); venuesFixed++; }
         const ref = db.collection('teams').doc(doc.id);
         // `merge: true` is intentional — preserves overrides from other
         // sync paths (e.g. a future syncTeamSocial function adding twitter/
@@ -131,7 +185,8 @@ export async function syncTeamsHandler(): Promise<void> {
       await Promise.all(batches.map(b => b.commit()));
 
       totalTeams += teams.length;
-      logger.info(`  ✓ ${league.name}: ${teams.length} teams`);
+      logger.info(`  ✓ ${league.name}: ${teams.length} teams` +
+        (venuesFixed ? ` (${venuesFixed} override(s) de sede aplicado(s))` : ''));
 
       await sleep(SLEEP_BETWEEN_LEAGUES_MS); // rate-limit courtesy
     } catch (err) {

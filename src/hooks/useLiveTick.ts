@@ -97,8 +97,11 @@ export interface LiveDisplayTime {
  *   ET 2nd    (counts_from 105) → cap 120
  */
 function getPeriodNominalCap(periodMinuteOffset: number): number {
-  if (periodMinuteOffset >= 105) return 120;
-  if (periodMinuteOffset >= 90)  return 105;
+  // SM modela la PRÓRROGA como UN periodo (counts_from 90, ambos tiempos,
+  // minuto continuo 90→120 — igual que la TV). El tope 105 partía el periodo
+  // en dos y pintaba "105+11'" cuando la transmisión decía 111' (ARG-SUI,
+  // 11 jul 2026). Tope real del periodo: 120.
+  if (periodMinuteOffset >= 90)  return 120;
   if (periodMinuteOffset >= 45)  return 90;
   return 45;
 }
@@ -108,6 +111,28 @@ function getPeriodNominalCap(periodMinuteOffset: number): number {
  *  (period ended but the patch didn't arrive yet) and bail out. 15 is well
  *  above any real-world stoppage (the record is ~14 min, rare). */
 const MAX_STOPPAGE_MIN = 15;
+
+// ── Reloj suave para partidos SIN ancla del servidor ─────────────────────────
+// Algunos fixtures (sobre todo amistosos de bajo perfil) nunca traen el dato
+// de "período corriendo" de SportMonks, así que `match.liveClock` nunca se
+// llena (ver functions/src/mappers.ts:getLiveClockAnchor) — el minuto solo
+// avanza cuando llega un valor NUEVO del servidor, y sin esto los segundos se
+// quedan fijos en :00 entre actualizaciones (reporte del dueño, 11 jul 2026:
+// Chivas vs Universidad de Guadalajara mostró "69:00'" y dos minutos después
+// "71:00'", sin nada corriendo entre medio). Esto NO intenta ser preciso al
+// segundo real — solo hace que se sienta vivo: la primera vez que vemos un
+// minuto para un partido, guardamos el momento; mientras el servidor no
+// mande un minuto distinto, animamos 0→59 desde ahí.
+const softAnchors = new Map<string, { minute: number; seenAtMs: number }>();
+
+function softTickSeconds(matchId: string, minute: number, now: number): number {
+  const prev = softAnchors.get(matchId);
+  if (!prev || prev.minute !== minute) {
+    softAnchors.set(matchId, { minute, seenAtMs: now });
+    return 0;
+  }
+  return Math.min(59, Math.floor((now - prev.seenAtMs) / 1000));
+}
 
 /**
  * Compute the live broadcast minute + seconds from a Match and the current
@@ -121,7 +146,7 @@ const MAX_STOPPAGE_MIN = 15;
  * prevents "ghost ticking" during HT/end-of-period cache lag.
  */
 export function computeLiveMinuteSeconds(
-  match: Pick<Match, 'status' | 'minute' | 'stateLabel' | 'liveClock'>,
+  match: Pick<Match, 'id' | 'status' | 'minute' | 'stateLabel' | 'liveClock'>,
   now: number,
 ): LiveDisplayTime {
   const empty: LiveDisplayTime = {
@@ -132,11 +157,22 @@ export function computeLiveMinuteSeconds(
   if (match.stateLabel === 'HT') {
     return { minute: 45, seconds: 0, isHalfTime: true, isStoppage: false };
   }
+  // 'ETB' = terminaron los 90', viene prórroga (o entre tiempos extra) —
+  // reloj congelado, el caller pinta la etiqueta "Tiempos extra".
+  if (match.stateLabel === 'ETB') {
+    return { minute: 90, seconds: 0, isHalfTime: true, isStoppage: false };
+  }
 
   const anchor = match.liveClock;
   if (!anchor || anchor.periodStartedAt <= 0) {
-    // No anchor → use server's last-known minute without sub-minute precision.
-    return { minute: match.minute, seconds: 0, isHalfTime: false, isStoppage: false };
+    // Sin ancla del servidor → reloj suave (ver softTickSeconds arriba) en
+    // vez de segundos fijos en :00.
+    return {
+      minute: match.minute,
+      seconds: match.minute != null ? softTickSeconds(match.id, match.minute, now) : 0,
+      isHalfTime: false,
+      isStoppage: false,
+    };
   }
 
   const elapsedSec  = Math.max(0, Math.floor(now / 1000 - anchor.periodStartedAt));

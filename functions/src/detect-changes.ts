@@ -36,10 +36,12 @@
  */
 
 import { admin, db } from './admin-init';
+import { displayLeague } from './league-display';
 import { getFunctions } from 'firebase-admin/functions';
 import * as logger from 'firebase-functions/logger';
 import { triggerLeagueSyncForChanges } from './sync-league-data';
 import type { DelayedPushPayload } from './deliver-delayed-push';
+import { countRedCardsForSide } from './mappers';
 import {
   SM_STATE_IDS, SM_EVENT_TYPES, LIVE_STATE_IDS, FINISHED_STATE_IDS,
 } from './types';
@@ -48,7 +50,7 @@ import {
 // Notifications are built server-side; i18n lives on the client. Since our
 // primary audience is MX/LATAM we localize to Spanish here. Club names that
 // don't appear in the map are returned unchanged (safe call).
-const TEAMS_ES: Record<string, string> = {
+export const TEAMS_ES: Record<string, string> = {
   'Afghanistan': 'Afganistán', 'Albania': 'Albania', 'Algeria': 'Argelia',
   'Angola': 'Angola', 'Argentina': 'Argentina', 'Armenia': 'Armenia',
   'Australia': 'Australia', 'Austria': 'Austria', 'Azerbaijan': 'Azerbaiyán',
@@ -91,7 +93,7 @@ const TEAMS_ES: Record<string, string> = {
 };
 
 /** Translate a team name to Spanish. Club names not in the map pass through unchanged. */
-function loc(name: string): string {
+export function loc(name: string): string {
   return TEAMS_ES[name] ?? name;
 }
 import type {
@@ -108,16 +110,18 @@ export async function loadSnapshot(): Promise<LivescoresSnapshot['matches']> {
 
 /** Count red cards (red + second yellow) for a given side. */
 function countRedCards(events: SMFixtureEvent[] | undefined, participantId: number | undefined): number {
-  if (!events || !participantId) return 0;
-  let count = 0;
-  for (const ev of events) {
-    if (ev.participant_id !== participantId) continue;
-    if (ev.type_id === SM_EVENT_TYPES.RED_CARD || ev.type_id === SM_EVENT_TYPES.SECOND_YELLOW) {
-      count++;
-    }
-  }
-  return count;
+  // Fuente única con el conteo que se escribe en el doc (mappers.ts): si el
+  // detector y el doc contaran distinto, la UI y los pushes se contradirían.
+  return countRedCardsForSide({ events }, participantId);
 }
+
+/** Polls consecutivos que la baja debe sostenerse antes de notificar una
+ *  anulación. pollLivescores corre cada ~4s, así que 3 polls ≈ 12s — nada
+ *  frente a los minutos que tarda una revisión, y suficiente para que un
+ *  parpadeo del feed (SM reordena o pierde eventos entre polls) no dispare un
+ *  "roja anulada" falso. Es el error inverso al FT falso del 5 ago: preferimos
+ *  llegar 12s tarde a inventar una corrección que no ocurrió. */
+const RED_CANCEL_CONFIRM_POLLS = 3;
 
 /** Count in-play missed penalties (type 17) for a given side. Shootout misses
  *  (type 22) are excluded — those belong to the penalty-shootout timeline. */
@@ -194,7 +198,14 @@ function findRecentYellowCard(
 }
 
 /** Find the most recent substitution for a given side.
- *  player_name = player going OFF, related_player_name = player coming ON. */
+ *
+ *  ⚠️ Semántica REAL de SM v3 (verificada contra datos en vivo, 6 ago 2026,
+ *  Nashville vs León, fixture 19687324): `player_name` = el que ENTRA,
+ *  `related_player_name` = el que SALE. Este comentario decía lo contrario y
+ *  el copy del push construyó las flechas sobre esa premisa → "↓ Edgar
+ *  Guerra ↑ Díber Cambindo" cuando Guerra fue el que entró (reporte del
+ *  dueño; la línea de tiempo de la app siempre estuvo bien porque mapea por
+ *  su cuenta). */
 function findRecentSubstitution(
   fixture: SMFixture | undefined,
   side: 'home' | 'away',
@@ -218,11 +229,15 @@ function findRecentSubstitution(
   return null;
 }
 
-/** Snapshot the relevant per-match state for next-poll diff detection. */
+/** Snapshot the relevant per-match state for next-poll diff detection.
+ *  `docHashes` (opcional): fingerprint del matchDoc calculado por
+ *  pollLivescores — se persiste para que el próximo poll pueda saltarse la
+ *  escritura a Firestore cuando nada relevante cambió (ahorro de egress). */
 export async function saveSnapshot(
   matches: MatchDoc[],
   fixtures: SMFixture[],
   previousSnapshot?: LivescoresSnapshot['matches'],
+  docHashes?: Map<string, string>,
 ): Promise<void> {
   const snapshot: LivescoresSnapshot['matches'] = {};
 
@@ -256,11 +271,46 @@ export async function saveSnapshot(
       halftimeSent:     prev?.halftimeSent     ?? false,
       secondHalfSent:   prev?.secondHalfSent   ?? false,
       suspendedSent:    prev?.suspendedSent     ?? false,
+      kickoffDelaySent: prev?.kickoffDelaySent  ?? false,
+      // Marca de agua + racha de confirmación de la anulación de roja. DEBEN
+      // preservarse entre polls: sin esto el latch se reiniciaría cada 4s y la
+      // confirmación de 3 polls jamás se alcanzaría.
+      redPushedHome:    prev?.redPushedHome     ?? 0,
+      redPushedAway:    prev?.redPushedAway     ?? 0,
+      redDropPollsHome: prev?.redDropPollsHome  ?? 0,
+      redDropPollsAway: prev?.redDropPollsAway  ?? 0,
       extraTimeSent:    prev?.extraTimeSent     ?? false,
       penaltiesSent: prev?.penaltiesSent ?? false,
       rivalResultSent: prev?.rivalResultSent ?? false,
+      // Fingerprint del doc para el skip-unchanged de pollLivescores. Si este
+      // poll no lo calculó (p. ej. saveSnapshot llamado desde otro camino),
+      // preservar el anterior para no forzar una escritura extra.
+      ...(docHashes?.get(m.id) ? { docHash: docHashes.get(m.id)! } : (prev?.docHash ? { docHash: prev.docHash } : {})),
     };
   }
+  // Carryover: partidos que estaban 'live' y DESAPARECIERON del feed (típico:
+  // suspendido por tormenta — SM los saca del inplay mientras dura la pausa).
+  // Sin esto, la entrada se perdía en el siguiente rebuild y el rescate de
+  // poll-livescores (poll 1) jamás podía re-consultarlos: el final llegaba sin
+  // push (Inter Miami vs San Luis, 5 ago 2026). goneChecks acota la vida de la
+  // entrada: ~2h de polls (1800 ≈ 15/min × 120 min) y expira — para entonces
+  // syncFixtures ya resolvió el doc por su lado.
+  for (const [id, prev] of Object.entries(previousSnapshot ?? {})) {
+    if (snapshot[id]) continue;
+    if (prev.status === 'live') {
+      const goneChecks = (prev.goneChecks ?? 0) + 1;
+      if (goneChecks > 1800) continue;
+      snapshot[id] = { ...prev, goneChecks };
+    } else if (prev.status === 'finished') {
+      // Asentamiento post-final: conservar ~20 min (300 polls ≈ 15/min × 20)
+      // para que poll-livescores re-enriquezca el partido y capture eventos
+      // tardíos (anotador del 90+, roja post-pitido). Ver settleChecks en types.
+      const settleChecks = (prev.settleChecks ?? 0) + 1;
+      if (settleChecks > 300) continue;
+      snapshot[id] = { ...prev, settleChecks };
+    }
+  }
+
   await db.doc('_meta/livescoresSnapshot').set({
     matches: snapshot,
     updatedAt: admin.firestore.Timestamp.now(),
@@ -269,12 +319,29 @@ export async function saveSnapshot(
 
 // ── Goal scorer extraction ──────────────────────────────────────────────────
 
+/** ¿Hay un evento VAR (type 24) cercano al minuto actual? Distingue la
+ *  revisión formal del VAR de una anulación inmediata del árbitro (fuera de
+ *  lugar claro): solo la primera genera este evento en SM. Ventana de 6' hacia
+ *  atrás: una revisión larga tarda 2-4 minutos entre el gol y la decisión, y
+ *  el evento VAR queda estampado con el minuto de la jugada. Sin minuto actual
+ *  (raro), basta con que exista CUALQUIER evento VAR — mejor atribuir de más
+ *  en un partido que sí tuvo revisión que negar una que acaba de pasar. */
+function hasRecentVarEvent(fixture: SMFixture | undefined, currentMinute: number | null | undefined): boolean {
+  if (!fixture?.events?.length) return false;
+  for (const ev of fixture.events) {
+    if (ev.type_id !== SM_EVENT_TYPES.VAR) continue;
+    if (currentMinute == null || ev.minute == null) return true;
+    if (currentMinute - ev.minute <= 6) return true;
+  }
+  return false;
+}
+
 /** Find the most recent goal event for a given side, returning the scorer
  *  name + kind (normal/penalty/own). Returns null if no matching event yet. */
 function findRecentGoalEvent(
   fixture: SMFixture | undefined,
   scoringSide: 'home' | 'away',
-): { scorerName?: string; goalKind: 'normal' | 'penalty' | 'own' } | null {
+): { scorerName?: string; scorerPlayerId?: number | null; goalKind: 'normal' | 'penalty' | 'own' } | null {
   if (!fixture?.events?.length) return null;
   const home = fixture.participants?.find(p => p.meta?.location === 'home');
   const away = fixture.participants?.find(p => p.meta?.location === 'away');
@@ -307,7 +374,8 @@ function findRecentGoalEvent(
       'normal';
 
     return {
-      scorerName: ev.player_name ?? undefined,
+      scorerName:     ev.player_name ?? undefined,
+      scorerPlayerId: ev.player_id ?? null,
       goalKind,
     };
   }
@@ -318,7 +386,7 @@ function findRecentGoalEvent(
 function findRecentRedCard(
   fixture: SMFixture | undefined,
   side: 'home' | 'away',
-): { playerName?: string; minute?: number | null } | null {
+): { playerName?: string; playerId?: number | null; minute?: number | null } | null {
   if (!fixture?.events?.length) return null;
   const home = fixture.participants?.find(p => p.meta?.location === 'home');
   const away = fixture.participants?.find(p => p.meta?.location === 'away');
@@ -331,6 +399,7 @@ function findRecentRedCard(
     if (ev.type_id === SM_EVENT_TYPES.RED_CARD || ev.type_id === SM_EVENT_TYPES.SECOND_YELLOW) {
       return {
         playerName: ev.player_name ?? undefined,
+        playerId:   ev.player_id ?? null,
         minute: ev.minute ?? null,
       };
     }
@@ -390,6 +459,7 @@ export function detectChanges(
           scoringTeamSide: 'home',
           goalKind:   ev?.goalKind ?? 'normal',
           scorerName: ev?.scorerName,
+          playerId:   ev?.scorerPlayerId ?? null,
         });
       }
       if (awayScored) {
@@ -400,16 +470,23 @@ export function detectChanges(
           scoringTeamSide: 'away',
           goalKind:   ev?.goalKind ?? 'normal',
           scorerName: ev?.scorerName,
+          playerId:   ev?.scorerPlayerId ?? null,
         });
       }
     } else if (newTotal < prevTotal) {
-      // Total goals DECREASED → a goal was disallowed (VAR overturned).
-      // Figure out which side lost the goal.
+      // El marcador BAJÓ → un gol quedó anulado. Ojo: eso es lo ÚNICO que
+      // sabemos. El copy decía "El VAR anula gol" siempre, pero hay dos
+      // situaciones distintas (reporte del dueño, 5 ago 2026): el árbitro lo
+      // anula en la jugada (fuera de lugar claro, falta previa — SM alcanzó a
+      // publicar el gol y lo retira segundos después, el VAR nunca intervino)
+      // vs. una revisión formal del VAR. Solo atribuimos al VAR cuando SM trae
+      // un evento VAR (type 24) reciente; si no, copy neutro "Gol anulado".
       const side: 'home' | 'away' = match.homeScore < prev.homeScore ? 'home' : 'away';
       changes.push({
         ...baseEvent,
         type: 'goalCancelled',
         scoringTeamSide: side,
+        varConfirmed: hasRecentVarEvent(fixture, match.minute),
       });
     }
 
@@ -443,7 +520,17 @@ export function detectChanges(
     }
 
     // ── Match end ─────────────────────────────────────────────────────────
-    if (prev.status === 'live' && match.status === 'finished') {
+    // ⚠️ NO basta con `status === 'finished'`: getMatchStatus (mappers.ts) mapea
+    // los estados MUERTOS de SM (POSTPONED/CANCELLED/DELAYED/ABANDONED/…) a
+    // 'finished' a propósito, para que el reloj del cliente no se dispare
+    // (incidente Chivas vs U. de G., 11 jul 2026). Combinado con la inferencia
+    // por tiempo — un partido con state_id 1 y kickoff pasado se marca 'live' —
+    // eso mandaba un "🏁 Final del partido" de un partido que NUNCA arrancó:
+    // Monterrey 0-0 Orlando City, Leagues Cup, 5 ago 2026, retrasado 85 min por
+    // tormenta (SM pasó 1 → 16 DELAYED y salió el FT falso a las 23:39 UTC).
+    // El FT solo sale con un estado de final REAL: FT / AET / FT_PEN / AWARDED.
+    if (prev.status === 'live' && match.status === 'finished' &&
+        (FINISHED_STATE_IDS as Set<number>).has(match.stateId)) {
       changes.push({ ...baseEvent, type: 'matchEnd' });
 
       // ── Modo Rival: a finished match with a loser is "bad news" for them.
@@ -515,6 +602,28 @@ export function detectChanges(
       prev.suspendedSent = true;
     }
 
+    // ── Retraso ANTES del pitido inicial ──────────────────────────────────
+    // Caso Monterrey vs Orlando City (Leagues Cup, 5 ago 2026): tormenta
+    // eléctrica, el partido arrancó 85 min tarde. SportMonks NO movió
+    // `starting_at` — señaló el retraso SOLO con `state_id` (1 → 16 DELAYED).
+    // Por eso kickoff-delays.ts (que compara starting_at viejo vs nuevo en
+    // syncFixtures) es CIEGO a esta variante, y matchSuspended tampoco cubre:
+    // exige prev.stateId ∈ {1T, 2T, ET, PEN}, o sea que el balón ya rodara.
+    // Aquí cerramos el hueco: el partido aún no empieza y SM lo marca
+    // retrasado/aplazado. Latch propio porque SM hace flapping 1 ↔ 16.
+    const preKickoffStateIds = [
+      SM_STATE_IDS.NOT_STARTED, SM_STATE_IDS.TBA, SM_STATE_IDS.PENDING,
+    ] as readonly number[];
+    const kickoffDelayStateIds = [
+      SM_STATE_IDS.DELAYED, SM_STATE_IDS.POSTPONED,
+    ] as readonly number[];
+    if (preKickoffStateIds.includes(prev.stateId) &&
+        kickoffDelayStateIds.includes(match.stateId) &&
+        !prev.kickoffDelaySent) {
+      changes.push({ ...baseEvent, type: 'kickoffDelayed' });
+      prev.kickoffDelaySent = true;
+    }
+
     // ── Pre-match reminder (one-time, ~15 min before kickoff) ────────────
     // Fired when a scheduled match is within 16 minutes of kickoff and the
     // reminder hasn't been sent yet. The 16-min window covers the 15-second
@@ -532,15 +641,57 @@ export function detectChanges(
 
     if (redHome > prev.redCardsHome) {
       const ev = findRecentRedCard(fixture, 'home');
-      const base = { ...baseEvent, scoringTeamSide: 'home' as const, playerName: ev?.playerName, minute: ev?.minute ?? match.minute };
+      const base = { ...baseEvent, scoringTeamSide: 'home' as const, playerName: ev?.playerName, playerId: ev?.playerId ?? null, minute: ev?.minute ?? match.minute, homeRedCards: redHome, awayRedCards: redAway };
       changes.push({ ...base, type: 'redCard' });
       changes.push({ ...base, type: 'rivalRedCard' }); // Modo Rival: rival player sent off
+      // Marca de agua: cuántas rojas de este lado hemos NOTIFICADO realmente.
+      // La anulación se mide contra esto, no contra el conteo del poll previo
+      // (que se sobrescribe cada 4s y perdería la referencia al instante).
+      prev.redPushedHome = redHome;
+      prev.redDropPollsHome = 0;
     }
     if (redAway > prev.redCardsAway) {
       const ev = findRecentRedCard(fixture, 'away');
-      const base = { ...baseEvent, scoringTeamSide: 'away' as const, playerName: ev?.playerName, minute: ev?.minute ?? match.minute };
+      const base = { ...baseEvent, scoringTeamSide: 'away' as const, playerName: ev?.playerName, playerId: ev?.playerId ?? null, minute: ev?.minute ?? match.minute, homeRedCards: redHome, awayRedCards: redAway };
       changes.push({ ...base, type: 'redCard' });
       changes.push({ ...base, type: 'rivalRedCard' });
+      prev.redPushedAway = redAway;
+      prev.redDropPollsAway = 0;
+    }
+
+    // ── Roja anulada (VAR revoca la expulsión) ────────────────────────────
+    // Hueco real: la detección de tarjetas era SOLO por incremento, así que
+    // una revocación no notificaba a NADIE — caso Rodolfo Cota (Atlante vs
+    // América, 24 jul 2026): salieron 3 pushes (redCard + playerRedCard +
+    // rivalRedCard) y ninguna corrección. SM revoca BORRANDO el evento, así
+    // que el conteo baja y eso sí es observable.
+    //
+    // Solo se dispara contra `redPushed*` — la marca de las rojas que de
+    // verdad notificamos. Un partido que entra al snapshot con una roja ya
+    // puesta (sin push nuestro) nunca genera una corrección fantasma.
+    for (const side of ['home', 'away'] as const) {
+      const isHome  = side === 'home';
+      const curr    = isHome ? redHome : redAway;
+      const pushed  = (isHome ? prev.redPushedHome : prev.redPushedAway) ?? 0;
+      const dropKey = isHome ? 'redDropPollsHome' : 'redDropPollsAway';
+
+      if (curr >= pushed) { prev[dropKey] = 0; continue; }
+
+      // La baja se sostiene: un poll más cerca de confirmarla.
+      const streak = (prev[dropKey] ?? 0) + 1;
+      prev[dropKey] = streak;
+      if (streak < RED_CANCEL_CONFIRM_POLLS) continue;
+
+      changes.push({
+        ...baseEvent,
+        type: 'redCardCancelled',
+        scoringTeamSide: side,
+        minute: match.minute,
+      });
+      // Bajar la marca al conteo real: la corrección ya salió y una expulsión
+      // posterior del mismo lado vuelve a contar como roja nueva.
+      if (isHome) prev.redPushedHome = curr; else prev.redPushedAway = curr;
+      prev[dropKey] = 0;
     }
 
     // ── Modo Rival: missed penalty (in-play) ──────────────────────────────
@@ -665,16 +816,31 @@ function copyForGoalCancelled(c: DetectedChange): FcmCopy {
   const cancelledFromTeam = loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
   const score = `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`;
   const minute = c.minute != null ? `${c.minute}' ` : '';
+  // "El VAR anula" SOLO cuando SM registró una revisión (evento type 24).
+  // Sin ella, copy neutro: cubre el fuera de lugar claro, la falta previa que
+  // el árbitro marca en la jugada, y la corrección de datos de SM. Nunca
+  // afirmar más de lo que sabemos (reporte del dueño, 5 ago 2026).
   return {
-    title: `🚫 El VAR anula gol de ${cancelledFromTeam}`,
+    title: c.varConfirmed
+      ? `🚫 El VAR anula gol de ${cancelledFromTeam}`
+      : `🚫 Gol anulado de ${cancelledFromTeam}`,
     body:  `${minute}${score}`.trim(),
+  };
+}
+
+function copyForRedCardCancelled(c: DetectedChange): FcmCopy {
+  const team = loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
+  const minute = c.minute != null ? `${c.minute}' ` : '';
+  return {
+    title: `🟥↩️ Se anula la expulsión de ${team}`,
+    body:  `${minute}${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)}`.trim(),
   };
 }
 
 function copyForMatchStart(c: DetectedChange): FcmCopy {
   return {
     title: `⚽ ¡Empieza el partido!`,
-    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 
@@ -688,7 +854,7 @@ function copyForHalftime(c: DetectedChange): FcmCopy {
 function copyForSecondHalfStart(c: DetectedChange): FcmCopy {
   return {
     title: `¡Arranca el segundo tiempo!`,
-    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 
@@ -701,7 +867,7 @@ function copyForMatchEnd(c: DetectedChange): FcmCopy {
       : '';
   return {
     title: `🏁 Final del partido`,
-    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore}${pen} ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore}${pen} ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 
@@ -730,8 +896,11 @@ function copyForYellowCard(c: DetectedChange): FcmCopy {
 function copyForSubstitution(c: DetectedChange): FcmCopy {
   const team = loc(c.scoringTeamSide === 'home' ? c.homeTeam.name : c.awayTeam.name);
   const minute = c.minute != null ? `${c.minute}' ` : '';
-  const playerOut = c.playerName        ? `↓ ${c.playerName}`        : '';
-  const playerIn  = c.relatedPlayerName ? ` ↑ ${c.relatedPlayerName}` : '';
+  // playerName = ENTRA, relatedPlayerName = SALE (semántica real de SM v3 —
+  // ver findRecentSubstitution). Sale primero en el texto, como lo lee un
+  // relator: "se va X, entra Y".
+  const playerOut = c.relatedPlayerName ? `↓ ${c.relatedPlayerName}` : '';
+  const playerIn  = c.playerName        ? ` ↑ ${c.playerName}`        : '';
   return {
     title: `🔄 Cambio · ${team}`,
     body:  `${minute}${playerOut}${playerIn}`.trim() ||
@@ -742,14 +911,14 @@ function copyForSubstitution(c: DetectedChange): FcmCopy {
 function copyForExtraTimeStart(c: DetectedChange): FcmCopy {
   return {
     title: `⏱️ ¡Prórroga!`,
-    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 
 function copyForPenaltiesStart(c: DetectedChange): FcmCopy {
   return {
     title: `🥅 ¡Tanda de penaltis!`,
-    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} ${c.homeScore}-${c.awayScore} ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 
@@ -760,17 +929,27 @@ function copyForMatchSuspended(c: DetectedChange): FcmCopy {
   };
 }
 
+function copyForKickoffDelayed(c: DetectedChange): FcmCopy {
+  // Sin marcador: el partido no ha empezado (mandar "0-0" fue justo el error
+  // del FT falso). Sin hora nueva: SM no la publica en este camino — el estado
+  // dice "retrasado", no cuánto. La app muestra la hora local cuando llegue.
+  return {
+    title: `⏰ Partido retrasado`,
+    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${displayLeague(c.league)} · el inicio se retrasó`,
+  };
+}
+
 function copyForMatchReminder(c: DetectedChange): FcmCopy {
   return {
     title: `⏰ ¡El partido comienza pronto!`,
-    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league} · en ~15 min`,
+    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${displayLeague(c.league)} · en ~15 min`,
   };
 }
 
 function copyForLineups(c: DetectedChange): FcmCopy {
   return {
     title: `📋 Alineaciones confirmadas`,
-    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${c.league}`,
+    body:  `${loc(c.homeTeam.name)} vs ${loc(c.awayTeam.name)} · ${displayLeague(c.league)}`,
   };
 }
 
@@ -802,14 +981,16 @@ interface TopicRouting {
 function routeChange(c: DetectedChange): TopicRouting {
   const homeId   = c.homeTeam.id;
   const awayId   = c.awayTeam.id;
-  const leagueId = c.leagueId;
+  // NOTA (4-ago-2026): los topics league_{id}_start/_finals se ELIMINARON de
+  // todos los ruteos. Seguir una liga = solo prioridad en el feed; las
+  // notificaciones vienen exclusivamente de EQUIPOS/JUGADORES seguidos.
   switch (c.type) {
     case 'goal':
       return {
         retrasableBases: [`team_${homeId}_goals`, `team_${awayId}_goals`],
         immediateTopic:  null,
         // DUAL-SEND legacy: goals + league start (old builds expect league topic)
-        legacyTopics:    [`team_${homeId}_goals`, `team_${awayId}_goals`, `league_${leagueId}_start`],
+        legacyTopics:    [`team_${homeId}_goals`, `team_${awayId}_goals`],
       };
     case 'goalCancelled':
       // VAR: only send to _d0 (immediate). Devices on _d2/_d5/_d10 haven't seen
@@ -820,13 +1001,32 @@ function routeChange(c: DetectedChange): TopicRouting {
         immediateTopic:  null,
         // Still notify _d0 devices (they saw the goal, now see the correction)
         // by putting the bases in legacyTopics + _d0 handling below.
-        legacyTopics:    [`team_${homeId}_goals`, `team_${awayId}_goals`, `league_${leagueId}_start`],
+        legacyTopics:    [`team_${homeId}_goals`, `team_${awayId}_goals`],
+      };
+    case 'redCardCancelled':
+      // Mismo criterio que goalCancelled: solo _d0. Los buckets _d2/_d5/_d10
+      // todavía no han visto la roja — el guard de VAR en deliverDelayedPush
+      // les suprime el push original, así que no hay nada que corregirles.
+      return {
+        retrasableBases: [], // sin tareas retrasadas
+        immediateTopic:  null,
+        legacyTopics:    [`team_${homeId}_cards`, `team_${awayId}_cards`],
       };
     case 'matchStart':
       return {
         retrasableBases: [],
         immediateTopic:  null, // kickoff fan-out handled specially below
-        legacyTopics:    [`team_${homeId}_start`, `team_${awayId}_start`, `league_${leagueId}_start`],
+        legacyTopics:    [`team_${homeId}_start`, `team_${awayId}_start`],
+      };
+    case 'kickoffDelayed':
+      // Misma audiencia y ruta que matchStart: un retraso ES un cambio de la
+      // hora de inicio. La clase `kickoff` está ON por default (a diferencia de
+      // `reminders`, opt-in y casi vacío — lección de la auditoría 10 jul 2026).
+      // Inmediato: un retraso no es spoiler, no pasa por buckets de Modo Estadio.
+      return {
+        retrasableBases: [],
+        immediateTopic:  null, // fan-out compartido con matchStart, abajo
+        legacyTopics:    [`team_${homeId}_start`, `team_${awayId}_start`],
       };
     case 'halftime':
       return {
@@ -844,7 +1044,7 @@ function routeChange(c: DetectedChange): TopicRouting {
       return {
         retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
         immediateTopic:  null,
-        legacyTopics:    [`team_${homeId}_start`, `team_${awayId}_start`, `league_${leagueId}_finals`],
+        legacyTopics:    [`team_${homeId}_start`, `team_${awayId}_start`],
       };
     case 'redCard': {
       const side = c.scoringTeamSide === 'home' ? homeId : awayId;
@@ -885,11 +1085,15 @@ function routeChange(c: DetectedChange): TopicRouting {
         legacyTopics:    [`team_${homeId}_start`, `team_${awayId}_start`],
       };
     case 'matchSuspended':
-      // Suspended/postponed are immediate — no spoiler concern
+      // FIX (auditoría 10 jul 2026): esto se enviaba SOLO a los topics legacy
+      // team_X_start, de los que los builds actuales están desuscritos —
+      // NADIE recibía el aviso de suspensión. Ahora viaja por la clase _live
+      // como el resto de los cambios de estado (retrasable: una suspensión
+      // llegando 2-10 min tarde a un usuario en Modo Estadio es aceptable).
       return {
-        retrasableBases: [],
+        retrasableBases: [`team_${homeId}_live`, `team_${awayId}_live`],
         immediateTopic:  null,
-        legacyTopics:    [`team_${homeId}_start`, `team_${awayId}_start`],
+        legacyTopics:    [],
       };
     case 'matchReminder':
       // Reminders are always immediate (pre-match)
@@ -961,6 +1165,7 @@ function buildFcmCopy(c: DetectedChange): FcmCopy {
     case 'rivalPenMiss':    return copyForRivalPenMiss(c);
     case 'goal':            return copyForGoal(c);
     case 'goalCancelled':   return copyForGoalCancelled(c);
+    case 'redCardCancelled': return copyForRedCardCancelled(c);
     case 'matchStart':      return copyForMatchStart(c);
     case 'halftime':          return copyForHalftime(c);
     case 'secondHalfStart':   return copyForSecondHalfStart(c);
@@ -971,6 +1176,7 @@ function buildFcmCopy(c: DetectedChange): FcmCopy {
     case 'extraTimeStart':  return copyForExtraTimeStart(c);
     case 'penaltiesStart':  return copyForPenaltiesStart(c);
     case 'matchSuspended':  return copyForMatchSuspended(c);
+    case 'kickoffDelayed':  return copyForKickoffDelayed(c);
     case 'matchReminder':   return copyForMatchReminder(c);
     case 'lineups':         return copyForLineups(c);
     default:                return { title: 'Analistas', body: 'Nueva actualización del partido' };
@@ -1015,7 +1221,9 @@ function sendWithCondition(
     },
     apns: {
       headers: { 'apns-collapse-id': dedupId },
-      payload: { aps: { sound: 'default', badge: 0 } },
+      // category MATCH_EVENT → iOS muestra la acción "Silenciar este partido"
+      // en el long-press (registrada en el cliente, notifications.ts).
+      payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } },
     },
   }).catch(err => {
     const code = (err as { code?: string }).code;
@@ -1023,6 +1231,19 @@ function sendWithCondition(
       logger.warn(`FCM send failed for condition ${condition}`, { err, code });
     }
   });
+}
+
+/**
+ * Guard de mute por partido (Fase 2, 10 jul 2026). El cliente suscribe el
+ * device a mute_{matchId} al silenciar un partido; anexar esto a la condición
+ * de envío excluye a esos devices EN FCM — silencio real con app cerrada.
+ * OJO: siempre parentizar el resto de la condición ("&&" liga más fuerte que
+ * "||" en el lenguaje de condiciones de FCM). Los pushes de JUGADOR seguido
+ * lo omiten a propósito (su condición ya usa los 5 topics del límite, y
+ * seguir a un jugador es un opt-in más fuerte que el mute del partido).
+ */
+function muteGuard(matchId: string): string {
+  return ` && !('mute_${matchId}' in topics)`;
 }
 
 /** Send one FCM alert push to a specific topic — shared helper. */
@@ -1045,7 +1266,9 @@ function sendToTopic(
     },
     apns: {
       headers: { 'apns-collapse-id': dedupId },
-      payload: { aps: { sound: 'default', badge: 0 } },
+      // category MATCH_EVENT → iOS muestra la acción "Silenciar este partido"
+      // en el long-press (registrada en el cliente, notifications.ts).
+      payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } },
     },
   }).catch(err => {
     const code = (err as { code?: string }).code;
@@ -1086,7 +1309,11 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
     // Same dedupId is reused for _d0 and _dN pushes. iOS APNs uses it as
     // apns-collapse-id (collapses duplicates within the notification centre);
     // Android uses it as `tag` (replaces rather than stacks). Capped at 64 B.
-    const dedupId = `${change.matchId}_${change.type}_${change.homeScore}-${change.awayScore}`.slice(0, 64);
+    // Incluye el minuto (auditoría 10 jul 2026): dos eventos DISTINTOS del
+    // mismo tipo con el mismo marcador (p. ej. dos amarillas seguidas a 0-0)
+    // compartían dedupId y el segundo REEMPLAZABA al primero en el centro de
+    // notificaciones — el usuario perdía eventos.
+    const dedupId = `${change.matchId}_${change.type}_${change.homeScore}-${change.awayScore}_m${change.minute ?? ''}`.slice(0, 64);
 
     // ── Modo Rival events (immediate, single topic, no delay buckets) ──────
     // Routed to team_{affectedId}_rival_<event> — only users who set that team
@@ -1100,7 +1327,9 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
         change.type === 'rivalRedCard' ? 'rival_redcard' :
         change.type === 'rivalPenMiss' ? 'rival_penmiss' :
                                          'rival_loss';
-      sendPromises.push(sendToTopic(messaging, `team_${affectedId}_${suffix}`, title, body, data, dedupId));
+      sendPromises.push(sendWithCondition(messaging,
+        `'team_${affectedId}_${suffix}' in topics${muteGuard(change.matchId)}`,
+        title, body, data, dedupId));
       logger.info(`😈 ${change.type.toUpperCase()} — ${title}`, { matchId: change.matchId });
       continue;
     }
@@ -1108,38 +1337,41 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
     // ── Special handling for matchStart (kickoff) ──────────────────────────
     // matchStart goes to the new _kickoff topics (immediate only, no bucket).
     // Also dual-sent to legacy _start topics for old builds.
-    if (change.type === 'matchStart') {
+    if (change.type === 'matchStart' || change.type === 'kickoffDelayed') {
       const homeId = change.homeTeam.id;
       const awayId = change.awayTeam.id;
       // Single condition → users following both teams get exactly one notification.
       sendPromises.push(sendWithCondition(messaging,
-        `'team_${homeId}_kickoff' in topics || 'team_${awayId}_kickoff' in topics`,
+        `('team_${homeId}_kickoff' in topics || 'team_${awayId}_kickoff' in topics)${muteGuard(change.matchId)}`,
         title, body, data, dedupId));
-      // Dual-send legacy (old builds subscribed to _start / league_start)
+      // Dual-send legacy (old builds subscribed to team _start)
       for (const topic of legacyTopics) {
         sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
       }
-      logger.info(`📣 MATCHSTART — ${title}`, { matchId: change.matchId });
+      logger.info(`📣 ${change.type.toUpperCase()} — ${title}`, { matchId: change.matchId });
       continue;
     }
 
-    // ── Immediate-only events (reminder, lineups, suspended) ──────────────
-    // These use only legacyTopics (which map to _reminders, _lineups, _kickoff, _start)
+    // ── Immediate-only events (reminder, lineups) ─────────────────────────
+    // These use only legacyTopics (which map to _reminders, _lineups)
     // and have no bucket variants. Send immediately to all legacy topics.
+    // matchSuspended ya NO va aquí: se rutea por la clase _live con buckets
+    // (antes se enviaba solo a topics legacy muertos — nadie lo recibía).
     if (
       change.type === 'matchReminder' ||
-      change.type === 'lineups' ||
-      change.type === 'matchSuspended'
+      change.type === 'lineups'
     ) {
       // legacyTopics for these events is always [team_homeId_X, team_awayId_X] — use
       // a single condition so users following both teams get exactly one notification.
       if (legacyTopics.length === 2) {
         sendPromises.push(sendWithCondition(messaging,
-          `'${legacyTopics[0]}' in topics || '${legacyTopics[1]}' in topics`,
+          `('${legacyTopics[0]}' in topics || '${legacyTopics[1]}' in topics)${muteGuard(change.matchId)}`,
           title, body, data, dedupId));
       } else {
         for (const topic of legacyTopics) {
-          sendPromises.push(sendToTopic(messaging, topic, title, body, data, dedupId));
+          sendPromises.push(sendWithCondition(messaging,
+            `'${topic}' in topics${muteGuard(change.matchId)}`,
+            title, body, data, dedupId));
         }
       }
       logger.info(`📣 ${change.type.toUpperCase()} — ${title}`, { matchId: change.matchId });
@@ -1153,10 +1385,65 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
     if (change.type === 'goalCancelled') {
       // Send to _d0 bases only via condition — users following both teams get one notification.
       sendPromises.push(sendWithCondition(messaging,
-        `'team_${change.homeTeam.id}_goals_d0' in topics || 'team_${change.awayTeam.id}_goals_d0' in topics`,
+        `('team_${change.homeTeam.id}_goals_d0' in topics || 'team_${change.awayTeam.id}_goals_d0' in topics)${muteGuard(change.matchId)}`,
         title, body, data, dedupId));
       logger.info(`📣 GOALCANCELLED (VAR) — ${title}`, { matchId: change.matchId });
       continue;
+    }
+
+    // ── redCardCancelled: solo _d0 (mismo criterio que goalCancelled) ──────
+    if (change.type === 'redCardCancelled') {
+      sendPromises.push(sendWithCondition(messaging,
+        `('team_${change.homeTeam.id}_cards_d0' in topics || 'team_${change.awayTeam.id}_cards_d0' in topics)${muteGuard(change.matchId)}`,
+        title, body, data, dedupId));
+      logger.info(`📣 REDCARDCANCELLED — ${title}`, { matchId: change.matchId });
+      continue;
+    }
+
+    // ── Seguidores del JUGADOR (goles y rojas) ─────────────────────────────
+    // Topics player_{id}_goals / player_{id}_cards: el cliente los suscribe
+    // desde 1.2.x pero el servidor nunca despachó a ellos hasta hoy (5 jul
+    // 2026). La condición FCM excluye a quienes ya siguen al EQUIPO del
+    // jugador (cualquier bucket de Modo Estadio) — ellos ya reciben la
+    // notificación del equipo, que trae el nombre del anotador. Límite FCM:
+    // 5 topics por condición → exactamente player + 4 buckets del equipo.
+    // Decisiones (dueño, 5 jul 2026):
+    //  · Autogoles NO notifican al seguidor del jugador.
+    //  · Solo rojas (incluye doble amarilla), no amarillas.
+    //  · Envío inmediato sin buckets (mismo trato que Modo Rival). Trade-off:
+    //    un usuario en Modo Estadio que siga a un jugador del equipo RIVAL
+    //    al suyo recibe este push sin retraso (población minúscula).
+    //  · Builds legacy (pre-buckets) que sigan equipo+jugador pueden recibir
+    //    doble notificación — la condición no alcanza para excluir también
+    //    los topics legacy (límite de 5).
+    if (
+      change.playerId &&
+      ((change.type === 'goal' && change.goalKind !== 'own') || change.type === 'redCard')
+    ) {
+      const playerTeamId = change.scoringTeamSide === 'home' ? change.homeTeam.id : change.awayTeam.id;
+      const kind        = change.type === 'goal' ? 'goals' : 'cards';
+      const playerTopic = `player_${change.playerId}_${kind}`;
+      const teamBase    = `team_${playerTeamId}_${kind}`;
+      const condition   =
+        `'${playerTopic}' in topics && !('${teamBase}_d0' in topics) && ` +
+        `!('${teamBase}_d2' in topics) && !('${teamBase}_d5' in topics) && ` +
+        `!('${teamBase}_d10' in topics)`;
+
+      const pName  = change.type === 'goal' ? change.scorerName : change.playerName;
+      const pTitle = change.type === 'goal'
+        ? (change.goalKind === 'penalty'
+            ? `⚽ ¡Gol de penal de ${pName ?? 'tu jugador'}!`
+            : `⚽ ¡Gol de ${pName ?? 'tu jugador'}!`)
+        : `🟥 Expulsado: ${pName ?? 'tu jugador'}`;
+      const pMinute = change.minute != null ? ` · ${change.minute}'` : '';
+      const pBody   = `${loc(change.homeTeam.name)} ${change.homeScore}-${change.awayScore} ${loc(change.awayTeam.name)}${pMinute}`;
+
+      sendPromises.push(sendWithCondition(
+        messaging, condition, pTitle, pBody,
+        { ...data, type: change.type === 'goal' ? 'playerGoal' : 'playerRedCard', playerId: String(change.playerId) },
+        `${dedupId}_p${change.playerId}`.slice(0, 64),
+      ));
+      logger.info(`⭐ PLAYER ${change.type.toUpperCase()} — ${pTitle}`, { matchId: change.matchId, playerId: change.playerId });
     }
 
     // ── Live retrasable events (goal, halftime, matchEnd, redCard) ─────────
@@ -1170,11 +1457,13 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
     // both teams receive exactly one notification instead of two.
     if (retrasableBases.length === 2) {
       sendPromises.push(sendWithCondition(messaging,
-        `'${retrasableBases[0]}_d0' in topics || '${retrasableBases[1]}_d0' in topics`,
+        `('${retrasableBases[0]}_d0' in topics || '${retrasableBases[1]}_d0' in topics)${muteGuard(change.matchId)}`,
         title, body, data, dedupId));
     } else {
       for (const base of retrasableBases) {
-        sendPromises.push(sendToTopic(messaging, `${base}_d0`, title, body, data, dedupId));
+        sendPromises.push(sendWithCondition(messaging,
+          `'${base}_d0' in topics${muteGuard(change.matchId)}`,
+          title, body, data, dedupId));
       }
     }
 
@@ -1188,12 +1477,14 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
         for (const delayMin of [2, 5, 10] as const) {
           const taskId = toTaskId(`estadio_${baseA}_${baseB}_${dedupId}_d${delayMin}`);
           const payload: DelayedPushPayload = {
-            condition:  `'${baseA}_d${delayMin}' in topics || '${baseB}_d${delayMin}' in topics`,
+            condition:  `('${baseA}_d${delayMin}' in topics || '${baseB}_d${delayMin}' in topics)${muteGuard(change.matchId)}`,
             title, body, data, dedupId,
             changeType: change.type,
             matchId:    change.matchId,
             homeScore:  change.homeScore,
             awayScore:  change.awayScore,
+            homeRedCards: change.homeRedCards,
+            awayRedCards: change.awayRedCards,
           };
           queue.enqueue(payload, {
             scheduleDelaySeconds: delayMin * 60,
@@ -1210,12 +1501,16 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
           for (const delayMin of [2, 5, 10] as const) {
             const taskId = toTaskId(`estadio_${base}_${dedupId}_d${delayMin}`);
             const payload: DelayedPushPayload = {
-              topic:      `${base}_d${delayMin}`,
+              // Condición (no topic directo) para poder excluir a los devices
+              // que silenciaron este partido (mute_{matchId}).
+              condition:  `'${base}_d${delayMin}' in topics${muteGuard(change.matchId)}`,
               title, body, data, dedupId,
               changeType: change.type,
               matchId:    change.matchId,
               homeScore:  change.homeScore,
               awayScore:  change.awayScore,
+              homeRedCards: change.homeRedCards,
+              awayRedCards: change.awayRedCards,
             };
             // Fire-and-forget; swallow ALREADY_EXISTS (idempotent re-enqueue)
             queue.enqueue(payload, {
@@ -1244,6 +1539,7 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
   logger.info(`📊 Total changes: ${changes.length}`, {
     goals:           changes.filter(c => c.type === 'goal').length,
     goalsCancelled:  changes.filter(c => c.type === 'goalCancelled').length,
+    redsCancelled:   changes.filter(c => c.type === 'redCardCancelled').length,
     starts:          changes.filter(c => c.type === 'matchStart').length,
     halftimes:       changes.filter(c => c.type === 'halftime').length,
     ends:            changes.filter(c => c.type === 'matchEnd').length,
@@ -1253,6 +1549,7 @@ export async function dispatchNotifications(changes: DetectedChange[]): Promise<
     extraTime:       changes.filter(c => c.type === 'extraTimeStart').length,
     penalties:       changes.filter(c => c.type === 'penaltiesStart').length,
     suspended:       changes.filter(c => c.type === 'matchSuspended').length,
+    kickoffDelays:   changes.filter(c => c.type === 'kickoffDelayed').length,
     reminders:       changes.filter(c => c.type === 'matchReminder').length,
     lineups:         changes.filter(c => c.type === 'lineups').length,
   });

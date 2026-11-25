@@ -40,5 +40,11 @@ export interface DelayedPushPayload {
     matchId: string;
     homeScore: number;
     awayScore: number;
+    /** Expulsados por lado AL MOMENTO DEL EVENTO. Solo se llena para
+     *  changeType 'redCard'; es la referencia del guard de VAR para saber si la
+     *  roja sigue vigente al entregar. Opcional: las tareas encoladas antes de
+     *  este cambio no lo traen y se entregan sin comparar. */
+    homeRedCards?: number;
+    awayRedCards?: number;
 }
 export declare const deliverDelayedPush: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;

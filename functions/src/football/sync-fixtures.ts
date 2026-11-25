@@ -15,12 +15,20 @@
  * Live fixtures are skipped here — the live poller owns them (fresher data and
  * a stable clock anchor). Rows are only written when their fingerprint changed.
  * The run also rebuilds the "live gate" the poller reads to know when to wake.
+ *
+ * Kickoff delays: API-Sports has no "delayed" status — a delay shows up as a
+ * NEW kickoff time (status still NS), a postponement as NS → PST. Both are
+ * detected here by comparing with the previous run (the per-date fingerprint
+ * stores "hash:kickoff:status") and pushed as `kickoffDelayed` to the
+ * followers of both teams when the original kickoff was within 8 h.
  */
 
 import * as logger from 'firebase-functions/logger';
 import { afGet, quotaState } from './apisports';
 import type { AfFixtureCore } from './apisports-types';
+import type { FbChange } from './live-detect';
 import { isFinishedShort, isLiveShort, mapFixtureToMatch, omitRedCardsWhenUnknown } from './mapping';
+import { dispatchFootballChanges } from './notify';
 import {
   commitSets, loadDateFingerprints, matchWrite, rowHash, saveDateFingerprints,
   saveLiveGateDates, saveQuota, type GateEntry,
@@ -42,7 +50,50 @@ export function datesForRun(nowMs: number): number[] {
   return out;
 }
 
-export interface SyncResult { dates: string[]; fixtures: number; written: number }
+export interface SyncResult { dates: string[]; fixtures: number; written: number; delays: number }
+
+const MIN_DELAY_SEC = 5 * 60;
+const MAX_DELAY_SEC = 8 * 3600;
+const IMMINENT_SEC = 8 * 3600;
+
+/** "1 h", "1 h 30 min", "45 min" — timezone-free delay text. */
+export function formatDelay(sec: number): string {
+  const total = Math.round(sec / 60);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h > 0 && m > 0) return `${h} h ${m} min`;
+  if (h > 0) return `${h} h`;
+  return `${m} min`;
+}
+
+/** Fingerprint record stored per fixture: "hash:kickoffUnix:statusShort". */
+function fpRecord(hash: string, ts: number, short: string): string {
+  return `${hash}:${ts}:${short}`;
+}
+
+function parseFp(rec: string | undefined): { hash: string; ts: number; short: string } | null {
+  if (!rec) return null;
+  const [hash, ts, short] = rec.split(':');
+  return { hash, ts: Number(ts) || 0, short: short ?? '' };
+}
+
+/** Delay / postponement of an imminent match vs the previous run. Pure — exported for tests. */
+export function kickoffDelayFor(
+  old: { ts: number; short: string } | null,
+  cur: { ts: number; short: string },
+  nowSec: number,
+): string | null {
+  if (!old || !old.ts) return null;
+  const wasPending = old.short === 'NS' || old.short === 'TBD';
+  if (!wasPending) return null;
+  const imminent = old.ts - nowSec < IMMINENT_SEC && old.ts - nowSec > -3 * 3600;
+  if (!imminent) return null;
+  if (cur.short === 'PST') return 'postponed';
+  if (cur.short !== 'NS' && cur.short !== 'TBD') return null;
+  const delta = cur.ts - old.ts;
+  if (delta < MIN_DELAY_SEC || delta > MAX_DELAY_SEC) return null;
+  return formatDelay(delta);
+}
 
 export async function syncFootballFixtures(explicitDates?: string[], nowMs = Date.now()): Promise<SyncResult> {
   const nowSec = Math.floor(nowMs / 1000);
@@ -50,6 +101,7 @@ export async function syncFootballFixtures(explicitDates?: string[], nowMs = Dat
   const gate: Record<string, GateEntry[]> = {};
   let fixturesSeen = 0;
   let written = 0;
+  const delayChanges: FbChange[] = [];
 
   for (const date of dates) {
     let list: AfFixtureCore[];
@@ -75,8 +127,19 @@ export async function syncFootballFixtures(explicitDates?: string[], nowMs = Dat
       if (isLiveShort(short)) { if (fp[id]) nextFp[id] = fp[id]; continue; }
       const row = omitRedCardsWhenUnknown(doc, false);
       const hash = rowHash(row);
-      nextFp[id] = hash;
-      if (fp[id] === hash) continue;
+      const prev = parseFp(fp[id]);
+      nextFp[id] = fpRecord(hash, f.fixture.timestamp, short);
+
+      const delay = kickoffDelayFor(prev, { ts: f.fixture.timestamp, short }, nowSec);
+      if (delay) {
+        delayChanges.push({
+          type: 'kickoffDelayed', matchId: id, homeTeam: doc.homeTeam, awayTeam: doc.awayTeam,
+          homeScore: 0, awayScore: 0, league: doc.league, leagueId: doc.leagueId,
+          popularity: doc.popularity, delay,
+        });
+      }
+
+      if (prev?.hash === hash) continue;
       writes.push(matchWrite({ ...row, id }));
     }
 
@@ -95,6 +158,13 @@ export async function syncFootballFixtures(explicitDates?: string[], nowMs = Dat
     await saveQuota({ limitDay: quotaState.limitDay, remainingDay: quotaState.remainingDay, at: quotaState.observedAt })
       .catch(() => {});
   }
-  logger.info('fbSyncFixtures: done', { dates, fixtures: fixturesSeen, written, remainingDay: quotaState.remainingDay });
-  return { dates, fixtures: fixturesSeen, written };
+  if (delayChanges.length) {
+    await dispatchFootballChanges(delayChanges).catch(err =>
+      logger.warn('fbSyncFixtures: delay pushes failed', { err: String(err) }));
+  }
+
+  logger.info('fbSyncFixtures: done', {
+    dates, fixtures: fixturesSeen, written, delays: delayChanges.length, remainingDay: quotaState.remainingDay,
+  });
+  return { dates, fixtures: fixturesSeen, written, delays: delayChanges.length };
 }

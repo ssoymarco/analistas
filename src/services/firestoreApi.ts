@@ -72,6 +72,10 @@ interface MatchDoc {
    *  and the server-side MatchDoc for full semantics. */
   homePenScore: number | null;
   awayPenScore: number | null;
+  /** Expulsados por lado. El servidor empezó a escribirlos hasta ago-2026;
+   *  en docs viejos vienen undefined. */
+  homeRedCards?: number;
+  awayRedCards?: number;
   status: MatchStatus;
   stateId: number;
   stateLabel: string | null;
@@ -336,7 +340,18 @@ function matchFromDoc(d: MatchDoc): Match {
     awayScoreHT:    d.awayScoreHT ?? undefined,
     homePenScore:   d.homePenScore ?? undefined,
     awayPenScore:   d.awayPenScore ?? undefined,
+    // El indicador de expulsados de MatchCard (`<RedCards>`) llevaba muerto
+    // desde la migración a Firestore-first: el componente lo pintaba, pero ni
+    // el servidor escribía el campo ni este mapeo lo copiaba. Ahora sí.
+    homeRedCards:   d.homeRedCards || undefined,
+    awayRedCards:   d.awayRedCards || undefined,
     stateLabel:     d.stateLabel ?? undefined,
+    // stateId crudo de SM — lo necesita deadStateLabelKey (etiqueta
+    // "Cancelado"/"Aplazado" vs "Finalizado") y la detección de DELAYED (16).
+    // Se leía en este archivo para derivar 'interrupted' pero NUNCA se
+    // copiaba al objeto Match → displayMatch.stateId llegaba undefined y la
+    // etiqueta caía siempre a "Finalizado" (bug 11 jul 2026).
+    stateId:        d.stateId ?? undefined,
     // Live-clock anchor — used by useLiveTick to smoothly extrapolate the
     // minute between server polls. Only populated for live matches.
     liveClock:      (d as any).liveClock ?? undefined,
@@ -437,9 +452,64 @@ const SEASON_FIXTURES_MEM_TTL = 60_000;
 /** Mirror of functions/src/season-fixtures-index.ts SeasonFixturesDoc. */
 interface SeasonFixturesDoc {
   seasonId: number;
+  /** Total fixtures for the season across every shard. */
   count: number;
+  /** How many shards make up this season. Absent on pre-sharding docs → 1. */
+  shardCount?: number;
+  shardIndex?: number;
   fixtures: MatchDoc[];
   updatedAt: unknown;
+}
+
+/**
+ * Must match MAX_SEASON_FIXTURE_SHARDS in
+ * functions/src/season-fixtures-index.ts. Used purely as a sanity clamp so a
+ * corrupt `shardCount` can't make the client fan out unbounded reads.
+ */
+const MAX_SEASON_FIXTURE_SHARDS = 8;
+
+/**
+ * Read every shard of a season's fixtures index.
+ *
+ * Shard 0 lives at `season_fixtures/{seasonId}` and publishes `shardCount`;
+ * overflow shards are `season_fixtures/{seasonId}_1`, `_2`, … Sharding exists
+ * because Firestore caps a document at 1 MB and catch-all competitions (SM's
+ * "Club Friendlies 3" runs Jan→Sep with ~2,800 fixtures) blow past it — those
+ * seasons' indexes silently froze at their last successful write.
+ *
+ * Returns null when the season has no index yet (caller falls back to the
+ * heavy per-match query). A missing OVERFLOW shard is not fatal: we return the
+ * shards we did get, which stay chronologically coherent.
+ */
+async function readSeasonFixtureShards(seasonId: number): Promise<MatchDoc[] | null> {
+  const head = await getDoc(doc(db, 'season_fixtures', String(seasonId))).catch(() => null);
+  if (!head?.exists()) return null;
+
+  const headData = head.data() as SeasonFixturesDoc;
+  const fixtures: MatchDoc[] = [...(headData.fixtures ?? [])];
+
+  const shardCount = Math.min(
+    Math.max(Math.floor(Number(headData.shardCount)) || 1, 1),
+    MAX_SEASON_FIXTURE_SHARDS,
+  );
+
+  if (shardCount > 1) {
+    const rest = await Promise.all(
+      Array.from({ length: shardCount - 1 }, (_, i) =>
+        getDoc(doc(db, 'season_fixtures', `${seasonId}_${i + 1}`)).catch(() => null),
+      ),
+    );
+    for (const snap of rest) {
+      if (snap?.exists()) fixtures.push(...((snap.data() as SeasonFixturesDoc).fixtures ?? []));
+    }
+  }
+
+  // The server writes shards in chronological order, so a straight concat is
+  // already sorted. Re-sort defensively: if one shard write lagged behind the
+  // others, callers still get a monotonic calendar instead of a scrambled one.
+  fixtures.sort((a, b) => (a.startingAtUtc ?? '').localeCompare(b.startingAtUtc ?? ''));
+
+  return fixtures;
 }
 
 /**
@@ -481,15 +551,15 @@ export async function getFixturesBySeasonFromFirestore(seasonId: number): Promis
   const promise = (async () => {
     let matches: Match[];
 
-    // Fast path: a single lightweight season_fixtures/{seasonId} index doc
-    // (~26 KB for the World Cup) instead of ~104 heavy match docs (several MB).
-    // The index is built server-side by syncFixtures via an Admin-SDK .select()
-    // that strips the detail/h2h blobs — see functions/src/season-fixtures-index.ts.
-    const indexSnap = await getDoc(doc(db, 'season_fixtures', String(seasonId))).catch(() => null);
+    // Fast path: the lightweight season_fixtures index (~26 KB for the World
+    // Cup, one doc) instead of ~104 heavy match docs (several MB). The index is
+    // built server-side by syncFixtures via an Admin-SDK .select() that strips
+    // the detail/h2h blobs — see functions/src/season-fixtures-index.ts. Big
+    // seasons span several shards; readSeasonFixtureShards stitches them.
+    const indexed = await readSeasonFixtureShards(seasonId);
 
-    if (indexSnap?.exists()) {
-      const data = indexSnap.data() as SeasonFixturesDoc;
-      const base = (data.fixtures ?? []).map(f => matchFromDoc(f));
+    if (indexed) {
+      const base = indexed.map(f => matchFromDoc(f));
       matches = await overlayLiveScores(base);
     } else {
       // Graceful rollout fallback — slow heavy query, but correct. Used until
@@ -805,6 +875,44 @@ export async function getFixturesByDateFromFirestore(localDate: string): Promise
  * The teamId param is stringified — MatchDoc stores team IDs as strings
  * (e.g. "2626"), not numbers.
  */
+/**
+ * PRÓXIMOS partidos de un equipo (todas las competencias), ascendente.
+ *
+ * Truco de índice: solo existen los compuestos (homeTeam.id ASC,
+ * startingAtUtc DESC) / (awayTeam.id ASC, startingAtUtc DESC). Una query
+ * `>= now` con orderBy ASC exigiría índices nuevos; en su lugar pedimos
+ * DESC (futuro más lejano primero) con limit generoso y revertimos en
+ * cliente. Un equipo tiene ≤ ~60 partidos futuros conocidos, así que el
+ * limit 100 nunca corta el extremo cercano.
+ *
+ * Los fixtures de temporada completa existen en `matches` gracias al crawl
+ * de syncLeagueSeasons (cambio de temporada) + la ventana de 15 días de
+ * syncFixtures.
+ */
+export async function getUpcomingFixturesByTeam(
+  teamId: string | number,
+  count = 100,
+): Promise<Match[]> {
+  const idStr = String(teamId);
+  const nowUtc = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const mk = (field: 'homeTeam.id' | 'awayTeam.id') => query(
+    collection(db, 'matches'),
+    where(field, '==', idStr),
+    where('startingAtUtc', '>=', nowUtc),
+    orderBy('startingAtUtc', 'desc'),
+    limit(count),
+  );
+  const [homeSnap, awaySnap] = await Promise.all([getDocs(mk('homeTeam.id')), getDocs(mk('awayTeam.id'))]);
+  const byId = new Map<string, Match>();
+  for (const d of [...homeSnap.docs, ...awaySnap.docs]) {
+    const m = matchFromDoc(d.data() as MatchDoc);
+    if (!byId.has(m.id)) byId.set(m.id, m);
+  }
+  // Ascendente: el siguiente partido primero.
+  return Array.from(byId.values()).sort((a, b) =>
+    (a.startingAtUtc ?? '').localeCompare(b.startingAtUtc ?? ''));
+}
+
 export async function getRecentFixturesByTeam(
   teamId: string | number,
   count = 25,
