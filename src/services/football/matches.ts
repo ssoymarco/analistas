@@ -80,6 +80,29 @@ const CACHE_PREFIX = 'cache:fb:matches:';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CACHE_WRITE_INTERVAL_MS = 20_000;
 
+/** Only days around today are mirrored: browsing the calendar must not grow storage without bound. */
+function isCacheableDay(localDate: string): boolean {
+  const { start } = localDayRange(localDate);
+  return Math.abs(start - Date.now() / 1000) <= 2 * 86_400;
+}
+
+let pruned = false;
+/** Once per session: drop day mirrors that are no longer around today. */
+function pruneDayCaches(): void {
+  if (pruned) return;
+  pruned = true;
+  AsyncStorage.getAllKeys()
+    .then(keys => {
+      const stale = keys.filter(k => {
+        if (!k.startsWith(`${CACHE_PREFIX}day:`)) return false;
+        const date = k.slice(`${CACHE_PREFIX}day:`.length).split(':')[0];
+        return !isCacheableDay(date);
+      });
+      return stale.length ? AsyncStorage.multiRemove(stale) : undefined;
+    })
+    .catch(() => {});
+}
+
 async function readMatchCache(key: string): Promise<Match[] | null> {
   try {
     const raw = await AsyncStorage.getItem(CACHE_PREFIX + key);
@@ -151,12 +174,16 @@ function subscribeDayTier(
   onChange: (matches: Match[]) => void,
   onError?: (err: Error) => void,
 ): Unsubscribe {
+  // The mirror exists for an instant first paint, which only the curated tier
+  // of the days around today needs (the rest is loaded on request anyway).
+  const useCache = tier === 'curated' && isCacheableDay(localDate);
   const cacheKey = `day:${localDate}:${tier}`;
-  const cache = makeCacheWriter(cacheKey);
+  const cache = useCache ? makeCacheWriter(cacheKey) : null;
   let live = false;
   let closed = false;
   let unsub: Unsubscribe = () => {};
-  readMatchCache(cacheKey).then(cached => { if (cached && !live && !closed) onChange(cached); });
+  pruneDayCaches();
+  if (useCache) readMatchCache(cacheKey).then(cached => { if (cached && !live && !closed) onChange(cached); });
 
   const listen = (indexed: boolean) => {
     unsub = onSnapshot(
@@ -166,7 +193,7 @@ function subscribeDayTier(
         let matches = snap.docs.map(d => matchFromFb(d.data() as FbMatchDoc));
         if (!indexed) matches = matches.filter(m => inTier(m, tier));
         onChange(matches);
-        cache.write(matches);
+        cache?.write(matches);
       },
       err => {
         const code = (err as { code?: string }).code;
@@ -182,7 +209,7 @@ function subscribeDayTier(
   };
   listen(!tierIndexUnavailable);
 
-  return () => { closed = true; unsub(); cache.flush(); };
+  return () => { closed = true; unsub(); cache?.flush(); };
 }
 
 /** Real-time fixtures of a local day in the curated leagues. */

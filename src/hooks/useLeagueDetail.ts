@@ -205,6 +205,13 @@ function teamsFromFixtures(fixtures: LeagueFixture[]): LeagueTeam[] {
   return [...byId.values()];
 }
 
+/**
+ * Calendars already built this session, by season key: re-opening a league
+ * paints at once. Memory only on purpose — a season is ~170 KB of rows, and
+ * mirroring every league ever opened would fill the device's key-value store.
+ */
+const sessionFixtures = new Map<number, LeagueFixture[]>();
+
 // ══════════════════════════════════════════════════════════════════════════════
 // HOOK
 // ══════════════════════════════════════════════════════════════════════════════
@@ -275,25 +282,21 @@ export function useLeagueDetail(
           // Stale-while-revalidate: paint what we showed last time at once.
           type CachedMeta = Pick<LeagueDetailData, 'standings' | 'topScorers' | 'topAssists' | 'topCards' | 'teams'>;
           const metaKey = `fb_league_meta_v1_${resolvedSeasonId}`;
-          const fixturesKey = `fb_league_fixtures_v1_${resolvedSeasonId}`;
           AppCache.get<CachedMeta>(metaKey).then(cachedMeta => {
             if (!cachedMeta || cancelled) return;
             setData(prev => (prev?.metaLoaded ? prev : merge(prev, { ...cachedMeta, metaLoaded: true })));
           }).catch(() => {});
-          AppCache.get<LeagueFixture[]>(fixturesKey).then(cachedFixtures => {
-            if (!cachedFixtures?.length || cancelled) return;
-            setData(prev => (prev?.fixtures.length ? prev : merge(prev, { fixtures: cachedFixtures })));
+          const seenFixtures = sessionFixtures.get(resolvedSeasonId);
+          if (seenFixtures?.length) {
+            setData(prev => (prev?.fixtures.length ? prev : merge(prev, { fixtures: seenFixtures })));
             setLoading(false);
-          }).catch(() => {});
+          }
 
           const fixtures = toFixtures(await fixturesPromise, resolvedSeasonId);
           if (cancelled) return;
           setData(prev => merge(prev, { fixtures }));
           setLoading(false);
-          if (fixtures.length > 0) {
-            const ttl = fixtures.some(f => f.status === 'live') ? CacheTTL.fixturesLive : CacheTTL.fixturesStatic;
-            AppCache.set(fixturesKey, fixtures, ttl).catch(() => {});
-          }
+          if (fixtures.length > 0) sessionFixtures.set(resolvedSeasonId, fixtures);
 
           const [standingsRaw, top] = await metaPromise;
           if (cancelled) return;

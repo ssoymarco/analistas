@@ -1,8 +1,8 @@
 # Migración Sportmonks → API-Sports — estado y traspaso
 
-Última actualización: 25 nov 2026. Rama: `claude/pensive-franklin-4gbgin` (contiene toda la rama
-`feature/live-activities` del dueño + el backend nuevo). Inventario de datos disponible:
-https://claude.ai/artifact/Mhi5LVy6ZiBXRwLSiRorh8
+Última actualización: 25 nov 2026. Rama de trabajo: `claude/bold-rubin-hqhclo` (parte de
+`claude/pensive-franklin-4gbgin`, que contiene `feature/live-activities` + el backend nuevo).
+Inventario de datos disponible: https://claude.ai/artifact/Mhi5LVy6ZiBXRwLSiRorh8
 
 ## Decisiones del dueño (no re-litigar)
 
@@ -12,79 +12,176 @@ https://claude.ai/artifact/Mhi5LVy6ZiBXRwLSiRorh8
   Lógica en `functions/src/shared/football/leagues.ts` (`getLeaguePopularity`, `compareLeagues`), con
   overrides por país (EE. UU. pone MLS primero). Las ~1,200 ligas no curadas van al final por heurística.
 - Índice de presión: lo calculamos nosotros (`computePressureShare` en `football/mapping.ts`).
-- Árbitro: solo el nombre. Clima y canales de TV: API-Sports no los tiene → ocultar.
+- Árbitro: solo el nombre. Clima y canales de TV: API-Sports no los tiene → ocultos.
 - Notificaciones: se conservan TODAS las reglas de la rama del dueño (Modo Estadio, Modo Rival,
   "Silenciar este partido", jugador seguido, roja anulada, VAR honesto, retraso pre-partido, Live Activities).
 - Forma de trabajar con el dueño: español, y en la terminal **un paso a la vez** ("no te adelantes").
   La Mac del dueño (`~/Analistas`) aún no se conecta por Remote Control: los despliegues los corre él.
+  No desplegar a Firebase ni publicar a tiendas sin su permiso.
 
-## Estado actual (en producción desde el 25-nov-2026)
+## Estado
 
-Backend en `functions/src/football/` desplegado en `analistas-8ba26` (us-central1):
+| Pieza | Estado |
+| --- | --- |
+| Backend programado (`fbPollLive`, `fbSyncFixtures`, `fbSyncStandings`, `fbDailyLeagues`, `fbAdmin`) | **En producción** desde el 25-nov-2026 |
+| Backend bajo demanda (`fbOnDemand`) + reglas + índices | Hecho en la rama, **sin desplegar** |
+| App leyendo `fb_*` (Fase 3 completa) | Hecho en la rama, **sin publicar** |
+| Migración de favoritos y topics al primer arranque | Hecho en la rama, sin publicar |
+| Bug de la pestaña En Vivo (nombres de estadísticas) | Corregido |
+
+### Backend en producción (`functions/src/football/`, proyecto `analistas-8ba26`, us-central1)
 
 | Función | Frecuencia | Qué hace |
 | --- | --- | --- |
 | `fbPollLive` | cada min (1–4 lecturas según liga) | `/fixtures?live=all`, detector de cambios, pushes, detalle, Live Activities |
 | `fbSyncFixtures` | cada 5 min | todos los partidos de ayer…+14 días, gate del poller, retrasos de kickoff |
 | `fbSyncStandings` | cada 10 min | tablas de ligas que terminaron un partido |
-| `fbDailyLeagues` | 04:17 UTC | catálogo de ligas, tablas, goleadores |
+| `fbDailyLeagues` | 04:17 UTC | catálogo de ligas, tablas, goleadores, índice de equipos |
 | `fbAdmin` | callable (BACKFILL_TOKEN) | sync manual de fechas, catálogo, tablas |
 
-También siguen: `onWallpaperEntryCreated`, `deliverDelayedPush` (Modo Estadio, ahora lee `fb_matches`),
-`reportFcmToken`, `sendTestPush`. Las 14 funciones de Sportmonks se borraron.
+También siguen: `onWallpaperEntryCreated`, `deliverDelayedPush`, `reportFcmToken`, `sendTestPush`.
 
-**Colecciones nuevas** (lectura pública, escritura solo servidor; formas en
-`functions/src/shared/football/model.ts`): `fb_matches`, `fb_match_details`, `fb_standings/{liga}_{temporada}`,
-`fb_topscorers/{liga}_{temporada}`, `fb_meta/leagueCatalog`. El resto de `fb_meta` es interno.
+### Backend bajo demanda (nuevo, por desplegar): `fbOnDemand`
 
-**Topics FCM nuevos** (`FbTopics` en `model.ts`): `fb_team_{id}_{goals|cards|live}_{d0|d2|d5|d10}`,
+Callable pública (`functions/src/football/on-demand.ts`). La app **lee el documento de Firestore** y solo
+llama a la función si falta o ya caducó (`expiresAt`); la función vuelve a comprobar la frescura, consulta
+API-Sports y guarda el documento con su TTL. Así cada dato le cuesta a API-Sports una llamada por TTL sin
+importar cuántos usuarios lo abran, y la llave nunca sale del servidor.
+
+| `kind` | Documento | Llamadas | TTL |
+| --- | --- | --- | --- |
+| `match` | `fb_matches/{id}` + `fb_match_details/{id}` (ligas sin poller, partidos viejos, alineaciones) | 1 | reglas en `shared/football/freshness.ts` |
+| `matchPreview` | `fb_match_previews/{id}`: H2H, bajas, predicción + comparación, forma, estadio | 2–5 | 12 h → 45 min según cercanía; congelado al empezar |
+| `team` | `fb_teams/{id}`: ficha, estadio, DT, plantilla, competencias, liga principal | 4 | 24 h |
+| `teamFixtures` | `fb_team_fixtures/{id}_{temporada}`: temporada completa, todas las competencias | 1 | 6 h |
+| `teamStats` | `fb_team_stats/{id}_{liga}_{temporada}` | 1 | 12 h |
+| `player` | `fb_players/{id}`: perfil, estadísticas de las 2 últimas temporadas, carrera | 3 | 24 h |
+| `coach` / `venue` / `league` | `fb_coaches`, `fb_venues`, `fb_leagues` (temporadas de la liga) | 1 | 7 d / 30 d / 7 d |
+| `leagueFixtures` | `fb_league_fixtures/{liga}_{temporada}`: calendario (máx. 1,400 filas) | 1 | 6 h (30 d si la temporada ya terminó) |
+| `standings` / `topPlayers` | los mismos `fb_standings` / `fb_topscorers` para ligas o temporadas que el sync no cubre | 1 / 3 | 3 h / 12 h |
+| `search` | `fb_search/{consulta}`: equipos y jugadores | 2 | 7 d |
+| `legacyPlayers` | `fb_legacy_players/{idSportmonks}`: id nuevo de un jugador seguido (apellido + fecha de nacimiento, usando el archivo `players/*`) | 1–3, una sola vez | permanente |
+
+**Guardia de cuota**: antes de cada consulta compara lo que queda del día contra una reserva para el
+poller (~3 llamadas por minuto restante + 200). Si no alcanza, sirve el documento viejo o responde
+`resource-exhausted`; los marcadores en vivo y los avisos nunca se quedan sin llamadas.
+
+`fbDailyLeagues` ahora también escribe `fb_meta/teamIndex` (equipos de las ligas curadas, para búsqueda
+instantánea) y el catálogo lleva inicio/fin de temporada (`b`, `e`).
+
+### Colecciones y topics
+
+Lectura pública, escritura solo servidor; formas en `functions/src/shared/football/model.ts`:
+`fb_matches`, `fb_match_details`, `fb_standings`, `fb_topscorers`, `fb_meta/leagueCatalog`,
+`fb_meta/teamIndex` y las de bajo demanda de la tabla anterior (`fb_legacy_players` es privada).
+
+**Topics FCM** (`FbTopics` en `model.ts`, el cliente usa ese mismo objeto): `fb_team_{id}_{goals|cards|live}_{d0|d2|d5|d10}`,
 `fb_team_{id}_{kickoff|lineups|reminders}`, `fb_team_{id}_rival_*`, `fb_player_{id}_{goals|cards|lineups}`,
-`fb_mute_{matchId}`. Además el servidor manda los avisos inmediatos a los topics viejos
-`team_{idSportmonks}_*` (dual-send, sin matchId) para que la app vieja reciba avisos; se apaga con
-`FB_LEGACY_DUAL_SEND=false`.
+`fb_mute_{matchId}`. El servidor sigue mandando los avisos inmediatos a los topics viejos
+`team_{idSportmonks}_*` (dual-send, sin matchId) para builds viejas; se apaga con `FB_LEGACY_DUAL_SEND=false`.
 
-**IDs viejos → nuevos**: `functions/src/shared/football/legacy.ts` + `legacyTeamMap.json`
-(2,413 de 2,478 equipos de Sportmonks) y `SM_TO_AF_LEAGUE` en `leagues.ts`. Jugadores: **sin mapear aún**.
+**IDs viejos → nuevos**: `shared/football/legacy.ts` + `legacyTeamMap.json` (2,413 de 2,478 equipos),
+`SM_TO_AF_LEAGUE` en `leagues.ts`, `legacyPlayerMap.json` (55 jugadores populares) y el `kind`
+`legacyPlayers` para el resto.
 
 **Archivo histórico de Sportmonks**: sigue en Firestore (`matches` 296k, `teams`, `players` 18.7k, etc.).
-No borrar. Re-descarga con API-Sports pendiente de decisión (cuántas temporadas).
+No borrar (la migración de jugadores seguidos lee `players/*`). Re-descarga con API-Sports pendiente.
 
-## Lo que falta — Fase 3: la app
+## La app (Fase 3, hecha)
 
-La app (Expo 54 / RN 0.81, versión 1.4.0 en `app.json`) **todavía lee Sportmonks**: `src/services/sportsApi.ts`
-(~4.7k líneas), `src/services/sportmonks.ts` (proxy Cloudflare, ya sin token), `src/services/firestoreApi.ts`
-(colecciones viejas). Hoy muestra casi nada para la mayoría de las ligas.
+Capa de datos nueva en `src/services/football/` (los servicios de Sportmonks se borraron):
 
-1. **Capa de datos nueva** que lea `fb_*` y devuelva los tipos de `src/data/types.ts` (Match, MatchDetail…).
-   La app importa los archivos compartidos directo desde `functions/src/shared/football/` (sin dependencias).
-   Agrupar por día LOCAL con `timestamp` (no `date`, que es UTC).
-2. **Datos bajo demanda** (aún no existen en el backend): ficha de equipo y estadísticas de temporada,
-   jugador (perfil + temporada), H2H, bajas, predicciones/comparación, estadio, DT, plantilla, calendario
-   de temporada por liga, tablas de ligas no prioritarias. Propuesta: callable `fbOnDemand` que consulta
-   API-Sports y cachea en Firestore con TTL; la app lee el doc y solo llama si falta o caducó.
-3. **Migración de favoritos al primer arranque**: AsyncStorage + `users/{uid}.favorites` con `legacy.ts`;
-   re-suscribir a topics `fb_*`, darse de baja de los viejos; jugadores vía mapeo en servidor.
-4. **Topics y Live Activities en el cliente**: `src/services/fcmTopics.ts` → `FbTopics`; el registro de
-   `liveActivities` debe guardar el matchId de API-Sports.
-5. **Onboarding y búsqueda**: `countryPresets.ts`, `POPULAR_TEAMS` y logos usan IDs/URLs de Sportmonks.
-6. **Bug existente**: la pestaña En Vivo busca "Tiros totales"/"Tiros a puerta"/"xG (Goles esperados)";
-   los datos se llaman "Total remates"/"Remates al arco"/"Goles esperados (xG)".
-7. Índices de Firestore para las consultas nuevas (p. ej. `leagueId` + `timestamp`).
-8. Lanzamiento: build nueva (o OTA si los módulos nativos no cambian) + subir `minVersion` en
-   `_meta/appVersion` para forzar la actualización.
+| Archivo | Qué hace |
+| --- | --- |
+| `base.ts`, `mappers.ts` | Documentos `fb_*` → tipos de `src/data/types.ts`. Puros (corren en Node). |
+| `matches.ts` | Partidos del día **local** (por `timestamp`), en vivo, detalle + previa en tiempo real. |
+| `leagueData.ts` | Tablas, grupos, goleadores, calendario, llaves, temporadas. |
+| `rounds.ts` | Interpreta las rondas ("Apertura - Quarter-finals") y arma el bracket (Liguilla, copas). |
+| `teams.ts` | Equipo, calendario, estadísticas, jugador, DT. |
+| `catalog.ts` | Catálogo de ligas y temporada actual (reemplaza a `seasonResolver`). |
+| `search.ts`, `popular.ts` | Búsqueda (índice local + remota) y tablas de populares con IDs nuevos. |
+| `onDemand.ts` | Cliente de `fbOnDemand` (leer doc → llamar solo si falta o caducó). |
+| `legacyMigration.ts` | Migración de favoritos al primer arranque. |
+
+Convenciones:
+
+- **`seasonId` = id de liga × 10000 + año** (`fbSeasonKey`; Liga MX 2026 → 2622026). Así los parámetros
+  de navegación y los hooks siguen recibiendo un solo número.
+- `Match.startingAtUtc` conserva el formato `"YYYY-MM-DD HH:MM:SS"` (UTC); `Match.statusShort` trae el
+  código de API-Sports y `Match.roundLabel` la ronda.
+- Aplazado / cancelado / abandonado se muestran con la etiqueta de `utils/deadState.ts` (vía `stateId`).
+- Selecciones: el código FIFA (colores y banderas) sale del nombre (`shortNameFor` en `base.ts`).
+- `src/config/leagues.ts` es solo una vista del catálogo compartido (`shared/football/leagues.ts`).
+- **Lista del día en dos niveles**: ligas curadas (popularidad ≥ 5) en tiempo real al abrir; el resto se
+  descarga cuando el usuario llega al final, elige un filtro o el día casi no tiene ligas curadas. Si el
+  índice compuesto no existe, cae a leer el día completo (nunca depende de un deploy de índices).
+
+**Migración al primer arranque** (`DataMigrationGate` → `legacyMigration.ts` → `FavoritesContext`):
+
+1. Antes de montar los providers traduce en AsyncStorage equipos, rivales, ligas y jugadores conocidos;
+   guarda las listas viejas en `analistas_legacy_favorites_v1`; marca `analistas_fb_migration_v1`.
+   Partidos favoritos/silenciados se descartan (ids de partido no traducibles).
+2. En segundo plano: se da de baja de **todos** los topics viejos (una vez) y pide al servidor los
+   jugadores que no pudo traducir.
+3. En la nube los favoritos migrados viven en **`users/{uid}.favoritesFb`**; `favorites` queda intacto
+   para dispositivos con build vieja (los dos espacios de ids nunca se mezclan). Las reglas ya lo permiten.
+
+Lo que API-Sports no tiene quedó oculto: clima, TV, ficha extendida del árbitro, estadísticas de DT,
+alineaciones probables, datos curiosos.
+
+## Lo que falta
+
+1. **Desplegar** (lo corre el dueño, un paso a la vez), en este orden:
+   1. `firebase deploy --only firestore:rules,firestore:indexes` — sin las reglas la app nueva no puede
+      leer las colecciones bajo demanda ni guardar `favoritesFb`.
+   2. `firebase deploy --only functions` — crea `fbOnDemand` y actualiza las programadas.
+   3. Probar la app en un dispositivo (build de desarrollo / preview) contra producción.
+   4. Publicar: OTA a las builds 1.4.0 (no cambió ningún módulo nativo) o build nueva; subir
+      `minVersion` en `_meta/appVersion` para forzar la actualización de versiones anteriores.
+2. **Probar en dispositivo**: la interfaz no se pudo abrir en la nube de Claude (solo se probaron la capa
+   de datos, la migración y el empaquetado de Metro). Revisar sobre todo: Partidos, detalle de partido
+   (En Vivo, Previa, Alineación, Tabla), Liga (calendario, bracket), Equipo, Jugador, búsqueda, onboarding,
+   y la migración con una instalación que ya tenga favoritos.
+3. Pendientes menores: mostrar en la ficha de equipo las estadísticas de temporada (`getTeamStats`, ya
+   disponible); App Check para `fbOnDemand`; apagar el dual-send cuando la build nueva esté adoptada.
 
 Después: Fase 4 re-descarga histórica · Fase 5 sitio web con los mismos datos · Fase 6 otros deportes.
 
-## Particularidades de API-Sports (ya resueltas en el backend)
+## Particularidades de API-Sports
 
 - Los partidos terminados **desaparecen** de `live=all`; el poller los re-consulta por `ids`.
 - Autogol: el evento viene con el equipo **beneficiado**; la app espera el que lo metió (se invierte en `mapEvents`).
 - Cambios: `player` = sale, `assist` = entra (la app usa player = entra).
 - `fixture.periods` suele venir vacío en vivo → el reloj se ancla con `elapsed`.
 - No hay estado "retrasado": un retraso es un kickoff nuevo con `NS`; aplazado = `PST`.
+- `search` solo acepta letras, números y espacios (sin acentos), mínimo 3; jugadores se buscan por apellido.
+- `/predictions` ya incluye el H2H y la comparación de equipos.
+- Rondas: `"Regular Season - 17"`, `"Apertura - Quarter-finals"`, `"Group Stage - 2"`, `"Round of 16"`.
+  El "Play-offs" de las copas UEFA es la previa (antes de la fase de liga) y no entra al bracket.
+- Tablas: una liga puede traer varias (conferencias, grupos, una general repetida); se muestran las que
+  no repiten equipos. En el Mundial, "Group Stage" es el ranking de terceros.
+- Muchos partidos del Mundial vienen sin id de estadio y con el nombre escrito de varias formas
+  (`config/worldCupVenues.ts` empata por nombre).
 
 ## Cómo probar sin tocar producción
 
-Emulador de Firestore + script que corre las funciones contra la API real y simula FCM/Cloud Tasks.
-En la nube de Claude, `fetch` de Node necesita `NODE_USE_ENV_PROXY=1` (el proxy pone la llave de API-Sports).
-Compilar a un directorio temporal (`npx tsc -p functions --outDir <tmp>`) — `functions/lib` está versionado.
+Todo corre contra el **emulador de Firestore** con datos reales de API-Sports; FCM y Cloud Tasks se
+simulan en memoria. Los scripts se niegan a correr si falta `FIRESTORE_EMULATOR_HOST`.
+
+```bash
+# 1) Emulador (desde la raíz del repo, para que cargue firestore.rules)
+firebase emulators:start --only firestore --project demo-analistas
+
+# 2) Backend contra el emulador
+cd functions && npm run build
+export FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=demo-analistas APISPORTS_KEY=<llave>
+node lib/scripts/fb-emulator.js seed      # catálogo + partidos de ayer/hoy/mañana
+node lib/scripts/fb-emulator.js poll      # un ciclo en vivo (los pushes se capturan, no se envían)
+node lib/scripts/fb-emulator.js verify    # comprobaciones de fbOnDemand, caché y guardia de cuota
+
+# 3) Capa de datos de la app (Node + emulador + el código real de la función)
+cd ../scripts/fb-tests && npm install && npm test
+```
+
+En la nube de Claude: `NODE_USE_ENV_PROXY=1` y cualquier valor en `APISPORTS_KEY` (el proxy pone la
+llave). Ojo: si el emulador no encuentra `firestore.rules` permite todo — verificar en su log.

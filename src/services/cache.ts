@@ -51,10 +51,41 @@ async function get<T>(key: string): Promise<T | null> {
  * Store a value with a time-to-live.
  * Fire-and-forget: awaiting is optional.
  */
+// ── Bounded size ─────────────────────────────────────────────────────────────
+// Entries only used to be removed when read after expiring, so every league or
+// season ever opened stayed on disk. AsyncStorage on Android is capped (6 MB by
+// default) and a full store makes EVERY write fail — favorites included. A
+// small index of write times keeps the newest MAX_ENTRIES and evicts the rest.
+const INDEX_KEY = 'analistas_cacheidx_v1';
+const MAX_ENTRIES = 60;
+let indexChain: Promise<void> = Promise.resolve();
+
+function touchIndex(key: string): Promise<void> {
+  // Serialized: concurrent sets must not overwrite each other's index update.
+  indexChain = indexChain.then(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(INDEX_KEY);
+      const index = (raw ? JSON.parse(raw) : {}) as Record<string, number>;
+      index[key] = Date.now();
+      const keys = Object.keys(index);
+      if (keys.length > MAX_ENTRIES) {
+        const evict = keys.sort((a, b) => index[a] - index[b]).slice(0, keys.length - MAX_ENTRIES);
+        for (const k of evict) delete index[k];
+        await AsyncStorage.multiRemove(evict.map(k => PREFIX + k));
+      }
+      await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(index));
+    } catch {
+      // Best-effort housekeeping.
+    }
+  });
+  return indexChain;
+}
+
 async function set<T>(key: string, data: T, ttlMs: number): Promise<void> {
   try {
     const entry: CacheEntry<T> = { data, at: Date.now(), ttl: ttlMs };
     await AsyncStorage.setItem(PREFIX + key, JSON.stringify(entry));
+    touchIndex(key).catch(() => {});
   } catch {
     // Storage full or serialization error — silently skip caching
   }
