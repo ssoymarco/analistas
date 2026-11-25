@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  countFixturesByDate, getTeamsFixturesByDate, groupMatchesByLeague,
+  countFixturesByDate, dayNeedsRequest, getTeamsFixturesByDate, groupMatchesByLeague, requestDayIfUnsynced,
   subscribeFixturesByDate, subscribeOtherFixturesByDate, type LeagueWithMatches,
 } from '../services/football/matches';
 import { sortForDisplay } from '../services/football/mappers';
@@ -48,6 +48,7 @@ export function useFixtures(date: string, followedTeamIds: string[] = []): UseFi
   const [wantAll, setWantAll]       = useState(false);
   const [otherLoaded, setOtherLoaded] = useState(false);
   const [loading, setLoading]       = useState(true);
+  const [fetchingDay, setFetchingDay] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError]           = useState<string | null>(null);
 
@@ -84,10 +85,22 @@ export function useFixtures(date: string, followedTeamIds: string[] = []): UseFi
     // Size of the whole day (one aggregate read): what isn't in the curated
     // tier is what's left to load — the screen can count it without
     // downloading it.
-    countFixturesByDate(date)
-      .then(n => { if (isMounted.current) setDayTotal(n); })
+    let cancelled = false;
+    const count = () => countFixturesByDate(date)
+      .then(n => { if (!cancelled && isMounted.current) setDayTotal(n); })
       .catch(() => {});
-    return unsubscribe;
+    count();
+    // A day outside the window the backend keeps synced (older results,
+    // fixtures far ahead) is fetched the first time anyone opens it; the
+    // listener above then delivers the rows.
+    const needsRequest = dayNeedsRequest(date);
+    setFetchingDay(needsRequest);
+    if (needsRequest) {
+      requestDayIfUnsynced(date)
+        .then(stored => (stored ? count() : undefined))
+        .finally(() => { if (!cancelled && isMounted.current) setFetchingDay(false); });
+    }
+    return () => { cancelled = true; unsubscribe(); };
   }, [date]);
 
   // Followed teams playing in leagues outside the curated set.
@@ -144,7 +157,10 @@ export function useFixtures(date: string, followedTeamIds: string[] = []): UseFi
   }, []);
 
   return {
-    matches, leagues, loading, refreshing, error, refresh, isPolling,
+    matches, leagues,
+    // An empty list isn't "no matches" while the backend is still fetching the day.
+    loading: loading || (fetchingDay && matches.length === 0),
+    refreshing, error, refresh, isPolling,
     pendingOtherCount: otherLoaded ? 0 : otherCount,
     allLeaguesRequested: wantAll,
     loadAllLeagues,

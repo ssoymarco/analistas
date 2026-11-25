@@ -278,7 +278,7 @@ export interface FbCached {
     expiresAt: number;
 }
 /** Request kinds accepted by the `fbOnDemand` callable. */
-export type FbOnDemandKind = 'match' | 'matchPreview' | 'team' | 'teamFixtures' | 'teamStats' | 'player' | 'coach' | 'venue' | 'league' | 'leagueFixtures' | 'standings' | 'topPlayers' | 'search' | 'legacyPlayers';
+export type FbOnDemandKind = 'match' | 'matchPreview' | 'day' | 'team' | 'teamFixtures' | 'teamStats' | 'player' | 'coach' | 'venue' | 'league' | 'leagueFixtures' | 'standings' | 'topPlayers' | 'search' | 'legacyPlayers';
 /** Team crest URL (API-Sports media CDN) — lets slim rows omit the logo. */
 export declare function fbTeamLogo(teamId: string | number): string;
 export declare function fbLeagueLogo(leagueId: string | number): string;

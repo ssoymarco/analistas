@@ -21,7 +21,7 @@ import {
   type QueryConstraint, type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { matchDetailNeedsFetch } from '../../../functions/src/shared/football/freshness';
+import { isOutsideSyncWindow, matchDetailNeedsFetch } from '../../../functions/src/shared/football/freshness';
 import { getFootballLeague } from '../../../functions/src/shared/football/leagues';
 import type {
   FbMatchDetailDoc, FbMatchDoc, FbMatchPreviewDoc,
@@ -239,6 +239,43 @@ export async function countFixturesByDate(localDate: string): Promise<number> {
     where('timestamp', '<', end),
   ));
   return snap.data().count;
+}
+
+/**
+ * A local day outside the window the backend keeps synced (results from
+ * further back than yesterday, fixtures more than two weeks ahead) may not be
+ * stored — or only partly: ask the backend, which fetches it once and answers
+ * from a marker afterwards. The rows arrive through the day listeners.
+ * Resolves to true when the backend stored something new.
+ */
+export async function requestDayIfUnsynced(localDate: string): Promise<boolean> {
+  const utcDates = unsyncedUtcDates(localDate);
+  if (!utcDates.length) return false;
+  const results = await Promise.all(utcDates.map(async date => {
+    try {
+      const res = await callOnDemand<{ synced?: boolean }>({ kind: 'day', date });
+      requestedDays.add(date);
+      return !!res?.synced;
+    } catch { return false; }       // offline / budget: asked again next time
+  }));
+  return results.some(Boolean);
+}
+
+/** UTC dates already confirmed with the backend in this session. */
+const requestedDays = new Set<string>();
+
+/** The UTC dates a local day overlaps that the schedule doesn't cover and
+ *  haven't been confirmed yet (empty for the ordinary yesterday … +14 days). */
+function unsyncedUtcDates(localDate: string): string[] {
+  const { start, end } = localDayRange(localDate);
+  const now = Date.now();
+  return [...new Set([start, end - 1].map(sec => new Date(sec * 1000).toISOString().slice(0, 10)))]
+    .filter(d => isOutsideSyncWindow(d, now) && !requestedDays.has(d));
+}
+
+/** True when opening this local day needs a round-trip to the backend first. */
+export function dayNeedsRequest(localDate: string): boolean {
+  return unsyncedUtcDates(localDate).length > 0;
 }
 
 /** One-shot: every fixture of a local day, all leagues. */

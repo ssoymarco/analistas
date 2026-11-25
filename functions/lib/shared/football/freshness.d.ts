@@ -32,6 +32,23 @@ export declare function matchPreviewTtlMs(row: MatchRowLike, nowMs: number): num
 export declare function isExpired(doc: {
     expiresAt?: number | null;
 } | null | undefined, nowMs: number): boolean;
+/**
+ * The scheduled sync keeps yesterday … +14 days in `fb_matches`. Any other
+ * (UTC) date is fetched the first time somebody opens it.
+ */
+export declare const SYNC_WINDOW_DAYS: {
+    readonly past: 1;
+    readonly future: 14;
+};
+/** How far from today a day can be requested on demand. */
+export declare const ON_DEMAND_DAY_RANGE: {
+    readonly past: 400;
+    readonly future: 180;
+};
+/** Whole days between a 'YYYY-MM-DD' UTC date and today (negative = past). */
+export declare function utcDayOffset(date: string, nowMs: number): number;
+/** True when the scheduled sync doesn't cover this UTC date. */
+export declare function isOutsideSyncWindow(date: string, nowMs: number): boolean;
 export declare const FbTtl: {
     readonly team: number;
     readonly teamFixtures: number;

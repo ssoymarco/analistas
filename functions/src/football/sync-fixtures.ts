@@ -50,7 +50,11 @@ export function datesForRun(nowMs: number): number[] {
   return out;
 }
 
-export interface SyncResult { dates: string[]; fixtures: number; written: number; delays: number }
+export interface SyncResult {
+  dates: string[]; fixtures: number; written: number; delays: number;
+  /** Dates the provider call failed for (nothing was stored for them). */
+  failed: string[];
+}
 
 const MIN_DELAY_SEC = 5 * 60;
 const MAX_DELAY_SEC = 8 * 3600;
@@ -102,6 +106,7 @@ export async function syncFootballFixtures(explicitDates?: string[], nowMs = Dat
   let fixturesSeen = 0;
   let written = 0;
   const delayChanges: FbChange[] = [];
+  const failed: string[] = [];
 
   for (const date of dates) {
     let list: AfFixtureCore[];
@@ -109,6 +114,7 @@ export async function syncFootballFixtures(explicitDates?: string[], nowMs = Dat
       list = await afGet<AfFixtureCore[]>('/fixtures', { date, timezone: 'UTC' });
     } catch (err) {
       logger.error(`fbSyncFixtures: ${date} failed`, { err: String(err) });
+      failed.push(date);
       continue;
     }
     fixturesSeen += list.length;
@@ -166,5 +172,5 @@ export async function syncFootballFixtures(explicitDates?: string[], nowMs = Dat
   logger.info('fbSyncFixtures: done', {
     dates, fixtures: fixturesSeen, written, delays: delayChanges.length, remainingDay: quotaState.remainingDay,
   });
-  return { dates, fixtures: fixturesSeen, written, delays: delayChanges.length };
+  return { dates, fixtures: fixturesSeen, written, delays: delayChanges.length, failed };
 }

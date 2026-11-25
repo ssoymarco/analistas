@@ -29,6 +29,8 @@ export interface SyncResult {
     fixtures: number;
     written: number;
     delays: number;
+    /** Dates the provider call failed for (nothing was stored for them). */
+    failed: string[];
 }
 /** "1 h", "1 h 30 min", "45 min" — timezone-free delay text. */
 export declare function formatDelay(sec: number): string;

@@ -86,6 +86,18 @@ const once = <T,>(sub: (cb: (v: T) => void, err: (e: Error) => void) => () => vo
   const player = await T.getPlayer(team.squad[5].id);
   check('player', !!player.name, `${player.name}, ${player.nationality}, ${player.stats.length} rows, club ${player.currentTeam?.name}`);
 
+  // a day the schedule doesn't cover (three weeks back): fetched when opened
+  const old = localDateOf(Math.floor(Date.now() / 1000) - 21 * 86400);
+  check('old day: in-window days need no request', !M.dayNeedsRequest(today));
+  check('old day: needs a request', M.dayNeedsRequest(old), old);
+  calls = 0;
+  const stored = await M.requestDayIfUnsynced(old);
+  const oldCount = await M.countFixturesByDate(old);
+  const oldRows = await M.getFixturesByDate(old);
+  check('old day: fetched on demand', oldCount > 50 && oldRows.length === oldCount, `${old}: ${oldCount} fixtures, stored=${stored}, calls ${calls}`);
+  check('old day: results are final', oldRows.filter(m => m.status === 'finished').length > oldRows.length * 0.8, `${oldRows.filter(m => m.status === 'finished').length} finished`);
+  check('old day: confirmed for the session', !M.dayNeedsRequest(old));
+
   console.log(`\n${failures === 0 ? 'ALL APP-LAYER CHECKS PASSED' : failures + ' FAILED'}`);
   process.exit(failures ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

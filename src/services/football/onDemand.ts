@@ -26,6 +26,8 @@ export interface OnDemandRequest {
   season?: number;
   q?: string;
   ids?: string[];
+  /** 'YYYY-MM-DD' (UTC) — kind 'day'. */
+  date?: string;
 }
 
 type Transport = (req: OnDemandRequest) => Promise<{ kind: string; data: unknown }>;

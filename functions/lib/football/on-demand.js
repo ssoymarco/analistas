@@ -62,6 +62,7 @@ exports.onDemandReserve = onDemandReserve;
 exports.budgetAllows = budgetAllows;
 exports.normalizeSearch = normalizeSearch;
 exports.ensureMatch = ensureMatch;
+exports.ensureDay = ensureDay;
 exports.ensureMatchPreview = ensureMatchPreview;
 exports.ensureTeam = ensureTeam;
 exports.ensureTeamFixtures = ensureTeamFixtures;
@@ -87,6 +88,7 @@ const apisports_1 = require("./apisports");
 const mapping_1 = require("./mapping");
 const on_demand_mapping_1 = require("./on-demand-mapping");
 const store_1 = require("./store");
+const sync_fixtures_1 = require("./sync-fixtures");
 const DAY_MS = 86_400_000;
 /** Firestore caps a document at 1 MB; ~450 B per slim fixture row. */
 const MAX_SEASON_FIXTURES = 1_400;
@@ -263,6 +265,45 @@ async function ensureMatch(id, nowMs) {
     await batch.commit();
     await persistQuota();
     return { match: writeRow ? row : cur.match, detail };
+}
+/**
+ * Store every fixture of a UTC date the scheduled sync doesn't cover (results
+ * from before the window, fixtures further ahead than two weeks). One provider
+ * call per date: past dates are final once fetched, future ones are refreshed
+ * at most once a day. The rows land in `fb_matches`, so the app's listeners
+ * pick them up.
+ */
+async function ensureDay(dateArg, nowMs) {
+    if (typeof dateArg !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateArg) || Number.isNaN(Date.parse(`${dateArg}T00:00:00Z`))) {
+        throw new https_1.HttpsError('invalid-argument', 'date must be YYYY-MM-DD');
+    }
+    const date = dateArg;
+    const off = (0, freshness_1.utcDayOffset)(date, nowMs);
+    if (off < -freshness_1.ON_DEMAND_DAY_RANGE.past || off > freshness_1.ON_DEMAND_DAY_RANGE.future) {
+        throw new https_1.HttpsError('invalid-argument', 'date out of range');
+    }
+    // Inside the window the schedule owns the date.
+    if (!(0, freshness_1.isOutsideSyncWindow)(date, nowMs))
+        return { date, fixtures: 0, synced: false };
+    const ref = admin_init_1.db.doc(`${store_1.COL.meta}/day_${date}`);
+    const snap = await ref.get();
+    const prev = (snap.exists ? snap.data() : null);
+    // Past days are final once fetched with data; an empty answer or a future
+    // day is asked again after a day.
+    const final = off < 0 && (prev?.fixtures ?? 0) > 0;
+    const fresh = !!prev?.syncedAt && (final || nowMs - prev.syncedAt < DAY_MS);
+    if (fresh)
+        return { date, fixtures: prev?.fixtures ?? 0, synced: false };
+    if (!(await budgetAllows(1, nowMs))) {
+        throw new https_1.HttpsError('resource-exhausted', 'Daily data budget reached — try again later.');
+    }
+    const res = await (0, sync_fixtures_1.syncFootballFixtures)([date], nowMs);
+    // A failed provider call must not mark the day as done (a past day is never
+    // fetched again once marked).
+    if (res.failed.length)
+        throw new https_1.HttpsError('unavailable', 'Could not load that day — try again.');
+    await ref.set({ syncedAt: nowMs, fixtures: res.fixtures });
+    return { date, fixtures: res.fixtures, synced: true };
 }
 // ── matchPreview ─────────────────────────────────────────────────────────────
 async function ensureVenue(venueId, nowMs) {
@@ -657,7 +698,7 @@ async function mapLegacyPlayers(idsArg, nowMs) {
 }
 // ── Dispatcher ───────────────────────────────────────────────────────────────
 const KINDS = new Set([
-    'match', 'matchPreview', 'team', 'teamFixtures', 'teamStats', 'player', 'coach', 'venue',
+    'match', 'matchPreview', 'day', 'team', 'teamFixtures', 'teamStats', 'player', 'coach', 'venue',
     'league', 'leagueFixtures', 'standings', 'topPlayers', 'search', 'legacyPlayers',
 ]);
 /** Route one request. Always resolves to `{ kind, data }` or throws an HttpsError. */
@@ -672,6 +713,8 @@ async function handleOnDemand(req, nowMs = Date.now()) {
             return { kind, data: await ensureMatch(idParam(r.id, 'id'), nowMs) };
         case 'matchPreview':
             return { kind, data: await ensureMatchPreview(idParam(r.id, 'id'), nowMs) };
+        case 'day':
+            return { kind, data: await ensureDay(r.date, nowMs) };
         case 'team':
             return { kind, data: await ensureTeam(idParam(r.id, 'id'), nowMs) };
         case 'teamFixtures':

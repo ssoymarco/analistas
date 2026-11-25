@@ -43,6 +43,20 @@ export interface MatchResult {
  * than the sync window, lineups before kickoff).
  */
 export declare function ensureMatch(id: number, nowMs: number): Promise<MatchResult>;
+export interface DayResult {
+    date: string;
+    /** Fixtures the provider has for that date (0 when the schedule owns it). */
+    fixtures: number;
+    synced: boolean;
+}
+/**
+ * Store every fixture of a UTC date the scheduled sync doesn't cover (results
+ * from before the window, fixtures further ahead than two weeks). One provider
+ * call per date: past dates are final once fetched, future ones are refreshed
+ * at most once a day. The rows land in `fb_matches`, so the app's listeners
+ * pick them up.
+ */
+export declare function ensureDay(dateArg: unknown, nowMs: number): Promise<DayResult>;
 export declare function ensureMatchPreview(id: number, nowMs: number): Promise<FbMatchPreviewDoc>;
 export declare function ensureTeam(id: number, nowMs: number): Promise<FbTeamDoc>;
 export declare function ensureTeamFixtures(id: number, seasonArg: number | undefined, nowMs: number): Promise<FbTeamFixturesDoc>;
@@ -64,6 +78,7 @@ export interface OnDemandRequest {
     season?: unknown;
     q?: unknown;
     ids?: unknown;
+    date?: unknown;
 }
 /** Route one request. Always resolves to `{ kind, data }` or throws an HttpsError. */
 export declare function handleOnDemand(req: OnDemandRequest | null | undefined, nowMs?: number): Promise<{

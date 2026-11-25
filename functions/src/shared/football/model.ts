@@ -309,6 +309,7 @@ export const FbTopics = {
 // app reads the doc directly and only calls the function when the doc is
 // missing or past `expiresAt`. Collections (public-read, server-write):
 //
+//   fb_matches (a whole day)               kind 'day' — dates outside the synced window
 //   fb_match_previews/{fixtureId}          FbMatchPreviewDoc
 //   fb_teams/{teamId}                      FbTeamDoc
 //   fb_team_fixtures/{teamId}_{season}     FbTeamFixturesDoc
@@ -331,7 +332,7 @@ export interface FbCached {
 
 /** Request kinds accepted by the `fbOnDemand` callable. */
 export type FbOnDemandKind =
-  | 'match' | 'matchPreview'
+  | 'match' | 'matchPreview' | 'day'
   | 'team' | 'teamFixtures' | 'teamStats'
   | 'player' | 'coach' | 'venue'
   | 'league' | 'leagueFixtures' | 'standings' | 'topPlayers'

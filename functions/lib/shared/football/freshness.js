@@ -10,10 +10,12 @@
  *     build can't make it spend API quota on something that is still fresh).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.FbTtl = exports.POLLER_DETAIL_POPULARITY = void 0;
+exports.FbTtl = exports.ON_DEMAND_DAY_RANGE = exports.SYNC_WINDOW_DAYS = exports.POLLER_DETAIL_POPULARITY = void 0;
 exports.matchDetailNeedsFetch = matchDetailNeedsFetch;
 exports.matchPreviewTtlMs = matchPreviewTtlMs;
 exports.isExpired = isExpired;
+exports.utcDayOffset = utcDayOffset;
+exports.isOutsideSyncWindow = isOutsideSyncWindow;
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
@@ -83,6 +85,24 @@ function matchPreviewTtlMs(row, nowMs) {
 /** True when `expiresAt` (unix ms) is missing or in the past. */
 function isExpired(doc, nowMs) {
     return !doc || typeof doc.expiresAt !== 'number' || doc.expiresAt <= nowMs;
+}
+/**
+ * The scheduled sync keeps yesterday … +14 days in `fb_matches`. Any other
+ * (UTC) date is fetched the first time somebody opens it.
+ */
+exports.SYNC_WINDOW_DAYS = { past: 1, future: 14 };
+/** How far from today a day can be requested on demand. */
+exports.ON_DEMAND_DAY_RANGE = { past: 400, future: 180 };
+/** Whole days between a 'YYYY-MM-DD' UTC date and today (negative = past). */
+function utcDayOffset(date, nowMs) {
+    const day = Date.parse(`${date}T00:00:00Z`);
+    const today = Math.floor(nowMs / 86_400_000) * 86_400_000;
+    return Math.round((day - today) / 86_400_000);
+}
+/** True when the scheduled sync doesn't cover this UTC date. */
+function isOutsideSyncWindow(date, nowMs) {
+    const off = utcDayOffset(date, nowMs);
+    return off < -exports.SYNC_WINDOW_DAYS.past || off > exports.SYNC_WINDOW_DAYS.future;
 }
 exports.FbTtl = {
     team: 24 * HOUR,

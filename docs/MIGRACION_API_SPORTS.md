@@ -52,6 +52,7 @@ importar cuántos usuarios lo abran, y la llave nunca sale del servidor.
 | --- | --- | --- | --- |
 | `match` | `fb_matches/{id}` + `fb_match_details/{id}` (ligas sin poller, partidos viejos, alineaciones) | 1 | reglas en `shared/football/freshness.ts` |
 | `matchPreview` | `fb_match_previews/{id}`: H2H, bajas, predicción + comparación, forma, estadio | 2–5 | 12 h → 45 min según cercanía; congelado al empezar |
+| `day` | `fb_matches` de una fecha UTC **fuera** de la ventana ayer…+14 (resultados antiguos, partidos lejanos). Marcador en `fb_meta/day_{fecha}` | 1 por fecha | pasado: definitivo; futuro o vacío: 1 vez al día. Rango permitido: −400…+180 días |
 | `team` | `fb_teams/{id}`: ficha, estadio, DT, plantilla, competencias, liga principal | 4 | 24 h |
 | `teamFixtures` | `fb_team_fixtures/{id}_{temporada}`: temporada completa, todas las competencias | 1 | 6 h |
 | `teamStats` | `fb_team_stats/{id}_{liga}_{temporada}` | 1 | 12 h |

@@ -25,7 +25,8 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import * as logger from 'firebase-functions/logger';
 import { admin, db } from '../admin-init';
 import {
-  FbTtl, isExpired, matchDetailNeedsFetch, matchPreviewTtlMs, POLLER_DETAIL_POPULARITY,
+  FbTtl, isExpired, isOutsideSyncWindow, matchDetailNeedsFetch, matchPreviewTtlMs, ON_DEMAND_DAY_RANGE,
+  utcDayOffset,
 } from '../shared/football/freshness';
 import { LEAGUE_POPULARITY } from '../shared/football/leagues';
 import legacyPlayerMap from '../shared/football/legacyPlayerMap.json';
@@ -49,6 +50,7 @@ import {
   mapSearchPlayers, mapSearchTeams, mapTeam, mapTeamStats, mapVenue, toFixtureLite,
 } from './on-demand-mapping';
 import { COL, loadQuota, saveQuota } from './store';
+import { syncFootballFixtures } from './sync-fixtures';
 
 const DAY_MS = 86_400_000;
 /** Firestore caps a document at 1 MB; ~450 B per slim fixture row. */
@@ -258,6 +260,54 @@ export async function ensureMatch(id: number, nowMs: number): Promise<MatchResul
   await batch.commit();
   await persistQuota();
   return { match: writeRow ? row : cur.match, detail };
+}
+
+// ── day ──────────────────────────────────────────────────────────────────────
+
+export interface DayResult {
+  date: string;
+  /** Fixtures the provider has for that date (0 when the schedule owns it). */
+  fixtures: number;
+  synced: boolean;
+}
+
+/**
+ * Store every fixture of a UTC date the scheduled sync doesn't cover (results
+ * from before the window, fixtures further ahead than two weeks). One provider
+ * call per date: past dates are final once fetched, future ones are refreshed
+ * at most once a day. The rows land in `fb_matches`, so the app's listeners
+ * pick them up.
+ */
+export async function ensureDay(dateArg: unknown, nowMs: number): Promise<DayResult> {
+  if (typeof dateArg !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateArg) || Number.isNaN(Date.parse(`${dateArg}T00:00:00Z`))) {
+    throw new HttpsError('invalid-argument', 'date must be YYYY-MM-DD');
+  }
+  const date = dateArg;
+  const off = utcDayOffset(date, nowMs);
+  if (off < -ON_DEMAND_DAY_RANGE.past || off > ON_DEMAND_DAY_RANGE.future) {
+    throw new HttpsError('invalid-argument', 'date out of range');
+  }
+  // Inside the window the schedule owns the date.
+  if (!isOutsideSyncWindow(date, nowMs)) return { date, fixtures: 0, synced: false };
+
+  const ref = db.doc(`${COL.meta}/day_${date}`);
+  const snap = await ref.get();
+  const prev = (snap.exists ? snap.data() : null) as { syncedAt?: number; fixtures?: number } | null;
+  // Past days are final once fetched with data; an empty answer or a future
+  // day is asked again after a day.
+  const final = off < 0 && (prev?.fixtures ?? 0) > 0;
+  const fresh = !!prev?.syncedAt && (final || nowMs - prev.syncedAt < DAY_MS);
+  if (fresh) return { date, fixtures: prev?.fixtures ?? 0, synced: false };
+
+  if (!(await budgetAllows(1, nowMs))) {
+    throw new HttpsError('resource-exhausted', 'Daily data budget reached — try again later.');
+  }
+  const res = await syncFootballFixtures([date], nowMs);
+  // A failed provider call must not mark the day as done (a past day is never
+  // fetched again once marked).
+  if (res.failed.length) throw new HttpsError('unavailable', 'Could not load that day — try again.');
+  await ref.set({ syncedAt: nowMs, fixtures: res.fixtures });
+  return { date, fixtures: res.fixtures, synced: true };
 }
 
 // ── matchPreview ─────────────────────────────────────────────────────────────
@@ -661,7 +711,7 @@ export async function mapLegacyPlayers(idsArg: unknown, nowMs: number): Promise<
 // ── Dispatcher ───────────────────────────────────────────────────────────────
 
 const KINDS: ReadonlySet<FbOnDemandKind> = new Set<FbOnDemandKind>([
-  'match', 'matchPreview', 'team', 'teamFixtures', 'teamStats', 'player', 'coach', 'venue',
+  'match', 'matchPreview', 'day', 'team', 'teamFixtures', 'teamStats', 'player', 'coach', 'venue',
   'league', 'leagueFixtures', 'standings', 'topPlayers', 'search', 'legacyPlayers',
 ]);
 
@@ -672,6 +722,7 @@ export interface OnDemandRequest {
   season?: unknown;
   q?: unknown;
   ids?: unknown;
+  date?: unknown;
 }
 
 /** Route one request. Always resolves to `{ kind, data }` or throws an HttpsError. */
@@ -686,6 +737,8 @@ export async function handleOnDemand(req: OnDemandRequest | null | undefined, no
       return { kind, data: await ensureMatch(idParam(r.id, 'id'), nowMs) };
     case 'matchPreview':
       return { kind, data: await ensureMatchPreview(idParam(r.id, 'id'), nowMs) };
+    case 'day':
+      return { kind, data: await ensureDay(r.date, nowMs) };
     case 'team':
       return { kind, data: await ensureTeam(idParam(r.id, 'id'), nowMs) };
     case 'teamFixtures':

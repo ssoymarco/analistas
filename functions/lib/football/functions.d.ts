@@ -29,6 +29,7 @@ export declare const fbAdmin: import("firebase-functions/v2/https").CallableFunc
     fixtures: number;
     written: number;
     delays: number;
+    failed: string[];
     ok: boolean;
     leagues?: undefined;
 } | {

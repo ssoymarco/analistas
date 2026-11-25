@@ -133,6 +133,7 @@ async function syncFootballFixtures(explicitDates, nowMs = Date.now()) {
     let fixturesSeen = 0;
     let written = 0;
     const delayChanges = [];
+    const failed = [];
     for (const date of dates) {
         let list;
         try {
@@ -140,6 +141,7 @@ async function syncFootballFixtures(explicitDates, nowMs = Date.now()) {
         }
         catch (err) {
             logger.error(`fbSyncFixtures: ${date} failed`, { err: String(err) });
+            failed.push(date);
             continue;
         }
         fixturesSeen += list.length;
@@ -196,6 +198,6 @@ async function syncFootballFixtures(explicitDates, nowMs = Date.now()) {
     logger.info('fbSyncFixtures: done', {
         dates, fixtures: fixturesSeen, written, delays: delayChanges.length, remainingDay: apisports_1.quotaState.remainingDay,
     });
-    return { dates, fixtures: fixturesSeen, written, delays: delayChanges.length };
+    return { dates, fixtures: fixturesSeen, written, delays: delayChanges.length, failed };
 }
 //# sourceMappingURL=sync-fixtures.js.map

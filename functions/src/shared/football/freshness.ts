@@ -96,6 +96,27 @@ export function isExpired(doc: { expiresAt?: number | null } | null | undefined,
   return !doc || typeof doc.expiresAt !== 'number' || doc.expiresAt <= nowMs;
 }
 
+/**
+ * The scheduled sync keeps yesterday … +14 days in `fb_matches`. Any other
+ * (UTC) date is fetched the first time somebody opens it.
+ */
+export const SYNC_WINDOW_DAYS = { past: 1, future: 14 } as const;
+/** How far from today a day can be requested on demand. */
+export const ON_DEMAND_DAY_RANGE = { past: 400, future: 180 } as const;
+
+/** Whole days between a 'YYYY-MM-DD' UTC date and today (negative = past). */
+export function utcDayOffset(date: string, nowMs: number): number {
+  const day = Date.parse(`${date}T00:00:00Z`);
+  const today = Math.floor(nowMs / 86_400_000) * 86_400_000;
+  return Math.round((day - today) / 86_400_000);
+}
+
+/** True when the scheduled sync doesn't cover this UTC date. */
+export function isOutsideSyncWindow(date: string, nowMs: number): boolean {
+  const off = utcDayOffset(date, nowMs);
+  return off < -SYNC_WINDOW_DAYS.past || off > SYNC_WINDOW_DAYS.future;
+}
+
 export const FbTtl = {
   team: 24 * HOUR,
   teamFixtures: 6 * HOUR,
