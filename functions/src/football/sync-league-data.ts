@@ -17,18 +17,12 @@ import { admin, db } from '../admin-init';
 import { LEAGUE_POPULARITY } from '../shared/football/leagues';
 import { afGet } from './apisports';
 import type { AfLeagueEntry, AfStandingsResponse, AfTopPlayerEntry } from './apisports-types';
+import type { FbCatalogEntry, FbStandingsDoc, FbTeamIndexDoc } from '../shared/football/model';
 import { mapStandings, mapTopPlayers } from './mapping';
 import { COL } from './store';
 
-export interface CatalogEntry {
-  /** API name */ n: string;
-  /** country */ c: string;
-  /** 'League' | 'Cup' */ t: string;
-  logo: string;
-  flag: string | null;
-  /** current season year */ s: number | null;
-  /** season has standings coverage */ st: boolean;
-}
+/** Shape of `fb_meta/leagueCatalog.leagues[id]` — shared with the app. */
+export type CatalogEntry = FbCatalogEntry;
 
 const now = () => admin.firestore.Timestamp.now();
 
@@ -53,13 +47,35 @@ async function loadCatalog(): Promise<Record<string, CatalogEntry>> {
   return ((s.exists ? s.data()?.leagues : undefined) as Record<string, CatalogEntry>) ?? {};
 }
 
-async function refreshStandings(leagueId: string, cat: CatalogEntry | undefined): Promise<boolean> {
-  if (!cat?.s || !cat.st) return false;
+async function refreshStandings(leagueId: string, cat: CatalogEntry | undefined): Promise<FbStandingsDoc | null> {
+  if (!cat?.s || !cat.st) return null;
   const res = await afGet<AfStandingsResponse[]>('/standings', { league: leagueId, season: cat.s });
-  if (!res.length) return false;
+  if (!res.length) return null;
   const doc = mapStandings(res[0]);
   await db.doc(`${COL.standings}/${leagueId}_${cat.s}`).set({ ...doc, updatedAt: now() });
-  return true;
+  return doc;
+}
+
+/**
+ * `fb_meta/teamIndex`: every team that appears in a curated league's table,
+ * most popular league first. One small doc the app reads once so team search
+ * is instant and offline-friendly (no provider call per keystroke).
+ */
+export function buildTeamIndex(tables: FbStandingsDoc[]): FbTeamIndexDoc['teams'] {
+  const sorted = [...tables].sort((a, b) =>
+    (LEAGUE_POPULARITY[Number(b.leagueId)] ?? 0) - (LEAGUE_POPULARITY[Number(a.leagueId)] ?? 0));
+  const seen = new Set<string>();
+  const teams: FbTeamIndexDoc['teams'] = [];
+  for (const table of sorted) {
+    for (const group of table.groups) {
+      for (const row of group.rows) {
+        if (!row.team.id || seen.has(row.team.id)) continue;
+        seen.add(row.team.id);
+        teams.push({ i: row.team.id, n: row.team.name, l: table.leagueId });
+      }
+    }
+  }
+  return teams;
 }
 
 async function refreshTopPlayers(leagueId: string, cat: CatalogEntry | undefined): Promise<boolean> {
@@ -105,10 +121,12 @@ export async function syncAllLeagueTables(): Promise<{ standings: number; topPla
   const cat = await loadCatalog();
   let standings = 0;
   let topPlayers = 0;
+  const tables: FbStandingsDoc[] = [];
   const ids = Object.entries(LEAGUE_POPULARITY).filter(([, p]) => p >= 20).map(([id]) => id);
   for (const id of ids) {
     try {
-      if (await refreshStandings(id, cat[id])) standings++;
+      const table = await refreshStandings(id, cat[id]);
+      if (table) { standings++; tables.push(table); }
     } catch (err) {
       logger.warn(`fbTables: standings ${id} failed`, { err: String(err) });
     }
@@ -119,6 +137,13 @@ export async function syncAllLeagueTables(): Promise<{ standings: number; topPla
         logger.warn(`fbTables: top players ${id} failed`, { err: String(err) });
       }
     }
+  }
+  // Only replace the index after a healthy sweep — a provider outage must not
+  // leave the app with an empty search index.
+  if (tables.length >= 20) {
+    const teams = buildTeamIndex(tables);
+    await db.doc(`${COL.meta}/teamIndex`).set({ teams, updatedAt: now() })
+      .catch(err => logger.warn('fbTables: team index write failed', { err: String(err) }));
   }
   logger.info('fbTables: done', { standings, topPlayers });
   return { standings, topPlayers };

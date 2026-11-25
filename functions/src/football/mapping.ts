@@ -630,6 +630,7 @@ export function mapFixtureToDetail(f: AfFixtureFull, prevPressure?: FbPressure |
   const live = isLiveShort(f.fixture.status.short);
   return {
     matchId: String(f.fixture.id),
+    statusShort: f.fixture.status.short,
     events,
     statistics: mapStatistics(f),
     lineups: {

@@ -213,6 +213,10 @@ export interface FbMatchDetailDoc {
   lineups: { home: FbLineup | null; away: FbLineup | null };
   playerRatings: { home: FbPlayerRating[]; away: FbPlayerRating[] };
   pressure: FbPressure | null;
+  /** Unix ms of the provider fetch behind this doc (see shared/football/freshness.ts). */
+  fetchedAt?: number;
+  /** Fixture status at that fetch — tells a final detail from a mid-match one. */
+  statusShort?: string;
   updatedAt?: unknown;
 }
 
@@ -296,3 +300,449 @@ export const FbTopics = {
   /** "Silenciar este partido": devices subscribed here are excluded in FCM. */
   mute: (matchId: string) => `fb_mute_${matchId}`,
 } as const;
+
+// ═════════════════════════════════════════════════════════════════════════════
+// On-demand documents (fbOnDemand callable — see functions/src/football/on-demand.ts)
+//
+// Data that is too large or too rarely needed to sync for every team/league is
+// fetched the first time a user opens the screen and cached in Firestore. The
+// app reads the doc directly and only calls the function when the doc is
+// missing or past `expiresAt`. Collections (public-read, server-write):
+//
+//   fb_match_previews/{fixtureId}          FbMatchPreviewDoc
+//   fb_teams/{teamId}                      FbTeamDoc
+//   fb_team_fixtures/{teamId}_{season}     FbTeamFixturesDoc
+//   fb_team_stats/{teamId}_{league}_{season} FbTeamStatsDoc
+//   fb_players/{playerId}                  FbPlayerDoc
+//   fb_coaches/{coachId}                   FbCoachDoc
+//   fb_venues/{venueId}                    FbVenueDoc
+//   fb_leagues/{leagueId}                  FbLeagueDoc
+//   fb_league_fixtures/{leagueId}_{season} FbLeagueFixturesDoc
+//   fb_search/{key}                        FbSearchDoc
+//   fb_legacy_players/{sportmonksId}       FbLegacyPlayerDoc
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** Cache envelope shared by every on-demand doc. Plain numbers (unix ms) so the
+ *  client can check freshness without touching Firestore Timestamps. */
+export interface FbCached {
+  fetchedAt: number;
+  expiresAt: number;
+}
+
+/** Request kinds accepted by the `fbOnDemand` callable. */
+export type FbOnDemandKind =
+  | 'match' | 'matchPreview'
+  | 'team' | 'teamFixtures' | 'teamStats'
+  | 'player' | 'coach' | 'venue'
+  | 'league' | 'leagueFixtures' | 'standings' | 'topPlayers'
+  | 'search' | 'legacyPlayers';
+
+/** Team crest URL (API-Sports media CDN) — lets slim rows omit the logo. */
+export function fbTeamLogo(teamId: string | number): string {
+  return `https://media.api-sports.io/football/teams/${teamId}.png`;
+}
+export function fbLeagueLogo(leagueId: string | number): string {
+  return `https://media.api-sports.io/football/leagues/${leagueId}.png`;
+}
+export function fbPlayerPhoto(playerId: string | number): string {
+  return `https://media.api-sports.io/football/players/${playerId}.png`;
+}
+
+// ── Slim fixture rows (season calendars) ─────────────────────────────────────
+
+/**
+ * A fixture without the fields that are constant per doc or derivable on the
+ * client (logos come from `fbTeamLogo`, dates from `timestamp`). Keeps a full
+ * league season (300-600 fixtures) comfortably under Firestore's 1 MB doc limit.
+ */
+export interface FbFixtureLite {
+  id: string;
+  timestamp: number;
+  statusShort: string;
+  round: string | null;
+  homeId: string;
+  homeName: string;
+  awayId: string;
+  awayName: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  homePen?: number | null;
+  awayPen?: number | null;
+  /** Elapsed minute (live rows only). */
+  minute?: number | null;
+  venueId?: number | null;
+  venueName?: string | null;
+  venueCity?: string | null;
+  /** 'home' | 'away' when API-Sports flags a winner (decides ties after pens/aggregate). */
+  winner?: 'home' | 'away' | null;
+  /** Only on team calendars, where rows span several competitions. */
+  leagueId?: string;
+  league?: string;
+  season?: number;
+}
+
+export interface FbLeagueFixturesDoc extends FbCached {
+  leagueId: string;
+  season: number;
+  fixtures: FbFixtureLite[];
+  /** True when the season had more fixtures than fit and only the window around today was kept. */
+  truncated: boolean;
+}
+
+export interface FbTeamFixturesDoc extends FbCached {
+  teamId: string;
+  season: number;
+  fixtures: FbFixtureLite[];
+}
+
+// ── Match preview ────────────────────────────────────────────────────────────
+
+export interface FbH2HRow {
+  matchId: string;
+  timestamp: number;
+  homeTeam: FbTeamRef;
+  awayTeam: FbTeamRef;
+  homeScore: number;
+  awayScore: number;
+  leagueId: string;
+  league: string;
+  round: string | null;
+  venueName: string | null;
+}
+
+export type FbAbsenceType = 'injury' | 'suspension' | 'international' | 'doubtful' | 'other';
+
+export interface FbAbsence {
+  playerId: string;
+  name: string;
+  photo: string;
+  type: FbAbsenceType;
+  /** Raw API-Sports reason, e.g. "Knee Injury", "Red Card", "Yellow Cards". */
+  reason: string;
+}
+
+export interface FbSidePair { home: number; away: number }
+
+export interface FbPrediction {
+  /** Win probabilities, 0-100. */
+  percent: { home: number; draw: number; away: number };
+  advice: string | null;
+  winnerTeamId: string | null;
+  winOrDraw: boolean | null;
+  /** e.g. "-3.5" (under 3.5) / "+1.5" (over 1.5); null when the model has no call. */
+  underOver: string | null;
+  goalsHome: string | null;
+  goalsAway: string | null;
+  /** Team comparison, 0-100 shares per side. */
+  comparison: {
+    form: FbSidePair; attack: FbSidePair; defense: FbSidePair; poisson: FbSidePair;
+    h2h: FbSidePair; goals: FbSidePair; total: FbSidePair;
+  } | null;
+}
+
+export interface FbFormRow {
+  matchId: string;
+  timestamp: number;
+  opponent: FbTeamRef;
+  isHome: boolean;
+  goalsFor: number;
+  goalsAgainst: number;
+  result: 'W' | 'D' | 'L';
+  league: string;
+}
+
+export interface FbVenue {
+  id: number;
+  name: string;
+  city: string | null;
+  country: string | null;
+  address: string | null;
+  capacity: number | null;
+  surface: string | null;
+  image: string | null;
+}
+
+export interface FbVenueDoc extends FbCached, FbVenue {}
+
+export interface FbMatchPreviewDoc extends FbCached {
+  matchId: string;
+  homeTeamId: string;
+  awayTeamId: string;
+  /** Previous meetings, newest first. */
+  h2h: FbH2HRow[];
+  absences: { home: FbAbsence[]; away: FbAbsence[] };
+  prediction: FbPrediction | null;
+  /** Last finished matches per side, newest first (max 5). */
+  form: { home: FbFormRow[]; away: FbFormRow[] };
+  /** Unix ms of the last form fetch (form is refreshed less often than absences). */
+  formFetchedAt: number;
+  venue: FbVenue | null;
+}
+
+// ── Team ─────────────────────────────────────────────────────────────────────
+
+export type FbPositionShort = 'POR' | 'DEF' | 'MED' | 'DEL' | 'JUG';
+
+export interface FbSquadPlayer {
+  id: string;
+  name: string;
+  age: number | null;
+  number: number | null;
+  position: FbPositionShort;
+  photo: string;
+}
+
+export interface FbCoachRef {
+  id: string;
+  name: string;
+  photo: string | null;
+  age: number | null;
+  nationality: string | null;
+}
+
+export interface FbTeamLeagueRef {
+  leagueId: string;
+  name: string;
+  /** 'League' | 'Cup' */
+  type: string;
+  country: string;
+  logo: string;
+  season: number;
+}
+
+export interface FbTeamDoc extends FbCached {
+  id: string;
+  name: string;
+  shortName: string;
+  logo: string;
+  country: string | null;
+  founded: number | null;
+  national: boolean;
+  venue: FbVenue | null;
+  coach: FbCoachRef | null;
+  squad: FbSquadPlayer[];
+  /** Competitions the team is playing this season (current season of each). */
+  leagues: FbTeamLeagueRef[];
+  /** The team's main competition (domestic league for clubs) — drives its table and calendar. */
+  primaryLeagueId: string | null;
+  primaryLeagueName: string | null;
+  season: number | null;
+}
+
+export interface FbMinuteBucket { label: string; total: number; percentage: number }
+
+export interface FbHomeAwayTotal { home: number; away: number; total: number }
+
+export interface FbTeamStatsDoc extends FbCached {
+  teamId: string;
+  leagueId: string;
+  season: number;
+  /** Results oldest → newest, e.g. "WDWWL". */
+  form: string;
+  played: FbHomeAwayTotal;
+  wins: FbHomeAwayTotal;
+  draws: FbHomeAwayTotal;
+  losses: FbHomeAwayTotal;
+  goalsFor: FbHomeAwayTotal;
+  goalsAgainst: FbHomeAwayTotal;
+  goalsForAvg: FbHomeAwayTotal;
+  goalsAgainstAvg: FbHomeAwayTotal;
+  goalsForByMinute: FbMinuteBucket[];
+  goalsAgainstByMinute: FbMinuteBucket[];
+  cleanSheets: FbHomeAwayTotal;
+  failedToScore: FbHomeAwayTotal;
+  penalties: { scored: number; missed: number; total: number };
+  biggest: {
+    winHome: string | null; winAway: string | null;
+    lossHome: string | null; lossAway: string | null;
+    streakWins: number; streakDraws: number; streakLosses: number;
+  };
+  formations: Array<{ formation: string; played: number }>;
+  yellowByMinute: FbMinuteBucket[];
+  redByMinute: FbMinuteBucket[];
+}
+
+// ── Player / coach ───────────────────────────────────────────────────────────
+
+export interface FbPlayerSeasonStat {
+  season: number;
+  leagueId: string;
+  league: string;
+  leagueLogo: string;
+  teamId: string;
+  team: string;
+  teamLogo: string;
+  number: number | null;
+  position: string | null;
+  captain: boolean;
+  appearances: number;
+  lineups: number;
+  minutes: number;
+  rating: number | null;
+  subIn: number;
+  subOut: number;
+  bench: number;
+  goals: number;
+  assists: number;
+  conceded: number;
+  saves: number;
+  shots: number;
+  shotsOn: number;
+  passes: number;
+  keyPasses: number;
+  /** Accurate passes per match as API-Sports reports it (not a percentage on recent seasons). */
+  passAccuracy: number;
+  tackles: number;
+  blocks: number;
+  interceptions: number;
+  duels: number;
+  duelsWon: number;
+  dribbles: number;
+  dribblesWon: number;
+  foulsDrawn: number;
+  foulsCommitted: number;
+  yellow: number;
+  yellowRed: number;
+  red: number;
+  penWon: number;
+  penScored: number;
+  penMissed: number;
+  penSaved: number;
+}
+
+export interface FbPlayerCareerEntry {
+  teamId: string;
+  team: string;
+  teamLogo: string;
+  seasons: number[];
+}
+
+export interface FbPlayerDoc extends FbCached {
+  id: string;
+  name: string;
+  firstName: string;
+  lastName: string;
+  photo: string;
+  age: number | null;
+  birthDate: string | null;
+  birthPlace: string | null;
+  birthCountry: string | null;
+  nationality: string | null;
+  heightCm: number | null;
+  weightKg: number | null;
+  injured: boolean;
+  position: string | null;
+  number: number | null;
+  /** Club the player currently plays for (null when unknown / free agent). */
+  currentTeam: FbTeamRef | null;
+  nationalTeam: FbTeamRef | null;
+  /** Per competition rows for the loaded seasons, newest season first. */
+  stats: FbPlayerSeasonStat[];
+  seasonsLoaded: number[];
+  career: FbPlayerCareerEntry[];
+}
+
+export interface FbCoachDoc extends FbCached {
+  id: string;
+  name: string;
+  firstName: string;
+  lastName: string;
+  photo: string | null;
+  age: number | null;
+  birthDate: string | null;
+  birthPlace: string | null;
+  birthCountry: string | null;
+  nationality: string | null;
+  team: FbTeamRef | null;
+  /** Newest first. `end` null = current job. */
+  career: Array<{ team: FbTeamRef; start: string | null; end: string | null }>;
+}
+
+// ── League ───────────────────────────────────────────────────────────────────
+
+export interface FbLeagueSeason {
+  year: number;
+  start: string;
+  end: string;
+  current: boolean;
+  standings: boolean;
+}
+
+export interface FbLeagueDoc extends FbCached {
+  id: string;
+  name: string;
+  /** 'League' | 'Cup' */
+  type: string;
+  country: string;
+  logo: string;
+  flag: string | null;
+  /** Newest first. */
+  seasons: FbLeagueSeason[];
+}
+
+/** Entry of `fb_meta/leagueCatalog.leagues[leagueId]` (written nightly). */
+export interface FbCatalogEntry {
+  /** API name */ n: string;
+  /** country */ c: string;
+  /** 'League' | 'Cup' */ t: string;
+  logo: string;
+  flag: string | null;
+  /** current season year */ s: number | null;
+  /** current season has standings coverage */ st: boolean;
+}
+
+// ── Search ───────────────────────────────────────────────────────────────────
+
+export interface FbSearchTeam {
+  id: string;
+  name: string;
+  shortName: string;
+  logo: string;
+  country: string | null;
+  national: boolean;
+}
+
+export interface FbSearchPlayer {
+  id: string;
+  name: string;
+  photo: string;
+  nationality: string | null;
+  position: string | null;
+  age: number | null;
+}
+
+export interface FbSearchDoc extends FbCached {
+  q: string;
+  teams: FbSearchTeam[];
+  players: FbSearchPlayer[];
+}
+
+/** `fb_meta/teamIndex` — every team of the curated leagues, for instant local search. */
+export interface FbTeamIndexDoc {
+  /** [teamId, name, leagueId] */
+  teams: Array<{ i: string; n: string; l: string }>;
+  updatedAt?: unknown;
+}
+
+// ── Legacy (Sportmonks) player ids ───────────────────────────────────────────
+
+export interface FbLegacyPlayerDoc {
+  smId: string;
+  /** API-Sports player id, or null when no confident match was found. */
+  afId: string | null;
+  name: string | null;
+  resolvedAt: number;
+}
+
+/** Synthetic numeric season key the app uses where it used to carry a provider
+ *  season id: leagueId * 10000 + season year (e.g. Liga MX 2026 → 2622026). */
+export function fbSeasonKey(leagueId: string | number, season: number): number {
+  return Number(leagueId) * 10000 + season;
+}
+export function parseFbSeasonKey(key: number): { leagueId: number; season: number } | null {
+  if (!Number.isFinite(key) || key < 10000) return null;
+  const season = key % 10000;
+  const leagueId = Math.floor(key / 10000);
+  if (season < 1900 || season > 2200 || leagueId <= 0) return null;
+  return { leagueId, season };
+}

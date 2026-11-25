@@ -21,6 +21,18 @@ export const COL = {
   standings: 'fb_standings',
   topscorers: 'fb_topscorers',
   meta: 'fb_meta',
+  // On-demand caches (see on-demand.ts)
+  previews: 'fb_match_previews',
+  teams: 'fb_teams',
+  teamFixtures: 'fb_team_fixtures',
+  teamStats: 'fb_team_stats',
+  players: 'fb_players',
+  coaches: 'fb_coaches',
+  venues: 'fb_venues',
+  leagues: 'fb_leagues',
+  leagueFixtures: 'fb_league_fixtures',
+  search: 'fb_search',
+  legacyPlayers: 'fb_legacy_players',
 } as const;
 
 const now = () => admin.firestore.Timestamp.now();
@@ -51,7 +63,10 @@ export function matchWrite(doc: Partial<FbMatchDoc> & { id: string }) {
 export function detailWrite(doc: FbMatchDetailDoc) {
   // set() without merge semantics per field would be ideal for arrays; merge
   // replaces arrays wholesale anyway, which is what we want here.
-  return { path: `${COL.details}/${doc.matchId}`, data: { ...doc, updatedAt: now() } as unknown as Record<string, unknown> };
+  return {
+    path: `${COL.details}/${doc.matchId}`,
+    data: { ...doc, fetchedAt: Date.now(), updatedAt: now() } as unknown as Record<string, unknown>,
+  };
 }
 
 // ── Live snapshot ────────────────────────────────────────────────────────────

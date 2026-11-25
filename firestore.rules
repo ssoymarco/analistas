@@ -204,11 +204,29 @@ service cloud.firestore {
     }
 
     /// fb_meta/leagueCatalog — every API-Sports league with its current season.
+    /// fb_meta/teamIndex — teams of the curated leagues (instant local search).
     /// The rest of fb_meta (snapshot, gate, quota, leases) stays server-only.
     match /fb_meta/leagueCatalog {
       allow read: if true;
       allow write: if false;
     }
+    match /fb_meta/teamIndex {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // On-demand caches written by the fbOnDemand callable (team pages, player
+    // pages, match previews, season calendars, search). Public sports data.
+    match /fb_match_previews/{fixtureId} { allow read: if true; allow write: if false; }
+    match /fb_teams/{teamId}             { allow read: if true; allow write: if false; }
+    match /fb_team_fixtures/{docId}      { allow read: if true; allow write: if false; }
+    match /fb_team_stats/{docId}         { allow read: if true; allow write: if false; }
+    match /fb_players/{playerId}         { allow read: if true; allow write: if false; }
+    match /fb_coaches/{coachId}          { allow read: if true; allow write: if false; }
+    match /fb_venues/{venueId}           { allow read: if true; allow write: if false; }
+    match /fb_leagues/{leagueId}         { allow read: if true; allow write: if false; }
+    match /fb_league_fixtures/{docId}    { allow read: if true; allow write: if false; }
+    match /fb_search/{key}               { allow read: if true; allow write: if false; }
 
     /// _meta/appVersion — public version manifest read by useVersionCheck on every launch.
     /// Other _meta docs (e.g. livescoresSnapshot) remain server-only.

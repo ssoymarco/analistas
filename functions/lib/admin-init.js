@@ -51,4 +51,7 @@ if (!admin.apps.length) {
     admin.initializeApp();
 }
 exports.db = admin.firestore();
+// Optional fields are common in the football docs (e.g. FbEvent.addedTime);
+// drop `undefined` values instead of throwing on write.
+exports.db.settings({ ignoreUndefinedProperties: true });
 //# sourceMappingURL=admin-init.js.map

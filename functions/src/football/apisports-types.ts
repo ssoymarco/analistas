@@ -150,3 +150,176 @@ export interface AfTopPlayerEntry {
     cards: { yellow: number | null; red: number | null };
   }>;
 }
+
+// ── On-demand endpoints (verified against live responses on 2026-11-25) ──────
+
+export interface AfVenue {
+  id: number | null;
+  name: string | null;
+  address?: string | null;
+  city: string | null;
+  country?: string | null;
+  capacity: number | null;
+  surface: string | null;
+  image: string | null;
+}
+
+/** /teams?id= | ?search= | ?league=&season= */
+export interface AfTeamEntry {
+  team: {
+    id: number; name: string; code: string | null; country: string | null;
+    founded: number | null; national: boolean; logo: string;
+  };
+  venue: AfVenue | null;
+}
+
+/** /players/squads?team= */
+export interface AfSquadEntry {
+  team: { id: number; name: string; logo: string };
+  players: Array<{
+    id: number; name: string; age: number | null; number: number | null;
+    /** 'Goalkeeper' | 'Defender' | 'Midfielder' | 'Attacker' */
+    position: string | null; photo: string;
+  }>;
+}
+
+/** /coachs?id= | ?team= */
+export interface AfCoachEntry {
+  id: number;
+  name: string;
+  firstname: string | null;
+  lastname: string | null;
+  age: number | null;
+  birth: { date: string | null; place: string | null; country: string | null };
+  nationality: string | null;
+  height: string | null;
+  weight: string | null;
+  photo: string | null;
+  team: { id: number | null; name: string | null; logo: string | null } | null;
+  career: Array<{
+    team: { id: number | null; name: string | null; logo: string | null };
+    start: string | null;
+    end: string | null;
+  }>;
+}
+
+export interface AfHomeAwayTotal<T = number> { home: T | null; away: T | null; total: T | null }
+export type AfMinuteMap = Record<string, { total: number | null; percentage: string | null }>;
+
+/** /teams/statistics?league=&season=&team= (response is an object, not an array) */
+export interface AfTeamSeasonStats {
+  league: { id: number; name: string; season: number };
+  team: { id: number; name: string; logo: string };
+  form: string | null;
+  fixtures: {
+    played: AfHomeAwayTotal; wins: AfHomeAwayTotal; draws: AfHomeAwayTotal; loses: AfHomeAwayTotal;
+  };
+  goals: {
+    for: { total: AfHomeAwayTotal; average: AfHomeAwayTotal<string>; minute: AfMinuteMap };
+    against: { total: AfHomeAwayTotal; average: AfHomeAwayTotal<string>; minute: AfMinuteMap };
+  };
+  biggest: {
+    streak: { wins: number | null; draws: number | null; loses: number | null };
+    wins: { home: string | null; away: string | null };
+    loses: { home: string | null; away: string | null };
+  };
+  clean_sheet: AfHomeAwayTotal;
+  failed_to_score: AfHomeAwayTotal;
+  penalty: {
+    scored: { total: number | null }; missed: { total: number | null }; total: number | null;
+  };
+  lineups: Array<{ formation: string; played: number }>;
+  cards: { yellow: AfMinuteMap; red: AfMinuteMap };
+}
+
+export interface AfPlayerProfile {
+  id: number;
+  name: string;
+  firstname: string | null;
+  lastname: string | null;
+  age: number | null;
+  birth: { date: string | null; place: string | null; country: string | null };
+  nationality: string | null;
+  height: string | null;
+  weight: string | null;
+  injured?: boolean;
+  number?: number | null;
+  position?: string | null;
+  photo: string;
+}
+
+export interface AfPlayerSeasonBlock {
+  team: { id: number | null; name: string | null; logo: string | null };
+  league: { id: number | null; name: string | null; country: string | null; logo: string | null; season: number | null };
+  games: {
+    appearences: number | null; lineups: number | null; minutes: number | null;
+    number: number | null; position: string | null; rating: string | null; captain: boolean;
+  };
+  substitutes: { in: number | null; out: number | null; bench: number | null };
+  shots: { total: number | null; on: number | null };
+  goals: { total: number | null; conceded: number | null; assists: number | null; saves: number | null };
+  passes: { total: number | null; key: number | null; accuracy: number | string | null };
+  tackles: { total: number | null; blocks: number | null; interceptions: number | null };
+  duels: { total: number | null; won: number | null };
+  dribbles: { attempts: number | null; success: number | null; past: number | null };
+  fouls: { drawn: number | null; committed: number | null };
+  cards: { yellow: number | null; yellowred: number | null; red: number | null };
+  penalty: {
+    won: number | null; commited: number | null; scored: number | null;
+    missed: number | null; saved: number | null;
+  };
+}
+
+/** /players?id=&season= */
+export interface AfPlayerSeasonEntry {
+  player: AfPlayerProfile;
+  statistics: AfPlayerSeasonBlock[];
+}
+
+/** /players/profiles?search= | ?player= */
+export interface AfPlayerProfileEntry {
+  player: AfPlayerProfile;
+}
+
+/** /players/teams?player= */
+export interface AfPlayerTeamsEntry {
+  team: { id: number; name: string; logo: string };
+  seasons: number[];
+}
+
+/** /injuries?fixture= */
+export interface AfInjuryEntry {
+  player: { id: number; name: string; photo: string; type: string | null; reason: string | null };
+  team: { id: number; name: string; logo: string };
+  fixture: { id: number; date: string; timestamp: number };
+  league: { id: number; season: number; name: string };
+}
+
+interface AfPct { home: string | null; away: string | null }
+
+/** /predictions?fixture= */
+export interface AfPredictionEntry {
+  predictions: {
+    winner: { id: number | null; name: string | null; comment: string | null } | null;
+    win_or_draw: boolean | null;
+    under_over: string | null;
+    goals: { home: string | null; away: string | null } | null;
+    advice: string | null;
+    percent: { home: string | null; draw: string | null; away: string | null } | null;
+  };
+  comparison?: {
+    form: AfPct; att: AfPct; def: AfPct; poisson_distribution: AfPct;
+    h2h: AfPct; goals: AfPct; total: AfPct;
+  } | null;
+  h2h?: AfFixtureCore[];
+}
+
+/** /leagues?id= (all seasons with coverage) */
+export interface AfLeagueFull {
+  league: { id: number; name: string; type: string; logo: string };
+  country: { name: string; code: string | null; flag: string | null };
+  seasons: Array<{
+    year: number; start: string; end: string; current: boolean;
+    coverage?: { standings?: boolean };
+  }>;
+}

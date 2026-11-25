@@ -40,6 +40,9 @@ export interface DelayedPushPayload {
     matchId: string;
     homeScore: number;
     awayScore: number;
+    /** Collection holding the match doc for the VAR guard. Defaults to the
+     *  legacy 'matches'; API-Sports pushes use 'fb_matches'. */
+    matchCollection?: 'matches' | 'fb_matches';
     /** Expulsados por lado AL MOMENTO DEL EVENTO. Solo se llena para
      *  changeType 'redCard'; es la referencia del guard de VAR para saber si la
      *  roja sigue vigente al entregar. Opcional: las tareas encoladas antes de

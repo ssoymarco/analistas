@@ -86,7 +86,7 @@ exports.deliverDelayedPush = (0, tasks_1.onTaskDispatched)({
     // escriba homeRedCards/awayRedCards en el doc — antes no existían.
     if (p.changeType === 'goal' || p.changeType === 'redCard') {
         try {
-            const snap = await admin_init_1.db.doc(`matches/${p.matchId}`).get();
+            const snap = await admin_init_1.db.doc(`${p.matchCollection ?? 'matches'}/${p.matchId}`).get();
             if (snap.exists) {
                 const curr = snap.data();
                 const isGoal = p.changeType === 'goal';
