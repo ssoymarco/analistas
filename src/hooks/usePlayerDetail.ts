@@ -1,12 +1,28 @@
-// ── usePlayerDetail — loads full player data from SportMonks ──────────────────
+// ── usePlayerDetail — a player's profile and statistics ─────────────────────
+//
+// Read from `fb_players/{id}` through services/football/teams: the first open
+// of a player makes the backend fetch and cache the profile, the statistics of
+// the running and previous season (one row per competition) and the clubs of
+// the career; later opens are a single document read.
 import { useState, useEffect, useRef } from 'react';
+import { seasonLabel } from '../services/football/catalog';
+import { getPlayer } from '../services/football/teams';
 import {
-  fetchPlayerById,
-  fetchApi,
-  type SMPlayer,
-} from '../services/sportmonks';
+  fbSeasonKey, type FbPlayerDoc, type FbPlayerSeasonStat,
+} from '../../functions/src/shared/football/model';
 
 // ── Position helpers ────────────────────────────────────────────────────────
+
+/** Legacy numeric position codes the screen colors by (24 GK · 25 DEF · 26 MID · 27 FWD). */
+function positionIdOf(position: string | null): number {
+  switch ((position ?? '').toLowerCase()) {
+    case 'goalkeeper': return 24;
+    case 'defender':   return 25;
+    case 'midfielder': return 26;
+    case 'attacker':   return 27;
+    default:           return 0;
+  }
+}
 
 function positionName(posId: number): string {
   switch (posId) {
@@ -30,14 +46,9 @@ function positionShort(posId: number): string {
 
 // ── Country resolver (ISO2-based) ───────────────────────────────────────────
 //
-// We previously mapped SportMonks numeric `country_id` → Spanish name + emoji.
-// That map was wrong (Griezmann showed as Belgian, Kane as Ivorian) because
-// SportMonks numeric IDs don't match the values we'd guessed.
-//
-// This version uses the COUNTRY OBJECT returned by `?include=nationality`,
-// which has a stable `iso2` code. ISO2 → emoji is a deterministic Unicode trick;
-// ISO2 → Spanish name is a small static map. Both are reliable and don't depend
-// on SportMonks' internal IDs.
+// The data gives the nationality as an English country name. It is mapped to
+// an ISO2 code (NATIONALITY_ISO2 below); ISO2 → flag emoji is a deterministic
+// Unicode trick and ISO2 → Spanish name a small static map.
 
 /** Spanish country names keyed by ISO2 code. Falls back to API's English name. */
 const ISO2_NAME_ES: Record<string, string> = {
@@ -94,7 +105,7 @@ function iso2ToFlag(iso2: string): string {
 
 /**
  * Resolve a player's country to (Spanish name, flag emoji) using the
- * SportMonks country object returned by `?include=nationality`.
+ * country name + ISO2 code.
  * Special-cases UK constituent countries which need their non-ISO2 flags.
  */
 function resolveCountry(
@@ -103,7 +114,7 @@ function resolveCountry(
   if (!country) return { name: 'Desconocido', flag: '🏳️' };
 
   const apiNameLower = (country.name || '').toLowerCase();
-  // UK constituent countries: SportMonks names them "England", "Scotland", etc.
+  // UK constituent countries come as "England", "Scotland", etc.
   if (SPECIAL_FLAG_BY_NAME[apiNameLower]) {
     return {
       name: SPECIAL_NAME_ES[apiNameLower] || country.name || 'Desconocido',
@@ -116,74 +127,6 @@ function resolveCountry(
     name: ISO2_NAME_ES[iso2] || country.name || 'Desconocido',
     flag: iso2 ? iso2ToFlag(iso2) : '🏳️',
   };
-}
-
-// ── SM Season Stats interface ───────────────────────────────────────────────
-interface SMSeasonStatistic {
-  id: number;
-  player_id: number;
-  team_id: number;
-  season_id: number;
-  has_values: boolean;
-  jersey_number: number | null;
-  details?: SMStatDetail[];
-  season?: { id: number; name: string };
-  team?: { id: number; name: string; short_code: string; image_path: string };
-}
-
-interface SMStatDetail {
-  id: number;
-  player_statistic_id: number;
-  type_id: number;
-  value: { total?: number; home?: number; away?: number; average?: number } | number;
-}
-
-// SM stat type IDs
-const STAT_TYPE = {
-  APPEARANCES: 321,      // Appearances (lineups)
-  STARTS: 41,            // Matches started (titular)
-  GOALS: 52,             // Goals scored
-  ASSISTS: 79,           // Assists
-  MINUTES_PLAYED: 119,   // Minutes played
-  YELLOW_CARDS: 84,      // Yellow cards
-  RED_CARDS: 83,         // Red cards
-  RATING: 118,           // Average rating
-  SHOTS_TOTAL: 42,       // Total shots
-  SHOTS_ON_TARGET: 44,   // Shots on target
-  PASSES: 80,            // Total passes
-  PASS_ACCURACY: 1584,   // Pass accuracy %
-  KEY_PASSES: 117,       // Key passes
-  DRIBBLES: 86,          // Successful dribbles
-  TACKLES: 78,           // Tackles
-  INTERCEPTIONS: 100,    // Interceptions
-  CLEARANCES: 104,       // Clearances
-  SAVES: 57,             // Saves (GK)
-  CLEAN_SHEETS: 275,     // Clean sheets (GK)
-  FOULS_COMMITTED: 95,   // Fouls committed
-  FOULS_DRAWN: 107,      // Fouls drawn
-  DUELS_WON: 105,        // Duels won
-  AERIAL_WON: 110,       // Aerial duels won
-  CROSSES: 99,           // Crosses
-  OFFSIDES: 74,          // Offsides
-  PEN_SCORED: 48,        // Penalties scored
-  PEN_MISSED: 50,        // Penalties missed
-};
-
-// ── Extract stat value ──────────────────────────────────────────────────────
-function getStatValue(details: SMStatDetail[] | undefined, typeId: number): number {
-  if (!details) return 0;
-  const d = details.find(s => s.type_id === typeId);
-  if (!d) return 0;
-  if (typeof d.value === 'number') return d.value;
-  return d.value?.total ?? d.value?.average ?? 0;
-}
-
-function getStatAvg(details: SMStatDetail[] | undefined, typeId: number): number {
-  if (!details) return 0;
-  const d = details.find(s => s.type_id === typeId);
-  if (!d) return 0;
-  if (typeof d.value === 'number') return d.value;
-  return d.value?.average ?? d.value?.total ?? 0;
 }
 
 // ── Public Types ────────────────────────────────────────────────────────────
@@ -255,7 +198,7 @@ export interface PlayerDetailData {
   teamName: string;
   teamLogo: string;
   leagueName: string;
-  /** The player's NATIONAL TEAM, if SportMonks has a record of them being
+  /** The player's NATIONAL TEAM, if there is a record of them being
    *  called up. Falls back to undefined when the player has never appeared
    *  in a national team — in that case we still show their nationality
    *  (info.nationality) but render it without a click target. */
@@ -264,89 +207,128 @@ export interface PlayerDetailData {
   nationalTeamLogo?: string;
 }
 
-// ── Fetch enhanced player data ──────────────────────────────────────────────
+// ── Mapping ─────────────────────────────────────────────────────────────────
 
-async function fetchPlayerEnhanced(playerId: number): Promise<SMPlayer & { statistics?: SMSeasonStatistic[] }> {
-  // Firestore-first: syncPlayers writes players/{id} daily with the same
-  // shape and includes. Avoids a per-user SM call (the only proxy hit
-  // remaining for the player detail page).
-  try {
-    const { getPlayerRawFromFirestore } = await import('../services/firestoreApi');
-    const raw = await getPlayerRawFromFirestore(playerId);
-    if (raw) {
-      return raw as SMPlayer & { statistics?: SMSeasonStatistic[] };
-    }
-  } catch {
-    // Firestore unavailable — fall through to proxy
-  }
-
-  return fetchApi<SMPlayer & { statistics?: SMSeasonStatistic[] }>(
-    `players/${playerId}`,
-    {
-      // - statistics.* → season-by-season numbers
-      // - nationality  → country object with iso2 + name (replaces the broken numeric-id map)
-      // - teams.team   → membership history; lets us find the player's CURRENT CLUB
-      //                  and (when called up) their NATIONAL TEAM team_id for navigation
-      include: 'statistics.details;statistics.season;statistics.team;nationality;teams.team',
-    },
-  );
-}
-
-// ── Map SM season statistics ────────────────────────────────────────────────
-
-function mapSeasonStats(stat: SMSeasonStatistic): PlayerSeasonStats {
-  const d = stat.details;
+function mapSeasonStats(row: FbPlayerSeasonStat): PlayerSeasonStats {
   return {
-    seasonId: stat.season_id,
-    seasonName: stat.season?.name ?? `${stat.season_id}`,
-    teamId: stat.team_id,
-    teamName: stat.team?.name ?? '',
-    teamLogo: stat.team?.image_path ?? '',
-    jerseyNumber: stat.jersey_number,
-    appearances: getStatValue(d, STAT_TYPE.APPEARANCES),
-    starts: getStatValue(d, STAT_TYPE.STARTS),
-    goals: getStatValue(d, STAT_TYPE.GOALS),
-    assists: getStatValue(d, STAT_TYPE.ASSISTS),
-    minutesPlayed: getStatValue(d, STAT_TYPE.MINUTES_PLAYED),
-    yellowCards: getStatValue(d, STAT_TYPE.YELLOW_CARDS),
-    redCards: getStatValue(d, STAT_TYPE.RED_CARDS),
-    rating: Math.round(getStatAvg(d, STAT_TYPE.RATING) * 10) / 10,
-    shotsTotal: getStatValue(d, STAT_TYPE.SHOTS_TOTAL),
-    shotsOnTarget: getStatValue(d, STAT_TYPE.SHOTS_ON_TARGET),
-    passes: getStatValue(d, STAT_TYPE.PASSES),
-    passAccuracy: Math.round(getStatValue(d, STAT_TYPE.PASS_ACCURACY) * 10) / 10,
-    keyPasses: getStatValue(d, STAT_TYPE.KEY_PASSES),
-    dribbles: getStatValue(d, STAT_TYPE.DRIBBLES),
-    tackles: getStatValue(d, STAT_TYPE.TACKLES),
-    interceptions: getStatValue(d, STAT_TYPE.INTERCEPTIONS),
-    clearances: getStatValue(d, STAT_TYPE.CLEARANCES),
-    saves: getStatValue(d, STAT_TYPE.SAVES),
-    cleanSheets: getStatValue(d, STAT_TYPE.CLEAN_SHEETS),
-    foulsCommitted: getStatValue(d, STAT_TYPE.FOULS_COMMITTED),
-    foulsDrawn: getStatValue(d, STAT_TYPE.FOULS_DRAWN),
-    duelsWon: getStatValue(d, STAT_TYPE.DUELS_WON),
-    aerialWon: getStatValue(d, STAT_TYPE.AERIAL_WON),
-    crosses: getStatValue(d, STAT_TYPE.CROSSES),
-    offsides: getStatValue(d, STAT_TYPE.OFFSIDES),
-    penScored: getStatValue(d, STAT_TYPE.PEN_SCORED),
-    penMissed: getStatValue(d, STAT_TYPE.PEN_MISSED),
+    seasonId: fbSeasonKey(row.leagueId, row.season),
+    seasonName: `${row.league} ${seasonLabel(row.leagueId, row.season)}`.trim(),
+    teamId: Number(row.teamId) || 0,
+    teamName: row.team,
+    teamLogo: row.teamLogo,
+    jerseyNumber: row.number,
+    appearances: row.appearances,
+    starts: row.lineups,
+    goals: row.goals,
+    assists: row.assists,
+    minutesPlayed: row.minutes,
+    yellowCards: row.yellow,
+    redCards: row.red + row.yellowRed,
+    rating: row.rating ? Math.round(row.rating * 10) / 10 : 0,
+    shotsTotal: row.shots,
+    shotsOnTarget: row.shotsOn,
+    passes: row.passes,
+    passAccuracy: row.passAccuracy,
+    keyPasses: row.keyPasses,
+    dribbles: row.dribblesWon,
+    tackles: row.tackles,
+    interceptions: row.interceptions,
+    // Not provided by the data source: hidden by the screen when 0.
+    clearances: 0,
+    saves: row.saves,
+    cleanSheets: 0,
+    foulsCommitted: row.foulsCommitted,
+    foulsDrawn: row.foulsDrawn,
+    duelsWon: row.duelsWon,
+    aerialWon: 0,
+    crosses: 0,
+    offsides: 0,
+    penScored: row.penScored,
+    penMissed: row.penMissed,
   };
 }
 
-// ── Calculate age ───────────────────────────────────────────────────────────
+/** English nationality → the ISO2 code the country resolver needs. */
+const NATIONALITY_ISO2: Record<string, string> = {
+  argentina: 'AR', australia: 'AU', austria: 'AT', belgium: 'BE', bolivia: 'BO', brazil: 'BR',
+  cameroon: 'CM', canada: 'CA', chile: 'CL', china: 'CN', colombia: 'CO', 'costa rica': 'CR',
+  croatia: 'HR', cuba: 'CU', 'czech republic': 'CZ', czechia: 'CZ', denmark: 'DK',
+  'dominican republic': 'DO', ecuador: 'EC', egypt: 'EG', 'el salvador': 'SV', spain: 'ES',
+  usa: 'US', 'united states': 'US', finland: 'FI', france: 'FR', georgia: 'GE', germany: 'DE',
+  ghana: 'GH', greece: 'GR', guatemala: 'GT', guinea: 'GN', haiti: 'HT', honduras: 'HN',
+  hungary: 'HU', iceland: 'IS', india: 'IN', indonesia: 'ID', iran: 'IR', iraq: 'IQ',
+  ireland: 'IE', 'republic of ireland': 'IE', israel: 'IL', italy: 'IT', 'ivory coast': 'CI',
+  "cote d'ivoire": 'CI', jamaica: 'JM', japan: 'JP', 'south korea': 'KR', 'korea republic': 'KR',
+  'north korea': 'KP', morocco: 'MA', mali: 'ML', mexico: 'MX', netherlands: 'NL',
+  'new zealand': 'NZ', nigeria: 'NG', norway: 'NO', pakistan: 'PK', panama: 'PA', paraguay: 'PY',
+  peru: 'PE', philippines: 'PH', poland: 'PL', portugal: 'PT', 'puerto rico': 'PR', qatar: 'QA',
+  romania: 'RO', russia: 'RU', 'saudi arabia': 'SA', senegal: 'SN', serbia: 'RS', singapore: 'SG',
+  slovakia: 'SK', slovenia: 'SI', 'south africa': 'ZA', sweden: 'SE', switzerland: 'CH',
+  thailand: 'TH', tunisia: 'TN', turkey: 'TR', 'türkiye': 'TR', ukraine: 'UA',
+  'united arab emirates': 'AE', uruguay: 'UY', venezuela: 'VE', vietnam: 'VN', algeria: 'DZ',
+  albania: 'AL', armenia: 'AM', azerbaijan: 'AZ', 'bosnia and herzegovina': 'BA', bulgaria: 'BG',
+  cyprus: 'CY', estonia: 'EE', latvia: 'LV', lithuania: 'LT', luxembourg: 'LU', malta: 'MT',
+  montenegro: 'ME', moldova: 'MD', 'north macedonia': 'MK', rwanda: 'RW',
+};
 
-function calcAge(dob: string): number {
-  const birth = new Date(dob);
-  const now = new Date();
-  let age = now.getFullYear() - birth.getFullYear();
-  const m = now.getMonth() - birth.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) age--;
-  return age;
+function mapPlayer(
+  p: FbPlayerDoc,
+  fallback: { teamName?: string; teamLogo?: string; jerseyNumber?: number },
+): PlayerDetailData {
+  const history = p.stats.map(mapSeasonStats);
+  // "Current" numbers: the competition where he has played most this season
+  // for his club (a cup cameo or a national-team call-up shouldn't headline).
+  const newest = p.stats[0]?.season;
+  const clubRows = p.stats.filter(r => r.season === newest && (!p.currentTeam || r.teamId === p.currentTeam.id));
+  const headline = [...(clubRows.length ? clubRows : p.stats.filter(r => r.season === newest))]
+    .sort((a, b) => b.appearances - a.appearances || b.minutes - a.minutes)[0];
+  const currentStats = headline ? mapSeasonStats(headline) : (history[0] ?? null);
+
+  const nationalityKey = (p.nationality ?? '').toLowerCase();
+  const { name: nationalityName, flag: nationalityFlag } = resolveCountry(
+    p.nationality ? { name: p.nationality, iso2: NATIONALITY_ISO2[nationalityKey] } : undefined,
+  );
+  const posId = positionIdOf(p.position);
+  const first = p.firstName.split(' ')[0] ?? '';
+
+  const info: PlayerInfo = {
+    id: Number(p.id) || 0,
+    name: p.name,
+    displayName: p.name,
+    firstName: p.firstName,
+    lastName: p.lastName,
+    commonName: first && p.lastName ? `${first} ${p.lastName.split(' ')[0]}` : p.name,
+    image: p.photo,
+    nationality: nationalityName,
+    nationalityFlag,
+    nationalityId: 0,
+    position: positionName(posId),
+    positionShort: positionShort(posId),
+    positionId: posId,
+    age: p.age ?? 0,
+    dateOfBirth: p.birthDate ?? '',
+    height: p.heightCm ? `${(p.heightCm / 100).toFixed(2)}m` : '-',
+    weight: p.weightKg ? `${p.weightKg}kg` : '-',
+    gender: 'male',
+  };
+
+  return {
+    info,
+    currentStats,
+    seasonHistory: history,
+    jerseyNumber: p.number ?? currentStats?.jerseyNumber ?? fallback.jerseyNumber ?? 0,
+    teamId: Number(p.currentTeam?.id) || currentStats?.teamId || 0,
+    teamName: p.currentTeam?.name ?? currentStats?.teamName ?? fallback.teamName ?? '',
+    teamLogo: p.currentTeam?.logo ?? currentStats?.teamLogo ?? fallback.teamLogo ?? '',
+    leagueName: headline?.league ?? '',
+    nationalTeamId: p.nationalTeam ? Number(p.nationalTeam.id) || undefined : undefined,
+    nationalTeamName: p.nationalTeam?.name,
+    nationalTeamLogo: p.nationalTeam?.logo,
+  };
 }
 
-// ── Mock fallback ───────────────────────────────────────────────────────────
-
-function mockPlayerData(playerId: number, playerName: string, playerImage?: string): PlayerDetailData {
+/** Shown while loading fails: the name and photo the caller already had. */
+function placeholderPlayer(playerId: number, playerName: string, playerImage?: string): PlayerDetailData {
   return {
     info: {
       id: playerId,
@@ -397,108 +379,32 @@ export function usePlayerDetail(
 
   useEffect(() => {
     mounted.current = true;
+    let cancelled = false;
+    const alive = () => mounted.current && !cancelled;
+    const fallback = { teamName, teamLogo, jerseyNumber };
     setLoading(true);
     setError(null);
 
-    (async () => {
-      try {
-        const player = await fetchPlayerEnhanced(playerId);
-        if (!mounted.current) return;
-
-        const stats = player.statistics ?? [];
-        // Sort seasons most recent first
-        const sortedStats = stats
-          .map(mapSeasonStats)
-          .sort((a, b) => b.seasonId - a.seasonId);
-
-        const currentStats = sortedStats.length > 0 ? sortedStats[0] : null;
-
-        // ── Country resolution via the `nationality` include ──
-        // Falls back to `country` if nationality is missing on the response.
-        const countryObj = player.nationality ?? player.country;
-        const { name: nationalityName, flag: nationalityFlag } = resolveCountry(countryObj);
-
-        // ── Find the current CLUB and the NATIONAL TEAM from `teams.team` ──
-        // SportMonks tags each team membership entry with a `team.type` of
-        // 'club' / 'national' / 'domestic'. The active club is preferred from
-        // the explicit `active === true` flag; if missing, fall back to the
-        // most recent `start` date among club entries.
-        const memberships = player.teams ?? [];
-        const clubMemberships = memberships.filter(m => m.team && m.team.type !== 'national');
-        const activeClub =
-          clubMemberships.find(m => m.active === true) ??
-          [...clubMemberships].sort((a, b) => {
-            const aStart = a.start ? Date.parse(a.start) : 0;
-            const bStart = b.start ? Date.parse(b.start) : 0;
-            return bStart - aStart;
-          })[0];
-
-        // National team: any membership where team.type === 'national'.
-        // Prefer one whose country_id matches the player's nationality.
-        const nationalMemberships = memberships.filter(m => m.team?.type === 'national');
-        const nationalTeam =
-          nationalMemberships.find(m => m.team?.country_id === player.nationality_id) ??
-          nationalMemberships[0];
-
-        // Resolved club info — the activeClub from teams API takes precedence
-        // over currentStats.team (which can wrongly be a national team if the
-        // player's most recent stat row is a national-team appearance).
-        const clubId   = activeClub?.team?.id ?? (currentStats?.teamId ?? 0);
-        const clubName = activeClub?.team?.name ?? (currentStats?.teamName ?? teamName ?? '');
-        const clubLogo = activeClub?.team?.image_path ?? (currentStats?.teamLogo ?? teamLogo ?? '');
-
-        const info: PlayerInfo = {
-          id: player.id,
-          name: player.name,
-          displayName: player.display_name,
-          firstName: player.firstname,
-          lastName: player.lastname,
-          commonName: player.common_name,
-          image: player.image_path,
-          nationality: nationalityName,
-          nationalityFlag,
-          nationalityId: player.nationality_id,
-          position: positionName(player.position_id),
-          positionShort: positionShort(player.position_id),
-          positionId: player.position_id,
-          age: player.date_of_birth ? calcAge(player.date_of_birth) : 0,
-          dateOfBirth: player.date_of_birth,
-          height: player.height ? `${(player.height / 100).toFixed(2)}m` : '-',
-          weight: player.weight ? `${player.weight}kg` : '-',
-          gender: player.gender,
-        };
-
-        setData({
-          info,
-          currentStats,
-          seasonHistory: sortedStats,
-          jerseyNumber: activeClub?.jersey_number ?? currentStats?.jerseyNumber ?? jerseyNumber ?? 0,
-          teamId: clubId,
-          teamName: clubName,
-          teamLogo: clubLogo,
-          leagueName: '',
-          nationalTeamId:   nationalTeam?.team?.id,
-          nationalTeamName: nationalTeam?.team?.name,
-          nationalTeamLogo: nationalTeam?.team?.image_path,
-        });
-      } catch (err: any) {
-        if (!mounted.current) return;
-        console.warn('usePlayerDetail error:', err?.message);
-        // Fallback to mock with passed-in info
-        setData({
-          ...mockPlayerData(playerId, playerName, playerImage),
+    getPlayer(playerId, { onStale: stale => { if (alive()) setData(mapPlayer(stale, fallback)); } })
+      .then(player => {
+        if (alive()) setData(mapPlayer(player, fallback));
+      })
+      .catch((err: unknown) => {
+        if (!alive()) return;
+        const message = err instanceof Error ? err.message : 'Error loading player';
+        console.warn('usePlayerDetail error:', message);
+        setData(prev => prev ?? {
+          ...placeholderPlayer(playerId, playerName, playerImage),
           teamName: teamName ?? '',
           teamLogo: teamLogo ?? '',
           jerseyNumber: jerseyNumber ?? 0,
         });
-        setError(err?.message ?? 'Error loading player');
-      } finally {
-        if (mounted.current) setLoading(false);
-      }
-    })();
+        setError(message);
+      })
+      .finally(() => { if (alive()) setLoading(false); });
 
-    return () => { mounted.current = false; };
-  }, [playerId]);
+    return () => { cancelled = true; mounted.current = false; };
+  }, [playerId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { data, loading, error };
 }

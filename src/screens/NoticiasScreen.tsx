@@ -18,7 +18,7 @@ import { SearchIcon } from '../components/NavIcons';
 import { SectionHeader } from '../components/SectionHeader';
 import { CategoryTabs } from '../components/CategoryTabs';
 import { radius, ui } from '../theme/tokens';
-import { getNews } from '../services/sportsApi';
+import { getNews } from '../services/wordpressApi';
 import type { NewsArticle } from '../data/types';
 import type { NoticiasStackParamList } from '../navigation/AppNavigator';
 import { normalize } from '../utils/normalize';

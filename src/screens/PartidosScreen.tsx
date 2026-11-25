@@ -27,7 +27,7 @@ import { LeagueSection } from '../components/LeagueSection';
 import { PromoBanner } from '../components/PromoBanner';
 import { CalendarPicker } from '../components/CalendarPicker';
 import { useFixtures } from '../hooks/useFixtures';
-import type { LeagueWithMatches } from '../services/sportsApi';
+import type { LeagueWithMatches } from '../services/football/matches';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { getLeaguePopularity, isFriendliesLeague, FRIENDLIES_RE } from '../config/leagues';

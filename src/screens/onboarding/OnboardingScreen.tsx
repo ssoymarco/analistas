@@ -18,13 +18,11 @@ import {
   TextInput, Image, ImageBackground, Dimensions, Platform, ActivityIndicator,
   Easing, KeyboardAvoidingView, Alert, PanResponder,
 } from 'react-native';
-import {
-  getRecentFixturesByTeam,
-  getStandingsFromFirestore,
-  getTopScorersFromFirestore,
-  type FirestoreTopScorer,
-} from '../../services/firestoreApi';
-import { getStandings as getStandingsFromApi } from '../../services/sportsApi';
+import { getCurrentSeasonId } from '../../services/football/catalog';
+import { getStandings, getTopScorers } from '../../services/football/leagueData';
+import { getTeamsFixturesBetween } from '../../services/football/matches';
+import type { TopPlayerRow } from '../../services/football/mappers';
+import { POPULAR_PLAYERS, POPULAR_TEAMS } from '../../services/football/popular';
 import type { Match, LeagueStanding } from '../../data/types';
 import { LinearGradient } from 'expo-linear-gradient';
 // expo-image for REMOTE images (team logos, player photos) — react-native's
@@ -41,12 +39,12 @@ import { useFavorites } from '../../contexts/FavoritesContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotificationPrefs } from '../../contexts/NotificationPrefsContext';
 import {
-  getSearchableTeams,
   getSearchableLeagues,
   getSearchablePlayers,
   getAllSearchableTeams,
-  getAllSearchablePlayers,
-} from '../../services/sportsApi';
+  searchRemote,
+  type SearchableTeam, type SearchableLeague, type SearchablePlayer,
+} from '../../services/football/search';
 import {
   buildOnboardingTeamGrid,
   buildOnboardingPlayerNames,
@@ -60,7 +58,6 @@ import { initializeFCM } from '../../services/fcmInit';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useGoogleAuth } from '../../services/authGoogle';
 import { signInWithApple, isAppleAuthAvailable } from '../../services/authApple';
-import type { SearchableTeam, SearchableLeague, SearchablePlayer } from '../../services/sportsApi';
 import type { AuthMethod } from '../../contexts/AuthContext';
 import { isImageUri } from '../../utils/imageUri';
 
@@ -114,46 +111,12 @@ const SIDE_PAD = 20;
 const CARD_GAP = 10;
 const CARD_W   = (SCREEN_W - SIDE_PAD * 2 - CARD_GAP * 2) / 3;
 
-// ── Static fallbacks ──────────────────────────────────────────────────────────
-const FALLBACK_TEAMS: SearchableTeam[] = [
-  { id: 2687,  name: 'América',          shortName: 'AME', logo: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png',   leagueName: 'Liga MX',        leagueId: 743 },
-  { id: 427,   name: 'Guadalajara',      shortName: 'GUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png',    leagueName: 'Liga MX',        leagueId: 743 },
-  { id: 2626,  name: 'Cruz Azul',        shortName: 'CAZ', logo: 'https://cdn.sportmonks.com/images/soccer/teams/2/2626.png',    leagueName: 'Liga MX',        leagueId: 743 },
-  { id: 609,   name: 'Tigres UANL',      shortName: 'TUA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/1/609.png',     leagueName: 'Liga MX',        leagueId: 743 },
-  { id: 2662,  name: 'Monterrey',        shortName: 'MNT', logo: 'https://cdn.sportmonks.com/images/soccer/teams/6/2662.png',    leagueName: 'Liga MX',        leagueId: 743 },
-  { id: 2989,  name: 'Pumas UNAM',       shortName: 'PUM', logo: 'https://cdn.sportmonks.com/images/soccer/teams/13/2989.png',   leagueName: 'Liga MX',        leagueId: 743 },
-  { id: 53,    name: 'Real Madrid',      shortName: 'RMA', logo: 'https://cdn.sportmonks.com/images/soccer/teams/21/53.png',     leagueName: 'La Liga',        leagueId: 564 },
-  { id: 83,    name: 'Barcelona',        shortName: 'BAR', logo: 'https://cdn.sportmonks.com/images/soccer/teams/19/83.png',     leagueName: 'La Liga',        leagueId: 564 },
-  { id: 1044,  name: 'Manchester City',  shortName: 'MCI', logo: 'https://cdn.sportmonks.com/images/soccer/teams/4/1044.png',    leagueName: 'Premier League', leagueId: 8 },
-  { id: 42,    name: 'Arsenal',          shortName: 'ARS', logo: 'https://cdn.sportmonks.com/images/soccer/teams/10/42.png',     leagueName: 'Premier League', leagueId: 8 },
-  { id: 496,   name: 'Liverpool',        shortName: 'LIV', logo: 'https://cdn.sportmonks.com/images/soccer/teams/8/496.png',     leagueName: 'Premier League', leagueId: 8 },
-];
-
-const FALLBACK_LEAGUES: SearchableLeague[] = [
-  { id: 743,  name: 'Liga MX',           country: 'México',    flag: '🇲🇽', image: 'https://cdn.sportmonks.com/images/soccer/leagues/743.png' },
-  { id: 564,  name: 'La Liga',           country: 'España',    flag: '🇪🇸', image: 'https://cdn.sportmonks.com/images/soccer/leagues/564.png' },
-  { id: 8,    name: 'Premier League',    country: 'Inglaterra', flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', image: 'https://cdn.sportmonks.com/images/soccer/leagues/8.png' },
-  { id: 2,    name: 'Champions League',  country: 'UEFA',       flag: '⭐', image: 'https://cdn.sportmonks.com/images/soccer/leagues/2.png' },
-  { id: 82,   name: 'Bundesliga',        country: 'Alemania',   flag: '🇩🇪', image: 'https://cdn.sportmonks.com/images/soccer/leagues/82.png' },
-  { id: 384,  name: 'Serie A',           country: 'Italia',     flag: '🇮🇹', image: 'https://cdn.sportmonks.com/images/soccer/leagues/384.png' },
-  { id: 325,  name: 'Brasileirão',       country: 'Brasil',     flag: '🇧🇷', image: 'https://cdn.sportmonks.com/images/soccer/leagues/325.png' },
-  { id: 155,  name: 'Liga Argentina',    country: 'Argentina',  flag: '🇦🇷', image: 'https://cdn.sportmonks.com/images/soccer/leagues/155.png' },
-];
-
-const FALLBACK_PLAYERS: SearchablePlayer[] = [
-  { id: 198756, name: 'Henry Martín',    position: 'Delantero',     teamName: 'América' },
-  { id: 220665, name: 'Vinícius Jr',     position: 'Delantero',     teamName: 'Real Madrid' },
-  { id: 229533, name: 'Jude Bellingham', position: 'Mediocampista', teamName: 'Real Madrid' },
-  { id: 950020, name: 'Lamine Yamal',    position: 'Delantero',     teamName: 'Barcelona' },
-  { id: 2371,   name: 'Robert Lewandowski', position: 'Delantero',  teamName: 'Barcelona' },
-  { id: 163626, name: 'Lionel Messi',    position: 'Delantero',     teamName: 'Inter Miami' },
-  { id: 219028, name: 'Erling Haaland',  position: 'Delantero',     teamName: 'Manchester City' },
-  { id: 216528, name: 'Kylian Mbappé',   position: 'Delantero',     teamName: 'Real Madrid' },
-];
-
-// ── Team IDs for suggestion logic ─────────────────────────────────────────────
-const MX_TEAM_IDS = new Set([2687, 427, 2626, 609, 2662, 2989, 2844, 967, 10036, 680]);
-const EU_TEAM_IDS = new Set([53, 83, 1044, 42, 496]);
+// ── Initial content ──────────────────────────────────────────────────────────
+// What the pickers show before the country-aware grid is computed: the head of
+// the curated lists (bundled with the app — no network needed).
+const FALLBACK_TEAMS: SearchableTeam[] = POPULAR_TEAMS.slice(0, 12);
+const FALLBACK_LEAGUES: SearchableLeague[] = getSearchableLeagues().slice(0, 8);
+const FALLBACK_PLAYERS: SearchablePlayer[] = POPULAR_PLAYERS.slice(0, 8);
 
 // ── State shape ───────────────────────────────────────────────────────────────
 type FanLevel = 'espectador' | 'casual' | 'fan' | 'analista';
@@ -851,16 +814,25 @@ const Screen3Teams: React.FC<{
   loading: boolean;
   selectedIds: number[];
   onToggle: (id: number) => void;
+  /** Ask the backend for clubs beyond the local catalog (results join `allTeams`). */
+  onSearch?: (query: string) => void;
   fanLevel: FanLevel | null;
   onNext: () => void;
   onBack: () => void;
   onSkip: () => void;
-}> = ({ teams, allTeams, loading, selectedIds, onToggle, fanLevel, onNext, onBack, onSkip }) => {
+}> = ({ teams, allTeams, loading, selectedIds, onToggle, onSearch, fanLevel, onNext, onBack, onSkip }) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
   const [query, setQuery]                 = useState('');
   const [visibleCount, setVisibleCount]   = useState(INITIAL_TEAM_GRID);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 3 || !onSearch) return;
+    const timer = setTimeout(() => onSearch(q), 350);
+    return () => clearTimeout(timer);
+  }, [query, onSearch]);
 
   // Search hits the FULL catalog so niche clubs (e.g. Atlante in Liga Expansión,
   // Cruzeiro in Brasileirão) are findable. Without a query, show the curated
@@ -1067,22 +1039,31 @@ const PLAYER_GRID_STEP    = 9;
 const Screen4Players: React.FC<{
   /** Curated, country-ordered list shown by default (~50 items). */
   players: SearchablePlayer[];
-  /** Full searchable catalog (~750 items). Used ONLY when query is non-empty. */
+  /** Searchable catalog: the curated players plus whatever the remote search found. */
   allPlayers: SearchablePlayer[];
   loading: boolean;
   selectedTeamIds: number[];
   selectedIds: number[];
   onToggle: (id: number) => void;
+  /** Ask the backend for players beyond the curated list (results join `allPlayers`). */
+  onSearch?: (query: string) => void;
   onNext: () => void;
   onBack: () => void;
   onSkip: () => void;
   teamNames: string[];
-}> = ({ players, allPlayers, loading, selectedTeamIds, selectedIds, onToggle, onNext, onBack, onSkip, teamNames }) => {
+}> = ({ players, allPlayers, loading, selectedTeamIds, selectedIds, onToggle, onSearch, onNext, onBack, onSkip, teamNames }) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
   const [query, setQuery]               = useState('');
   const [visibleCount, setVisibleCount] = useState(INITIAL_PLAYER_GRID);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 3 || !onSearch) return;
+    const timer = setTimeout(() => onSearch(q), 350);
+    return () => clearTimeout(timer);
+  }, [query, onSearch]);
 
   const filtered = useMemo(() => {
     // Filter out players with invalid/duplicate IDs first
@@ -1346,7 +1327,7 @@ const Screen6Feed: React.FC<{
    */
   const [matchState, setMatchState] = useState<'upcoming' | 'live' | 'finished'>('upcoming');
   const [standings, setStandings] = useState<LeagueStanding[]>([]);
-  const [topScorers, setTopScorers] = useState<FirestoreTopScorer[]>([]);
+  const [topScorers, setTopScorers] = useState<TopPlayerRow[]>([]);
 
   const firstTeam   = teams.find(t2 => state.teamIds.includes(t2.id));
   const firstPlayer = players.find(p => state.playerIds.includes(p.id));
@@ -1362,13 +1343,12 @@ const Screen6Feed: React.FC<{
     //   3. FINISHED — last played match (fallback for end-of-season / pre-season
     //      gap when the next-season calendar isn't published yet)
     //
-    // getRecentFixturesByTeam returns fixtures ORDERED BY kickoff DESC, so we
-    // re-sort upcomings ASC (nearest first) and keep finisheds DESC (most
-    // recent first).
+    // Source: the synced window of fixtures (a few days back … two weeks
+    // ahead), chronological.
     if (firstTeam) {
-      getRecentFixturesByTeam(firstTeam.id, 25).then(fixtures => {
+      const nowSec = Math.floor(Date.now() / 1000);
+      getTeamsFixturesBetween([String(firstTeam.id)], nowSec - 4 * 86_400, nowSec + 15 * 86_400).then(fixtures => {
         if (!fixtures.length) return;
-        const now = Date.now();
 
         const live = fixtures.find(f => f.status === 'live');
         if (live) {
@@ -1377,51 +1357,41 @@ const Screen6Feed: React.FC<{
           return;
         }
 
-        const upcomings = fixtures
-          .filter(f => f.status === 'scheduled' || new Date(f.startingAtUtc ?? f.date).getTime() > now)
-          .sort((a, b) => {
-            const ta = new Date(a.startingAtUtc ?? a.date).getTime();
-            const tb = new Date(b.startingAtUtc ?? b.date).getTime();
-            return ta - tb;
-          });
-        if (upcomings.length > 0) {
-          setNextMatch(upcomings[0]);
+        const upcoming = fixtures.find(f => f.status === 'scheduled' && (f.timestamp ?? 0) > nowSec);
+        if (upcoming) {
+          setNextMatch(upcoming);
           setMatchState('upcoming');
           return;
         }
 
-        // Fallback: no upcoming → show the most recently FINISHED match so
-        // the card never feels empty. fixtures is already DESC by kickoff.
-        const finished = fixtures.find(f => f.status === 'finished') ?? fixtures[0];
-        setNextMatch(finished);
-        setMatchState('finished');
+        // No upcoming → the most recently FINISHED match, so the card never
+        // feels empty.
+        const finished = [...fixtures].reverse().find(f => f.status === 'finished' && f.stateId === undefined);
+        if (finished) {
+          setNextMatch(finished);
+          setMatchState('finished');
+        }
       }).catch(() => {});
     }
-    // Fetch standings for the user's first league (preferring the team's league)
-    // Firestore-first with API fallback so the table shows something even when
-    // the league hasn't been synced yet.
-    const seasonId = firstLeague?.seasonId;
-    if (seasonId) {
+    // Table and top scorers of the user's first league (preferring the team's
+    // league), in its current season.
+    const leagueId = firstLeague?.id;
+    if (leagueId) {
       (async () => {
         try {
-          const fsRows = await getStandingsFromFirestore(seasonId);
-          if (fsRows.length > 0) {
-            setStandings(fsRows.slice(0, 5));
-            return;
-          }
-          // Fallback to direct API call when Firestore is empty
-          const apiRows = await getStandingsFromApi(seasonId);
-          if (apiRows.length > 0) setStandings(apiRows.slice(0, 5));
+          const seasonId = await getCurrentSeasonId(leagueId);
+          if (!seasonId) return;
+          getStandings(seasonId)
+            .then(rows => { if (rows.length > 0) setStandings(rows.slice(0, 5)); })
+            .catch(() => {/* show skeleton */});
+          // If missing we just hide the card.
+          getTopScorers(seasonId)
+            .then(scorers => { if (scorers.length > 0) setTopScorers(scorers.slice(0, 3)); })
+            .catch(() => {});
         } catch {/* show skeleton */}
       })();
-
-      // Fetch top 3 scorers of the same league (no API fallback — server
-      // populates this; if missing we just hide the card).
-      getTopScorersFromFirestore(seasonId).then(scorers => {
-        if (scorers.length > 0) setTopScorers(scorers.slice(0, 3));
-      }).catch(() => {});
     }
-  }, [firstTeam?.id, firstLeague?.seasonId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [firstTeam?.id, firstLeague?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Entrance animations ────────────────────────────────────────────────────
   const matchAnim    = useRef(new Animated.Value(0)).current;
@@ -2429,7 +2399,7 @@ export function OnboardingScreen() {
     setAllTeams(curatedTeams); // initial value; will be replaced when full catalog loads
     setTeamsLoading(false);
 
-    // Players curated list — names are resolved by sportsApi to enriched objects
+    // Players curated list
     timeout3s(getSearchablePlayers())
       .then(data => {
         if (Array.isArray(data) && data.length > 0) {
@@ -2458,22 +2428,36 @@ export function OnboardingScreen() {
     const ls = getSearchableLeagues();
     if (ls.length > 0) setLeagues(ls);
 
-    // ── Background: full catalog for search (cached 7 days) ──────────────────
-    // Doesn't block the UI — the grid is already showing the curated 18.
-    // When the catalog arrives, search will start finding ~1,300 teams instead
-    // of ~50.
+    // ── Background: every team of the curated leagues, for search ────────────
+    // Doesn't block the UI — the grid is already showing the curated teams.
+    // Clubs and players beyond these lists come from the remote search.
     getAllSearchableTeams()
       .then(full => {
         if (full.length > 0) setAllTeams(full);
       })
       .catch(() => {});
-
-    getAllSearchablePlayers()
-      .then(full => {
-        if (full.length > 0) setAllPlayers(full);
-      })
-      .catch(() => {});
   }, [country, language]); // re-order when country resolves from Worker
+
+  // Remote search: any club or player beyond the bundled lists. The backend
+  // searches the full database; answers join the searchable catalogs.
+  const searchMore = useCallback((q: string) => {
+    searchRemote(q).then(res => {
+      if (res.teams.length) {
+        setAllTeams(prev => {
+          const ids = new Set(prev.map(x => x.id));
+          const extras = res.teams.filter(x => !ids.has(x.id));
+          return extras.length ? [...prev, ...extras] : prev;
+        });
+      }
+      if (res.players.length) {
+        setAllPlayers(prev => {
+          const ids = new Set(prev.map(x => x.id));
+          const extras = res.players.filter(x => !ids.has(x.id));
+          return extras.length ? [...prev, ...extras] : prev;
+        });
+      }
+    }).catch(() => {});
+  }, []);
 
   // ── Onboarding state ────────────────────────────────────────────────────────
   const [screen, setScreen] = useState(1);
@@ -2535,7 +2519,7 @@ export function OnboardingScreen() {
   //      AR user sees Copa Libertadores above Bundesliga, a US user sees MLS
   //      as the second league after Mundial 2026, etc. Niche leagues (Russia,
   //      Iran, China) always sink to the bottom regardless of country.
-  // Mundial 2026 (id 732) is always position 1 this season (preset top).
+  // The World Cup (league id 1) is always position 1 this season (preset top).
   const orderedLeagues = useMemo(() => {
     const preset = getCountryPreset(country, language);
     const tierOrder = new Map<number, number>();
@@ -2695,6 +2679,7 @@ export function OnboardingScreen() {
           loading={teamsLoading}
           selectedIds={obState.teamIds}
           onToggle={toggleTeamId}
+          onSearch={searchMore}
           fanLevel={obState.fanLevel}
           onNext={goNext}
           onBack={goBack}
@@ -2711,6 +2696,7 @@ export function OnboardingScreen() {
           selectedTeamIds={obState.teamIds}
           selectedIds={obState.playerIds}
           onToggle={togglePlayerId}
+          onSearch={searchMore}
           onNext={goNext}
           onBack={goBack}
           onSkip={goNext}

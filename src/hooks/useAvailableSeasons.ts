@@ -1,20 +1,21 @@
-// ── useAvailableSeasons ──────────────────────────────────────────────────────
-// Real-time list of historical seasons for a league, powering the season
-// picker in LeagueDetailScreen. Subscribes to season_index/{leagueId} so the
-// dropdown updates the moment a new crawl pass adds a season.
+// ── useAvailableSeasons — seasons a league has (season picker) ───────────────
+//
+// Loaded once per league from `fb_leagues/{id}` (fetched on demand, cached for
+// a week). Empty until it arrives — the picker hides itself meanwhile.
 import { useEffect, useState } from 'react';
-import { subscribeAvailableSeasons, type AvailableSeason } from '../services/firestoreApi';
+import { getAvailableSeasons, type AvailableSeason } from '../services/football/leagueData';
 
 export function useAvailableSeasons(leagueId: number | null): AvailableSeason[] {
   const [seasons, setSeasons] = useState<AvailableSeason[]>([]);
 
   useEffect(() => {
     if (!leagueId) { setSeasons([]); return; }
-    const unsub = subscribeAvailableSeasons(leagueId, setSeasons, err => {
-      // eslint-disable-next-line no-console
-      console.warn('[useAvailableSeasons] subscribe error:', err.message);
-    });
-    return unsub;
+    let cancelled = false;
+    setSeasons([]);
+    getAvailableSeasons(leagueId)
+      .then(list => { if (!cancelled) setSeasons(list); })
+      .catch(() => { /* picker stays hidden */ });
+    return () => { cancelled = true; };
   }, [leagueId]);
 
   return seasons;

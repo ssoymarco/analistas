@@ -13,7 +13,7 @@ import {
 import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
-import type { CupRound, CupTie, CupLeg } from '../services/sportsApi';
+import type { CupRound, CupTie, CupLeg } from '../services/football/rounds';
 import { translateTeamName } from '../utils/nationalTeams';
 import { localizeCityName } from '../utils/cityI18n';
 import { getDisplayVenueName, getDisplayVenueCity } from '../config/worldCupVenues';

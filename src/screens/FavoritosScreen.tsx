@@ -28,15 +28,13 @@ import {
   getSearchableTeams,
   getAllSearchableTeams,
   getSearchablePlayers,
-  getAllSearchablePlayers,
   getSearchableLeagues,
-  POPULAR_NATIONAL_TEAMS,
-} from '../services/sportsApi';
-import type {
-  SearchableTeam,
-  SearchablePlayer,
-  SearchableLeague,
-} from '../services/sportsApi';
+  searchRemote,
+  type SearchableTeam,
+  type SearchablePlayer,
+  type SearchableLeague,
+} from '../services/football/search';
+import { fbPlayerPhoto, fbTeamLogo } from '../../functions/src/shared/football/model';
 import type { FavoritosStackParamList } from '../navigation/AppNavigator';
 import { normalize } from '../utils/normalize';
 import { useTranslation } from 'react-i18next';
@@ -56,7 +54,8 @@ interface FavItem {
   name: string;
   subtitle: string;
   emoji: string;
-  smId?: number;
+  /** Numeric id of the team / league / player (opens its screen). */
+  apiId?: number;
   image?: string;
   seasonId?: number;
   teamName?: string;
@@ -71,134 +70,132 @@ interface FavItem {
 type Tab = 'equipos' | 'ligas' | 'jugadores';
 
 // ── Popular curated lists ─────────────────────────────────────────────────────
-// Ordered by global popularity. IDs verified against SportMonks API.
+// Ordered by global popularity. API-Sports ids.
 
 const POPULAR_TEAMS: FavItem[] = [
   // Liga MX
-  { id: '2687',  name: 'América',             subtitle: 'Liga MX · México',             emoji: 'AM', smId: 2687,   image: 'https://cdn.sportmonks.com/images/soccer/teams/31/2687.png' },
-  { id: '427',   name: 'Guadalajara',         subtitle: 'Liga MX · México',             emoji: 'GU', smId: 427,    image: 'https://cdn.sportmonks.com/images/soccer/teams/11/427.png', searchAliases: ['chivas', 'chivas de guadalajara'] },
-  { id: '609',   name: 'Tigres UANL',         subtitle: 'Liga MX · México',             emoji: 'TI', smId: 609,    image: 'https://cdn.sportmonks.com/images/soccer/teams/1/609.png' },
-  { id: '2626',  name: 'Cruz Azul',           subtitle: 'Liga MX · México',             emoji: 'CA', smId: 2626,   image: 'https://cdn.sportmonks.com/images/soccer/teams/2/2626.png' },
-  { id: '2662',  name: 'Monterrey',           subtitle: 'Liga MX · México',             emoji: 'MO', smId: 2662,   image: 'https://cdn.sportmonks.com/images/soccer/teams/6/2662.png' },
-  { id: '2989',  name: 'Pumas UNAM',          subtitle: 'Liga MX · México',             emoji: 'PU', smId: 2989,   image: 'https://cdn.sportmonks.com/images/soccer/teams/13/2989.png' },
+  { id: '2287', name: 'América',             subtitle: 'Liga MX · México',             emoji: 'AM', apiId: 2287, image: fbTeamLogo(2287) },
+  { id: '2278', name: 'Guadalajara',         subtitle: 'Liga MX · México',             emoji: 'GU', apiId: 2278, image: fbTeamLogo(2278), searchAliases: ['chivas', 'chivas de guadalajara'] },
+  { id: '2279', name: 'Tigres UANL',         subtitle: 'Liga MX · México',             emoji: 'TI', apiId: 2279, image: fbTeamLogo(2279) },
+  { id: '2295', name: 'Cruz Azul',           subtitle: 'Liga MX · México',             emoji: 'CA', apiId: 2295, image: fbTeamLogo(2295) },
+  { id: '2282', name: 'Monterrey',           subtitle: 'Liga MX · México',             emoji: 'MO', apiId: 2282, image: fbTeamLogo(2282) },
+  { id: '2286', name: 'Pumas UNAM',          subtitle: 'Liga MX · México',             emoji: 'PU', apiId: 2286, image: fbTeamLogo(2286) },
   // La Liga
-  { id: '3468',  name: 'Real Madrid',         subtitle: 'La Liga · España',             emoji: 'RM', smId: 3468,   image: 'https://cdn.sportmonks.com/images/soccer/teams/12/3468.png' },
-  { id: '83',    name: 'FC Barcelona',        subtitle: 'La Liga · España',             emoji: 'FC', smId: 83,     image: 'https://cdn.sportmonks.com/images/soccer/teams/19/83.png' },
+  { id: '541', name: 'Real Madrid',         subtitle: 'La Liga · España',             emoji: 'RM', apiId: 541, image: fbTeamLogo(541) },
+  { id: '529', name: 'FC Barcelona',        subtitle: 'La Liga · España',             emoji: 'FC', apiId: 529, image: fbTeamLogo(529) },
   // Premier League
-  { id: '8',     name: 'Liverpool',           subtitle: 'Premier League · Inglaterra',  emoji: 'LI', smId: 8,      image: 'https://cdn.sportmonks.com/images/soccer/teams/8/8.png' },
-  { id: '9',     name: 'Manchester City',     subtitle: 'Premier League · Inglaterra',  emoji: 'MC', smId: 9,      image: 'https://cdn.sportmonks.com/images/soccer/teams/9/9.png' },
-  { id: '19',    name: 'Arsenal',             subtitle: 'Premier League · Inglaterra',  emoji: 'AR', smId: 19,     image: 'https://cdn.sportmonks.com/images/soccer/teams/19/19.png' },
-  { id: '18',    name: 'Chelsea',             subtitle: 'Premier League · Inglaterra',  emoji: 'CH', smId: 18,     image: 'https://cdn.sportmonks.com/images/soccer/teams/18/18.png' },
-  { id: '14',    name: 'Manchester United',   subtitle: 'Premier League · Inglaterra',  emoji: 'MU', smId: 14,     image: 'https://cdn.sportmonks.com/images/soccer/teams/14/14.png' },
-  { id: '6',     name: 'Tottenham',           subtitle: 'Premier League · Inglaterra',  emoji: 'TO', smId: 6,      image: 'https://cdn.sportmonks.com/images/soccer/teams/6/6.png' },
+  { id: '40', name: 'Liverpool',           subtitle: 'Premier League · Inglaterra',  emoji: 'LI', apiId: 40, image: fbTeamLogo(40) },
+  { id: '50', name: 'Manchester City',     subtitle: 'Premier League · Inglaterra',  emoji: 'MC', apiId: 50, image: fbTeamLogo(50) },
+  { id: '42', name: 'Arsenal',             subtitle: 'Premier League · Inglaterra',  emoji: 'AR', apiId: 42, image: fbTeamLogo(42) },
+  { id: '49', name: 'Chelsea',             subtitle: 'Premier League · Inglaterra',  emoji: 'CH', apiId: 49, image: fbTeamLogo(49) },
+  { id: '33', name: 'Manchester United',   subtitle: 'Premier League · Inglaterra',  emoji: 'MU', apiId: 33, image: fbTeamLogo(33) },
+  { id: '47', name: 'Tottenham',           subtitle: 'Premier League · Inglaterra',  emoji: 'TO', apiId: 47, image: fbTeamLogo(47) },
   // Other Europe
-  { id: '591',   name: 'Paris Saint-Germain', subtitle: 'Ligue 1 · Francia',            emoji: 'PS', smId: 591,    image: 'https://cdn.sportmonks.com/images/soccer/teams/15/591.png' },
-  { id: '503',   name: 'Bayern München',      subtitle: 'Bundesliga · Alemania',        emoji: 'BY', smId: 503,    image: 'https://cdn.sportmonks.com/images/soccer/teams/23/503.png' },
-  { id: '625',   name: 'Juventus',            subtitle: 'Serie A · Italia',             emoji: 'JU', smId: 625,    image: 'https://cdn.sportmonks.com/images/soccer/teams/17/625.png' },
-  { id: '113',   name: 'AC Milan',            subtitle: 'Serie A · Italia',             emoji: 'AC', smId: 113,    image: 'https://cdn.sportmonks.com/images/soccer/teams/17/113.png' },
-  { id: '2930',  name: 'Inter',               subtitle: 'Serie A · Italia',             emoji: 'IN', smId: 2930,   image: 'https://cdn.sportmonks.com/images/soccer/teams/18/2930.png' },
-  { id: '676',   name: 'Sevilla',             subtitle: 'La Liga · España',             emoji: 'SE', smId: 676,    image: 'https://cdn.sportmonks.com/images/soccer/teams/4/676.png' },
+  { id: '85', name: 'Paris Saint-Germain', subtitle: 'Ligue 1 · Francia',            emoji: 'PS', apiId: 85, image: fbTeamLogo(85) },
+  { id: '157', name: 'Bayern München',      subtitle: 'Bundesliga · Alemania',        emoji: 'BY', apiId: 157, image: fbTeamLogo(157) },
+  { id: '496', name: 'Juventus',            subtitle: 'Serie A · Italia',             emoji: 'JU', apiId: 496, image: fbTeamLogo(496) },
+  { id: '489', name: 'AC Milan',            subtitle: 'Serie A · Italia',             emoji: 'AC', apiId: 489, image: fbTeamLogo(489) },
+  { id: '505', name: 'Inter',               subtitle: 'Serie A · Italia',             emoji: 'IN', apiId: 505, image: fbTeamLogo(505) },
+  { id: '536', name: 'Sevilla',             subtitle: 'La Liga · España',             emoji: 'SE', apiId: 536, image: fbTeamLogo(536) },
   // Americas
-  { id: '587',   name: 'Boca Juniors',        subtitle: 'Liga Profesional · Argentina', emoji: 'BJ', smId: 587,    image: 'https://cdn.sportmonks.com/images/soccer/teams/11/587.png' },
-  { id: '10002', name: 'River Plate',         subtitle: 'Liga Profesional · Argentina', emoji: 'RP', smId: 10002,  image: 'https://cdn.sportmonks.com/images/soccer/teams/18/10002.png' },
-  { id: '1024',  name: 'Flamengo',            subtitle: 'Brasileirão · Brasil',         emoji: 'FL', smId: 1024,   image: 'https://cdn.sportmonks.com/images/soccer/teams/0/1024.png' },
-  { id: '239235',name: 'Inter Miami',         subtitle: 'MLS · EUA',                    emoji: 'IM', smId: 239235, image: 'https://cdn.sportmonks.com/images/soccer/teams/3/239235.png' },
+  { id: '451', name: 'Boca Juniors',        subtitle: 'Liga Profesional · Argentina', emoji: 'BJ', apiId: 451, image: fbTeamLogo(451) },
+  { id: '435', name: 'River Plate',         subtitle: 'Liga Profesional · Argentina', emoji: 'RP', apiId: 435, image: fbTeamLogo(435) },
+  { id: '127', name: 'Flamengo',            subtitle: 'Brasileirão · Brasil',         emoji: 'FL', apiId: 127, image: fbTeamLogo(127) },
+  { id: '9568', name: 'Inter Miami',         subtitle: 'MLS · EUA',                    emoji: 'IM', apiId: 9568, image: fbTeamLogo(9568) },
   // Saudi
-  { id: '2506',  name: 'Al Nassr',            subtitle: 'Saudi Pro League · Arabia',    emoji: 'AN', smId: 2506,   image: 'https://cdn.sportmonks.com/images/soccer/teams/10/2506.png' },
-  { id: '7011',  name: 'Al Hilal',            subtitle: 'Saudi Pro League · Arabia',    emoji: 'AH', smId: 7011,   image: 'https://cdn.sportmonks.com/images/soccer/teams/3/7011.png' },
+  { id: '2939', name: 'Al Nassr',            subtitle: 'Saudi Pro League · Arabia',    emoji: 'AN', apiId: 2939, image: fbTeamLogo(2939) },
+  { id: '2932', name: 'Al Hilal',            subtitle: 'Saudi Pro League · Arabia',    emoji: 'AH', apiId: 2932, image: fbTeamLogo(2932) },
   // More Liga MX
-  { id: '2844',  name: 'Santos Laguna',       subtitle: 'Liga MX · México',             emoji: 'SL', smId: 2844,   image: 'https://cdn.sportmonks.com/images/soccer/teams/28/2844.png' },
-  { id: '967',   name: 'Toluca',              subtitle: 'Liga MX · México',             emoji: 'TO', smId: 967,    image: 'https://cdn.sportmonks.com/images/soccer/teams/7/967.png' },
-  { id: '10036', name: 'Pachuca',             subtitle: 'Liga MX · México',             emoji: 'PA', smId: 10036,  image: 'https://cdn.sportmonks.com/images/soccer/teams/20/10036.png' },
-  { id: '680',   name: 'Atlas',               subtitle: 'Liga MX · México',             emoji: 'AT', smId: 680,    image: 'https://cdn.sportmonks.com/images/soccer/teams/8/680.png' },
+  { id: '2285', name: 'Santos Laguna',       subtitle: 'Liga MX · México',             emoji: 'SL', apiId: 2285, image: fbTeamLogo(2285) },
+  { id: '2281', name: 'Toluca',              subtitle: 'Liga MX · México',             emoji: 'TO', apiId: 2281, image: fbTeamLogo(2281) },
+  { id: '2292', name: 'Pachuca',             subtitle: 'Liga MX · México',             emoji: 'PA', apiId: 2292, image: fbTeamLogo(2292) },
+  { id: '2283', name: 'Atlas',               subtitle: 'Liga MX · México',             emoji: 'AT', apiId: 2283, image: fbTeamLogo(2283) },
 ];
 
 const POPULAR_LEAGUES: FavItem[] = [
-  { id: '743',  name: 'Liga MX',              subtitle: 'México',           emoji: '🇲🇽', smId: 743,  searchAliases: ['ligamx', 'liga mexicana', 'apertura', 'clausura'] },
-  { id: '8',    name: 'Premier League',       subtitle: 'Inglaterra',       emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', smId: 8,    searchAliases: ['epl', 'liga inglesa'] },
-  { id: '564',  name: 'La Liga',              subtitle: 'España',           emoji: '🇪🇸', smId: 564,  searchAliases: ['laliga', 'liga espanola', 'liga española'] },
-  { id: '384',  name: 'Serie A',              subtitle: 'Italia',           emoji: '🇮🇹', smId: 384 },
-  { id: '82',   name: 'Bundesliga',           subtitle: 'Alemania',         emoji: '🇩🇪', smId: 82 },
-  { id: '301',  name: 'Ligue 1',              subtitle: 'Francia',          emoji: '🇫🇷', smId: 301 },
-  { id: '648',  name: 'Brasileirão',          subtitle: 'Brasil',           emoji: '🇧🇷', smId: 648 },
-  { id: '779',  name: 'MLS',                  subtitle: 'EUA / Canadá',     emoji: '🇺🇸', smId: 779 },
-  { id: '636',  name: 'Liga Profesional',     subtitle: 'Argentina',        emoji: '🇦🇷', smId: 636 },
-  { id: '1122', name: 'Copa Libertadores',    subtitle: 'Sudamérica',       emoji: '🏆', smId: 1122 },
-  { id: '1111', name: 'CONCACAF Champions',   subtitle: 'CONCACAF',         emoji: '🏆', smId: 1111 },
-  { id: '72',   name: 'Eredivisie',           subtitle: 'Países Bajos',     emoji: '🇳🇱', smId: 72 },
-  { id: '462',  name: 'Liga Portugal',        subtitle: 'Portugal',         emoji: '🇵🇹', smId: 462 },
-  { id: '944',  name: 'Saudi Pro League',     subtitle: 'Arabia Saudita',   emoji: '🇸🇦', smId: 944 },
-  { id: '672',  name: 'Liga BetPlay',         subtitle: 'Colombia',         emoji: '🇨🇴', smId: 672 },
-  { id: '600',  name: 'Süper Lig',            subtitle: 'Turquía',          emoji: '🇹🇷', smId: 600 },
-  { id: '1579', name: 'Liga MX Femenil',      subtitle: 'México',           emoji: '🇲🇽', smId: 1579 },
-  { id: '663',  name: 'Primera División',     subtitle: 'Chile',            emoji: '🇨🇱', smId: 663 },
-  { id: '968',  name: 'J1 League',            subtitle: 'Japón',            emoji: '🇯🇵', smId: 968 },
-  { id: '1082', name: 'Amistosos',            subtitle: 'Internacional',    emoji: '🌍', smId: 1082 },
+  { id: '262', name: 'Liga MX',              subtitle: 'México',           emoji: '🇲🇽', apiId: 262,  searchAliases: ['ligamx', 'liga mexicana', 'apertura', 'clausura'] },
+  { id: '39', name: 'Premier League',       subtitle: 'Inglaterra',       emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', apiId: 39,    searchAliases: ['epl', 'liga inglesa'] },
+  { id: '140', name: 'La Liga',              subtitle: 'España',           emoji: '🇪🇸', apiId: 140,  searchAliases: ['laliga', 'liga espanola', 'liga española'] },
+  { id: '135', name: 'Serie A',              subtitle: 'Italia',           emoji: '🇮🇹', apiId: 135 },
+  { id: '78', name: 'Bundesliga',           subtitle: 'Alemania',         emoji: '🇩🇪', apiId: 78 },
+  { id: '61', name: 'Ligue 1',              subtitle: 'Francia',          emoji: '🇫🇷', apiId: 61 },
+  { id: '71', name: 'Brasileirão',          subtitle: 'Brasil',           emoji: '🇧🇷', apiId: 71 },
+  { id: '253', name: 'MLS',                  subtitle: 'EUA / Canadá',     emoji: '🇺🇸', apiId: 253 },
+  { id: '128', name: 'Liga Profesional',     subtitle: 'Argentina',        emoji: '🇦🇷', apiId: 128 },
+  { id: '13', name: 'Copa Libertadores',    subtitle: 'Sudamérica',       emoji: '🏆', apiId: 13 },
+  { id: '16', name: 'CONCACAF Champions',   subtitle: 'CONCACAF',         emoji: '🏆', apiId: 16 },
+  { id: '88', name: 'Eredivisie',           subtitle: 'Países Bajos',     emoji: '🇳🇱', apiId: 88 },
+  { id: '94', name: 'Liga Portugal',        subtitle: 'Portugal',         emoji: '🇵🇹', apiId: 94 },
+  { id: '307', name: 'Saudi Pro League',     subtitle: 'Arabia Saudita',   emoji: '🇸🇦', apiId: 307 },
+  { id: '239', name: 'Liga BetPlay',         subtitle: 'Colombia',         emoji: '🇨🇴', apiId: 239 },
+  { id: '203', name: 'Süper Lig',            subtitle: 'Turquía',          emoji: '🇹🇷', apiId: 203 },
+  { id: '673', name: 'Liga MX Femenil',      subtitle: 'México',           emoji: '🇲🇽', apiId: 673 },
+  { id: '265', name: 'Primera División',     subtitle: 'Chile',            emoji: '🇨🇱', apiId: 265 },
+  { id: '98', name: 'J1 League',            subtitle: 'Japón',            emoji: '🇯🇵', apiId: 98 },
+  { id: '10', name: 'Amistosos',            subtitle: 'Internacional',    emoji: '🌍', apiId: 10 },
 ];
 
-// Curated list of globally-followed players. The `id` is a stable name-based slug
-// (used as the React key and as the local follow-tracking ID), and `smId` is left
-// undefined here — it gets resolved at runtime via SportMonks /players/search/{name},
-// which avoids the brittleness of hardcoding numeric IDs that may map to the wrong
-// player when the SportMonks DB changes.
+// Curated list of globally-followed players (API-Sports player ids; the photo
+// comes from the media CDN by id). The club in the subtitle is refreshed from
+// live data when available.
 const POPULAR_PLAYERS: FavItem[] = [
   // ── Global TOP ─────────────────────────────────────────────────────────────
-  { id: 'pop_lionel_messi',           name: 'Lionel Messi',           subtitle: 'Inter Miami · Argentina',                    emoji: '🇦🇷' },
-  { id: 'pop_cristiano_ronaldo',      name: 'Cristiano Ronaldo',      subtitle: 'Al Nassr · Portugal',                        emoji: '🇵🇹' },
-  { id: 'pop_kylian_mbappe',          name: 'Kylian Mbappé',          subtitle: 'Real Madrid · Francia',                      emoji: '🇫🇷' },
-  { id: 'pop_erling_haaland',         name: 'Erling Haaland',         subtitle: 'Manchester City · Noruega',                  emoji: '🇳🇴' },
-  { id: 'pop_vinicius_junior',        name: 'Vinícius Júnior',        subtitle: 'Real Madrid · Brasil',                       emoji: '🇧🇷' },
-  { id: 'pop_neymar_jr',              name: 'Neymar Jr',              subtitle: 'Santos · Brasil',                            emoji: '🇧🇷' },
-  { id: 'pop_mohamed_salah',          name: 'Mohamed Salah',          subtitle: 'Liverpool · Egipto',                         emoji: '🇪🇬' },
-  { id: 'pop_robert_lewandowski',     name: 'Robert Lewandowski',     subtitle: 'Barcelona · Polonia',                        emoji: '🇵🇱' },
-  { id: 'pop_kevin_de_bruyne',        name: 'Kevin De Bruyne',        subtitle: 'Manchester City · Bélgica',                  emoji: '🇧🇪' },
-  { id: 'pop_luka_modric',            name: 'Luka Modrić',            subtitle: 'AC Milan · Croacia',                         emoji: '🇭🇷' },
-  { id: 'pop_lamine_yamal',           name: 'Lamine Yamal',           subtitle: 'Barcelona · España',                         emoji: '🇪🇸' },
-  { id: 'pop_pedri',                  name: 'Pedri',                  subtitle: 'Barcelona · España',                         emoji: '🇪🇸' },
-  { id: 'pop_jude_bellingham',        name: 'Jude Bellingham',        subtitle: 'Real Madrid · Inglaterra',                   emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
-  { id: 'pop_rodri',                  name: 'Rodri',                  subtitle: 'Manchester City · España',                   emoji: '🇪🇸' },
-  { id: 'pop_karim_benzema',          name: 'Karim Benzema',          subtitle: 'Al-Ittihad · Francia',                       emoji: '🇫🇷' },
-  { id: 'pop_phil_foden',             name: 'Phil Foden',             subtitle: 'Manchester City · Inglaterra',               emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
-  { id: 'pop_florian_wirtz',          name: 'Florian Wirtz',          subtitle: 'Liverpool · Alemania',                       emoji: '🇩🇪' },
-  { id: 'pop_raphinha',               name: 'Raphinha',               subtitle: 'Barcelona · Brasil',                         emoji: '🇧🇷' },
-  { id: 'pop_bernardo_silva',         name: 'Bernardo Silva',         subtitle: 'Manchester City · Portugal',                 emoji: '🇵🇹' },
-  { id: 'pop_bukayo_saka',            name: 'Bukayo Saka',            subtitle: 'Arsenal · Inglaterra',                       emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
-  { id: 'pop_ruben_dias',             name: 'Rúben Dias',             subtitle: 'Manchester City · Portugal',                 emoji: '🇵🇹' },
-  { id: 'pop_virgil_van_dijk',        name: 'Virgil van Dijk',        subtitle: 'Liverpool · Países Bajos',                   emoji: '🇳🇱' },
-  { id: 'pop_trent_alexander_arnold', name: 'Trent Alexander-Arnold', subtitle: 'Real Madrid · Inglaterra',                   emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
-  { id: 'pop_luis_diaz',              name: 'Luis Díaz',              subtitle: 'Bayern Múnich · Colombia',                   emoji: '🇨🇴' },
-  { id: 'pop_dusan_vlahovic',         name: 'Dušan Vlahović',         subtitle: 'Juventus · Serbia',                          emoji: '🇷🇸' },
-  { id: 'pop_gavi',                   name: 'Gavi',                   subtitle: 'Barcelona · España',                         emoji: '🇪🇸' },
-  { id: 'pop_federico_valverde',      name: 'Federico Valverde',      subtitle: 'Real Madrid · Uruguay',                      emoji: '🇺🇾' },
-  { id: 'pop_marcus_rashford',        name: 'Marcus Rashford',        subtitle: 'Barcelona · Inglaterra',                     emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
-  { id: 'pop_antoine_griezmann',      name: 'Antoine Griezmann',      subtitle: 'Atlético Madrid · Francia',                  emoji: '🇫🇷' },
-  { id: 'pop_harry_kane',             name: 'Harry Kane',             subtitle: 'Bayern Múnich · Inglaterra',                 emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
-  { id: 'pop_alejandro_garnacho',     name: 'Alejandro Garnacho',     subtitle: 'Chelsea · Argentina',                        emoji: '🇦🇷' },
-  { id: 'pop_nico_williams',          name: 'Nico Williams',          subtitle: 'Athletic Club · España',                     emoji: '🇪🇸' },
-  { id: 'pop_ruben_neves',            name: 'Rúben Neves',            subtitle: 'Al-Hilal · Portugal',                        emoji: '🇵🇹' },
-  { id: 'pop_vitinha',                name: 'Vitinha',                subtitle: 'PSG · Portugal',                             emoji: '🇵🇹' },
-  { id: 'pop_richarlison',            name: 'Richarlison',            subtitle: 'Tottenham · Brasil',                         emoji: '🇧🇷' },
-  { id: 'pop_darwin_nunez',           name: 'Darwin Núñez',           subtitle: 'Al-Hilal · Uruguay',                         emoji: '🇺🇾' },
-  { id: 'pop_cody_gakpo',             name: 'Cody Gakpo',             subtitle: 'Liverpool · Países Bajos',                   emoji: '🇳🇱' },
-  { id: 'pop_khvicha_kvaratskhelia',  name: 'Khvicha Kvaratskhelia',  subtitle: 'PSG · Georgia',                              emoji: '🇬🇪' },
-  { id: 'pop_victor_osimhen',         name: 'Victor Osimhen',         subtitle: 'Galatasaray · Nigeria',                      emoji: '🇳🇬' },
-  { id: 'pop_achraf_hakimi',          name: 'Achraf Hakimi',          subtitle: 'PSG · Marruecos',                            emoji: '🇲🇦' },
-  { id: 'pop_ousmane_dembele',        name: 'Ousmane Dembélé',        subtitle: 'PSG · Francia',                              emoji: '🇫🇷' },
-  { id: 'pop_serhou_guirassy',        name: 'Serhou Guirassy',        subtitle: 'Borussia Dortmund · Guinea',                 emoji: '🇬🇳' },
-  { id: 'pop_jonathan_david',         name: 'Jonathan David',         subtitle: 'Juventus · Canadá',                          emoji: '🇨🇦' },
-  { id: 'pop_tijjani_reijnders',      name: 'Tijjani Reijnders',      subtitle: 'Manchester City · Países Bajos',             emoji: '🇳🇱' },
-  { id: 'pop_warren_zaire_emery',     name: 'Warren Zaïre-Emery',     subtitle: 'PSG · Francia',                              emoji: '🇫🇷' },
-  { id: 'pop_endrick',                name: 'Endrick',                subtitle: 'Real Madrid · Brasil',                       emoji: '🇧🇷' },
-  { id: 'pop_pau_cubarsi',            name: 'Pau Cubarsí',            subtitle: 'Barcelona · España',                         emoji: '🇪🇸' },
-  { id: 'pop_leny_yoro',              name: 'Leny Yoro',              subtitle: 'Manchester United · Francia',                emoji: '🇫🇷' },
-  { id: 'pop_mathys_tel',             name: 'Mathys Tel',             subtitle: 'Tottenham · Francia',                        emoji: '🇫🇷' },
-  { id: 'pop_alejandro_balde',        name: 'Alejandro Balde',        subtitle: 'Barcelona · España',                         emoji: '🇪🇸' },
+  { id: '154', name: 'Lionel Messi',           subtitle: 'Inter Miami · Argentina',                    emoji: '🇦🇷', apiId: 154, image: fbPlayerPhoto(154) },
+  { id: '874', name: 'Cristiano Ronaldo',      subtitle: 'Al Nassr · Portugal',                        emoji: '🇵🇹', apiId: 874, image: fbPlayerPhoto(874) },
+  { id: '278', name: 'Kylian Mbappé',          subtitle: 'Real Madrid · Francia',                      emoji: '🇫🇷', apiId: 278, image: fbPlayerPhoto(278) },
+  { id: '1100', name: 'Erling Haaland',         subtitle: 'Manchester City · Noruega',                  emoji: '🇳🇴', apiId: 1100, image: fbPlayerPhoto(1100) },
+  { id: '762', name: 'Vinícius Júnior',        subtitle: 'Real Madrid · Brasil',                       emoji: '🇧🇷', apiId: 762, image: fbPlayerPhoto(762) },
+  { id: '276', name: 'Neymar Jr',              subtitle: 'Santos · Brasil',                            emoji: '🇧🇷', apiId: 276, image: fbPlayerPhoto(276) },
+  { id: '306', name: 'Mohamed Salah',          subtitle: 'Liverpool · Egipto',                         emoji: '🇪🇬', apiId: 306, image: fbPlayerPhoto(306) },
+  { id: '521', name: 'Robert Lewandowski',     subtitle: 'Barcelona · Polonia',                        emoji: '🇵🇱', apiId: 521, image: fbPlayerPhoto(521) },
+  { id: '629', name: 'Kevin De Bruyne',        subtitle: 'Manchester City · Bélgica',                  emoji: '🇧🇪', apiId: 629, image: fbPlayerPhoto(629) },
+  { id: '754', name: 'Luka Modrić',            subtitle: 'AC Milan · Croacia',                         emoji: '🇭🇷', apiId: 754, image: fbPlayerPhoto(754) },
+  { id: '386828', name: 'Lamine Yamal',           subtitle: 'Barcelona · España',                         emoji: '🇪🇸', apiId: 386828, image: fbPlayerPhoto(386828) },
+  { id: '133609', name: 'Pedri',                  subtitle: 'Barcelona · España',                         emoji: '🇪🇸', apiId: 133609, image: fbPlayerPhoto(133609) },
+  { id: '129718', name: 'Jude Bellingham',        subtitle: 'Real Madrid · Inglaterra',                   emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', apiId: 129718, image: fbPlayerPhoto(129718) },
+  { id: '44', name: 'Rodri',                  subtitle: 'Manchester City · España',                   emoji: '🇪🇸', apiId: 44, image: fbPlayerPhoto(44) },
+  { id: '759', name: 'Karim Benzema',          subtitle: 'Al-Ittihad · Francia',                       emoji: '🇫🇷', apiId: 759, image: fbPlayerPhoto(759) },
+  { id: '631', name: 'Phil Foden',             subtitle: 'Manchester City · Inglaterra',               emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', apiId: 631, image: fbPlayerPhoto(631) },
+  { id: '203224', name: 'Florian Wirtz',          subtitle: 'Liverpool · Alemania',                       emoji: '🇩🇪', apiId: 203224, image: fbPlayerPhoto(203224) },
+  { id: '1496', name: 'Raphinha',               subtitle: 'Barcelona · Brasil',                         emoji: '🇧🇷', apiId: 1496, image: fbPlayerPhoto(1496) },
+  { id: '636', name: 'Bernardo Silva',         subtitle: 'Manchester City · Portugal',                 emoji: '🇵🇹', apiId: 636, image: fbPlayerPhoto(636) },
+  { id: '1460', name: 'Bukayo Saka',            subtitle: 'Arsenal · Inglaterra',                       emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', apiId: 1460, image: fbPlayerPhoto(1460) },
+  { id: '567', name: 'Rúben Dias',             subtitle: 'Manchester City · Portugal',                 emoji: '🇵🇹', apiId: 567, image: fbPlayerPhoto(567) },
+  { id: '290', name: 'Virgil van Dijk',        subtitle: 'Liverpool · Países Bajos',                   emoji: '🇳🇱', apiId: 290, image: fbPlayerPhoto(290) },
+  { id: '283', name: 'Trent Alexander-Arnold', subtitle: 'Real Madrid · Inglaterra',                   emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', apiId: 283, image: fbPlayerPhoto(283) },
+  { id: '2489', name: 'Luis Díaz',              subtitle: 'Bayern Múnich · Colombia',                   emoji: '🇨🇴', apiId: 2489, image: fbPlayerPhoto(2489) },
+  { id: '30415', name: 'Dušan Vlahović',         subtitle: 'Juventus · Serbia',                          emoji: '🇷🇸', apiId: 30415, image: fbPlayerPhoto(30415) },
+  { id: '296667', name: 'Gavi',                   subtitle: 'Barcelona · España',                         emoji: '🇪🇸', apiId: 296667, image: fbPlayerPhoto(296667) },
+  { id: '756', name: 'Federico Valverde',      subtitle: 'Real Madrid · Uruguay',                      emoji: '🇺🇾', apiId: 756, image: fbPlayerPhoto(756) },
+  { id: '909', name: 'Marcus Rashford',        subtitle: 'Barcelona · Inglaterra',                     emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', apiId: 909, image: fbPlayerPhoto(909) },
+  { id: '56', name: 'Antoine Griezmann',      subtitle: 'Atlético Madrid · Francia',                  emoji: '🇫🇷', apiId: 56, image: fbPlayerPhoto(56) },
+  { id: '184', name: 'Harry Kane',             subtitle: 'Bayern Múnich · Inglaterra',                 emoji: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', apiId: 184, image: fbPlayerPhoto(184) },
+  { id: '284324', name: 'Alejandro Garnacho',     subtitle: 'Chelsea · Argentina',                        emoji: '🇦🇷', apiId: 284324, image: fbPlayerPhoto(284324) },
+  { id: '183799', name: 'Nico Williams',          subtitle: 'Athletic Club · España',                     emoji: '🇪🇸', apiId: 183799, image: fbPlayerPhoto(183799) },
+  { id: '2676', name: 'Rúben Neves',            subtitle: 'Al-Hilal · Portugal',                        emoji: '🇵🇹', apiId: 2676, image: fbPlayerPhoto(2676) },
+  { id: '128384', name: 'Vitinha',                subtitle: 'PSG · Portugal',                             emoji: '🇵🇹', apiId: 128384, image: fbPlayerPhoto(128384) },
+  { id: '2413', name: 'Richarlison',            subtitle: 'Tottenham · Brasil',                         emoji: '🇧🇷', apiId: 2413, image: fbPlayerPhoto(2413) },
+  { id: '51617', name: 'Darwin Núñez',           subtitle: 'Al-Hilal · Uruguay',                         emoji: '🇺🇾', apiId: 51617, image: fbPlayerPhoto(51617) },
+  { id: '247', name: 'Cody Gakpo',             subtitle: 'Liverpool · Países Bajos',                   emoji: '🇳🇱', apiId: 247, image: fbPlayerPhoto(247) },
+  { id: '483', name: 'Khvicha Kvaratskhelia',  subtitle: 'PSG · Georgia',                              emoji: '🇬🇪', apiId: 483, image: fbPlayerPhoto(483) },
+  { id: '2780', name: 'Victor Osimhen',         subtitle: 'Galatasaray · Nigeria',                      emoji: '🇳🇬', apiId: 2780, image: fbPlayerPhoto(2780) },
+  { id: '9', name: 'Achraf Hakimi',          subtitle: 'PSG · Marruecos',                            emoji: '🇲🇦', apiId: 9, image: fbPlayerPhoto(9) },
+  { id: '153', name: 'Ousmane Dembélé',        subtitle: 'PSG · Francia',                              emoji: '🇫🇷', apiId: 153, image: fbPlayerPhoto(153) },
+  { id: '21393', name: 'Serhou Guirassy',        subtitle: 'Borussia Dortmund · Guinea',                 emoji: '🇬🇳', apiId: 21393, image: fbPlayerPhoto(21393) },
+  { id: '8489', name: 'Jonathan David',         subtitle: 'Juventus · Canadá',                          emoji: '🇨🇦', apiId: 8489, image: fbPlayerPhoto(8489) },
+  { id: '36902', name: 'Tijjani Reijnders',      subtitle: 'Manchester City · Países Bajos',             emoji: '🇳🇱', apiId: 36902, image: fbPlayerPhoto(36902) },
+  { id: '336657', name: 'Warren Zaïre-Emery',     subtitle: 'PSG · Francia',                              emoji: '🇫🇷', apiId: 336657, image: fbPlayerPhoto(336657) },
+  { id: '377122', name: 'Endrick',                subtitle: 'Real Madrid · Brasil',                       emoji: '🇧🇷', apiId: 377122, image: fbPlayerPhoto(377122) },
+  { id: '396623', name: 'Pau Cubarsí',            subtitle: 'Barcelona · España',                         emoji: '🇪🇸', apiId: 396623, image: fbPlayerPhoto(396623) },
+  { id: '342970', name: 'Leny Yoro',              subtitle: 'Manchester United · Francia',                emoji: '🇫🇷', apiId: 342970, image: fbPlayerPhoto(342970) },
+  { id: '270510', name: 'Mathys Tel',             subtitle: 'Tottenham · Francia',                        emoji: '🇫🇷', apiId: 270510, image: fbPlayerPhoto(270510) },
+  { id: '161928', name: 'Alejandro Balde',        subtitle: 'Barcelona · España',                         emoji: '🇪🇸', apiId: 161928, image: fbPlayerPhoto(161928) },
   // ── México stars ───────────────────────────────────────────────────────────
-  { id: 'pop_santiago_gimenez',       name: 'Santiago Giménez',       subtitle: 'AC Milan · México',                          emoji: '🇲🇽' },
-  { id: 'pop_raul_jimenez',           name: 'Raúl Jiménez',           subtitle: 'Fulham · México',                            emoji: '🇲🇽' },
-  { id: 'pop_julian_quinones',        name: 'Julián Quiñones',        subtitle: 'Al-Qadsiah · México',                        emoji: '🇲🇽' },
-  { id: 'pop_guillermo_ochoa',        name: 'Guillermo Ochoa',        subtitle: 'AVS · México',                               emoji: '🇲🇽' },
-  { id: 'pop_hirving_lozano',         name: 'Hirving Lozano',         subtitle: 'San Diego FC · México',                      emoji: '🇲🇽' },
+  { id: '94562', name: 'Santiago Giménez',       subtitle: 'AC Milan · México',                          emoji: '🇲🇽', apiId: 94562, image: fbPlayerPhoto(94562) },
+  { id: '2887', name: 'Raúl Jiménez',           subtitle: 'Fulham · México',                            emoji: '🇲🇽', apiId: 2887, image: fbPlayerPhoto(2887) },
+  { id: '35532', name: 'Julián Quiñones',        subtitle: 'Al-Qadsiah · México',                        emoji: '🇲🇽', apiId: 35532, image: fbPlayerPhoto(35532) },
+  { id: '2098', name: 'Guillermo Ochoa',        subtitle: 'AVS · México',                               emoji: '🇲🇽', apiId: 2098, image: fbPlayerPhoto(2098) },
+  { id: '248', name: 'Hirving Lozano',         subtitle: 'San Diego FC · México',                      emoji: '🇲🇽', apiId: 248, image: fbPlayerPhoto(248) },
 ];
 
 // ── Tab config ────────────────────────────────────────────────────────────────
@@ -236,14 +233,14 @@ function abbrev(name: string | null | undefined): string {
 
 /**
  * Remove duplicate items keeping the first occurrence.
- * Deduplicates by BOTH numeric smId AND string id so that React key
+ * Deduplicates by BOTH numeric apiId AND string id so that React key
  * collisions (e.g. two entries with item.id='85668') are impossible.
  */
 function deduplicateItems(items: FavItem[]): FavItem[] {
-  const seenEids   = new Set<string>(); // numeric smId or string id
+  const seenEids   = new Set<string>(); // numeric apiId or string id
   const seenStrIds = new Set<string>(); // raw string id (used as React key)
   return items.filter(item => {
-    const eid = item.smId ? String(item.smId) : item.id;
+    const eid = item.apiId ? String(item.apiId) : item.id;
     if (seenEids.has(eid) || seenStrIds.has(item.id)) return false;
     seenEids.add(eid);
     seenStrIds.add(item.id);
@@ -503,11 +500,9 @@ export const FavoritosScreen: React.FC = () => {
   const [smLeagues, setSmLeagues] = useState<SearchableLeague[]>([]);
   const [loading, setLoading]     = useState(true);
 
-  // ── Load SportMonks enrichment data ──
+  // ── Load the searchable lists ──
   useEffect(() => {
-    // Phase 1: quick results — the curated ~30 popular teams + 15 hardcoded
-    // popular players (fast, ~1-2 s). Renders MIS SEGUIDOS / SUGERIDOS for
-    // mainstream picks immediately so the tab feels snappy.
+    // Phase 1: the curated popular teams and players — instant, no network.
     Promise.all([
       getSearchableTeams().then(setSmTeams).catch(() => {}),
       getSearchablePlayers().then(setSmPlayers).catch(() => {}),
@@ -515,29 +510,38 @@ export const FavoritosScreen: React.FC = () => {
 
     setSmLeagues(getSearchableLeagues());
 
-    // Phase 2: background enrichment.
-    //
-    // Teams: previously stopped at the 30-team popular list, which produced
-    // the visible bug where a user who followed Cruzeiro (in onboarding's
-    // FULL search) couldn't find it in MIS SEGUIDOS, and "Equipos (N)"
-    // miscounted the followed list. Now upgrade to the same
-    // getAllSearchableTeams() result the onboarding uses — cached for 7
-    // days under `searchable_teams_all_v1`, so this is a cache hit on
-    // first launch after onboarding (the screen the user came from
-    // populated the cache). Length-guard keeps us from regressing if
-    // the full-list call fails or returns empty.
-    //
-    // Players: replaces the hardcoded 15 with full squad data sourced
-    // directly from live team-squad API responses — fixes navigation
-    // bugs where hardcoded IDs map to the wrong player.
+    // Phase 2: every team of the curated leagues (one cached Firestore read),
+    // so a followed club outside the popular list still shows in MIS SEGUIDOS.
     getAllSearchableTeams()
-      .then(full => { if (full.length > smTeams.length) setSmTeams(full); })
+      .then(full => { setSmTeams(prev => (full.length > prev.length ? full : prev)); })
       .catch(() => {});
-    getAllSearchablePlayers()
-      .then(full => { if (full.length > 15) setSmPlayers(full); })
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Remote search ──
+  // Any club or player beyond the local lists: the backend searches the full
+  // database and the answers join the same lists the tabs filter.
+  useEffect(() => {
+    if (activeTab === 'ligas' || debouncedQuery.trim().length < 3) return;
+    let cancelled = false;
+    searchRemote(debouncedQuery).then(res => {
+      if (cancelled) return;
+      if (res.teams.length) {
+        setSmTeams(prev => {
+          const ids = new Set(prev.map(t => t.id));
+          const extras = res.teams.filter(t => !ids.has(t.id));
+          return extras.length ? [...prev, ...extras] : prev;
+        });
+      }
+      if (res.players.length) {
+        setSmPlayers(prev => {
+          const ids = new Set(prev.map(p => p.id));
+          const extras = res.players.filter(p => !ids.has(p.id));
+          return extras.length ? [...prev, ...extras] : prev;
+        });
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [debouncedQuery, activeTab]);
 
   // Reset visible count when tab/search changes
   useEffect(() => {
@@ -603,7 +607,7 @@ export const FavoritosScreen: React.FC = () => {
     const m = new Map<string, { subtitle: string; emoji: string; searchAliases?: string[] }>();
     for (const t of POPULAR_TEAMS) {
       const meta = { subtitle: t.subtitle, emoji: t.emoji, searchAliases: t.searchAliases };
-      if (t.smId) m.set(String(t.smId), meta);
+      if (t.apiId) m.set(String(t.apiId), meta);
       m.set(t.id, meta);
     }
     return m;
@@ -622,31 +626,31 @@ export const FavoritosScreen: React.FC = () => {
         name: st.name,
         subtitle: pretty?.subtitle ?? (isNational ? 'Selección Nacional' : (st.leagueName || '')),
         emoji: pretty?.emoji ?? (isNational ? '🏳️' : abbrev(st.name)),
-        smId: st.id,
+        apiId: st.id,
         image: isImageUri(st.logo) ? st.logo : undefined,
         seasonId: st.seasonId,
         searchAliases: pretty?.searchAliases,
       };
     });
 
-    // Enrich with live SportMonks data (logo, seasonId).
+    // Enrich with the loaded team index (logo, seasonId).
     // Prefer ID lookup so teams with the same name in different leagues
     // (e.g. Guadalajara MX id=427 vs. Guadalajara ES id=85668) always
     // resolve to the correct team.
     const enriched = baseItems.map(item => {
-      const sm = (item.smId ? smTeamById.get(item.smId) : undefined)
+      const sm = (item.apiId ? smTeamById.get(item.apiId) : undefined)
         ?? smTeamMap.get(normalize(item.name));
       if (!sm) return item;
       const apiImage = isImageUri(sm.logo) ? sm.logo : undefined;
       return {
         ...item,
-        smId:     item.smId ?? sm.id,
+        apiId:     item.apiId ?? sm.id,
         image:    apiImage ?? item.image,
         seasonId: sm.seasonId ?? item.seasonId,
       };
     });
 
-    // Tail: any SportMonks team not in our ordered set (long tail for search)
+    // Tail: any other loaded team not in our ordered set (long tail for search)
     const seenNames = new Set(enriched.map(t => normalize(t.name)));
     const extras: FavItem[] = smTeams
       .filter(t => !seenNames.has(normalize(t.name)))
@@ -655,7 +659,7 @@ export const FavoritosScreen: React.FC = () => {
         name: t.name,
         subtitle: t.leagueName || '',
         emoji: abbrev(t.name),
-        smId: t.id,
+        apiId: t.id,
         image: isImageUri(t.logo) ? t.logo : undefined,
         seasonId: t.seasonId,
       }));
@@ -707,7 +711,7 @@ export const FavoritosScreen: React.FC = () => {
       }
     }
 
-    // Enrich with live SportMonks player data (current club, image, jersey)
+    // Enrich with loaded player data (current club, image, jersey)
     return ordered.map(item => {
       const sm = smPlayerMap.get(normalize(item.name));
       if (!sm) return item;
@@ -726,8 +730,8 @@ export const FavoritosScreen: React.FC = () => {
       return {
         ...item,
         subtitle,
-        smId: (sm.id && sm.id > 0) ? sm.id : undefined,
-        image: apiImage,
+        apiId: (sm.id && sm.id > 0) ? sm.id : item.apiId,
+        image: apiImage ?? item.image,
         teamName: sm.teamName,
         teamLogo: sm.teamLogo,
         jerseyNumber: sm.jerseyNumber,
@@ -746,7 +750,7 @@ export const FavoritosScreen: React.FC = () => {
         // Show "Team · League" (e.g. "América · Liga MX") for squad players.
         subtitle: [p.teamName, p.leagueName || p.position].filter(Boolean).join(' · ') || '',
         emoji: abbrev(p.name),
-        smId: p.id,
+        apiId: p.id,
         image: isImageUri(p.image) ? p.image : undefined,
         teamName: p.teamName,
         teamLogo: p.teamLogo,
@@ -767,8 +771,8 @@ export const FavoritosScreen: React.FC = () => {
     leagueOrder.forEach((id, idx) => orderMap.set(id, idx));
 
     const sortedPopular = [...POPULAR_LEAGUES].sort((a, b) => {
-      const ai = orderMap.get(Number(a.smId ?? a.id)) ?? Number.MAX_SAFE_INTEGER;
-      const bi = orderMap.get(Number(b.smId ?? b.id)) ?? Number.MAX_SAFE_INTEGER;
+      const ai = orderMap.get(Number(a.apiId ?? a.id)) ?? Number.MAX_SAFE_INTEGER;
+      const bi = orderMap.get(Number(b.apiId ?? b.id)) ?? Number.MAX_SAFE_INTEGER;
       return ai - bi;
     });
 
@@ -777,7 +781,7 @@ export const FavoritosScreen: React.FC = () => {
       const sm = smLeagueMap.get(normalize(item.name));
       if (!sm) return item;
       const apiImage = isImageUri(sm.image) ? sm.image : undefined;
-      return { ...item, smId: sm.id ?? item.smId, seasonId: sm.seasonId, image: apiImage ?? item.image };
+      return { ...item, apiId: sm.id ?? item.apiId, seasonId: sm.seasonId, image: apiImage ?? item.image };
     });
     const extras: FavItem[] = smLeagues
       .filter(l => !names.has(normalize(l.name)))
@@ -786,7 +790,7 @@ export const FavoritosScreen: React.FC = () => {
         name: l.name,
         subtitle: l.country || '',
         emoji: l.flag || '🏆',
-        smId: l.id,
+        apiId: l.id,
         image: isImageUri(l.image) ? l.image : undefined,
         seasonId: l.seasonId,
       }));
@@ -794,10 +798,7 @@ export const FavoritosScreen: React.FC = () => {
   }, [country, language, smLeagueMap, smLeagues]);
 
   // ── Effective ID helper ──
-  // Uses item.id directly (always stable). For teams/leagues, item.id = String(smId)
-  // so behavior is unchanged. For popular players (name-based), item.id = 'pop_<slug>'
-  // which stays stable even before SportMonks resolves the smId — this prevents the
-  // follow toggle from "forgetting" a player when the smId comes back from the API.
+  // The id a follow is stored under: always the item's numeric id as a string.
   const getEffectiveId = useCallback((item: FavItem): string => item.id, []);
 
   // ── Per-tab config ──
@@ -865,24 +866,24 @@ export const FavoritosScreen: React.FC = () => {
 
   // ── Navigation ──
   const handleItemNav = useCallback((item: FavItem) => {
-    if (!item.smId) return;
+    if (!item.apiId) return;
     if (activeTab === 'equipos') {
       navigation.navigate('TeamDetail', {
-        teamId: item.smId,
+        teamId: item.apiId,
         teamName: item.name,
         teamLogo: item.image || item.emoji,
         seasonId: item.seasonId,
       });
     } else if (activeTab === 'ligas') {
       navigation.navigate('LeagueDetail', {
-        leagueId: item.smId,
+        leagueId: item.apiId,
         leagueName: item.name,
         leagueLogo: item.emoji,
         seasonId: item.seasonId,
       });
     } else {
       navigation.navigate('PlayerDetail', {
-        playerId: item.smId,
+        playerId: item.apiId,
         playerName: item.name,
         playerImage: item.image,
         teamName: item.teamName,
@@ -904,10 +905,10 @@ export const FavoritosScreen: React.FC = () => {
     const fol = config.isFollowing(item);
     return (
       <ItemRow
-        key={`${keyPrefix}${item.smId ?? item.id}`}
+        key={`${keyPrefix}${item.apiId ?? item.id}`}
         item={item}
         followed={fol}
-        canNavigate={!!item.smId}
+        canNavigate={!!item.apiId}
         isLeague={isLeague}
         isPlayer={isPlayer}
         isDark={isDark}

@@ -197,3 +197,18 @@ export async function getWPNewsById(id: string): Promise<NewsArticle | null> {
     return null;
   }
 }
+
+/**
+ * News for the Noticias tab: the WordPress feed, or the bundled sample
+ * articles when it can't be reached.
+ */
+export async function getNews(): Promise<NewsArticle[]> {
+  try {
+    const articles = await getWPNews(20);
+    if (articles.length > 0) return articles;
+  } catch (err) {
+    console.warn('[getNews] WordPress unavailable, using sample data:', err);
+  }
+  const { news } = await import('../data/mockData');
+  return news;
+}

@@ -16,14 +16,14 @@ import { useDarkMode } from '../contexts/DarkModeContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import {
   getSearchableTeams, getSearchablePlayers, getSearchableLeagues, getSearchableNationalTeams,
-  getAllSearchableTeams, getAllSearchablePlayers,
+  getAllSearchableTeams, getAllSearchableLeagues, searchRemote,
   type SearchableTeam, type SearchablePlayer, type SearchableLeague,
-} from '../services/sportsApi';
+} from '../services/football/search';
 import { SearchIcon } from '../components/NavIcons';
 import { ChevronRight as SharedChevron } from '../components/ChevronRight';
 import { radius, ui } from '../theme/tokens';
 
-const RECENT_KEY = 'analistas_recent_searches';
+const RECENT_KEY = 'analistas_recent_searches_fb';
 const MAX_RECENT = 8;
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -119,7 +119,8 @@ const COUNTRY_ES_TO_EN: Record<string, string> = Object.fromEntries(
  * Handles "España" → matches league with country "Spain", and vice-versa.
  */
 function matchesCountry(country: string, q: string): boolean {
-  const normCountry = normalize(country);
+  // The catalog spells multi-word countries with hyphens ("South-Korea").
+  const normCountry = normalize(country).replace(/-/g, ' ');
   if (normCountry.includes(q)) return true;
   // Translate query from Spanish to English and retry
   const qInEn = COUNTRY_ES_TO_EN[q] ?? q;
@@ -156,7 +157,7 @@ export const GlobalSearchScreen: React.FC = () => {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [teams, setTeams] = useState<SearchableTeam[]>([]);
   const [players, setPlayers] = useState<SearchablePlayer[]>([]);
-  const leagues = useMemo(() => getSearchableLeagues(), []);
+  const [leagues, setLeagues] = useState<SearchableLeague[]>(() => getSearchableLeagues());
   const [loading, setLoading] = useState(true);
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
 
@@ -181,7 +182,7 @@ export const GlobalSearchScreen: React.FC = () => {
       }
       setLoading(false);
 
-      // Phase 2: load national teams in background (real IDs from SportMonks API)
+      // Phase 2: national teams
       getSearchableNationalTeams().then(nationals => {
         if (!mounted) return;
         if (nationals.length > 0) {
@@ -194,9 +195,9 @@ export const GlobalSearchScreen: React.FC = () => {
         }
       }).catch(() => { /* silently ignore */ });
 
-      // Phase 3: full team/player index (all leagues + all popular-team squads).
-      // Cached 7 days, so after the first run this is effectively free. This is
-      // what makes niche clubs (e.g. Dorados — Liga Expansión MX) searchable.
+      // Phase 3: every team of the curated leagues (one cached Firestore read)
+      // and every league of the catalog. Anything beyond that — any club, any
+      // player — comes from the remote search below.
       getAllSearchableTeams().then(all => {
         if (!mounted || all.length === 0) return;
         setTeams(prev => {
@@ -206,13 +207,8 @@ export const GlobalSearchScreen: React.FC = () => {
         });
       }).catch(() => {});
 
-      getAllSearchablePlayers().then(all => {
-        if (!mounted || all.length === 0) return;
-        setPlayers(prev => {
-          const prevIds = new Set(prev.map(p => p.id));
-          const extras = all.filter(p => !prevIds.has(p.id));
-          return extras.length > 0 ? [...prev, ...extras] : prev;
-        });
+      getAllSearchableLeagues().then(all => {
+        if (mounted && all.length > 0) setLeagues(all);
       }).catch(() => {});
     })();
     return () => { mounted = false; };
@@ -229,6 +225,33 @@ export const GlobalSearchScreen: React.FC = () => {
     const timer = setTimeout(() => setDebouncedQuery(query.trim()), 250);
     return () => clearTimeout(timer);
   }, [query]);
+
+  // ── Remote search ─────────────────────────────────────────────────────────
+  // The local lists cover the popular teams/players and the curated leagues.
+  // For everything else the backend searches the full database; its answers
+  // are merged into the same lists, so the filter below treats them alike.
+  useEffect(() => {
+    if (debouncedQuery.length < 3) return;
+    let cancelled = false;
+    searchRemote(debouncedQuery).then(res => {
+      if (cancelled) return;
+      if (res.teams.length) {
+        setTeams(prev => {
+          const ids = new Set(prev.map(t => t.id));
+          const extras = res.teams.filter(t => !ids.has(t.id));
+          return extras.length ? [...prev, ...extras] : prev;
+        });
+      }
+      if (res.players.length) {
+        setPlayers(prev => {
+          const ids = new Set(prev.map(p => p.id));
+          const extras = res.players.filter(p => !ids.has(p.id));
+          return extras.length ? [...prev, ...extras] : prev;
+        });
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [debouncedQuery]);
 
   // ── Search logic ──────────────────────────────────────────────────────────
   const results = useMemo<SearchResult[]>(() => {
@@ -388,22 +411,16 @@ export const GlobalSearchScreen: React.FC = () => {
     Keyboard.dismiss();
     if (item.type === 'team') {
       const id = Number(item.id.replace('team-', ''));
-      const team = teams.find(t => t.id === id);
-      if (team) {
-        handleResultPress({
-          ...item,
-          data: team,
-        });
-      }
+      // A team found through remote search in an earlier session isn't in
+      // the local list: its id, name and crest are enough to open it.
+      const team = teams.find(t => t.id === id)
+        ?? { id, name: item.name, shortName: '', logo: item.image ?? '', leagueName: item.subtitle, leagueId: 0 };
+      handleResultPress({ ...item, data: team });
     } else if (item.type === 'player') {
       const id = Number(item.id.replace('player-', ''));
-      const player = players.find(p => p.id === id);
-      if (player) {
-        handleResultPress({
-          ...item,
-          data: player,
-        });
-      }
+      const player = players.find(p => p.id === id)
+        ?? { id, name: item.name, image: item.image, teamName: item.subtitle };
+      handleResultPress({ ...item, data: player });
     } else if (item.type === 'league') {
       const id = Number(item.id.replace('league-', ''));
       const league = leagues.find(l => l.id === id);

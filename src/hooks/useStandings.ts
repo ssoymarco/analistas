@@ -1,16 +1,10 @@
-// ── useStandings — Firestore-backed standings with proxy fallback ───────────
+// ── useStandings — real-time league table ────────────────────────────────────
 //
-// Reads from `standings/{seasonId}` in Firestore, which the `syncStandings`
-// Cloud Function refreshes every 1 hour. The Firestore subscription pushes
-// updates the moment a new sync lands — no client polling.
-//
-// Falls back to SportMonks (via getStandings → proxy) when:
-//   • the season isn't in the synced league list (51 leagues today), or
-//   • the Firestore document hasn't been written yet for a brand-new season, or
-//   • Firestore is unavailable (rules error, network, etc.).
+// `seasonId` is a season key (league id × 10000 + season year). The table
+// lives in `fb_standings`: the backend refreshes it after every finished match
+// of the big leagues, and fetches it on demand for any other league/season.
 import { useState, useEffect, useRef } from 'react';
-import { subscribeStandings } from '../services/firestoreApi';
-import { getStandings } from '../services/sportsApi';
+import { subscribeStandings } from '../services/football/leagueData';
 import type { LeagueStanding } from '../data/types';
 
 interface UseStandingsResult {
@@ -36,51 +30,21 @@ export function useStandings(seasonId: number | null): UseStandingsResult {
       setLoading(false);
       return;
     }
-
     setLoading(true);
     setError(null);
-
-    // Helper: fetch from SportMonks proxy as a fallback
-    const loadFromProxy = () => {
-      getStandings(seasonId)
-        .then(data => {
-          if (!isMounted.current) return;
-          setStandings(data);
-          setLoading(false);
-        })
-        .catch(err => {
-          if (!isMounted.current) return;
-          setError(err instanceof Error ? err.message : 'Error loading standings');
-          setLoading(false);
-        });
-    };
-
-    // Subscribe to Firestore. If the doc doesn't exist (empty array) OR the
-    // subscription errors out, fall back to the proxy. Otherwise keep streaming.
-    let receivedAny = false;
-    const unsubscribe = subscribeStandings(
+    return subscribeStandings(
       seasonId,
       rows => {
         if (!isMounted.current) return;
-        receivedAny = true;
-        if (rows.length === 0) {
-          // Doc doesn't exist yet for this season — try the proxy once
-          loadFromProxy();
-        } else {
-          setStandings(rows);
-          setLoading(false);
-        }
+        setStandings(rows);
+        setLoading(false);
       },
       err => {
         if (!isMounted.current) return;
-        if (!receivedAny) {
-          console.warn('[useStandings] Firestore failed, using proxy:', err.message);
-          loadFromProxy();
-        }
+        setError(err.message || 'Error loading standings');
+        setLoading(false);
       },
     );
-
-    return unsubscribe;
   }, [seasonId]);
 
   return { standings, loading, error };

@@ -15,11 +15,11 @@ import { useCupBracket } from '../../hooks/useCupBracket';
 import { useCupGroupStandings } from '../../hooks/useCupGroupStandings';
 import { CupBracketView } from '../../components/CupBracketView';
 import type { Match, MatchDetail, LeagueStanding, CupGroup } from '../../data/types';
-import type { CupRound, CupTie } from '../../services/sportsApi';
+import type { CupRound, CupTie } from '../../services/football/rounds';
 import { SkeletonLeagueDetail } from '../../components/Skeleton';
 import type { PartidosStackParamList } from '../../navigation/AppNavigator';
 import { getLeagueConfig, getLeagueConfigByName, getLeagueDisplayName, type LeagueZone } from '../../config/leagues';
-import { peekCurrentSeasonId } from '../../services/seasonResolver';
+import { peekCurrentSeasonId } from '../../services/football/catalog';
 import { translateNationalTeam } from '../../utils/nationalTeams';
 import { isImageUri } from '../../utils/imageUri';
 

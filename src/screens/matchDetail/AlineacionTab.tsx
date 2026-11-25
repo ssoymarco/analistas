@@ -22,7 +22,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useThemeColors } from '../../theme/useTheme';
 import { useDarkMode } from '../../contexts/DarkModeContext';
 import type { Match, MatchDetail, LineupPlayer, MatchLineup, MissingPlayer } from '../../data/types';
-import { getCoachProfile, type CoachProfile } from '../../services/sportsApi';
+import { getCoachProfile, type CoachProfile } from '../../services/football/teams';
 import { translateCountry } from '../../i18n/countries';
 import { translateNationalTeam } from '../../utils/nationalTeams';
 import { isFriendliesLeague } from '../../config/leagues';

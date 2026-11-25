@@ -1,7 +1,7 @@
 // ── Core Types ────────────────────────────────────────────────────────────────
-// These interfaces mirror the shape of SportMonks API v3 responses.
-// When integrating the real API, map the API response to these types in
-// src/services/sportsApi.ts — no component code should change.
+// The app's own domain types. Provider data (API-Sports, via the Firestore
+// `fb_*` collections) is mapped to these in src/services/football/mappers.ts —
+// components never see provider payloads.
 
 export interface Team {
   id: string;
@@ -26,8 +26,20 @@ export interface Match {
   leagueId: string;
   date: string;           // ISO "YYYY-MM-DD"
   isFavorite?: boolean;
-  startingAtUtc?: string; // raw SM "YYYY-MM-DD HH:MM:SS" UTC — used for countdown
-  seasonId?: number;      // SM season ID — used for standings tab
+  startingAtUtc?: string; // kickoff as "YYYY-MM-DD HH:MM:SS" in UTC — used for countdown
+  /** Kickoff, unix seconds. */
+  timestamp?: number;
+  /** Season key (league id × 10000 + season year, see fbSeasonKey) — standings, bracket, calendar. */
+  seasonId?: number;
+  /** Season year as the provider labels it (2026 = 2026 or 2026/27). */
+  season?: number;
+  /** Provider status code: NS, 1H, HT, 2H, ET, BT, P, FT, AET, PEN, PST, CANC, ABD, SUSP, INT… */
+  statusShort?: string;
+  /** Round as the provider labels it: "Regular Season - 17", "Quarter-finals", "Group A - 2". */
+  roundLabel?: string;
+  leagueCountry?: string;
+  /** League popularity 0-100 (server-side default ordering). */
+  popularity?: number;
   homeScoreHT?: number;   // half-time score (home)
   awayScoreHT?: number;   // half-time score (away)
   /** Penalty shootout final score. Set ONLY when the fixture ended in a
@@ -39,8 +51,10 @@ export interface Match {
   awayPenScore?: number;
   homeRedCards?: number;  // number of players sent off (red/second-yellow)
   awayRedCards?: number;
-  stateLabel?: string;    // "1T" | "HT" | "2T" | "ET" | "PEN" — live state
-  stateId?: number;       // raw SM state_id — used for DELAYED (16) and other pre-match states
+  stateLabel?: string;    // "1T" | "HT" | "2T" | "ET" | "ETB" | "PEN" | "SUSP" | "INT" — live state
+  /** Dead-state code read by utils/deadState.ts: 10 postponed · 12 cancelled ·
+   *  15 abandoned · 16 delayed. Undefined for matches that were (or will be) played. */
+  stateId?: number;
   /** Server anchor for client-side live-clock extrapolation (only while ticking).
    *  Lets the UI advance the minute/seconds smoothly between 10-s poll updates
    *  instead of showing a frozen "41'" until the next server tick. */

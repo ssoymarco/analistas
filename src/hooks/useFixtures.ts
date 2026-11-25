@@ -1,30 +1,24 @@
-// ── useFixtures — date-based matches with Firestore real-time + proxy fallback
+// ── useFixtures — the matches of a (device-local) day, in real time ──────────
 //
-// Data sources:
-//   • Firestore  → when the selected date is in the Cloud Functions sync
-//                  window (±1 day from today). Real-time via onSnapshot — when
-//                  the pollLivescores function writes a goal update to
-//                  matches/{id}, this hook receives it within ~100ms with no
-//                  client polling and zero SportMonks tokens consumed.
+// Reads `fb_matches` through Firestore listeners: when the backend writes a
+// goal the list updates within a moment, with no client polling.
 //
-//   • SportMonks proxy → for dates outside the sync window (older history or
-//                  far-future fixtures). Still cached locally via the existing
-//                  sportsApi cache layer.
-//
-// The hook surface is unchanged from the previous polling-based implementation
-// so PartidosScreen (and any future consumer) needs no changes.
+// Two tiers, so an ordinary open doesn't download every fixture on the planet:
+//   • curated leagues (Liga MX, Premier, LaLiga, Champions… ~90 competitions)
+//     and the user's followed teams — loaded at once;
+//   • every other league — loaded when `loadAllLeagues()` is called (the list
+//     reached its end, or a filter needs the complete day).
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  getFixturesByDate,
-  groupMatchesByLeague,
-  type LeagueWithMatches,
-} from '../services/sportsApi';
-import { subscribeFixturesByDate } from '../services/firestoreApi';
+  countOtherFixturesByDate, getTeamsFixturesByDate, groupMatchesByLeague,
+  subscribeFixturesByDate, subscribeOtherFixturesByDate, type LeagueWithMatches,
+} from '../services/football/matches';
+import { sortForDisplay } from '../services/football/mappers';
 import type { Match } from '../data/types';
 
 interface UseFixturesResult {
-  /** All matches for the selected date */
+  /** Loaded matches for the selected date */
   matches: Match[];
   /** Matches grouped by league */
   leagues: LeagueWithMatches[];
@@ -34,31 +28,28 @@ interface UseFixturesResult {
   refreshing: boolean;
   /** Error message, if any */
   error: string | null;
-  /** Trigger a manual refresh (for pull-to-refresh) */
+  /** Pull-to-refresh acknowledgement (the data is already live) */
   refresh: () => void;
-  /** True when there's at least one live match (used to drive UI live indicator) */
+  /** True when there's at least one live match (drives the live indicator) */
   isPolling: boolean;
+  /** Fixtures of the day in leagues not loaded yet (0 once everything is loaded) */
+  pendingOtherCount: number;
+  /** True once the non-curated leagues have been requested */
+  allLeaguesRequested: boolean;
+  /** Load the rest of the day's leagues (idempotent) */
+  loadAllLeagues: () => void;
 }
 
-// ── Display sort: live first, then scheduled by kickoff time, then finished ──
-function sortForDisplay(a: Match, b: Match): number {
-  const order: Record<string, number> = { live: 0, interrupted: 0, scheduled: 1, finished: 2 };
-  const so = order[a.status] - order[b.status];
-  if (so !== 0) return so;
-  // Within the same status, sort by start time (or id as final tiebreaker)
-  const ta = a.startingAtUtc ?? '';
-  const tb = b.startingAtUtc ?? '';
-  if (ta !== tb) return ta.localeCompare(tb);
-  return a.id.localeCompare(b.id);
-}
-
-export function useFixtures(date: string): UseFixturesResult {
-  const [matches, setMatches]       = useState<Match[]>([]);
-  const [leagues, setLeagues]       = useState<LeagueWithMatches[]>([]);
+export function useFixtures(date: string, followedTeamIds: string[] = []): UseFixturesResult {
+  const [curated, setCurated]       = useState<Match[]>([]);
+  const [other, setOther]           = useState<Match[]>([]);
+  const [mine, setMine]             = useState<Match[]>([]);
+  const [otherCount, setOtherCount] = useState(0);
+  const [wantAll, setWantAll]       = useState(false);
+  const [otherLoaded, setOtherLoaded] = useState(false);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError]           = useState<string | null>(null);
-  const [isPolling, setIsPolling]   = useState(false);
 
   const isMounted = useRef(true);
   useEffect(() => {
@@ -66,79 +57,92 @@ export function useFixtures(date: string): UseFixturesResult {
     return () => { isMounted.current = false; };
   }, []);
 
-  // Apply sort + group in a single pass
-  const commit = useCallback((raw: Match[]) => {
-    const sorted = [...raw].sort(sortForDisplay);
-    setMatches(sorted);
-    setLeagues(groupMatchesByLeague(sorted));
-    setIsPolling(sorted.some(m => m.status === 'live'));
-  }, []);
-
-  // Emergency-only proxy load. ALL date queries now read from Firestore (the
-  // 2026-05 historical crawl wrote ~282k fixtures spanning every league SM
-  // covers — there's no "outside the sync window" anymore). This function
-  // is invoked exclusively when Firestore returns an error on the first
-  // subscription emit (network down, permissions, etc.). Any other usage
-  // would re-introduce per-user SportMonks calls and break the "scales to
-  // any user count" property of the architecture.
-  const loadFromProxyOnError = useCallback(async () => {
-    setError(null);
-    try {
-      const data = await getFixturesByDate(date);
-      if (!isMounted.current) return;
-      commit(data);
-    } catch (err) {
-      if (!isMounted.current) return;
-      setError(err instanceof Error ? err.message : 'Error loading fixtures');
-    } finally {
-      if (isMounted.current) {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    }
-  }, [date, commit]);
-
-  // Main effect — always subscribe to Firestore. onSnapshot pushes server
-  // changes (~100ms latency) so the displayed data is as fresh as anything
-  // the proxy could fetch. Proxy fallback only fires on a hard error.
+  // Curated tier — always on.
   useEffect(() => {
     setLoading(true);
     setError(null);
-    let receivedFirstSnapshot = false;
+    setCurated([]);
+    setOther([]);
+    setMine([]);
+    setOtherCount(0);
+    setWantAll(false);
+    setOtherLoaded(false);
 
     const unsubscribe = subscribeFixturesByDate(
       date,
       data => {
         if (!isMounted.current) return;
-        receivedFirstSnapshot = true;
-        commit(data);
+        setCurated(data);
         setLoading(false);
       },
       err => {
         if (!isMounted.current) return;
-        // If we never got a first snapshot, fall back to the proxy fully.
-        // If we did, keep the displayed data and report the error silently
-        // — the next reconnection will resume the stream.
-        if (!receivedFirstSnapshot) {
-          console.warn('[useFixtures] Firestore unavailable, using proxy:', err.message);
-          loadFromProxyOnError();
-        }
+        setError(err.message || 'Error loading fixtures');
+        setLoading(false);
       },
     );
-
+    // How much is left in the other tier (one aggregate read) — lets the
+    // screen say "and N more matches" without downloading them.
+    countOtherFixturesByDate(date)
+      .then(n => { if (isMounted.current) setOtherCount(n); })
+      .catch(() => {});
     return unsubscribe;
-  }, [date, commit, loadFromProxyOnError]);
+  }, [date]);
 
-  // Pull-to-refresh: no-op against the network. Firestore's onSnapshot is
-  // already live — by the time the user releases the pull, the displayed
-  // data is already current. We give a short visual refreshing pulse so the
-  // gesture feels acknowledged.
+  // Followed teams playing in leagues outside the curated set.
+  const teamsKey = followedTeamIds.join(',');
+  useEffect(() => {
+    if (!followedTeamIds.length) { setMine([]); return; }
+    let cancelled = false;
+    getTeamsFixturesByDate(followedTeamIds, date)
+      .then(list => { if (!cancelled && isMounted.current) setMine(list); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [date, teamsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Other tier — on demand.
+  useEffect(() => {
+    if (!wantAll) return;
+    return subscribeOtherFixturesByDate(
+      date,
+      data => {
+        if (!isMounted.current) return;
+        setOther(data);
+        setOtherLoaded(true);
+      },
+      () => { if (isMounted.current) setOtherLoaded(true); },
+    );
+  }, [date, wantAll]);
+
+  // A day with (almost) nothing in the curated leagues: don't make the user ask.
+  useEffect(() => {
+    if (!loading && !wantAll && otherCount > 0 && curated.length < 12) setWantAll(true);
+  }, [loading, wantAll, otherCount, curated.length]);
+
+  const matches = useMemo(() => {
+    const byId = new Map<string, Match>();
+    for (const m of mine) byId.set(m.id, m);
+    for (const m of other) byId.set(m.id, m);
+    for (const m of curated) byId.set(m.id, m); // live listeners win over the one-shot
+    return [...byId.values()].sort(sortForDisplay);
+  }, [curated, other, mine]);
+
+  const leagues = useMemo(() => groupMatchesByLeague(matches), [matches]);
+  const isPolling = useMemo(() => matches.some(m => m.status === 'live'), [matches]);
+
+  const loadAllLeagues = useCallback(() => setWantAll(true), []);
+
+  // Pull-to-refresh: the listeners are already live, so there is nothing to
+  // fetch — acknowledge the gesture with a short pulse.
   const refresh = useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => {
-      if (isMounted.current) setRefreshing(false);
-    }, 300);
+    setTimeout(() => { if (isMounted.current) setRefreshing(false); }, 300);
   }, []);
 
-  return { matches, leagues, loading, refreshing, error, refresh, isPolling };
+  return {
+    matches, leagues, loading, refreshing, error, refresh, isPolling,
+    pendingOtherCount: otherLoaded ? 0 : otherCount,
+    allLeaguesRequested: wantAll,
+    loadAllLeagues,
+  };
 }

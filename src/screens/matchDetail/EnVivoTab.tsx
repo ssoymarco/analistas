@@ -30,7 +30,8 @@ import {
 import { translateNationalTeam } from '../../utils/nationalTeams';
 import { resolveMatchColors } from '../../utils/teamColors';
 import { translateCountry } from '../../i18n/countries';
-import { getRefereeProfile, type RefereeProfile } from '../../services/sportsApi';
+import { seasonLabel } from '../../services/football/catalog';
+import { parseRound, translateRoundName } from '../../services/football/rounds';
 import { BETTING_CONTENT_ENABLED, ADMOB_ENABLED } from '../../config/features';
 import MediumRectangleBannerAd from '../../components/MediumRectangleBannerAd';
 import { LiveActivityButton } from '../../components/LiveActivityButton';
@@ -107,10 +108,14 @@ function isGoalEvent(type: string): boolean {
 const QuickStats: React.FC<{ match: Match; detail: MatchDetail }> = ({ match, detail }) => {
   const c = useThemeColors();
   const allStats = detail.statistics.flatMap(cat => cat.stats);
+  // Labels are the ones the backend writes (functions/src/football/mapping.ts
+  // STAT_LABELS). The strip used to look for "Tiros totales" / "Tiros a puerta"
+  // / "xG (Goles esperados)", which never existed in the data — so it only
+  // ever showed possession.
   const poss     = allStats.find(s => s.label === 'Posesión');
-  const shots    = allStats.find(s => s.label === 'Tiros totales');
-  const onTarget = allStats.find(s => s.label === 'Tiros a puerta');
-  const xg       = allStats.find(s => s.label === 'xG (Goles esperados)');
+  const shots    = allStats.find(s => s.label === 'Total remates');
+  const onTarget = allStats.find(s => s.label === 'Remates al arco');
+  const xg       = allStats.find(s => s.label === 'Goles esperados (xG)');
 
   if (!poss && !shots) return null;
 
@@ -1531,25 +1536,14 @@ const RefereeDetailModal: React.FC<{
   const { t } = useTranslation();
   const { isDark } = useDarkMode();
 
-  // Fetch the full referee profile (country + career stats) on open. The
-  // Firestore blob only has name/photo, so this is what fills the card.
-  const [profile, setProfile] = useState<RefereeProfile | null>(null);
-  useEffect(() => {
-    if (!visible || !referee?.id) { setProfile(null); return; }
-    let alive = true;
-    getRefereeProfile(referee.id).then(p => { if (alive) setProfile(p); }).catch(() => {});
-    return () => { alive = false; };
-  }, [visible, referee?.id]);
-
   if (!referee) return null;
   const sheetBg = isDark ? '#1c1c1e' : '#f2f2f7';
   const overlayBg = isDark ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.55)';
 
-  // Prefer the freshly-fetched profile; fall back to whatever the blob had.
-  const natName  = profile?.nationality || referee.nationality;
-  const natCode  = profile?.nationalityCode ?? referee.nationalityCode;
-  const flag     = (profile?.flag && profile.flag !== '👔') ? profile.flag : referee.flag;
-  const refStats = profile?.stats ?? stats;
+  const natName  = referee.nationality;
+  const natCode  = referee.nationalityCode;
+  const flag     = referee.flag;
+  const refStats = stats;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -1706,8 +1700,10 @@ const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match,
     rows.push({
       icon: '👤', iconBg: 'rgba(245,158,11,0.15)',
       label: detail.referee.name,
-      sublabel: detail.referee.flag ? `${detail.referee.flag} ${detail.referee.nationality}` : detail.referee.nationality,
-      onPress: () => setRefereeModal(true),
+      sublabel: (detail.referee.flag ? `${detail.referee.flag} ${detail.referee.nationality}` : detail.referee.nationality) || undefined,
+      // The data source only knows the referee's name: the sheet opens only
+      // when there is something more to show.
+      onPress: detail.refereeStats ? () => setRefereeModal(true) : undefined,
     });
   }
 
@@ -1736,8 +1732,12 @@ const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match,
 
   if (rows.length === 0) return null;
 
-  // Get round/season info
-  const seasonStr = match.seasonId ? `Temporada ${new Date().getFullYear() - 1}/${String(new Date().getFullYear()).slice(2)}` : '';
+  // Round + season, from the match itself ("Jornada 17 · Temporada 2026/27").
+  const round = parseRound(match.roundLabel);
+  const roundStr = round.kind === 'knockout' || round.kind === 'qualifying'
+    ? translateRoundName(round.base)
+    : round.number !== null ? `${t('matches.matchday')} ${round.number}` : '';
+  const seasonStr = match.season ? `Temporada ${seasonLabel(match.leagueId, match.season)}` : '';
 
   return (
     <View style={[mi.card, { backgroundColor: c.card, borderColor: c.border }]}>
@@ -1746,7 +1746,7 @@ const MatchInfoCard: React.FC<{ match: Match; detail: MatchDetail }> = ({ match,
         <Text style={[mi.title, { color: c.textTertiary }]}>Información del partido</Text>
         <View style={{ flex: 1 }} />
         <Text style={[mi.round, { color: c.textTertiary }]}>
-          {seasonStr ? `${t('matches.matchday')} · ${seasonStr}` : t('matches.matchday')}
+          {[roundStr, seasonStr].filter(Boolean).join(' · ')}
         </Text>
       </View>
 

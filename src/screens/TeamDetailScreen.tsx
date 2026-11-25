@@ -38,7 +38,7 @@ import { BackArrow, ShareIcon } from '../components/NavIcons';
 import { translateNationalTeam } from '../utils/nationalTeams';
 import { CupBracketView, bracketRoundPillsDragging } from '../components/CupBracketView';
 import { useCupBracket } from '../hooks/useCupBracket';
-import type { CupTie } from '../services/sportsApi';
+import type { CupTie } from '../services/football/rounds';
 import { getLeagueConfig, type LeagueZone } from '../config/leagues';
 import { MODO_RIVAL_ENABLED } from '../config/features';
 import { isImageUri } from '../utils/imageUri';

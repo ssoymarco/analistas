@@ -22,15 +22,14 @@
  */
 
 /**
- * Player suggestions are by NAME (resolved to SportMonks IDs at runtime via
- * resolvePlayerByName). Names match exactly what's in POPULAR_PLAYER_NAMES
- * in sportsApi.ts; if you list a name here that isn't in that resolver list,
- * it will be silently ignored.
+ * Player suggestions are by NAME. Names must match POPULAR_PLAYER_NAMES in
+ * services/football/popular.ts exactly; a name that isn't in that list is
+ * silently ignored.
  */
 export interface CountryPreset {
   /** Display label for QA/logs */
   label: string;
-  /** SportMonks team ID of the national team. Must exist in POPULAR_NATIONAL_TEAMS. */
+  /** Team id of the national team (0 = none). Must exist in POPULAR_NATIONAL_TEAMS. */
   nationalTeamId: number;
   /** Local club IDs in popularity order. Must exist in POPULAR_TEAMS. */
   localClubIds: number[];
@@ -53,86 +52,86 @@ export interface CountryPreset {
 
 // ── Country presets ─────────────────────────────────────────────────────────
 
-// League ID reference (verified against /src/config/leagues.ts):
-//   732  = Mundial 2026 (FIFA World Cup)
-//   2    = UEFA Champions League
-//   5    = UEFA Europa League
-//   2286 = UEFA Conference League
-//   8    = Premier League (England)
-//   564  = La Liga (España)
-//   82   = Bundesliga (Alemania)
-//   384  = Serie A (Italia)
-//   301  = Ligue 1 (Francia)
-//   743  = Liga MX (México)
-//   779  = MLS (USA)
-//   636  = Liga Profesional Argentina
-//   648  = Brasileirão Série A
-//   462  = Primeira Liga Portugal      ← NOT Champions League!
-//   1111 = CONCACAF Champions Cup
-//   1122 = Copa Libertadores (CONMEBOL)
-//   1116 = Copa Sudamericana
+// League ID reference (API-Sports ids — see functions/src/shared/football/leagues.ts):
+//   1   = Mundial (FIFA World Cup)
+//   2   = UEFA Champions League
+//   3   = UEFA Europa League
+//   848 = UEFA Conference League
+//   39  = Premier League (England)
+//   140 = LaLiga (España)
+//   78  = Bundesliga (Alemania)
+//   135 = Serie A (Italia)
+//   61  = Ligue 1 (Francia)
+//   262 = Liga MX (México)
+//   253 = MLS (USA)
+//   128 = Liga Profesional Argentina
+//   71  = Brasileirão Série A
+//   94  = Liga Portugal
+//   16  = CONCACAF Champions Cup
+//   13  = Copa Libertadores (CONMEBOL)
+//   11  = Copa Sudamericana
 
 export const COUNTRY_PRESETS: Record<string, CountryPreset> = {
   // 🇲🇽 México
   MX: {
     label: 'México',
-    nationalTeamId: 18576,
-    localClubIds: [2687, 427, 2626, 2989, 609, 2662, 967, 10036, 2844, 680], // AME, GUA, CAZ, PUM, TUA, MNT, TOL, PCH, SLA, ATS
+    nationalTeamId: 16,
+    localClubIds: [2287, 2278, 2295, 2286, 2279, 2282, 2281, 2292, 2285, 2283], // AME, GUA, CAZ, PUM, TUA, MNT, TOL, PCH, SLA, ATS
     // Removed: Chicharito (apenas juega), Luis Romo, Hirving Lozano (poca actividad).
     // Si quieres recuperarlos: vienen vía search del repertorio global.
     localPlayerNames: ['Santiago Giménez', 'Raúl Jiménez', 'Edson Álvarez', 'Guillermo Ochoa'],
-    suggestedLeagueIds:  [732, 743, 2, 8, 564, 779],     // Mundial, Liga MX, Champions, Premier, La Liga, MLS
-    secondaryLeagueIds:  [5, 1111, 82, 384, 301, 462, 2286], // Europa, CCC, Bundes, Serie A, Ligue 1, Liga Portugal, Conference
+    suggestedLeagueIds:  [1, 262, 2, 39, 140, 253],     // Mundial, Liga MX, Champions, Premier, La Liga, MLS
+    secondaryLeagueIds:  [3, 16, 78, 135, 61, 94, 848], // Europa, CCC, Bundes, Serie A, Ligue 1, Liga Portugal, Conference
   },
 
   // 🇦🇷 Argentina
   AR: {
     label: 'Argentina',
-    nationalTeamId: 18644,
-    localClubIds: [587, 10002, 3608, 10840, 520, 9335, 9904], // Boca, River, Racing, Independiente, San Lorenzo, Estudiantes, Vélez
+    nationalTeamId: 26,
+    localClubIds: [451, 435, 436, 453, 460, 450, 438], // Boca, River, Racing, Independiente, San Lorenzo, Estudiantes, Vélez
     localPlayerNames: ['Lionel Messi', 'Lautaro Martínez', 'Julián Álvarez', 'Enzo Fernández', 'Rodrigo De Paul', 'Paulo Dybala', 'Alexis Mac Allister'],
-    suggestedLeagueIds:  [732, 636, 564, 2, 8],          // Mundial, Liga Pro Arg, La Liga, Champions, Premier
-    secondaryLeagueIds:  [1122, 5, 384, 779, 462, 2286],    // Libertadores, Europa, Serie A, MLS, Liga Portugal, Conference
+    suggestedLeagueIds:  [1, 128, 140, 2, 39],          // Mundial, Liga Pro Arg, La Liga, Champions, Premier
+    secondaryLeagueIds:  [13, 3, 135, 253, 94, 848],    // Libertadores, Europa, Serie A, MLS, Liga Portugal, Conference
   },
 
   // 🇧🇷 Brasil
   BR: {
     label: 'Brasil',
-    nationalTeamId: 18704,
-    localClubIds: [1024, 3422, 303, 3496, 1095, 3427, 3371, 2925, 3684], // Flamengo, Palmeiras, Corinthians, São Paulo, Fluminense, Atl. Mineiro, Cruzeiro, Grêmio, Santos
+    nationalTeamId: 6,
+    localClubIds: [127, 121, 131, 126, 124, 1062, 135, 130, 128], // Flamengo, Palmeiras, Corinthians, São Paulo, Fluminense, Atl. Mineiro, Cruzeiro, Grêmio, Santos
     localPlayerNames: ['Vinícius Júnior', 'Rodrygo', 'Raphinha', 'Neymar', 'Casemiro', 'Endrick'],
-    suggestedLeagueIds:  [732, 648, 564, 2, 8],          // Mundial, Brasileirão, La Liga, Champions, Premier
-    secondaryLeagueIds:  [1122, 5, 384, 779, 462, 2286],
+    suggestedLeagueIds:  [1, 71, 140, 2, 39],          // Mundial, Brasileirão, La Liga, Champions, Premier
+    secondaryLeagueIds:  [13, 3, 135, 253, 94, 848],
   },
 
   // 🇺🇸 USA
   US: {
     label: 'United States',
-    nationalTeamId: 18571,
-    localClubIds: [239235, 147671, 3645, 2649, 413], // Inter Miami, LAFC, Atlanta United, Seattle, LA Galaxy
+    nationalTeamId: 2384,
+    localClubIds: [9568, 1616, 1608, 1595, 1605], // Inter Miami, LAFC, Atlanta United, Seattle, LA Galaxy
     localPlayerNames: ['Christian Pulisic', 'Weston McKennie', 'Folarin Balogun', 'Tim Weah', 'Gio Reyna'],
-    suggestedLeagueIds:  [732, 779, 8, 2, 564],          // Mundial (co-host!), MLS, Premier, Champions, La Liga
-    secondaryLeagueIds:  [5, 1111, 743, 82, 384, 2286],   // Europa, CCC, Liga MX, Bundes, Serie A, Conference
+    suggestedLeagueIds:  [1, 253, 39, 2, 140],          // Mundial (co-host!), MLS, Premier, Champions, La Liga
+    secondaryLeagueIds:  [3, 16, 262, 78, 135, 848],   // Europa, CCC, Liga MX, Bundes, Serie A, Conference
   },
 
   // 🇪🇸 España
   ES: {
     label: 'España',
-    nationalTeamId: 18710,
-    localClubIds: [3468, 83, 7980, 676, 594, 13258, 214, 485, 3477], // Madrid, Barça, Atlético, Sevilla, Real Sociedad, Athletic, Valencia, Betis, Villarreal
+    nationalTeamId: 9,
+    localClubIds: [541, 529, 530, 536, 548, 531, 532, 543, 533], // Madrid, Barça, Atlético, Sevilla, Real Sociedad, Athletic, Valencia, Betis, Villarreal
     localPlayerNames: ['Lamine Yamal', 'Pedri', 'Rodri', 'Nico Williams', 'Ferran Torres', 'Álvaro Morata', 'Dani Olmo'],
-    suggestedLeagueIds:  [732, 564, 2, 8, 82, 384],      // Mundial, La Liga, Champions, Premier, Bundes, Serie A
-    secondaryLeagueIds:  [5, 301, 462, 2286, 779],         // Europa, Ligue 1, Liga Portugal, Conference, MLS
+    suggestedLeagueIds:  [1, 140, 2, 39, 78, 135],      // Mundial, La Liga, Champions, Premier, Bundes, Serie A
+    secondaryLeagueIds:  [3, 61, 94, 848, 253],         // Europa, Ligue 1, Liga Portugal, Conference, MLS
   },
 
   // 🇨🇴 Colombia
   CO: {
     label: 'Colombia',
-    nationalTeamId: 18720,
+    nationalTeamId: 8,
     localClubIds: [], // No local clubs in POPULAR_TEAMS yet — falls back to globals
     localPlayerNames: ['James Rodríguez', 'Luis Díaz', 'Falcao', 'Davinson Sánchez'],
-    suggestedLeagueIds:  [732, 564, 2, 8, 779],          // Mundial, La Liga, Champions, Premier, MLS
-    secondaryLeagueIds:  [1122, 5, 743, 636, 648, 384],
+    suggestedLeagueIds:  [1, 140, 2, 39, 253],          // Mundial, La Liga, Champions, Premier, MLS
+    secondaryLeagueIds:  [13, 3, 262, 128, 71, 135],
   },
 
   // 🇨🇱 Chile (no clasificó al Mundial 2026, sin selección hardcoded)
@@ -141,8 +140,8 @@ export const COUNTRY_PRESETS: Record<string, CountryPreset> = {
     nationalTeamId: 0,
     localClubIds: [],
     localPlayerNames: ['Alexis Sánchez', 'Arturo Vidal'],
-    suggestedLeagueIds:  [732, 564, 2, 8, 636],          // Mundial, La Liga, Champions, Premier, Liga Pro Arg
-    secondaryLeagueIds:  [1122, 5, 648, 779, 384],
+    suggestedLeagueIds:  [1, 140, 2, 39, 128],          // Mundial, La Liga, Champions, Premier, Liga Pro Arg
+    secondaryLeagueIds:  [13, 3, 71, 253, 135],
   },
 
   // 🇵🇪 Perú (mismo caso que Chile)
@@ -151,8 +150,8 @@ export const COUNTRY_PRESETS: Record<string, CountryPreset> = {
     nationalTeamId: 0,
     localClubIds: [],
     localPlayerNames: [],
-    suggestedLeagueIds:  [732, 564, 2, 8, 636],
-    secondaryLeagueIds:  [1122, 5, 648, 779, 384],
+    suggestedLeagueIds:  [1, 140, 2, 39, 128],
+    secondaryLeagueIds:  [13, 3, 71, 253, 135],
   },
 
   // Default fallback when country is unknown or not in the map.
@@ -160,10 +159,10 @@ export const COUNTRY_PRESETS: Record<string, CountryPreset> = {
   DEFAULT: {
     label: 'Default (LATAM tilt)',
     nationalTeamId: 0,
-    localClubIds: [3468, 83, 9, 14, 8, 591, 503], // Madrid, Barça, City, ManU, Liverpool, PSG, Bayern
+    localClubIds: [541, 529, 50, 33, 40, 85, 157], // Madrid, Barça, City, ManU, Liverpool, PSG, Bayern
     localPlayerNames: ['Lionel Messi', 'Cristiano Ronaldo', 'Kylian Mbappé', 'Erling Haaland', 'Vinícius Júnior', 'Jude Bellingham', 'Lamine Yamal'],
-    suggestedLeagueIds:  [732, 2, 8, 564, 82, 384],      // Mundial, Champions, Premier, La Liga, Bundes, Serie A
-    secondaryLeagueIds:  [5, 301, 779, 743, 462, 2286],
+    suggestedLeagueIds:  [1, 2, 39, 140, 78, 135],      // Mundial, Champions, Premier, La Liga, Bundes, Serie A
+    secondaryLeagueIds:  [3, 61, 253, 262, 94, 848],
   },
 };
 
@@ -175,12 +174,12 @@ export const COUNTRY_PRESETS: Record<string, CountryPreset> = {
  * Excludes the user's own national team to avoid duplicates.
  */
 export const GLOBAL_NATIONAL_TEAMS_TOP_6: number[] = [
-  18644, // Argentina (campeón Mundial 2022, Messi)
-  18704, // Brasil
-  18647, // Francia
-  18710, // España
-  18645, // Inglaterra
-  18660, // Alemania
+  26, // Argentina (campeón Mundial 2022, Messi)
+  6, // Brasil
+  2, // Francia
+  9, // España
+  10, // Inglaterra
+  25, // Alemania
 ];
 
 /**
@@ -190,18 +189,18 @@ export const GLOBAL_NATIONAL_TEAMS_TOP_6: number[] = [
  * dedupes.
  */
 export const GLOBAL_CLUBS_TOP_8: number[] = [
-  3468,   // Real Madrid
-  83,     // FC Barcelona
-  9,      // Manchester City
-  14,     // Manchester United
-  8,      // Liverpool
-  591,    // PSG
-  503,    // Bayern München
-  239235, // Inter Miami (Messi effect)
+  541,   // Real Madrid
+  529,     // FC Barcelona
+  50,      // Manchester City
+  33,     // Manchester United
+  40,      // Liverpool
+  85,    // PSG
+  157,    // Bayern München
+  9568, // Inter Miami (Messi effect)
 ];
 
 /**
- * @deprecated Use PLAYER_POPULARITY in services/sportsApi.ts instead.
+ * @deprecated Use PLAYER_POPULARITY in services/football/popular.ts instead.
  *
  * Globally famous players (Ballon d'Or candidates / megastars). Previously
  * used by buildOnboardingPlayerNames to intercalate stars after the country
@@ -236,9 +235,9 @@ export function getCountryPreset(country: string, language?: string): CountryPre
       ...COUNTRY_PRESETS.MX,
       label: 'Hispanic-USA (MX + MLS hybrid)',
       // Add Inter Miami + LAFC after the Mexican clubs since user lives in US
-      localClubIds: [...COUNTRY_PRESETS.MX.localClubIds.slice(0, 6), 239235, 147671],
-      suggestedLeagueIds:  [732, 743, 779, 2, 564, 8], // Mundial, Liga MX, MLS, Champions, La Liga, Premier
-      secondaryLeagueIds:  [5, 1111, 82, 384, 301, 462, 2286],
+      localClubIds: [...COUNTRY_PRESETS.MX.localClubIds.slice(0, 6), 9568, 1616],
+      suggestedLeagueIds:  [1, 262, 253, 2, 140, 39], // Mundial, Liga MX, MLS, Champions, La Liga, Premier
+      secondaryLeagueIds:  [3, 16, 78, 135, 61, 94, 848],
     };
   }
   return COUNTRY_PRESETS[country] ?? COUNTRY_PRESETS.DEFAULT;

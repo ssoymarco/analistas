@@ -24,7 +24,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
-import type { AvailableSeason } from '../services/firestoreApi';
+import type { AvailableSeason } from '../services/football/leagueData';
 
 interface SeasonSelectorProps {
   seasons: AvailableSeason[];

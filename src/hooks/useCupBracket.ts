@@ -1,8 +1,8 @@
 // ── useCupBracket — React hook for knockout competition brackets ──────────────
 import { useState, useEffect } from 'react';
 import { InteractionManager } from 'react-native';
-import { getCupBracket } from '../services/sportsApi';
-import type { CupRound } from '../services/sportsApi';
+import { getCupBracket } from '../services/football/leagueData';
+import type { CupRound } from '../services/football/rounds';
 
 interface UseCupBracketResult {
   rounds: CupRound[];
@@ -34,7 +34,7 @@ export function useCupBracket(
     // doesn't block on the Firestore round-trip + synchronous bracket assembly.
     // On cache hit (memory or AsyncStorage) the work is near-zero anyway.
     const task = InteractionManager.runAfterInteractions(() => {
-      getCupBracket(seasonId, currentFixtureId, isPlayoffsOnly)
+      getCupBracket(seasonId, currentFixtureId)
         .then(data => {
           if (cancelled) return;
           setRounds(data);

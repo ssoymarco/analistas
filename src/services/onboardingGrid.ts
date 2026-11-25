@@ -30,8 +30,8 @@ import {
   POPULAR_NATIONAL_TEAMS,
   POPULAR_PLAYER_NAMES,
   getPlayerPopularity,
-} from './sportsApi';
-import type { SearchableTeam } from './sportsApi';
+  type SearchableTeam,
+} from './football/popular';
 import {
   GLOBAL_NATIONAL_TEAMS_TOP_6,
   GLOBAL_CLUBS_TOP_8,
@@ -103,7 +103,7 @@ export function buildOnboardingTeamGrid(
  *   - All names in preset.localPlayerNames (in case any aren't in the
  *     repertoire — defensive)
  *
- * See services/sportsApi.ts → PLAYER_POPULARITY + PLAYER_POPULARITY_BY_COUNTRY.
+ * See services/football/popular.ts → PLAYER_POPULARITY + PLAYER_POPULARITY_BY_COUNTRY.
  */
 export function buildOnboardingPlayerNames(
   country: string,
@@ -135,7 +135,7 @@ export function buildOnboardingPlayerNames(
  *   1. preset.suggestedLeagueIds in preset order (these get "Sugerida" badge)
  *   2. Remaining leagues from AVAILABLE_LEAGUES (preserves config order)
  *
- * Mundial 2026 (id 732) is always position 1 this season — it's already first
+ * The World Cup (league id 1) is always position 1 this season — it's already first
  * in every preset, but if the user's country doesn't have a preset, the
  * DEFAULT preset still pins it.
  */

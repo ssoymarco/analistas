@@ -3,7 +3,7 @@
 // Libertadores Groups A–H, CONCACAF Champions Cup pools, etc.).
 // Returns { hasGroups: false } for knockout-only competitions or while loading.
 import { useState, useEffect, useRef } from 'react';
-import { getCupGroupStandings } from '../services/sportsApi';
+import { getCupGroupStandings } from '../services/football/leagueData';
 import type { CupGroupsResult } from '../data/types';
 
 const EMPTY: CupGroupsResult = { hasGroups: false, groups: [] };

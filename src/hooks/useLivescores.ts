@@ -1,15 +1,10 @@
-// ── useLivescores — Firestore-backed real-time live matches ─────────────────
+// ── useLivescores — matches in play right now, in real time ─────────────────
 //
-// Reads from the `matches` Firestore collection (populated by the
-// `pollLivescores` Cloud Function every 15s). Uses `onSnapshot` so the UI
-// receives push updates within ~100ms of a goal being detected server-side —
-// no client polling, no SportMonks tokens consumed per app open.
-//
-// Falls back to a one-shot SportMonks call only on Firestore errors (permission,
-// network) to keep the screen functional during incidents.
+// A Firestore listener on `fb_matches` (status live/interrupted, all leagues).
+// The backend's live poller writes every score/minute change, so the UI gets
+// it pushed — no client polling.
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { subscribeLivescores, getLivescoresFromFirestore } from '../services/firestoreApi';
-import { getLiveFixtures } from '../services/sportsApi';
+import { getLivescores, subscribeLivescores } from '../services/football/matches';
 import type { Match } from '../data/types';
 
 interface UseLivescoresResult {
@@ -30,41 +25,29 @@ export function useLivescores(enabled = true): UseLivescoresResult {
     return () => { isMounted.current = false; };
   }, []);
 
-  // Manual refresh — only useful when Firestore subscription is unavailable.
-  // With onSnapshot active, the data is already real-time.
+  // Manual refresh — only matters if the listener dropped (it re-reads once).
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getLivescoresFromFirestore();
+      const data = await getLivescores();
       if (isMounted.current) setMatches(data);
     } catch (err) {
-      // Firestore failed — try SportMonks proxy as a last resort
-      try {
-        const fallback = await getLiveFixtures();
-        if (isMounted.current) setMatches(fallback);
-      } catch {
-        if (isMounted.current) {
-          setError(err instanceof Error ? err.message : 'Error loading livescores');
-        }
-      }
+      if (isMounted.current) setError(err instanceof Error ? err.message : 'Error loading livescores');
     } finally {
       if (isMounted.current) setLoading(false);
     }
   }, []);
 
-  // Real-time subscription
   useEffect(() => {
     if (!enabled) {
       setMatches([]);
       setLoading(false);
       return;
     }
-
     setLoading(true);
     setError(null);
-
-    const unsubscribe = subscribeLivescores(
+    return subscribeLivescores(
       data => {
         if (!isMounted.current) return;
         setMatches(data);
@@ -73,15 +56,10 @@ export function useLivescores(enabled = true): UseLivescoresResult {
       },
       err => {
         if (!isMounted.current) return;
-        // Subscription failed — fall back to SportMonks one-shot
-        getLiveFixtures()
-          .then(data => { if (isMounted.current) setMatches(data); })
-          .catch(() => { if (isMounted.current) setError(err.message); })
-          .finally(() => { if (isMounted.current) setLoading(false); });
+        setError(err.message);
+        setLoading(false);
       },
     );
-
-    return unsubscribe;
   }, [enabled]);
 
   return { matches, loading, error, refresh };

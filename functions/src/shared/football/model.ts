@@ -689,6 +689,9 @@ export interface FbCatalogEntry {
   flag: string | null;
   /** current season year */ s: number | null;
   /** current season has standings coverage */ st: boolean;
+  /** current season start / end dates, 'YYYY-MM-DD' (absent on catalogs written before Nov 2026) */
+  b?: string | null;
+  e?: string | null;
 }
 
 // ── Search ───────────────────────────────────────────────────────────────────

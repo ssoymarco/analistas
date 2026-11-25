@@ -35,6 +35,7 @@ export async function syncFootballCatalog(): Promise<number> {
     leagues[String(x.league.id)] = {
       n: x.league.name, c: x.country.name, t: x.league.type, logo: x.league.logo,
       flag: x.country.flag ?? null, s: cur?.year ?? null, st: !!cov.standings,
+      b: cur?.start ?? null, e: cur?.end ?? null,
     };
   }
   await db.doc(`${COL.meta}/leagueCatalog`).set({ leagues, count: list.length, updatedAt: now() });

@@ -5,7 +5,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Animated, Easing } from 'reac
 import { Image } from 'expo-image';
 import { useThemeColors } from '../theme/useTheme';
 import type { Match } from '../data/types';
-import type { LeagueWithMatches } from '../services/sportsApi';
+import type { LeagueWithMatches } from '../services/football/matches';
 import { MatchCard } from './MatchCard';
 import { getLeagueDisplayName, getLeagueDisplayFlag, isCopyrightSensitiveLeague } from '../config/leagues';
 import { isImageUri } from '../utils/imageUri';

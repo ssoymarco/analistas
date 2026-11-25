@@ -33,8 +33,8 @@ import { useCupBracket } from '../hooks/useCupBracket';
 import { useAvailableSeasons } from '../hooks/useAvailableSeasons';
 import { CupBracketView, bracketRoundPillsDragging } from '../components/CupBracketView';
 import { SeasonSelector } from '../components/SeasonSelector';
-import type { CupTie } from '../services/sportsApi';
-import type { AvailableSeason } from '../services/firestoreApi';
+import type { CupTie } from '../services/football/rounds';
+import type { AvailableSeason } from '../services/football/leagueData';
 import type {
   LeagueDetailData,
   LeagueStandingRow,
@@ -44,7 +44,7 @@ import type {
 } from '../hooks/useLeagueDetail';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { getLeagueConfig, getLeagueDisplayName, isCopyrightSensitiveLeague } from '../config/leagues';
-import { peekCurrentSeasonId, peekLeagueLogo } from '../services/seasonResolver';
+import { peekCurrentSeasonId, peekLeagueLogo } from '../services/football/catalog';
 import { ChevronRight } from '../components/ChevronRight';
 import type { LeagueZone } from '../config/leagues';
 import type { Match, MatchStatus } from '../data/types';
