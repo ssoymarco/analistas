@@ -154,6 +154,41 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── Football (API-Sports, since Nov 2026) ─────────────────────────────────
+    // Written only by the Cloud Functions in functions/src/football (Admin SDK
+    // bypasses rules). Shapes: functions/src/shared/football/model.ts.
+
+    /// fb_matches/{fixtureId} — every fixture (list rows + live scores)
+    match /fb_matches/{fixtureId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// fb_match_details/{fixtureId} — events, stats, lineups, ratings, pressure
+    match /fb_match_details/{fixtureId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// fb_standings/{leagueId}_{season} — league tables
+    match /fb_standings/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// fb_topscorers/{leagueId}_{season} — top scorers / assists / yellow cards
+    match /fb_topscorers/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    /// fb_meta/leagueCatalog — every API-Sports league with its current season.
+    /// The rest of fb_meta (snapshot, gate, quota, leases) stays server-only.
+    match /fb_meta/leagueCatalog {
+      allow read: if true;
+      allow write: if false;
+    }
+
     /// _meta/appVersion — public version manifest read by useVersionCheck on every launch.
     /// Other _meta docs (e.g. livescoresSnapshot) remain server-only.
     match /_meta/appVersion {

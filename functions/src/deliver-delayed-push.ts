@@ -48,6 +48,9 @@ export interface DelayedPushPayload {
   matchId:    string;
   homeScore:  number;               // score AT THE TIME OF THE EVENT
   awayScore:  number;
+  /** Collection holding the match doc for the VAR guard. Defaults to the
+   *  legacy 'matches'; API-Sports pushes use 'fb_matches'. */
+  matchCollection?: 'matches' | 'fb_matches';
 }
 
 // ── Handler ─────────────────────────────────────────────────────────────────────
@@ -69,7 +72,7 @@ export const deliverDelayedPush = onTaskDispatched(
     // never receive a spoiler for a disallowed goal.
     if (p.changeType === 'goal') {
       try {
-        const snap = await db.doc(`matches/${p.matchId}`).get();
+        const snap = await db.doc(`${p.matchCollection ?? 'matches'}/${p.matchId}`).get();
         if (snap.exists) {
           const curr = snap.data() as { homeScore?: number; awayScore?: number };
           const currTotal = (curr.homeScore ?? 0) + (curr.awayScore ?? 0);
