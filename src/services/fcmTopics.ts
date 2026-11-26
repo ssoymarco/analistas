@@ -17,8 +17,11 @@
  *
  * Live event topics (with bucket):
  *   fb_team_{id}_goals_d{0|2|5|10}  — goals (both teams' followers)
- *   fb_team_{id}_cards_d{0|2|5|10}  — cards
+ *   fb_team_{id}_cards_d{0|2|5|10}  — red cards
+ *   fb_team_{id}_yellow_d{0|2|5|10} — yellow cards (only when that toggle is on)
  *   fb_team_{id}_live_d{0|2|5|10}   — halftime + matchEnd…
+ *   fb_team_{id}_subs_d{0|2|5|10}   — substitutions (only when that toggle is on)
+ * Every event of a match reaches the followers of both teams.
  *
  * Immediate-only topics (NO bucket — never delayed):
  *   fb_team_{id}_kickoff   — matchStart
@@ -100,6 +103,8 @@ export const TopicNames = {
   teamGoals:    (teamId: string, bucket: DelayBucket) => FbTopics.goals(teamId, bucket),
   teamCards:    (teamId: string, bucket: DelayBucket) => FbTopics.cards(teamId, bucket),
   teamLive:     (teamId: string, bucket: DelayBucket) => FbTopics.live(teamId, bucket),
+  teamYellow:   (teamId: string, bucket: DelayBucket) => FbTopics.yellow(teamId, bucket),
+  teamSubs:     (teamId: string, bucket: DelayBucket) => FbTopics.subs(teamId, bucket),
 
   // ── Immediate-only topics (no bucket — never delayed) ──────────────────────
   teamKickoff:   (teamId: string)   => FbTopics.kickoff(teamId),
@@ -141,15 +146,20 @@ const ALL_BUCKETS: DelayBucket[] = ['d0', 'd2', 'd5', 'd10'];
 // Antes el cliente se suscribía SIEMPRE a las 6 y los toggles de la UI eran
 // decorativos (en background el OS pinta el banner sin preguntarle a la app).
 // Ahora las prefs gatean la membresía — el único enforcement que existe.
-export type TeamEventClass = 'goals' | 'cards' | 'live' | 'kickoff' | 'lineups' | 'reminders';
+export type TeamEventClass =
+  | 'goals' | 'cards' | 'live' | 'kickoff' | 'lineups' | 'reminders'
+  | 'yellow' | 'subs';
 
+/** Classes a team gets when the caller doesn't say (yellow cards and
+ *  substitutions are opt-in: only when their toggle is on). */
 export const ALL_TEAM_EVENT_CLASSES: TeamEventClass[] =
   ['goals', 'cards', 'live', 'kickoff', 'lineups', 'reminders'];
 
 /** Mapea las prefs del usuario → clases de topic habilitadas. Espejo de la
- *  taxonomía del servidor: goals={gol+VAR}, cards={amarillas+rojas},
- *  live={MT+2T+final+sustituciones+prórroga+penales+suspendido},
- *  kickoff={inicio}, lineups, reminders. Master switch apagado → nada. */
+ *  taxonomía del servidor: goals={gol+VAR}, cards={rojas}, yellow={amarillas},
+ *  live={MT+2T+final+prórroga+penales+suspendido}, subs={sustituciones},
+ *  kickoff={inicio}, lineups, reminders. Master switch apagado → nada.
+ *  Cada evento del partido llega por el equipo seguido, sea de quien sea. */
 export function teamEventsFromPrefs(p: {
   notificationsEnabled: boolean;
   goals: boolean; yellowCards: boolean; redCards: boolean;
@@ -159,8 +169,10 @@ export function teamEventsFromPrefs(p: {
   if (!p.notificationsEnabled) return [];
   const ev: TeamEventClass[] = [];
   if (p.goals)                                        ev.push('goals');
-  if (p.yellowCards || p.redCards)                    ev.push('cards');
-  if (p.halftime || p.matchEnd || p.substitutions)    ev.push('live');
+  if (p.redCards)                                     ev.push('cards');
+  if (p.yellowCards)                                  ev.push('yellow');
+  if (p.halftime || p.matchEnd)                       ev.push('live');
+  if (p.substitutions)                                ev.push('subs');
   if (p.matchStart)                                   ev.push('kickoff');
   if (p.lineups)                                      ev.push('lineups');
   if (p.matchReminder)                                ev.push('reminders');
@@ -183,6 +195,8 @@ function topicsForTeam(teamId: string, bucket: DelayBucket, events: TeamEventCla
   if (events.includes('goals'))     t.push(TopicNames.teamGoals(teamId, bucket));
   if (events.includes('cards'))     t.push(TopicNames.teamCards(teamId, bucket));
   if (events.includes('live'))      t.push(TopicNames.teamLive(teamId, bucket));
+  if (events.includes('yellow'))    t.push(TopicNames.teamYellow(teamId, bucket));
+  if (events.includes('subs'))      t.push(TopicNames.teamSubs(teamId, bucket));
   if (events.includes('kickoff'))   t.push(TopicNames.teamKickoff(teamId));
   if (events.includes('lineups'))   t.push(TopicNames.teamLineups(teamId));
   if (events.includes('reminders')) t.push(TopicNames.teamReminders(teamId));
@@ -198,6 +212,8 @@ function allBucketTopicsForTeam(teamId: string): string[] {
       TopicNames.teamGoals(teamId, b),
       TopicNames.teamCards(teamId, b),
       TopicNames.teamLive(teamId, b),
+      TopicNames.teamYellow(teamId, b),
+      TopicNames.teamSubs(teamId, b),
     );
   }
   return topics;

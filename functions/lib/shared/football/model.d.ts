@@ -255,8 +255,14 @@ export type FbDelayBucket = 'd0' | 'd2' | 'd5' | 'd10';
  */
 export declare const FbTopics: {
     readonly goals: (teamId: string, b: FbDelayBucket) => string;
+    /** Red cards (and their VAR cancellations). */
     readonly cards: (teamId: string, b: FbDelayBucket) => string;
+    /** Match phases: half-time, second half, full time, extra time, penalties, suspension. */
     readonly live: (teamId: string, b: FbDelayBucket) => string;
+    /** Yellow cards and substitutions have their own topics, so each toggle of
+     *  the app means exactly what it says (they used to ride on cards / live). */
+    readonly yellow: (teamId: string, b: FbDelayBucket) => string;
+    readonly subs: (teamId: string, b: FbDelayBucket) => string;
     readonly kickoff: (teamId: string) => string;
     readonly lineups: (teamId: string) => string;
     readonly reminders: (teamId: string) => string;

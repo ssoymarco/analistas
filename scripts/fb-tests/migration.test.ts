@@ -145,7 +145,19 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
   fcmCalls.length = 0;
   await Topics.unsubscribeTeamTopics('541');
-  check('unfollow leaves all topics of the team', fcmCalls.filter(c => c.op === 'unsub').length === 15 && fcmCalls.every(c => c.topic.startsWith('fb_team_541_')));
+  check('unfollow leaves all topics of the team', fcmCalls.filter(c => c.op === 'unsub').length === 23 && fcmCalls.every(c => c.topic.startsWith('fb_team_541_')));
+
+  // Each toggle has its own topic: with the defaults (red on, yellow and
+  // substitutions off) a device is not in the yellow / subs topics.
+  const defaults = { notificationsEnabled: true, goals: true, yellowCards: false, redCards: true, matchStart: true, halftime: true, matchEnd: true, substitutions: false, lineups: true, matchReminder: false };
+  const evDefault = Topics.teamEventsFromPrefs(defaults);
+  check('toggles: defaults subscribe to red cards and phases, not yellow or substitutions', evDefault.includes('cards') && evDefault.includes('live') && !evDefault.includes('yellow') && !evDefault.includes('subs'), evDefault.join(','));
+  const evAll = Topics.teamEventsFromPrefs({ ...defaults, yellowCards: true, substitutions: true, redCards: false, halftime: false, matchEnd: false });
+  check('toggles: yellow and substitutions on their own, without red or phases', evAll.includes('yellow') && evAll.includes('subs') && !evAll.includes('cards') && !evAll.includes('live'), evAll.join(','));
+  fcmCalls.length = 0;
+  await Topics.reconcileSubscriptions({ teamIds: ['2287'], leagueIds: [], playerIds: [], rivalTeamIds: [], delayBucket: 'd0', teamEvents: evAll });
+  const subs2 = new Set(fcmCalls.filter(c => c.op === 'sub').map(c => c.topic));
+  check('toggles: reconcile joins exactly the chosen topics', subs2.has('fb_team_2287_yellow_d0') && subs2.has('fb_team_2287_subs_d0') && !subs2.has('fb_team_2287_cards_d0') && !subs2.has('fb_team_2287_live_d0') && subs2.has('fb_team_2287_goals_d0'), [...subs2].join(', '));
 
   console.log(`\n${failures === 0 ? 'ALL MIGRATION CHECKS PASSED' : failures + ' FAILED'}`);
   process.exit(failures ? 1 : 0);

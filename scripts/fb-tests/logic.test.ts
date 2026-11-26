@@ -11,6 +11,7 @@ import { aggregateFromH2H, detailFromFb, h2hFromFb, matchFromFb, matchFromLite, 
 import { shortNameFor } from '../../src/services/football/base';
 import { leagueShareUrl, SITE_URL } from '../../src/config/site';
 import { formatShortDate } from '../../src/utils/formatMatchTime';
+import { translateAbsenceReason } from '../../src/utils/absenceReasons';
 import { matchDetailNeedsFetch } from '../../functions/src/shared/football/freshness';
 import { teamColor, teamFlagEmoji } from '../../src/utils/teamColors';
 import { deadStateLabelKey } from '../../src/utils/deadState';
@@ -126,7 +127,15 @@ const check = (name: string, ok: boolean, detail = '') => { if (!ok) failures++;
   const teamsOf = (type: string, side?: 'home' | 'away') => { const r = notify.route(ch(type, side)); return (r.bucketed ?? r.immediate).teams.join(','); };
   check('push: a red card reaches followers of both teams', teamsOf('redCard', 'home') === '2282,2287' && teamsOf('redCard', 'away') === '2282,2287');
   check('push: goals and match phases reach both teams', teamsOf('goal', 'home') === '2282,2287' && teamsOf('matchEnd') === '2282,2287');
-  check('push: yellow cards and substitutions stay with the player\'s team', teamsOf('yellowCard', 'home') === '2282' && teamsOf('substitution', 'away') === '2287');
+  const topicOf = (type: string) => notify.route(ch(type, 'home')).bucketed.topic('2287', 'd0');
+  check('push: yellow cards and substitutions reach both teams on their own topics', teamsOf('yellowCard', 'home') === '2282,2287' && teamsOf('substitution', 'away') === '2282,2287' && topicOf('yellowCard') === 'fb_team_2287_yellow_d0' && topicOf('substitution') === 'fb_team_2287_subs_d0' && topicOf('redCard') === 'fb_team_2287_cards_d0');
+  check('push: old builds get no twin for the new topics', notify.legacyTopicFor('fb_team_2287_yellow_d0') === null && notify.legacyTopicFor('fb_team_2287_subs_d0') === null && notify.legacyTopicFor('fb_team_2287_cards_d0') === 'team_2687_cards_d0');
+
+  // ── absences in the app's language
+  check('absences: common reasons are translated', translateAbsenceReason('Knee Injury') === 'Lesión de rodilla' && translateAbsenceReason('Red Card') === 'Tarjeta roja' && translateAbsenceReason('Knock') === 'Golpe' && translateAbsenceReason('Muscle Injury') === 'Lesión muscular' && translateAbsenceReason('Achilles Tendon Injury') === 'Lesión del tendón de Aquiles' && translateAbsenceReason('Off the roster') === 'Fuera de la convocatoria');
+  check('absences: other wordings fall into their family', translateAbsenceReason('Hamstring') === 'Lesión de isquiotibiales' && translateAbsenceReason('Broken leg') === 'Fractura' && translateAbsenceReason('Knee Surgery') === 'Cirugía' && translateAbsenceReason('Shin Injury') === 'Lesión' && translateAbsenceReason("Coach's decision") === 'Decisión técnica');
+  check('absences: unknown text is kept, empty stays empty', translateAbsenceReason('Paternity leave') === 'Paternity leave' && translateAbsenceReason('') === '');
+
   const rivalCond: string = notify.immediateCondition(ch('rivalRedCard', 'home'), ['fb_team_2282_rival_red_card']);
   check('push: rival red card skips devices that already get the red card through the other team', rivalCond.includes("!('fb_team_2287_cards_d0' in topics)") && rivalCond.includes("!('fb_mute_77' in topics)") && (rivalCond.match(/in topics/g) ?? []).length === 5, rivalCond);
   check('push: other pushes keep the plain condition', notify.immediateCondition(ch('redCard', 'home'), ['a', 'b']) === notify.conditionFor(['a', 'b'], '77'));

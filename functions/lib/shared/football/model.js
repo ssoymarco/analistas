@@ -35,8 +35,14 @@ exports.parseFbSeasonKey = parseFbSeasonKey;
  */
 exports.FbTopics = {
     goals: (teamId, b) => `fb_team_${teamId}_goals_${b}`,
+    /** Red cards (and their VAR cancellations). */
     cards: (teamId, b) => `fb_team_${teamId}_cards_${b}`,
+    /** Match phases: half-time, second half, full time, extra time, penalties, suspension. */
     live: (teamId, b) => `fb_team_${teamId}_live_${b}`,
+    /** Yellow cards and substitutions have their own topics, so each toggle of
+     *  the app means exactly what it says (they used to ride on cards / live). */
+    yellow: (teamId, b) => `fb_team_${teamId}_yellow_${b}`,
+    subs: (teamId, b) => `fb_team_${teamId}_subs_${b}`,
     kickoff: (teamId) => `fb_team_${teamId}_kickoff`,
     lineups: (teamId) => `fb_team_${teamId}_lineups`,
     reminders: (teamId) => `fb_team_${teamId}_reminders`,

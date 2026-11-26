@@ -22,6 +22,7 @@ import {
   utcStringOf,
 } from './base';
 import { parseRound } from './rounds';
+import { absenceDoubtfulLabel, absenceFallbackLabel, translateAbsenceReason } from '../../utils/absenceReasons';
 import { getFootballLeague } from '../../../functions/src/shared/football/leagues';
 
 export {
@@ -222,20 +223,15 @@ function markMotm(home: PlayerRating[], away: PlayerRating[]): void {
   if (best && best.rating >= 7) best.isMOTM = true;
 }
 
-const ABSENCE_DETAIL_ES: Record<FbAbsence['type'], string> = {
-  injury: 'Lesión',
-  suspension: 'Suspendido',
-  international: 'Con su selección',
-  doubtful: 'En duda',
-  other: 'No disponible',
-};
-
 function missingFromFb(a: FbAbsence): MissingPlayer {
   const reason: MissingPlayer['reason'] =
     a.type === 'injury' || a.type === 'doubtful' ? 'injury' :
     a.type === 'suspension' ? 'suspension' :
     a.type === 'international' ? 'international' : 'other';
-  return { name: a.name, reason, detail: a.type === 'doubtful' ? `${ABSENCE_DETAIL_ES.doubtful} · ${a.reason}` : (a.reason || ABSENCE_DETAIL_ES[a.type]) };
+  // The provider's reason ("Knee Injury", "Red Card"…) in the app's language.
+  const why = translateAbsenceReason(a.reason) || absenceFallbackLabel(a.type);
+  const detail = a.type === 'doubtful' && a.reason ? `${absenceDoubtfulLabel()} · ${why}` : why;
+  return { name: a.name, reason, detail };
 }
 
 /**

@@ -197,12 +197,14 @@ function route(c) {
         case 'extraTimeStart':
         case 'penaltiesStart':
         case 'matchSuspended': return { bucketed: { topic: model_1.FbTopics.live, teams: [h, a], delayed: true } };
-        // A sending-off changes the match for both sides: followers of either team
-        // get it (owner's rule since 25-nov-2026; it used to reach only the
-        // followers of the player's team).
+        // Owner's rule (25-nov-2026): following a team means hearing about the
+        // whole match — every event goes to the followers of BOTH sides, and each
+        // kind has the topic of its own toggle ("Notificaciones de este partido").
+        // Before, cards and substitutions only reached the player's team, and
+        // yellow cards / substitutions rode on the red-card / match-phase topics.
         case 'redCard': return { bucketed: { topic: model_1.FbTopics.cards, teams: [h, a], delayed: true } };
-        case 'yellowCard': return { bucketed: { topic: model_1.FbTopics.cards, teams: [s], delayed: true } };
-        case 'substitution': return { bucketed: { topic: model_1.FbTopics.live, teams: [s], delayed: true } };
+        case 'yellowCard': return { bucketed: { topic: model_1.FbTopics.yellow, teams: [h, a], delayed: true } };
+        case 'substitution': return { bucketed: { topic: model_1.FbTopics.subs, teams: [h, a], delayed: true } };
         case 'matchStart':
         case 'kickoffDelayed': return { immediate: { topic: model_1.FbTopics.kickoff, teams: [h, a] } };
         case 'matchReminder': return { immediate: { topic: model_1.FbTopics.reminders, teams: [h, a] } };
@@ -218,6 +220,9 @@ function route(c) {
 function legacyTopicFor(fbTopic) {
     const m = /^fb_team_(\d+)_(.+)$/.exec(fbTopic);
     if (!m)
+        return null;
+    // Topics that didn't exist in the previous taxonomy have no legacy twin.
+    if (/^(yellow|subs)_/.test(m[2]))
         return null;
     const smId = (0, legacy_1.legacyTeamIdFor)(m[1]);
     return smId ? `team_${smId}_${m[2]}` : null;
