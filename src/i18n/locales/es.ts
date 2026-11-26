@@ -1127,6 +1127,7 @@ const es = {
     activeDetail: 'Goles, tarjetas, medio tiempo, final, rival y jugadores que sigues.',
     autoOffNote: 'Se apaga solo cuando termine el partido.',
     finishedNote: 'Este partido ya terminó.',
+    notFollowingNote: 'No sigues a ninguno de estos equipos, así que no recibes avisos de este partido. Sigue a uno para que te lleguen.',
     bumpedNote: 'Ahora mismo: {{min}} minutos (sumaste retraso desde un aviso).',
     pill: 'Modo Estadio · avisos {{min}} min después',
     errorGeneric: 'No se pudo cambiar el Modo Estadio. Revisa tu conexión e inténtalo de nuevo.',

@@ -1107,6 +1107,7 @@ const en: TranslationKeys = {
     activeDetail: 'Goals, cards, half-time, full time, rival news and players you follow.',
     autoOffNote: 'It turns off by itself when the match ends.',
     finishedNote: 'This match is already over.',
+    notFollowingNote: 'You don’t follow either team, so you get no alerts for this match. Follow one to receive them.',
     bumpedNote: 'Right now: {{min}} minutes (you added delay from an alert).',
     pill: 'Stadium Mode · alerts {{min}} min later',
     errorGeneric: 'Stadium Mode couldn’t be changed. Check your connection and try again.',

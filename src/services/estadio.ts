@@ -42,6 +42,10 @@ export interface EstadioSessionLocal {
   delayMin: number;
   /** Unix seconds after which the server has dropped the session for sure. */
   endsAt: number;
+  /** The match's teams — to tell the server again what this device wants
+   *  from it when the user follows a team or flips a toggle. */
+  homeTeamId?: string | null;
+  awayTeamId?: string | null;
 }
 export type EstadioSessions = Record<string, EstadioSessionLocal>;
 
@@ -214,7 +218,12 @@ export async function startEstadio(
     action: 'start', matchId: match.id, fcmToken, delayMin, platform: platform(), confirm: opts.confirm, ...wants,
   });
   if (!res.active) throw new EstadioError('failed');
-  const session = { delayMin: res.delayMin, endsAt: res.endsAt ?? Math.floor(Date.now() / 1000) + 4 * 3600 };
+  const session: EstadioSessionLocal = {
+    delayMin: res.delayMin,
+    endsAt: res.endsAt ?? Math.floor(Date.now() / 1000) + 4 * 3600,
+    homeTeamId: match.homeTeamId ?? null,
+    awayTeamId: match.awayTeamId ?? null,
+  };
   await setSession(match.id, session);
   await AsyncStorage.setItem(LAST_DELAY_KEY, String(delayMin)).catch(() => {});
   return session;
@@ -242,8 +251,44 @@ export async function bumpEstadio(matchId: string, opts: { confirm?: boolean } =
     await setSession(matchId, null);
     return 0;
   }
-  await setSession(matchId, { delayMin: res.delayMin, endsAt: res.endsAt ?? all[matchId]?.endsAt ?? Math.floor(Date.now() / 1000) + 4 * 3600 });
+  await setSession(matchId, {
+    ...all[matchId],
+    delayMin: res.delayMin,
+    endsAt: res.endsAt ?? all[matchId]?.endsAt ?? Math.floor(Date.now() / 1000) + 4 * 3600,
+  });
   return res.delayMin;
+}
+
+/**
+ * What the device wants changed (it followed or unfollowed a team, marked a
+ * rival, flipped a notification toggle): tell the server for every match that
+ * has the mode on. Without this, a team followed mid-match would stay silent —
+ * the device is out of that match's regular pushes while the session lasts.
+ *
+ * Safe to call on every such change: with no session it only reads storage.
+ * Calls made in a burst collapse into one.
+ */
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+export function refreshEstadioWants(delayMs = 600): void {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    refreshEstadioWantsNow().catch(() => {});
+  }, delayMs);
+}
+
+export async function refreshEstadioWantsNow(): Promise<void> {
+  const all = await readEstadioSessions();
+  const ids = Object.keys(all);
+  if (!ids.length) return;
+  const fcmToken = await token();
+  for (const matchId of ids) {
+    const s = all[matchId];
+    const wants = await wantsForMatch({ id: matchId, homeTeamId: s.homeTeamId, awayTeamId: s.awayTeamId });
+    const res = await call({ action: 'refresh', matchId, fcmToken, ...wants }).catch(() => null);
+    // The server no longer has it (the match ended): stop showing it here too.
+    if (res && !res.active) await setSession(matchId, null);
+  }
 }
 
 /** The delay "me spoileó" would lead to (for labels). */

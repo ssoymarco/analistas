@@ -14,6 +14,8 @@ import { useTranslation } from 'react-i18next';
 import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
+import { useFavorites } from '../contexts/FavoritesContext';
+import { useTeamsWithFamily } from '../hooks/useTeamsWithFamily';
 import { ESTADIO_DELAYS, EstadioError } from '../services/estadio';
 import { logEvent, ANALYTICS_EVENTS } from '../services/analytics';
 import { haptics } from '../utils/haptics';
@@ -44,6 +46,13 @@ export const EstadioSheet: React.FC<Props> = ({ visible, onClose, match, matchLa
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { isMatchEstadio, getMatchEstadioDelay, startMatchEstadio, stopMatchEstadio } = useNotificationPrefs();
+
+  // Notifications of a match come from following one of its teams (or having
+  // one as a rival). Without that there is nothing to delay — say so.
+  const { followedTeamIds, isRivalTeam } = useFavorites();
+  const followedWithYouth = useTeamsWithFamily(followedTeamIds);
+  const sides = [match.homeTeamId, match.awayTeamId].filter((id): id is string => !!id).map(String);
+  const getsPushes = sides.length === 0 || sides.some(id => followedWithYouth.includes(id) || isRivalTeam(id));
 
   const active = isMatchEstadio(match.id);
   const currentDelay = getMatchEstadioDelay(match.id);
@@ -138,7 +147,7 @@ export const EstadioSheet: React.FC<Props> = ({ visible, onClose, match, matchLa
           </View>
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontSize: 18, fontWeight: '800', color: c.textPrimary }}>{t('estadioMode.title')}</Text>
-            <Text style={{ fontSize: 13, color: secondary }} numberOfLines={1}>
+            <Text style={{ fontSize: 13, color: secondary }} numberOfLines={2}>
               {t('estadioMode.matchScope', { match: matchLabel })}
             </Text>
           </View>
@@ -202,6 +211,10 @@ export const EstadioSheet: React.FC<Props> = ({ visible, onClose, match, matchLa
         {/* Bumped from a notification ("me spoileó"): neither option matches. */}
         {active && !(ESTADIO_DELAYS as readonly number[]).includes(currentDelay) && (
           <Text style={{ fontSize: 12, color: tertiary, marginTop: -8 }}>{t('estadioMode.bumpedNote', { min: currentDelay })}</Text>
+        )}
+
+        {!getsPushes && !finished && (
+          <Text style={{ fontSize: 12, lineHeight: 17, color: isDark ? '#fbbf24' : '#92400e' }}>{t('estadioMode.notFollowingNote')}</Text>
         )}
 
         {error && (

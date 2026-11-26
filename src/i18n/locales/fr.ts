@@ -1022,6 +1022,7 @@ const fr: TranslationKeys = {
     activeDetail: 'Buts, cartons, mi-temps, fin du match, rival et joueurs que vous suivez.',
     autoOffNote: 'Il se désactive tout seul à la fin du match.',
     finishedNote: 'Ce match est déjà terminé.',
+    notFollowingNote: 'Vous ne suivez aucune de ces équipes : vous ne recevez donc pas d’alertes pour ce match. Suivez-en une pour les recevoir.',
     bumpedNote: 'En ce moment : {{min}} minutes (vous avez ajouté du retard depuis une alerte).',
     pill: 'Mode Stade · alertes {{min}} min plus tard',
     errorGeneric: 'Impossible de modifier le Mode Stade. Vérifiez votre connexion et réessayez.',

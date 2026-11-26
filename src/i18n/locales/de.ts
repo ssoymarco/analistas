@@ -1022,6 +1022,7 @@ const de: TranslationKeys = {
     activeDetail: 'Tore, Karten, Halbzeit, Abpfiff, Rivale und Spieler, denen du folgst.',
     autoOffNote: 'Schaltet sich von selbst aus, wenn das Spiel endet.',
     finishedNote: 'Dieses Spiel ist bereits beendet.',
+    notFollowingNote: 'Du folgst keinem dieser Teams und bekommst daher keine Mitteilungen zu diesem Spiel. Folge einem, um sie zu erhalten.',
     bumpedNote: 'Aktuell: {{min}} Minuten (du hast über eine Mitteilung Verzögerung hinzugefügt).',
     pill: 'Stadion-Modus · Mitteilungen {{min}} Min. später',
     errorGeneric: 'Der Stadion-Modus konnte nicht geändert werden. Prüfe deine Verbindung und versuche es erneut.',

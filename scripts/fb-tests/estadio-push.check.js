@@ -233,10 +233,14 @@ const redEv = (teamId, min) => ({ time: { elapsed: min, extra: null }, team: { i
   const b1 = res.delayMin; res = await call('bump'); const b2 = res.delayMin; res = await call('bump'); const b3 = res.delayMin;
   check('callable: "me spoileó" adds 3 minutes up to 10', b1 === 8 && b2 === 10 && b3 === 10 && docs.get(sid).delayMin === 10, `${b1},${b2},${b3}`);
   topicOps.length = 0;
+  res = await call('refresh', { classes: ['goals', 'cards', 'yellow'], rivalTeamIds: ['2282'], rivalEvents: ['loss'], playerIds: ['7'] });
+  check('callable: refresh updates what the device wants, not the delay nor the start', res.active && res.delayMin === 10 && docs.get(sid).classes.join() === 'goals,cards,yellow' && docs.get(sid).rivalTeamIds.join() === '2282' && docs.get(sid).playerIds.join() === '7' && docs.get(sid).delayMin === 10 && docs.get(sid).startedAt === startedAt && topicOps.length === 0, JSON.stringify(docs.get(sid)));
   res = await call('stop');
   check('callable: stop deletes the session and releases the device', !res.active && !docs.has(sid) && topicOps.join(' ') === '-fb_hold_77 -fb_mute_77', topicOps.join(' '));
   res = await call('bump');
   check('callable: adding delay without a session does nothing', !res.active && !docs.has(sid));
+  res = await call('refresh', { classes: ['goals'] });
+  check('callable: refresh without a session creates nothing', !res.active && !docs.has(sid) && topicOps.join(' ') === '-fb_hold_77 -fb_mute_77', topicOps.join(' '));
   await call('start', { delayMin: 3 }); topicOps.length = 0;
   await call('stop', { keepMuted: true });
   check('callable: stopping because the user silenced the match keeps it muted', topicOps.join(' ') === '-fb_hold_77' && !docs.has(sid), topicOps.join(' '));

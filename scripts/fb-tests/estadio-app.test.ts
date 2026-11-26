@@ -3,7 +3,7 @@
 // The server call is replaced by a recorder; storage is in memory.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  bumpEstadio, EstadioError, forgetEstadio, getLastEstadioDelay, handleEstadioAction, readEstadioSessions,
+  bumpEstadio, EstadioError, forgetEstadio, getLastEstadioDelay, handleEstadioAction, readEstadioSessions, refreshEstadioWantsNow,
   setEstadioTransport, startEstadio, stopEstadio, stopEstadioBecauseMuted, subscribeEstadio, wantsForMatch,
 } from '../../src/services/estadio';
 import { FAVORITES_KEYS } from '../../src/services/football/legacyMigration';
@@ -88,6 +88,22 @@ async function main() {
   reply = new Error('offline');
   await stopEstadioBecauseMuted('77');
   check('mute: offline, the match still stops showing the mode', !(await readEstadioSessions())['77']);
+
+  // ── following a team with the mode already on ─────────────────────────────
+  reply = (req: any) => ({ ok: true, active: req.action !== 'stop', delayMin: req.delayMin ?? 3, endsAt: 99999999999 });
+  await set(FAVORITES_KEYS.teams, []);
+  await startEstadio(match, 3);
+  calls.length = 0;
+  await set(FAVORITES_KEYS.teams, ['2282']);
+  await refreshEstadioWantsNow();
+  check('refresh: a team followed mid-match is sent to the server for the running session', calls.length === 1 && calls[0].action === 'refresh' && calls[0].matchId === '77' && calls[0].classes.includes('goals') && calls[0].delayMin === undefined && (await readEstadioSessions())['77'].delayMin === 3, JSON.stringify(calls[0]));
+  reply = { ok: true, active: false, delayMin: 0 };
+  await refreshEstadioWantsNow();
+  check('refresh: a session the server already closed stops showing here', !(await readEstadioSessions())['77']);
+  calls.length = 0;
+  await refreshEstadioWantsNow();
+  check('refresh: with no session nobody is called', calls.length === 0);
+  await set(FAVORITES_KEYS.teams, ['2287', '16']);
 
   // ── notification buttons ──────────────────────────────────────────────────
   reply = (req: any) => ({ ok: true, active: req.action !== 'stop', delayMin: req.action === 'bump' ? 6 : (req.delayMin ?? 0), endsAt: 99999999999 });

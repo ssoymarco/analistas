@@ -22,15 +22,17 @@ export type EstadioClass = typeof ESTADIO_CLASSES[number];
 export declare const ESTADIO_RIVAL_EVENTS: readonly ["loss", "bigLoss", "redCard", "penMiss"];
 export type EstadioRivalEvent = typeof ESTADIO_RIVAL_EVENTS[number];
 export interface EstadioRequest {
-    /** `start` also changes the delay or the wanted classes of a running session. */
-    action: 'start' | 'stop' | 'bump';
+    /** `start` also changes the delay of a running session. `refresh` only
+     *  updates what the device wants (it followed a team, flipped a toggle…)
+     *  and does nothing when there is no session. */
+    action: 'start' | 'stop' | 'bump' | 'refresh';
     matchId: string;
     /** The device's FCM registration token — where the delayed pushes go. */
     fcmToken: string;
     /** start: minutes of delay (one of ESTADIO_DELAYS). */
     delayMin?: number;
-    /** start: team notifications this device has on for the match (empty when
-     *  it follows neither team). */
+    /** start / refresh: team notifications this device has on for the match
+     *  (empty when it follows neither team). */
     classes?: EstadioClass[];
     /** start: teams of this match the user marked as rivals, and which of
      *  their bad news they want. */

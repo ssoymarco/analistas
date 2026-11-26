@@ -23,6 +23,7 @@ import {
   type TeamEventClass,
 } from '../services/fcmTopics';
 import { useNotificationPrefs } from './NotificationPrefsContext';
+import { refreshEstadioWants } from '../services/estadio';
 import {
   FAVORITES_KEYS, clearPendingPlayers, migrateRemoteFavorites, readLegacyBackup, readLocalFavorites,
   resolvePendingPlayers,
@@ -162,6 +163,12 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   const leagueRef = useRef<string[]>([]);
   const rivalRef  = useRef<string[]>([]);
   const uidRef    = useRef<string | null>(null);
+
+  // A match with Modo Estadio on is served by the server from what this device
+  // follows: tell it when that changes (does nothing without a session).
+  useEffect(() => {
+    if (favoritesLoaded) refreshEstadioWants();
+  }, [followedTeamIds, followedPlayerIds, rivalTeamIds, favoritesLoaded]);
 
   // Keep refs in sync with state
   useEffect(() => { matchRef.current  = favoriteIds;       }, [favoriteIds]);

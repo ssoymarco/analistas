@@ -7,7 +7,7 @@ import { captureFirestoreRejection } from '../services/sentry';
 import { cancelAllNotificationsForMatch, PUSH_TOKEN_KEY } from '../services/notifications';
 import { forgetMatchMuteRecord, subscribeMatchMute, unsubscribeMatchMute } from '../services/fcmTopics';
 import {
-  ESTADIO_DEFAULT_DELAY, forgetEstadio, getLastEstadioDelay, readEstadioSessions, startEstadio,
+  ESTADIO_DEFAULT_DELAY, forgetEstadio, getLastEstadioDelay, readEstadioSessions, refreshEstadioWants, startEstadio,
   stopEstadio, stopEstadioBecauseMuted, subscribeEstadio,
   type EstadioMatchRef, type EstadioSessions,
 } from '../services/estadio';
@@ -223,6 +223,9 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   const uidRef   = useRef<string | null>(null);
   const tokenRef = useRef<string | null>(null);
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
+  // Un partido con Modo Estadio activo debe seguir recibiendo lo que digan los
+  // interruptores: si cambian, se le avisa al servidor (no hace nada sin sesión).
+  useEffect(() => { if (isHydrated) refreshEstadioWants(); }, [prefs, matchEventOverrides, isHydrated]);
   useEffect(() => { tokenRef.current = pushToken; }, [pushToken]);
 
   /** Guarda el token FCM del dispositivo en users/{uid}.pushToken (solo

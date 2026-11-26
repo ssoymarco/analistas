@@ -1019,6 +1019,7 @@ const tr: TranslationKeys = {
     activeDetail: 'Goller, kartlar, devre arası, maç sonu, rakip ve takip ettiğiniz oyuncular.',
     autoOffNote: 'Maç bittiğinde kendiliğinden kapanır.',
     finishedNote: 'Bu maç zaten bitti.',
+    notFollowingNote: 'Bu takımlardan hiçbirini takip etmiyorsunuz, bu yüzden bu maçın bildirimlerini almıyorsunuz. Almak için birini takip edin.',
     bumpedNote: 'Şu anda: {{min}} dakika (bir bildirimden gecikme eklediniz).',
     pill: 'Stadyum Modu · bildirimler {{min}} dk sonra',
     errorGeneric: 'Stadyum Modu değiştirilemedi. Bağlantınızı kontrol edip tekrar deneyin.',

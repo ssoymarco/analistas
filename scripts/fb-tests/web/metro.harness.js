@@ -16,6 +16,7 @@ config.resolver.resolveRequest = (ctx, name, platform) => {
   if (platform === 'web') {
     if (/^react-native-view-shot/.test(name)) return { type: 'sourceFile', filePath: path.join(W, 'viewshot-stub.js') };
     if (/^@react-native-community\/netinfo/.test(name)) return { type: 'sourceFile', filePath: path.join(W, 'netinfo-stub.js') };
+    if (/^@react-native-firebase\/messaging$/.test(name)) return { type: 'sourceFile', filePath: path.join(W, 'messaging-stub.js') };
     if (NATIVE.some(r => r.test(name))) return { type: 'sourceFile', filePath: path.join(W, 'native-stub.js') };
     if (/exports\/InteractionManager(\/index)?$/.test(name) && /react-native-web/.test(ctx.originModulePath)) {
       return { type: 'sourceFile', filePath: path.join(W, 'interaction-stub.js') };

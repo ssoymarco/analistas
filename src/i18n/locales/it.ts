@@ -1022,6 +1022,7 @@ const it: TranslationKeys = {
     activeDetail: 'Gol, cartellini, intervallo, fine partita, rivale e giocatori che segui.',
     autoOffNote: 'Si disattiva da sola quando la partita finisce.',
     finishedNote: 'Questa partita è già finita.',
+    notFollowingNote: 'Non segui nessuna di queste squadre, quindi non ricevi avvisi per questa partita. Seguine una per riceverli.',
     bumpedNote: 'In questo momento: {{min}} minuti (hai aggiunto ritardo da un avviso).',
     pill: 'Modalità Stadio · avvisi {{min}} min dopo',
     errorGeneric: 'Impossibile modificare la Modalità Stadio. Controlla la connessione e riprova.',

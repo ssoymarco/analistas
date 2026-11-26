@@ -1023,6 +1023,7 @@ const pt: TranslationKeys = {
     activeDetail: 'Gols, cartões, intervalo, fim de jogo, rival e jogadores que você segue.',
     autoOffNote: 'Desliga sozinho quando o jogo terminar.',
     finishedNote: 'Este jogo já terminou.',
+    notFollowingNote: 'Você não segue nenhum destes times, então não recebe avisos deste jogo. Siga um deles para receber.',
     bumpedNote: 'Agora: {{min}} minutos (você somou atraso a partir de um aviso).',
     pill: 'Modo Estádio · avisos {{min}} min depois',
     errorGeneric: 'Não foi possível alterar o Modo Estádio. Verifique sua conexão e tente novamente.',

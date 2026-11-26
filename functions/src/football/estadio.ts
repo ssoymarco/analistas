@@ -364,8 +364,8 @@ export async function handleEstadio(raw: unknown, uid: string | null): Promise<E
   const token = String(req.fcmToken ?? '');
   if (!/^\d{1,12}$/.test(matchId)) throw new HttpsError('invalid-argument', 'matchId');
   if (token.length < 20 || token.length > 4096 || /\s/.test(token)) throw new HttpsError('invalid-argument', 'fcmToken');
-  if (req.action !== 'start' && req.action !== 'stop' && req.action !== 'bump') {
-    throw new HttpsError('invalid-argument', "action must be 'start' | 'stop' | 'bump'");
+  if (req.action !== 'start' && req.action !== 'stop' && req.action !== 'bump' && req.action !== 'refresh') {
+    throw new HttpsError('invalid-argument', "action must be 'start' | 'stop' | 'bump' | 'refresh'");
   }
 
   const nowSec = Math.floor(Date.now() / 1000);
@@ -402,19 +402,32 @@ export async function handleEstadio(raw: unknown, uid: string | null): Promise<E
     return { ok: true, active: true, delayMin, endsAt: prev.endsAt };
   }
 
-  // start (or change the delay / wanted classes of a running session)
+  const teamIds = match ? [String(match.homeTeam.id), String(match.awayTeam.id)] : null;
+  const wants = {
+    classes: cleanList(req.classes, ESTADIO_CLASSES),
+    rivalTeamIds: cleanIds(req.rivalTeamIds, 2).filter(id => !teamIds || teamIds.includes(id)),
+    rivalEvents: cleanList(req.rivalEvents, ESTADIO_RIVAL_EVENTS),
+    playerIds: cleanIds(req.playerIds, MAX_PLAYERS),
+  };
+
+  // The device now follows a team of the match, or flipped a notification
+  // toggle: the session must deliver what the topics would. Delay and start
+  // stay as they are.
+  if (req.action === 'refresh') {
+    if (!prev || prev.endsAt <= nowSec) return { ok: true, active: false, delayMin: 0 };
+    await ref.update({ ...wants, updatedAt: nowSec });
+    return { ok: true, active: true, delayMin: prev.delayMin, endsAt: prev.endsAt };
+  }
+
+  // start (or change the delay of a running session)
   const delayMin = Number(req.delayMin);
   if (!(ESTADIO_DELAYS as readonly number[]).includes(delayMin)) throw new HttpsError('invalid-argument', 'delayMin');
   if (!match) throw new HttpsError('not-found', 'match');
   if (isFinishedShort(match.statusShort)) throw new HttpsError('failed-precondition', 'match-finished');
 
-  const teamIds = [String(match.homeTeam.id), String(match.awayTeam.id)];
   const session: Omit<EstadioSession, 'id'> = {
     matchId, token, delayMin,
-    classes: cleanList(req.classes, ESTADIO_CLASSES),
-    rivalTeamIds: cleanIds(req.rivalTeamIds, 2).filter(id => teamIds.includes(id)),
-    rivalEvents: cleanList(req.rivalEvents, ESTADIO_RIVAL_EVENTS),
-    playerIds: cleanIds(req.playerIds, MAX_PLAYERS),
+    ...wants,
     platform: req.platform === 'ios' || req.platform === 'android' ? req.platform : 'unknown',
     uid,
     startedAt: prev && prev.endsAt > nowSec ? prev.startedAt : nowSec,
