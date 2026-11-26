@@ -11,8 +11,8 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  countFixturesByDate, dayNeedsRequest, getTeamsFixturesByDate, groupMatchesByLeague, requestDayIfUnsynced,
-  subscribeFixturesByDate, subscribeOtherFixturesByDate, type LeagueWithMatches,
+  countFixturesByDate, dayNeedsRequest, groupMatchesByLeague, requestDayIfUnsynced,
+  subscribeFixturesByDate, subscribeOtherFixturesByDate, subscribeTeamsFixturesByDate, type LeagueWithMatches,
 } from '../services/football/matches';
 import { sortForDisplay } from '../services/football/mappers';
 import type { Match } from '../data/types';
@@ -103,15 +103,13 @@ export function useFixtures(date: string, followedTeamIds: string[] = []): UseFi
     return () => { cancelled = true; unsubscribe(); };
   }, [date]);
 
-  // Followed teams playing in leagues outside the curated set.
+  // Followed teams playing in leagues outside the curated set — live too.
   const teamsKey = followedTeamIds.join(',');
   useEffect(() => {
     if (!followedTeamIds.length) { setMine([]); return; }
-    let cancelled = false;
-    getTeamsFixturesByDate(followedTeamIds, date)
-      .then(list => { if (!cancelled && isMounted.current) setMine(list); })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    return subscribeTeamsFixturesByDate(followedTeamIds, date, list => {
+      if (isMounted.current) setMine(list);
+    });
   }, [date, teamsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Other tier — on demand.
@@ -140,7 +138,7 @@ export function useFixtures(date: string, followedTeamIds: string[] = []): UseFi
     const byId = new Map<string, Match>();
     for (const m of mine) byId.set(m.id, m);
     for (const m of other) byId.set(m.id, m);
-    for (const m of curated) byId.set(m.id, m); // live listeners win over the one-shot
+    for (const m of curated) byId.set(m.id, m);
     return [...byId.values()].sort(sortForDisplay);
   }, [curated, other, mine]);
 

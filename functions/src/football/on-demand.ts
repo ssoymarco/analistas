@@ -88,9 +88,49 @@ async function remainingToday(nowMs: number): Promise<number> {
   return sameUtcDay(q.at, nowMs) ? q.remainingDay : (q.limitDay || Number.POSITIVE_INFINITY);
 }
 
-export async function budgetAllows(cost: number, nowMs: number): Promise<boolean> {
+/** Calls kept free every minute for the live poller (the plan allows 300/min). */
+const MINUTE_RESERVE = 80;
+/** Extra headroom low-priority work (search) must leave for pages and matches. */
+const LOW_PRIORITY_MARGIN = 500;
+
+export async function budgetAllows(cost: number, nowMs: number, margin = 0): Promise<boolean> {
+  // Per-minute limit, shared with the poller: back off when this instance's
+  // last reading (if recent) shows the minute is nearly spent.
+  if (quotaState.observedAt > 0 && Date.now() - quotaState.observedAt < 60_000
+    && Number.isFinite(quotaState.remainingMinute) && quotaState.remainingMinute - cost < MINUTE_RESERVE) {
+    return false;
+  }
   const remaining = await remainingToday(nowMs);
-  return remaining - cost >= onDemandReserve(nowMs);
+  return remaining - cost - margin >= onDemandReserve(nowMs);
+}
+
+// ── Single flight ────────────────────────────────────────────────────────────
+
+/**
+ * Requests for the same thing that arrive while one is being built (a big
+ * match's preview expiring with thousands of people on it) share that one
+ * build instead of each calling the provider. Per instance — enough, since an
+ * instance serves many concurrent requests.
+ */
+const inflight = new Map<string, Promise<unknown>>();
+
+function singleFlight<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const running = inflight.get(key) as Promise<T> | undefined;
+  if (running) return running;
+  const p = run().finally(() => { inflight.delete(key); });
+  inflight.set(key, p);
+  return p;
+}
+
+// ── Unknown ids ──────────────────────────────────────────────────────────────
+
+/** How long an id the provider doesn't know is answered without asking again. */
+const NOT_FOUND_TTL_MS = 6 * 3600_000;
+const notFoundRef = (path: string) => db.doc(`${COL.meta}/nf_${path.replace(/[^A-Za-z0-9_]/g, '_')}`);
+
+async function isKnownMissing(path: string, nowMs: number): Promise<boolean> {
+  const s = await notFoundRef(path).get().catch(() => null);
+  return !!s?.exists && nowMs < Number(s.data()?.expiresAt ?? 0);
 }
 
 async function persistQuota(): Promise<void> {
@@ -117,18 +157,31 @@ interface BuildResult<T> {
  *  - on a provider failure or an exhausted budget the stale doc is returned
  *    when there is one.
  */
-async function cached<T extends FbCached>(
+function cached<T extends FbCached>(
   path: string,
   nowMs: number,
   cost: number,
   build: (prev: T | null) => Promise<BuildResult<T>>,
+  margin = 0,
+): Promise<T> {
+  return singleFlight(path, () => buildCached(path, nowMs, cost, build, margin));
+}
+
+async function buildCached<T extends FbCached>(
+  path: string,
+  nowMs: number,
+  cost: number,
+  build: (prev: T | null) => Promise<BuildResult<T>>,
+  margin: number,
 ): Promise<T> {
   const ref = db.doc(path);
   const snap = await ref.get();
   const prev = (snap.exists ? snap.data() : null) as T | null;
   if (prev && !isExpired(prev, nowMs)) return prev;
+  // An id the provider recently said it doesn't have: don't pay to hear it again.
+  if (!prev && await isKnownMissing(path, nowMs)) throw new HttpsError('not-found', 'Not found');
 
-  if (!(await budgetAllows(cost, nowMs))) {
+  if (!(await budgetAllows(cost, nowMs, margin))) {
     if (prev) return prev;
     logger.warn('fbOnDemand: quota reserve reached', { path, cost, reserve: onDemandReserve(nowMs) });
     throw new HttpsError('resource-exhausted', 'Daily data budget reached — try again later.');
@@ -141,6 +194,9 @@ async function cached<T extends FbCached>(
     await persistQuota();
     if (err instanceof HttpsError) {
       if (prev && err.code !== 'not-found' && err.code !== 'invalid-argument') return prev;
+      if (!prev && err.code === 'not-found') {
+        await notFoundRef(path).set({ path, at: nowMs, expiresAt: nowMs + NOT_FOUND_TTL_MS }).catch(() => {});
+      }
       throw err;
     }
     if (prev) {
@@ -222,10 +278,19 @@ async function readMatch(id: number): Promise<MatchResult> {
  * the live poller; this covers everything else (minor leagues, fixtures older
  * than the sync window, lineups before kickoff).
  */
-export async function ensureMatch(id: number, nowMs: number): Promise<MatchResult> {
+export function ensureMatch(id: number, nowMs: number): Promise<MatchResult> {
+  return singleFlight(`match:${id}`, () => buildMatch(id, nowMs));
+}
+
+async function buildMatch(id: number, nowMs: number): Promise<MatchResult> {
   const cur = await readMatch(id);
   if (!matchDetailNeedsFetch(cur.match, cur.detail, nowMs)) return cur;
-  if (!(await budgetAllows(1, nowMs))) return cur;
+  if (!cur.match && await isKnownMissing(`${COL.matches}/${id}`, nowMs)) throw new HttpsError('not-found', 'Unknown fixture');
+  // Said out loud (not a silent "nothing new") so the app backs off instead of
+  // asking again every minute while the budget is spent.
+  if (!(await budgetAllows(1, nowMs))) {
+    throw new HttpsError('resource-exhausted', 'Daily data budget reached — try again later.');
+  }
 
   let list: AfFixtureFull[];
   try {
@@ -238,7 +303,10 @@ export async function ensureMatch(id: number, nowMs: number): Promise<MatchResul
   const f = list[0];
   if (!f) {
     await persistQuota();
-    if (!cur.match) throw new HttpsError('not-found', 'Unknown fixture');
+    if (!cur.match) {
+      await notFoundRef(`${COL.matches}/${id}`).set({ at: nowMs, expiresAt: nowMs + NOT_FOUND_TTL_MS }).catch(() => {});
+      throw new HttpsError('not-found', 'Unknown fixture');
+    }
     return cur;
   }
 
@@ -289,7 +357,10 @@ export async function ensureDay(dateArg: unknown, nowMs: number): Promise<DayRes
   }
   // Inside the window the schedule owns the date.
   if (!isOutsideSyncWindow(date, nowMs)) return { date, fixtures: 0, synced: false };
+  return singleFlight(`day:${date}`, () => buildDay(date, off, nowMs));
+}
 
+async function buildDay(date: string, off: number, nowMs: number): Promise<DayResult> {
   const ref = db.doc(`${COL.meta}/day_${date}`);
   const snap = await ref.get();
   const prev = (snap.exists ? snap.data() : null) as { syncedAt?: number; fixtures?: number } | null;
@@ -573,6 +644,7 @@ export async function ensureSearch(rawQuery: unknown, nowMs: number): Promise<Fb
   const q = normalizeSearch(rawQuery);
   if (q.length < 3) throw new HttpsError('invalid-argument', 'search needs at least 3 letters');
   const key = q.replace(/ /g, '_');
+  // Lowest priority: search only spends what pages and matches won't need.
   return cached<FbSearchDoc>(`${COL.search}/${key}`, nowMs, 2, async () => {
     const tokens = q.split(' ').filter(t => t.length >= 3);
     // API-Sports matches players by surname: search the last usable word and
@@ -599,7 +671,7 @@ export async function ensureSearch(rawQuery: unknown, nowMs: number): Promise<Fb
     const doc = { q, teams: mapSearchTeams(teamRows), players: mapSearchPlayers(ranked) };
     const empty = !doc.teams.length && !doc.players.length;
     return { doc, ttlMs: empty ? FbTtl.empty : FbTtl.search };
-  });
+  }, LOW_PRIORITY_MARGIN);
 }
 
 // ── legacy player ids (favorites migration) ──────────────────────────────────
@@ -668,6 +740,9 @@ async function resolveLegacyPlayer(smId: string): Promise<{ afId: string | null;
   return { afId: null, name };
 }
 
+/** Time one legacyPlayers request may spend on provider lookups. */
+const LEGACY_LOOKUP_BUDGET_MS = 15_000;
+
 export async function mapLegacyPlayers(idsArg: unknown, nowMs: number): Promise<Record<string, string | null>> {
   if (!Array.isArray(idsArg) || idsArg.length === 0 || idsArg.length > 40) {
     throw new HttpsError('invalid-argument', 'ids must be 1-40 player ids');
@@ -690,8 +765,13 @@ export async function mapLegacyPlayers(idsArg: unknown, nowMs: number): Promise<
       if (d && (d.afId || nowMs - d.resolvedAt < 7 * DAY_MS)) out[pending[i]] = d.afId;
       else todo.push(pending[i]);
     });
+    const startedAt = Date.now();
     for (const id of todo) {
-      if (!(await budgetAllows(3, nowMs))) break; // leave the rest for a later launch
+      // Up to 7 calls each (two surname searches of three pages + a squad). The
+      // rest is left for a later launch when the budget or the caller's
+      // patience (its request times out at 25 s) runs short.
+      if (Date.now() - startedAt > LEGACY_LOOKUP_BUDGET_MS) break;
+      if (!(await budgetAllows(7, nowMs, LOW_PRIORITY_MARGIN))) break;
       let res: { afId: string | null; name: string | null };
       try {
         res = await resolveLegacyPlayer(id);

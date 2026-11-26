@@ -292,27 +292,42 @@ export function useLeagueDetail(
             setLoading(false);
           }
 
-          const fixtures = toFixtures(await fixturesPromise, resolvedSeasonId);
-          if (cancelled) return;
-          setData(prev => merge(prev, { fixtures }));
-          setLoading(false);
-          if (fixtures.length > 0) sessionFixtures.set(resolvedSeasonId, fixtures);
-
-          const [standingsRaw, top] = await metaPromise;
-          if (cancelled) return;
-          const standings = standingsRaw.map(toStandingRow);
-          const fromTable = teamsFromStandings(standings);
-          const teams = (fromTable.length ? fromTable : teamsFromFixtures(fixtures))
-            .sort((a, b) => a.name.localeCompare(b.name));
-          const meta: CachedMeta = {
-            standings,
-            topScorers: toTopRows(top.goals, TOP_TYPE.goals),
-            topAssists: toTopRows(top.assists, TOP_TYPE.assists),
-            topCards: toTopRows(top.cards, TOP_TYPE.cards),
-            teams,
+          // Each half paints as soon as it arrives, in whichever order.
+          let fixtures: LeagueDetailData['fixtures'] = [];
+          let fixturesDone = false;
+          let metaRaw: readonly [LeagueStanding[], TopPlayersByCategory] | null = null;
+          const paintMeta = () => {
+            if (!metaRaw || cancelled) return;
+            const [standingsRaw, top] = metaRaw;
+            const standings = standingsRaw.map(toStandingRow);
+            const fromTable = teamsFromStandings(standings);
+            // A cup without a table lists its teams from the calendar: wait for it.
+            if (!fromTable.length && !fixturesDone) return;
+            const teams = (fromTable.length ? fromTable : teamsFromFixtures(fixtures))
+              .sort((x, y) => x.name.localeCompare(y.name));
+            const meta: CachedMeta = {
+              standings,
+              topScorers: toTopRows(top.goals, TOP_TYPE.goals),
+              topAssists: toTopRows(top.assists, TOP_TYPE.assists),
+              topCards: toTopRows(top.cards, TOP_TYPE.cards),
+              teams,
+            };
+            setData(prev => merge(prev, { ...meta, metaLoaded: true }));
+            AppCache.set(metaKey, meta, CacheTTL.detailScheduled).catch(() => {});
           };
-          setData(prev => merge(prev, { ...meta, metaLoaded: true }));
-          AppCache.set(metaKey, meta, CacheTTL.detailScheduled).catch(() => {});
+
+          await Promise.all([
+            fixturesPromise.then(raw => {
+              fixtures = toFixtures(raw, resolvedSeasonId);
+              fixturesDone = true;
+              if (cancelled) return;
+              setData(prev => merge(prev, { fixtures }));
+              setLoading(false);
+              if (fixtures.length > 0) sessionFixtures.set(resolvedSeasonId, fixtures);
+              paintMeta();
+            }),
+            metaPromise.then(raw => { metaRaw = raw; paintMeta(); }),
+          ]);
         } catch (err: unknown) {
           if (cancelled) return;
           const message = err instanceof Error ? err.message : 'Error loading league';

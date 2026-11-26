@@ -26,16 +26,38 @@ const HOUR = 3600;
 /**
  * Every fixture of a team in a season (all competitions), chronological, with
  * today's scores overlaid from the live collection.
+ *
+ * `season` is the provider's season label, and competitions label the same
+ * months differently (a Liga MX club plays "2026" at home and the "2027"
+ * CONCACAF Champions Cup in the same spring) — pass every label the team is
+ * playing under to get its whole calendar.
  */
-export async function getTeamFixtures(teamId: number | string, season: number): Promise<Match[]> {
-  const docData = await loadCached<FbTeamFixturesDoc>(
-    `fb_team_fixtures/${teamId}_${season}`,
-    { kind: 'teamFixtures', id: teamId, season },
-  );
-  const base = (docData.fixtures ?? []).map(f => matchFromLite(f, {}));
+export async function getTeamFixtures(teamId: number | string, season: number | number[]): Promise<Match[]> {
+  const seasons = [...new Set(Array.isArray(season) ? season : [season])].filter(Boolean);
+  const docs = await Promise.all(seasons.map((year, i) =>
+    loadCached<FbTeamFixturesDoc>(`fb_team_fixtures/${teamId}_${year}`, { kind: 'teamFixtures', id: teamId, season: year })
+      // The first label is the team's own league: without it there is no calendar.
+      .catch(err => { if (i === 0) throw err; return null; })));
+  const byId = new Map<string, Match>();
+  for (const d of docs) for (const f of d?.fixtures ?? []) byId.set(String(f.id), matchFromLite(f, {}));
+  const base = [...byId.values()].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
   const nowSec = Math.floor(Date.now() / 1000);
   const fresh = await getTeamsFixturesBetween([String(teamId)], nowSec - 36 * HOUR, nowSec + 36 * HOUR).catch(() => []);
   return overlayMatches(base, fresh);
+}
+
+/** How many season labels a team's current calendar may span. */
+const MAX_CALENDAR_SEASONS = 3;
+
+/**
+ * The season labels that make up a team's current calendar: its main league's
+ * first, then those of the other competitions it is playing (newest first).
+ */
+export function currentSeasonLabels(team: Pick<FbTeamDoc, 'season' | 'leagues'>): number[] {
+  const others = [...new Set((team.leagues ?? []).map(l => l.season))]
+    .filter(y => y && y !== team.season)
+    .sort((a, b) => b - a);
+  return [...(team.season ? [team.season] : []), ...others].slice(0, MAX_CALENDAR_SEASONS);
 }
 
 /** Season statistics of a team in one competition (null when the provider has none). */

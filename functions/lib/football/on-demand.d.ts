@@ -29,7 +29,7 @@ import type { FbCached, FbCoachDoc, FbLeagueDoc, FbLeagueFixturesDoc, FbMatchDet
  * the day goes by and the real polling stays under the worst case.
  */
 export declare function onDemandReserve(nowMs: number): number;
-export declare function budgetAllows(cost: number, nowMs: number): Promise<boolean>;
+export declare function budgetAllows(cost: number, nowMs: number, margin?: number): Promise<boolean>;
 /** Lowercase ASCII letters/digits/spaces — the only characters API-Sports' search accepts. */
 export declare function normalizeSearch(raw: unknown): string;
 export interface MatchResult {

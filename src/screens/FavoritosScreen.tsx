@@ -29,8 +29,11 @@ import {
   getAllSearchableTeams,
   getSearchablePlayers,
   getSearchableLeagues,
+  getAllSearchableLeagues,
   searchRemote,
   rankByQuery,
+  resolveFollowedTeams,
+  resolveFollowedPlayers,
   type SearchableTeam,
   type SearchablePlayer,
   type SearchableLeague,
@@ -500,6 +503,7 @@ export const FavoritosScreen: React.FC = () => {
   const [smPlayers, setSmPlayers] = useState<SearchablePlayer[]>([]);
   const [smLeagues, setSmLeagues] = useState<SearchableLeague[]>([]);
   const [loading, setLoading]     = useState(true);
+  const [teamIndexLoaded, setTeamIndexLoaded] = useState(false);
 
   // ── Load the searchable lists ──
   useEffect(() => {
@@ -515,8 +519,63 @@ export const FavoritosScreen: React.FC = () => {
     // so a followed club outside the popular list still shows in MIS SEGUIDOS.
     getAllSearchableTeams()
       .then(full => { setSmTeams(prev => (full.length > prev.length ? full : prev)); })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setTeamIndexLoaded(true));
   }, []);
+
+  // ── Follows the lists above don't include ──
+  // A lower-league club, a squad player followed from his page, a follow
+  // carried over from the previous data source: without their name and picture
+  // they would be missing from MIS SEGUIDOS (and impossible to unfollow here).
+  const smTeamIdsKey = useMemo(() => smTeams.map(t => t.id).join(','), [smTeams]);
+  useEffect(() => {
+    if (!teamIndexLoaded) return;
+    const known = new Set(smTeams.map(t => String(t.id)));
+    const missing = followedTeamIds.filter(id => !known.has(String(id)));
+    if (!missing.length) return;
+    let cancelled = false;
+    resolveFollowedTeams(missing.map(String)).then(found => {
+      if (cancelled || !found.length) return;
+      setSmTeams(prev => {
+        const ids = new Set(prev.map(t => t.id));
+        const extras = found.filter(t => !ids.has(t.id));
+        return extras.length ? [...prev, ...extras] : prev;
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [teamIndexLoaded, followedTeamIds, smTeamIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Followed leagues outside the curated list come from the full catalog.
+  useEffect(() => {
+    const known = new Set(smLeagues.map(l => String(l.id)));
+    const missing = new Set(followedLeagueIds.map(String).filter(id => !known.has(id)));
+    if (!missing.size || !smLeagues.length) return;
+    let cancelled = false;
+    getAllSearchableLeagues().then(all => {
+      if (cancelled) return;
+      const extras = all.filter(l => missing.has(String(l.id)));
+      if (extras.length) setSmLeagues(prev => [...prev, ...extras.filter(l => !prev.some(p => p.id === l.id))]);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [followedLeagueIds, smLeagues.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const smPlayerIdsKey = useMemo(() => smPlayers.map(p => p.id).join(','), [smPlayers]);
+  useEffect(() => {
+    if (loading) return;
+    const known = new Set(smPlayers.map(p => String(p.id)));
+    const missing = followedPlayerIds.filter(id => !known.has(String(id)));
+    if (!missing.length) return;
+    let cancelled = false;
+    resolveFollowedPlayers(missing.map(String)).then(found => {
+      if (cancelled || !found.length) return;
+      setSmPlayers(prev => {
+        const ids = new Set(prev.map(p => p.id));
+        const extras = found.filter(p => !ids.has(p.id));
+        return extras.length ? [...prev, ...extras] : prev;
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [loading, followedPlayerIds, smPlayerIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Remote search ──
   // Any club or player beyond the local lists: the backend searches the full

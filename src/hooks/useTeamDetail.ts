@@ -12,7 +12,7 @@ import { useState, useEffect, useRef } from 'react';
 import { getLeagueConfig } from '../config/leagues';
 import { parseSeasonId } from '../services/football/catalog';
 import { getStandings } from '../services/football/leagueData';
-import { getTeam, getTeamFixtures } from '../services/football/teams';
+import { currentSeasonLabels, getTeam, getTeamFixtures } from '../services/football/teams';
 import { localizeCityName } from '../utils/cityI18n';
 import { translateLeagueCountry } from '../utils/nationalTeams';
 import { fbSeasonKey, type FbTeamDoc } from '../../functions/src/shared/football/model';
@@ -210,12 +210,23 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
     setData(null);
 
     const build = async (team: FbTeamDoc, withExtras: boolean) => {
-      // Which competition/season drives the table and the calendar: the one the
-      // caller asked for (season picker), else the team's main league.
+      // Which competition/season the page is about. A club is always shown in
+      // its own league — opening América from a Champions Cup match must not
+      // turn the cup into "its league". The caller's season only applies when
+      // it is that same league (an older season picked in the league screen)
+      // or the team is a national team (seen from the World Cup, a qualifier…).
+      const primaryLeagueId = Number(team.primaryLeagueId) || 0;
       const requested = parseSeasonId(seasonId);
-      const leagueId = requested?.leagueId ?? (Number(team.primaryLeagueId) || 0);
-      const season = requested?.season ?? team.season ?? null;
+      const useRequested = !!requested && (team.national || !primaryLeagueId || requested.leagueId === primaryLeagueId);
+      const leagueId = useRequested ? requested!.leagueId : primaryLeagueId;
+      const season = (useRequested ? requested!.season : team.season) ?? null;
       const seasonKey = leagueId && season ? fbSeasonKey(leagueId, season) : null;
+      // The calendar: every competition the team is playing now — or, for an
+      // older season of its league, that season alone.
+      const historical = useRequested && !team.national && !!team.season && season !== team.season;
+      const calendarSeasons = historical || !team.season
+        ? (season ? [season] : [])
+        : [...new Set([...(season ? [season] : []), ...currentSeasonLabels(team)])].slice(0, 3);
       const leagueName = getLeagueConfig(leagueId)?.name
         ?? team.leagues.find(l => Number(l.leagueId) === leagueId)?.name
         ?? team.primaryLeagueName ?? '';
@@ -228,7 +239,9 @@ export function useTeamDetail(teamId: number, seasonId?: number): UseTeamDetailR
       }
 
       const [fixtures, standings] = await Promise.all([
-        season ? getTeamFixtures(teamId, season).catch(() => [] as Match[]) : Promise.resolve([] as Match[]),
+        calendarSeasons.length
+          ? getTeamFixtures(teamId, calendarSeasons).catch(() => [] as Match[])
+          : Promise.resolve([] as Match[]),
         seasonKey ? getStandings(seasonKey).catch(() => [] as LeagueStanding[]) : Promise.resolve([] as LeagueStanding[]),
       ]);
       if (!alive()) return;

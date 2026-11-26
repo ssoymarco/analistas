@@ -163,8 +163,9 @@ export function translateLegacyFavorites(legacy: Partial<FavoriteLists>): Transl
 /** Ask the backend to translate legacy player ids. Unknown ones come back null. */
 export async function resolveLegacyPlayers(legacyIds: string[]): Promise<Record<string, string | null>> {
   const out: Record<string, string | null> = {};
-  for (let i = 0; i < legacyIds.length; i += 40) {
-    const chunk = legacyIds.slice(i, i + 40);
+  // Small batches: each id can take the backend a few seconds.
+  for (let i = 0; i < legacyIds.length; i += 10) {
+    const chunk = legacyIds.slice(i, i + 10);
     const res = await callOnDemand<Record<string, string | null>>({ kind: 'legacyPlayers', ids: chunk });
     Object.assign(out, res);
   }

@@ -392,16 +392,42 @@ export function standingsFromFb(doc: FbStandingsDoc | null | undefined): LeagueS
   return groups.flatMap((g, i) => standingsOfGroup(g, i + 1, groupDisplayName(g.name, i)));
 }
 
+/** Order of the halves of a split season ("Liga MX: Apertura" / "Liga MX: Clausura"). 0 = not a half. */
+function phaseRank(name: string): number {
+  if (/apertura|opening|1st|first/i.test(name)) return 1;
+  if (/clausura|closing|2nd|second/i.test(name)) return 2;
+  return 0;
+}
+
+const hasStarted = (g: FbStandingsGroup) => g.rows.some(r => (r.played ?? 0) > 0);
+const teamSetKey = (g: FbStandingsGroup) => g.rows.map(r => String(r.team.id)).sort().join(',');
+
 /**
  * The tables to show as "the" standings: the provider's groups in order,
  * skipping any that repeats teams already listed (overall/aggregate tables
  * that come after the per-conference or per-phase ones).
+ *
+ * A split season lists both halves with the same teams: the one to show is the
+ * half being played — the latest that has started — whatever order they come in.
  */
 export function primaryGroups(doc: FbStandingsDoc | null | undefined): FbStandingsGroup[] {
   const seen = new Set<string>();
   const out: FbStandingsGroup[] = [];
   for (const g of doc?.groups ?? []) {
-    if (!g.rows.length || g.rows.some(r => seen.has(String(r.team.id)))) continue;
+    if (!g.rows.length) continue;
+    if (g.rows.some(r => seen.has(String(r.team.id)))) {
+      const rank = phaseRank(g.name);
+      const i = rank ? out.findIndex(o => phaseRank(o.name) > 0 && teamSetKey(o) === teamSetKey(g)) : -1;
+      if (i >= 0) {
+        const cur = out[i];
+        const curRank = phaseRank(cur.name);
+        const better = hasStarted(g) !== hasStarted(cur)
+          ? hasStarted(g)                                   // the half that has matches played
+          : hasStarted(g) ? rank > curRank : rank < curRank; // both running → later; none → first
+        if (better) out[i] = g;
+      }
+      continue;
+    }
     for (const r of g.rows) seen.add(String(r.team.id));
     out.push(g);
   }

@@ -88,8 +88,9 @@ const TeamLogo: React.FC<{ uri: string; size: number; radius?: number }> = ({ ur
 // ── Form badges — score bubbles (new design) ─────────────────────────────────
 const FormBadges: React.FC<{ form: FormEntry[]; recentMatches: RecentMatch[] }> = ({ form, recentMatches }) => {
   const colors = { W: '#10b981', D: '#f59e0b', L: '#ef4444' };
-  // Build score label from matching finished matches
-  const finished = recentMatches.filter(m => m.result !== null).slice(0, 5);
+  // Score labels of the same matches `form` was built from: the list is
+  // chronological, so the five most recent results are its tail.
+  const finished = recentMatches.filter(m => m.result !== null).slice(-form.length || -5);
   return (
     <View style={{ flexDirection: 'row', gap: 4 }}>
       {form.map((f, i) => {
@@ -133,7 +134,8 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
   // playing today at 20:00 was shown as "Último Partido").
   const today = new Date().toISOString().split('T')[0];
   const pastMatches = data.recentMatches.filter(m => m.isFinished);
-  const lastMatch   = pastMatches[0] ?? null;
+  // The list is chronological (whole season): the last played match is its tail.
+  const lastMatch   = pastMatches[pastMatches.length - 1] ?? null;
 
   // Nearest upcoming: filter raw recentMatches for non-finished, sort ASC.
   const upcomingSorted = data.recentMatches
@@ -684,7 +686,8 @@ const PartidosTab: React.FC<{
   // próximos, todas las competencias). Sin chips de filtro: cada fila muestra
   // su propia competencia (feedback dueño 11-jul-2026).
   const upcoming = data.recentMatches.filter(m => !m.isFinished && m.date >= today);
-  const previous = data.recentMatches.filter(m => m.isFinished || m.date < today);
+  // Results: most recent first.
+  const previous = data.recentMatches.filter(m => m.isFinished || m.date < today).reverse();
 
   const goToMatch = useCallback((m: RecentMatch) => {
     // The calendar row carries the full match (right competition, status,

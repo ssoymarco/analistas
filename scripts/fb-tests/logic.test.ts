@@ -105,6 +105,17 @@ const check = (name: string, ok: boolean, detail = '') => { if (!ok) failures++;
   ] } as any);
   check('standings: conference tables kept, repeated overall table skipped', overall.length === 2 && overall[0].groupName === 'Conferencia Este' && overall[1].groupName === 'Conferencia Oeste');
 
+  // Split season: both halves list the same teams — show the one being played.
+  const half = (name: string, played: number) => ({ name, rows: ['1', '2'].map((id, i) => ({ position: i + 1, team: { id, name: 'T' + id, shortName: 'T' + id, logo: '' }, played, won: 0, drawn: played, lost: 0, goalsFor: 0, goalsAgainst: 0, goalDifference: 0, points: played, form: null, description: null })) });
+  const split = (groups: any[]) => standingsFromFb({ leagueId: '262', season: 2026, groups } as any);
+  check('standings: Apertura while the Clausura has not started', split([half('Liga MX: Apertura', 17), half('Liga MX: Clausura', 0)])[0].played === 17 && split([half('Liga MX: Clausura', 0), half('Liga MX: Apertura', 17)])[0].played === 17);
+  check('standings: Clausura once it is being played, in either order', split([half('Liga MX: Apertura', 17), half('Liga MX: Clausura', 3)])[0].played === 3 && split([half('Liga MX: Clausura', 3), half('Liga MX: Apertura', 17)])[0].played === 3);
+  check('standings: one table per split season, not two', split([half('Liga MX: Apertura', 17), half('Liga MX: Clausura', 3)]).length === 2);
+
+  // ── search ordering
+  const ranked = Search.rankByQuery(['Cultural Leonesa', 'Sierra Leone', 'León', 'Leones Negros', 'Napoleon FC'], 'leon', x => x);
+  check('search: exact name first, word starts next, mid-word last', ranked[0] === 'León' && ranked[ranked.length - 1] === 'Napoleon FC' && ranked[1] === 'Cultural Leonesa', ranked.join(' | '));
+
   // ── freshness rules shared with the server
   const now = Date.now(), nowSec = Math.floor(now / 1000);
   check('freshness: far-future match needs no fetch; lineups window does', !matchDetailNeedsFetch({ statusShort: 'NS', timestamp: nowSec + 6 * 3600, popularity: 100 }, null, now) && matchDetailNeedsFetch({ statusShort: 'NS', timestamp: nowSec + 1800, popularity: 100 }, null, now));

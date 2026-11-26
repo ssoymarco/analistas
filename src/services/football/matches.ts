@@ -144,6 +144,14 @@ function makeCacheWriter(key: string): { write: (data: Match[]) => void; flush: 
 
 // ── Day lists ────────────────────────────────────────────────────────────────
 
+/**
+ * Without a connection the SDK eventually answers a new listener from its
+ * local cache — empty, on a cold start. That means "unknown", not "there are
+ * no matches": it must neither replace what is on screen nor be persisted.
+ */
+const isOfflineEmpty = (snap: { empty: boolean; metadata: { fromCache: boolean } }) =>
+  snap.empty && snap.metadata.fromCache;
+
 type Tier = 'curated' | 'other';
 
 const inTier = (m: Match, tier: Tier) =>
@@ -180,15 +188,25 @@ function subscribeDayTier(
   const cacheKey = `day:${localDate}:${tier}`;
   const cache = useCache ? makeCacheWriter(cacheKey) : null;
   let live = false;
+  let painted = false;
   let closed = false;
   let unsub: Unsubscribe = () => {};
   pruneDayCaches();
-  if (useCache) readMatchCache(cacheKey).then(cached => { if (cached && !live && !closed) onChange(cached); });
+  if (useCache) {
+    readMatchCache(cacheKey).then(cached => {
+      if (cached && !live && !closed) { painted = true; onChange(cached); }
+    });
+  }
 
   const listen = (indexed: boolean) => {
     unsub = onSnapshot(
       dayQuery(localDate, indexed ? tier : null),
       snap => {
+        if (isOfflineEmpty(snap)) {
+          // Let the screen leave its loading state, unless the saved copy is showing.
+          if (!painted && !live) onChange([]);
+          return;
+        }
         live = true;
         let matches = snap.docs.map(d => matchFromFb(d.data() as FbMatchDoc));
         if (!indexed) matches = matches.filter(m => inTier(m, tier));
@@ -330,6 +348,45 @@ export function getTeamsFixturesByDate(teamIds: string[], localDate: string): Pr
   return getTeamsFixturesBetween(teamIds, start, end);
 }
 
+/**
+ * Real-time version of `getTeamsFixturesByDate`: the day's matches of the
+ * followed teams, whatever their league — so a followed club of a league
+ * outside the curated tier keeps its score and clock live in the day list.
+ * Two listeners per 30 teams.
+ */
+export function subscribeTeamsFixturesByDate(
+  teamIds: string[],
+  localDate: string,
+  onChange: (matches: Match[]) => void,
+): Unsubscribe {
+  const ids = [...new Set(teamIds.map(String))].filter(Boolean);
+  if (!ids.length) { onChange([]); return () => {}; }
+  const { start, end } = localDayRange(localDate);
+  const parts = new Map<string, Match[]>();
+  const emit = () => {
+    const byId = new Map<string, Match>();
+    for (const list of parts.values()) for (const m of list) byId.set(m.id, m);
+    onChange([...byId.values()].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0)));
+  };
+  const unsubs = chunk(ids, 30).flatMap((group, gi) =>
+    (['homeTeam.id', 'awayTeam.id'] as const).map(field => onSnapshot(
+      query(
+        collection(db, MATCHES),
+        where(field, 'in', group),
+        where('timestamp', '>=', start),
+        where('timestamp', '<', end),
+        orderBy('timestamp', 'asc'),
+      ),
+      snap => {
+        if (isOfflineEmpty(snap)) return;
+        parts.set(`${gi}:${field}`, snap.docs.map(d => matchFromFb(d.data() as FbMatchDoc)));
+        emit();
+      },
+      () => { /* the curated tier still shows the day */ },
+    )));
+  return () => unsubs.forEach(u => u());
+}
+
 /** Fixtures of one league with kickoff in [fromSec, toSec) — the fresh overlay for a cached season calendar. */
 export async function getLeagueFixturesBetween(leagueId: string | number, fromSec: number, toSec: number): Promise<Match[]> {
   const snap = await getDocs(query(
@@ -360,10 +417,15 @@ export function subscribeLivescores(
 ): Unsubscribe {
   const cache = makeCacheWriter('live');
   let live = false;
-  readMatchCache('live').then(cached => { if (cached && !live) onChange(cached); });
+  let painted = false;
+  readMatchCache('live').then(cached => { if (cached && !live) { painted = true; onChange(cached); } });
   const unsub = onSnapshot(
     query(collection(db, MATCHES), where('status', 'in', LIVE_STATUSES)),
     snap => {
+      if (isOfflineEmpty(snap)) {
+        if (!painted && !live) onChange([]);
+        return;
+      }
       live = true;
       const matches = snap.docs.map(d => matchFromFb(d.data() as FbMatchDoc));
       onChange(matches);
@@ -387,6 +449,8 @@ export interface MatchDetailSubscription {
 
 /** While a match without poller coverage is open and in play, re-check its detail this often. */
 const LIVE_RECHECK_MS = 60_000;
+/** After a failed request (offline, budget reached), stay quiet this long. */
+const FETCH_BACKOFF_MS = 4 * 60_000;
 
 /**
  * Everything behind the match screen, in real time:
@@ -433,7 +497,9 @@ export function subscribeMatchDetail(
     lastFetchAt = now;
     // The function writes the docs; the snapshots above deliver them.
     callOnDemand({ kind: 'match', id: matchId })
-      .catch(() => { /* offline or budget reached — keep what we have */ })
+      // Offline or the data budget is spent: keep what we have and wait a few
+      // minutes before asking again.
+      .catch(() => { lastFetchAt = Date.now() + FETCH_BACKOFF_MS; })
       .finally(() => { fetching = false; });
   };
 

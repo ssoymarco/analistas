@@ -8,18 +8,23 @@
  *     (`fb_meta/teamIndex`) and every league of the catalog;
  *   - for anything else: `searchRemote`, which asks the backend to search the
  *     data provider (answers are cached server-side per query).
+ *
+ * A user can follow something none of those lists include (a lower-league
+ * club, a squad player followed from his page, a follow carried over from the
+ * previous data source): `resolveFollowedTeams` / `resolveFollowedPlayers`
+ * fetch the name and picture of exactly those.
  */
 
 import { getFootballLeague, FOOTBALL_LEAGUES, COPYRIGHT_SENSITIVE_LEAGUE_IDS, getLeaguePopularity } from '../../../functions/src/shared/football/leagues';
 import {
   fbLeagueLogo, fbTeamLogo,
-  type FbSearchDoc, type FbTeamIndexDoc,
+  type FbPlayerDoc, type FbSearchDoc, type FbTeamDoc, type FbTeamIndexDoc,
 } from '../../../functions/src/shared/football/model';
 import { normalize } from '../../utils/normalize';
 import { AppCache } from '../cache';
 import { deriveShortName } from './base';
 import { ensureCatalog, getCatalogLeagues, peekCurrentSeasonId, peekLeagueLogo } from './catalog';
-import { loadCached, readDoc } from './onDemand';
+import { callOnDemand, loadCached, readDoc } from './onDemand';
 import {
   NATIONAL_TEAM_LEAGUE_NAME, POPULAR_NATIONAL_TEAMS, POPULAR_PLAYERS, POPULAR_TEAMS,
   type SearchableLeague, type SearchablePlayer, type SearchableTeam,
@@ -126,6 +131,87 @@ export async function getSearchablePlayers(): Promise<SearchablePlayer[]> {
 
 export async function getAllSearchablePlayers(): Promise<SearchablePlayer[]> {
   return POPULAR_PLAYERS;
+}
+
+// ── Followed teams / players outside the local lists ─────────────────────────
+
+const FOLLOW_META_KEY = 'fb_follow_meta_v1';
+/** Follows resolved per call — a first open after the migration can have many. */
+const MAX_RESOLVE = 40;
+
+interface FollowMeta {
+  teams: Record<string, SearchableTeam>;
+  players: Record<string, SearchablePlayer>;
+}
+
+let followMeta: FollowMeta | null = null;
+
+async function loadFollowMeta(): Promise<FollowMeta> {
+  if (!followMeta) {
+    followMeta = (await AppCache.get<FollowMeta>(FOLLOW_META_KEY).catch(() => null)) ?? { teams: {}, players: {} };
+  }
+  return followMeta;
+}
+
+/**
+ * The stored document if anyone has opened it before (a plain read, however
+ * old — a name and a picture don't expire); else the backend fetches it.
+ */
+async function docOrFetch<T>(path: string, kind: 'team' | 'player', id: string): Promise<T | null> {
+  const stored = await readDoc<T>(path).catch(() => null);
+  if (stored) return stored;
+  return callOnDemand<T>({ kind, id }).catch(() => null);
+}
+
+async function resolveFollowed<T>(
+  ids: string[],
+  bucket: 'teams' | 'players',
+  fetchOne: (id: string) => Promise<T | null>,
+): Promise<T[]> {
+  const meta = await loadFollowMeta();
+  const store = meta[bucket] as unknown as Record<string, T>;
+  const missing = ids.filter(id => !store[id]).slice(0, MAX_RESOLVE);
+  if (missing.length) {
+    const found = await Promise.all(missing.map(id => fetchOne(id).catch(() => null)));
+    let added = false;
+    missing.forEach((id, i) => { if (found[i]) { store[id] = found[i] as T; added = true; } });
+    if (added) AppCache.set(FOLLOW_META_KEY, meta, 30 * DAY).catch(() => {});
+  }
+  return ids.map(id => store[id]).filter((x): x is T => !!x);
+}
+
+/** Name and crest of followed teams the local lists don't include. */
+export function resolveFollowedTeams(ids: string[]): Promise<SearchableTeam[]> {
+  return resolveFollowed<SearchableTeam>(ids, 'teams', async id => {
+    const t = await docOrFetch<FbTeamDoc>(`fb_teams/${id}`, 'team', id);
+    if (!t) return null;
+    return {
+      id: Number(t.id),
+      name: t.name,
+      shortName: t.shortName,
+      logo: t.logo || fbTeamLogo(t.id),
+      leagueName: t.national ? NATIONAL_TEAM_LEAGUE_NAME : (t.primaryLeagueName ?? t.country ?? ''),
+      leagueId: t.national ? 0 : (Number(t.primaryLeagueId) || 0),
+    };
+  });
+}
+
+/** Name and photo of followed players the local lists don't include. */
+export function resolveFollowedPlayers(ids: string[]): Promise<SearchablePlayer[]> {
+  return resolveFollowed<SearchablePlayer>(ids, 'players', async id => {
+    const p = await docOrFetch<FbPlayerDoc>(`fb_players/${id}`, 'player', id);
+    if (!p) return null;
+    return {
+      id: Number(p.id),
+      name: p.name,
+      image: p.photo || undefined,
+      teamName: p.currentTeam?.name ?? p.nationality ?? undefined,
+      teamLogo: p.currentTeam?.logo ?? undefined,
+      teamId: p.currentTeam ? Number(p.currentTeam.id) || undefined : undefined,
+      position: p.position ?? undefined,
+      jerseyNumber: p.number ?? undefined,
+    };
+  });
 }
 
 // ── Ranking ──────────────────────────────────────────────────────────────────
