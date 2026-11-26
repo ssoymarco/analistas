@@ -338,6 +338,12 @@ exports.FOOTBALL_LEAGUES = [
     { id: 6, name: 'Copa Africana de Naciones', country: 'Africa', flag: '🏆', isCup: true },
     { id: 7, name: 'Copa Asiática', country: 'Asia', flag: '🏆', isCup: true },
     { id: 480, name: 'Juegos Olímpicos', country: 'World', flag: '🏅', isCup: true },
+    // Added by the owner's selection (26-nov-2026).
+    { id: 587, name: 'Mundial Sub-17', country: 'World', flag: '🌍', isCup: true,
+        hasPlayoffs: true, playoffsLabel: 'Eliminatoria',
+        searchAliases: ['mundial sub 17', 'mundial sub17', 'sub-17', 'sub 17', 'u17 world cup', 'world cup u17', 'u-17'] },
+    { id: 913, name: 'Finalissima', country: 'World', flag: '🏆', isCup: true,
+        searchAliases: ['finalisima', 'conmebol uefa'] },
     { id: 10, name: 'Amistosos Internacionales', country: 'World', flag: '🌍' },
     // ── Femenil ────────────────────────────────────────────────────────────────
     { id: 673, name: 'Liga MX Femenil', country: 'Mexico', flag: '🇲🇽',
@@ -360,7 +366,7 @@ function getFootballLeague(id) {
 // ── Trademark-sensitive leagues ──────────────────────────────────────────────
 // We must not display these competitions' official logo / English name; the
 // UI renders the curated `name` + `flag` emoji instead.
-exports.COPYRIGHT_SENSITIVE_LEAGUE_IDS = new Set([1, 8, 15]);
+exports.COPYRIGHT_SENSITIVE_LEAGUE_IDS = new Set([1, 8, 15, 587]);
 // ── Popularity (ordering) ────────────────────────────────────────────────────
 //
 // Higher = listed earlier. Product order (owner's call, Nov 2026): Liga MX,
@@ -402,6 +408,7 @@ exports.LEAGUE_POPULARITY = {
     32: 78, // Eliminatorias UEFA
     5: 76, // Liga de Naciones UEFA
     16: 76, // CONCACAF Champions Cup
+    913: 82, // Finalissima (campeón de América vs campeón de Europa: un partido)
     772: 76, // Leagues Cup
     307: 75, // Saudi Pro League
     // ── C ──
@@ -438,6 +445,7 @@ exports.LEAGUE_POPULARITY = {
     179: 48, // Premiership (Scotland)
     529: 48, // Supercopa de Alemania
     98: 46, // J1 League
+    587: 45, // Mundial Sub-17 (más alto en México: ver MX abajo)
     48: 45, // Carabao Cup
     526: 45, // Trofeo de Campeones (France)
     292: 43, // K League 1
@@ -491,6 +499,7 @@ exports.LEAGUE_POPULARITY_BY_COUNTRY = {
         307: 88, // Saudi Pro League — efecto Cristiano
         857: 84, // Campeón de Campeones
         10: 84, // Amistosos (El Tri juega muchos)
+        587: 91, // Mundial Sub-17 — El Tri Sub-17 (entra en el primer bloque de la pantalla)
         45: 78, // FA Cup
         673: 71, // Liga MX Femenil
         525: 69, // Champions League Femenil
