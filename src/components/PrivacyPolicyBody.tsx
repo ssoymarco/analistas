@@ -66,7 +66,7 @@ export const PrivacyPolicyBody: React.FC = () => {
   return (
     <>
       <Paragraph>
-        <Bold>Analistas Oficial Medios Digitales SA de CV</Bold> ("Analistas", "nosotros") opera la aplicación móvil Analistas (la "App") y los sitios web somosanalistas.com y analistas.app (los "Sitios"). Esta política informa sobre nuestras prácticas respecto a la recopilación, uso y protección de tus datos personales.
+        <Bold>Analistas Oficial Medios Digitales SA de CV</Bold> ("Analistas", "nosotros") opera la aplicación móvil Analistas (la "App") y los sitios web somosanalistas.com y analistasapp.com (los "Sitios"). Esta política informa sobre nuestras prácticas respecto a la recopilación, uso y protección de tus datos personales.
       </Paragraph>
 
       <SectionTitle>Información que recopilamos</SectionTitle>
@@ -78,14 +78,14 @@ export const PrivacyPolicyBody: React.FC = () => {
       <Bullet><Bold>Datos de errores:</Bold> Reportes anónimos de errores técnicos (sin datos personales identificables) a través de Sentry.</Bullet>
 
       <SubsectionTitle>En los Sitios web:</SubsectionTitle>
-      <Bullet><Bold>Registro de interés:</Bold> En analistas.app recopilamos tu correo electrónico si te registras para recibir novedades sobre la App.</Bullet>
+      <Bullet><Bold>Registro de interés:</Bold> En analistasapp.com recopilamos tu correo electrónico si te registras para recibir novedades sobre la App.</Bullet>
       <Bullet><Bold>Cookies:</Bold> Los Sitios pueden usar cookies de sesión y analíticas básicas para mejorar la experiencia de navegación.</Bullet>
 
       <SectionTitle>Cómo usamos tu información</SectionTitle>
       <Bullet>Para crear y gestionar tu cuenta en la App</Bullet>
       <Bullet>Para personalizar el contenido según tus preferencias deportivas</Bullet>
       <Bullet>Para enviarte notificaciones de los partidos que elegiste seguir</Bullet>
-      <Bullet>Para enviarte comunicaciones sobre novedades de la App (solo si te registraste en analistas.app)</Bullet>
+      <Bullet>Para enviarte comunicaciones sobre novedades de la App (solo si te registraste en analistasapp.com)</Bullet>
       <Bullet>Para detectar y corregir errores técnicos</Bullet>
       <Bullet>Para mejorar la experiencia general de la App y los Sitios</Bullet>
       <Paragraph>

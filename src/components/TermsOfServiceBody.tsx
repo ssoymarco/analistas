@@ -52,7 +52,7 @@ export const TermsOfServiceBody: React.FC = () => {
   return (
     <>
       <Paragraph>
-        <Bold>Analistas Oficial Medios Digitales SA de CV</Bold> ("Analistas", "nosotros") ofrece la aplicación móvil Analistas (la "App") y los sitios web somosanalistas.com y analistas.app (los "Sitios"). Al acceder o usar la App y los Sitios aceptas estos Términos y Condiciones (los "Términos") en su totalidad. Si no estás de acuerdo, no utilices el servicio.
+        <Bold>Analistas Oficial Medios Digitales SA de CV</Bold> ("Analistas", "nosotros") ofrece la aplicación móvil Analistas (la "App") y los sitios web somosanalistas.com y analistasapp.com (los "Sitios"). Al acceder o usar la App y los Sitios aceptas estos Términos y Condiciones (los "Términos") en su totalidad. Si no estás de acuerdo, no utilices el servicio.
       </Paragraph>
 
       <SectionTitle>Descripción del servicio</SectionTitle>

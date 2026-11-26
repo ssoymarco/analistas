@@ -34,7 +34,7 @@ import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { PREMIUM_ENABLED, BETTING_CONTENT_ENABLED, REDEEM_CODE_ENABLED } from '../config/features';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import Constants from 'expo-constants';
-import { SITE_HOST, SITE_URL } from '../config/site';
+import { APP_STORE_URL, CONTACT_EMAIL, PLAY_STORE_URL, SITE_HOST, SITE_URL } from '../config/site';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getInitials(name: string) {
@@ -562,7 +562,7 @@ export const PerfilScreen: React.FC = () => {
   // Alert so the user can copy it manually.
   const handleContact = useCallback(async () => {
     haptics.selection();
-    const email = 'contacto@somosanalistas.com';
+    const email = CONTACT_EMAIL;
     const platform = Platform.OS === 'ios' ? 'iOS' : 'Android';
     const subject = `[App ${platform}] ${t('profile.contactSubject')}`;
     const body =
@@ -584,7 +584,7 @@ export const PerfilScreen: React.FC = () => {
   }, [t]);
 
   const handleRateApp = useCallback(() => {
-    const url = Platform.OS === 'ios' ? 'https://apps.apple.com/app/analistas' : 'https://play.google.com/store/apps/details?id=com.analistas';
+    const url = Platform.OS === 'ios' ? APP_STORE_URL : PLAY_STORE_URL;
     Linking.openURL(url);
   }, []);
 
@@ -1085,9 +1085,9 @@ export const PerfilScreen: React.FC = () => {
             <Text style={{ fontSize: 14, color: c.textPrimary, fontWeight: '500' }}>{SITE_HOST}</Text>
             <Text style={{ marginLeft: 'auto', fontSize: 12, color: c.textTertiary }}>↗</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }} onPress={() => Linking.openURL('mailto:hola@analistas.app')} activeOpacity={0.7}>
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }} onPress={() => Linking.openURL(`mailto:${CONTACT_EMAIL}`)} activeOpacity={0.7}>
             <Text style={{ fontSize: 16 }}>✉️</Text>
-            <Text style={{ fontSize: 14, color: c.textPrimary, fontWeight: '500' }}>hola@analistas.app</Text>
+            <Text style={{ fontSize: 14, color: c.textPrimary, fontWeight: '500' }}>{CONTACT_EMAIL}</Text>
             <Text style={{ marginLeft: 'auto', fontSize: 12, color: c.textTertiary }}>↗</Text>
           </TouchableOpacity>
         </ScrollView>

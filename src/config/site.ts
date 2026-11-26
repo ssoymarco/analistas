@@ -18,8 +18,15 @@
 export const SITE_HOST = 'analistasapp.com';
 export const SITE_URL = `https://${SITE_HOST}`;
 
+/** Where users write to us (Perfil → contacto and the "about" card). */
+export const CONTACT_EMAIL = 'contacto@somosanalistas.com';
+
 /** Download page: redirects each device to its own store. */
 export const DOWNLOAD_URL = 'https://get.analistasapp.com';
+
+/** The app's store pages (same ones the download page links to). */
+export const APP_STORE_URL = 'https://apps.apple.com/app/id6767097258';
+export const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=app.analistas';
 
 /** League pages the site has, by API-Sports league id. */
 const LEAGUE_PAGES: Record<number, string> = {
