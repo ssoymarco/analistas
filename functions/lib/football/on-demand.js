@@ -88,6 +88,7 @@ const apisports_1 = require("./apisports");
 const mapping_1 = require("./mapping");
 const on_demand_mapping_1 = require("./on-demand-mapping");
 const store_1 = require("./store");
+const standings_repair_1 = require("./standings-repair");
 const sync_fixtures_1 = require("./sync-fixtures");
 const DAY_MS = 86_400_000;
 /** Firestore caps a document at 1 MB; ~450 B per slim fixture row. */
@@ -555,6 +556,8 @@ async function ensureStandings(id, season, nowMs) {
     try {
         const res = await (0, apisports_1.afGet)('/standings', { league: id, season });
         doc = res[0] ? (0, mapping_1.mapStandings)(res[0]) : { leagueId: String(id), season, groups: [] };
+        // A row can come without its team id (provider glitch): identify the team.
+        doc = await (0, standings_repair_1.repairStandings)(doc, prev);
     }
     catch (err) {
         await persistQuota();

@@ -112,6 +112,11 @@ const check = (name: string, ok: boolean, detail = '') => { if (!ok) failures++;
   check('standings: Clausura once it is being played, in either order', split([half('Liga MX: Apertura', 17), half('Liga MX: Clausura', 3)])[0].played === 3 && split([half('Liga MX: Clausura', 3), half('Liga MX: Apertura', 17)])[0].played === 3);
   check('standings: one table per split season, not two', split([half('Liga MX: Apertura', 17), half('Liga MX: Clausura', 3)]).length === 2);
 
+  // Best-of-three series: games won decide, not the goals added up.
+  const g = (id: string, ts: number, hId: string, aId: string, hs: number, as: number) => ({ id, timestamp: ts, statusShort: 'FT', round: 'Round One', homeId: hId, homeName: 'T' + hId, awayId: aId, awayName: 'T' + aId, homeScore: hs, awayScore: as });
+  const series = buildBracket([g('1', 1000, '10', '20', 5, 0), g('2', 2000, '20', '10', 1, 0), g('3', 3000, '10', '20', 0, 1), g('4', 4000, '20', '30', 1, 0)] as any, { leagueId: 253 });
+  check('bracket: best-of-three goes to the team with two wins', series[0]?.ties[0]?.winner?.id === '20', JSON.stringify(series[0]?.ties.map(t => [t.homeTeam.id, t.awayTeam.id, t.winner?.id, t.legs.length])));
+
   // ── search ordering
   const ranked = Search.rankByQuery(['Cultural Leonesa', 'Sierra Leone', 'León', 'Leones Negros', 'Napoleon FC'], 'leon', x => x);
   check('search: exact name first, word starts next, mid-word last', ranked[0] === 'León' && ranked[ranked.length - 1] === 'Napoleon FC' && ranked[1] === 'Cultural Leonesa', ranked.join(' | '));

@@ -413,6 +413,25 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
   // Config-marked cups skip the standings wait; auto-detected cups still need it
   const loading = (leagueIsCupConfig ? false : standingsLoading) || (isCup && bracketLoading);
 
+  // Which phase a cup opens on: the one this match belongs to. A knockout
+  // match opens on the bracket; a league-phase or group match opens on its
+  // table (the bracket doesn't exist yet, or isn't about this match). Once the
+  // user picks a pill, their choice stays.
+  const cupPhasePicked = useRef(false);
+  const pickCupPhase = (phase: 'table' | 'groups' | 'bracket') => {
+    cupPhasePicked.current = true;
+    setCupPhase(phase);
+  };
+  const matchInBracket = rounds.some(r => r.ties.some(tie => tie.isCurrentMatch));
+  const cupHasGroups = groupsResult.hasGroups && groupsResult.groups.length > 0;
+  const cupHasTable = !standingsLoading && standings.length > 0;
+  useEffect(() => {
+    if (!isCup || cupPhasePicked.current || bracketLoading || groupsLoading || standingsLoading) return;
+    if (matchInBracket) setCupPhase('bracket');
+    else if (cupHasGroups) setCupPhase('groups');
+    else if (cupHasTable) setCupPhase('table');
+  }, [isCup, bracketLoading, groupsLoading, standingsLoading, matchInBracket, cupHasGroups, cupHasTable]);
+
   const homeId = match.homeTeam.id;
   const awayId = match.awayTeam.id;
   const isLive = match.status === 'live';
@@ -588,7 +607,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
             {hasCupTable && (
               <TouchableOpacity
                 style={[ph.pill, cupPhase === 'table' && { backgroundColor: c.accent }]}
-                onPress={() => setCupPhase('table')}
+                onPress={() => pickCupPhase('table')}
                 activeOpacity={0.8}
               >
                 <Text style={[ph.pillText, { color: cupPhase === 'table' ? '#000' : c.textSecondary }]}>
@@ -599,7 +618,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
             {hasGroups && (
               <TouchableOpacity
                 style={[ph.pill, cupPhase === 'groups' && { backgroundColor: c.accent }]}
-                onPress={() => setCupPhase('groups')}
+                onPress={() => pickCupPhase('groups')}
                 activeOpacity={0.8}
               >
                 <Text style={[ph.pillText, { color: cupPhase === 'groups' ? '#000' : c.textSecondary }]}>
@@ -609,7 +628,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
             )}
             <TouchableOpacity
               style={[ph.pill, cupPhase === 'bracket' && { backgroundColor: c.accent }]}
-              onPress={() => setCupPhase('bracket')}
+              onPress={() => pickCupPhase('bracket')}
               activeOpacity={0.8}
             >
               <Text style={[ph.pillText, { color: cupPhase === 'bracket' ? '#000' : c.textSecondary }]}>

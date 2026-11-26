@@ -55,6 +55,7 @@ const admin_init_1 = require("../admin-init");
 const leagues_1 = require("../shared/football/leagues");
 const apisports_1 = require("./apisports");
 const mapping_1 = require("./mapping");
+const standings_repair_1 = require("./standings-repair");
 const store_1 = require("./store");
 const now = () => admin_init_1.admin.firestore.Timestamp.now();
 async function syncFootballCatalog() {
@@ -83,8 +84,13 @@ async function refreshStandings(leagueId, cat) {
     const res = await (0, apisports_1.afGet)('/standings', { league: leagueId, season: cat.s });
     if (!res.length)
         return null;
-    const doc = (0, mapping_1.mapStandings)(res[0]);
-    await admin_init_1.db.doc(`${store_1.COL.standings}/${leagueId}_${cat.s}`).set({ ...doc, updatedAt: now() });
+    const ref = admin_init_1.db.doc(`${store_1.COL.standings}/${leagueId}_${cat.s}`);
+    const mapped = (0, mapping_1.mapStandings)(res[0]);
+    // A row can come without its team id (provider glitch): identify the team.
+    const doc = (0, standings_repair_1.rowsWithoutTeam)(mapped).length
+        ? await (0, standings_repair_1.repairStandings)(mapped, ((await ref.get()).data() ?? null))
+        : mapped;
+    await ref.set({ ...doc, updatedAt: now() });
     return doc;
 }
 /**
@@ -99,7 +105,7 @@ function buildTeamIndex(tables) {
     for (const table of sorted) {
         for (const group of table.groups) {
             for (const row of group.rows) {
-                if (!row.team.id || seen.has(row.team.id))
+                if (!(0, standings_repair_1.hasTeamId)(row.team.id) || seen.has(row.team.id))
                     continue;
                 seen.add(row.team.id);
                 teams.push({ i: row.team.id, n: row.team.name, l: table.leagueId });

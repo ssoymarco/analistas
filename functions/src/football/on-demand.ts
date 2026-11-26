@@ -50,6 +50,7 @@ import {
   mapSearchPlayers, mapSearchTeams, mapTeam, mapTeamStats, mapVenue, toFixtureLite,
 } from './on-demand-mapping';
 import { COL, loadQuota, saveQuota } from './store';
+import { repairStandings } from './standings-repair';
 import { syncFootballFixtures } from './sync-fixtures';
 
 const DAY_MS = 86_400_000;
@@ -584,6 +585,8 @@ export async function ensureStandings(id: number, season: number, nowMs: number)
   try {
     const res = await afGet<AfStandingsResponse[]>('/standings', { league: id, season });
     doc = res[0] ? mapStandings(res[0]) : { leagueId: String(id), season, groups: [] };
+    // A row can come without its team id (provider glitch): identify the team.
+    doc = await repairStandings(doc, prev);
   } catch (err) {
     await persistQuota();
     if (prev) return prev;

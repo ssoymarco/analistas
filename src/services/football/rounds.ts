@@ -13,7 +13,7 @@
 
 import { fbTeamLogo, type FbFixtureLite } from '../../../functions/src/shared/football/model';
 import type { MatchStatus, Team } from '../../data/types';
-import { localDateOf, shortNameFor, statusFromShort } from './base';
+import { displayTeam, localDateOf, statusFromShort } from './base';
 
 // ── Bracket types (rendered by CupBracketView) ───────────────────────────────
 
@@ -169,7 +169,7 @@ function knockoutRank(base: string): number {
 // ── Bracket builder ──────────────────────────────────────────────────────────
 
 function teamOf(id: string, name: string): Team {
-  return { id, name, shortName: shortNameFor(name), logo: fbTeamLogo(id) };
+  return { id, ...displayTeam(id, name), logo: fbTeamLogo(id) };
 }
 
 interface BracketOptions {
@@ -313,7 +313,21 @@ function mapTie(id: string, fixtures: FbFixtureLite[], opts: BracketOptions): Cu
 
   const isFinished = legs.every(l => l.status === 'finished' && l.homeScore !== null);
   let winner: Team | null = null;
-  if (isFinished) {
+  if (isFinished && legs.length >= 3) {
+    // A series (best of three): games won decide, not the goals added up.
+    let homeWins = 0;
+    let awayWins = 0;
+    legs.forEach((leg, i) => {
+      let legWinner: Team | null = null;
+      if (leg.homeScore !== leg.awayScore) legWinner = leg.homeScore! > leg.awayScore! ? leg.homeTeam : leg.awayTeam;
+      else if (leg.homePenScore !== undefined && leg.awayPenScore !== undefined && leg.homePenScore !== leg.awayPenScore) {
+        legWinner = leg.homePenScore > leg.awayPenScore ? leg.homeTeam : leg.awayTeam;
+      } else if (fixtures[i].winner) legWinner = fixtures[i].winner === 'home' ? leg.homeTeam : leg.awayTeam;
+      if (legWinner?.id === homeTeam.id) homeWins++;
+      else if (legWinner) awayWins++;
+    });
+    if (homeWins !== awayWins) winner = homeWins > awayWins ? homeTeam : awayTeam;
+  } else if (isFinished) {
     if (aggHome !== aggAway) {
       winner = aggHome > aggAway ? homeTeam : awayTeam;
     } else {

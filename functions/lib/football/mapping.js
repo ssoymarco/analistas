@@ -92,7 +92,9 @@ function deriveShortName(name) {
     return (w[0][0] + w[1].slice(0, 2)).slice(0, 3);
 }
 function teamRef(t, code) {
-    return { id: String(t.id), name: t.name, shortName: code || deriveShortName(t.name), logo: t.logo };
+    // The provider occasionally omits a team's id and crest (standings rows):
+    // an empty id means "unknown team", never the string "null".
+    return { id: t.id ? String(t.id) : '', name: t.name, shortName: code || deriveShortName(t.name), logo: t.logo ?? '' };
 }
 function isoUtc(unixSec) {
     return new Date(unixSec * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');

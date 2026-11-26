@@ -19,6 +19,7 @@ import { afGet } from './apisports';
 import type { AfLeagueEntry, AfStandingsResponse, AfTopPlayerEntry } from './apisports-types';
 import type { FbCatalogEntry, FbStandingsDoc, FbTeamIndexDoc } from '../shared/football/model';
 import { mapStandings, mapTopPlayers } from './mapping';
+import { hasTeamId, repairStandings, rowsWithoutTeam } from './standings-repair';
 import { COL } from './store';
 
 /** Shape of `fb_meta/leagueCatalog.leagues[id]` — shared with the app. */
@@ -52,8 +53,13 @@ async function refreshStandings(leagueId: string, cat: CatalogEntry | undefined)
   if (!cat?.s || !cat.st) return null;
   const res = await afGet<AfStandingsResponse[]>('/standings', { league: leagueId, season: cat.s });
   if (!res.length) return null;
-  const doc = mapStandings(res[0]);
-  await db.doc(`${COL.standings}/${leagueId}_${cat.s}`).set({ ...doc, updatedAt: now() });
+  const ref = db.doc(`${COL.standings}/${leagueId}_${cat.s}`);
+  const mapped = mapStandings(res[0]);
+  // A row can come without its team id (provider glitch): identify the team.
+  const doc = rowsWithoutTeam(mapped).length
+    ? await repairStandings(mapped, ((await ref.get()).data() ?? null) as FbStandingsDoc | null)
+    : mapped;
+  await ref.set({ ...doc, updatedAt: now() });
   return doc;
 }
 
@@ -70,7 +76,7 @@ export function buildTeamIndex(tables: FbStandingsDoc[]): FbTeamIndexDoc['teams'
   for (const table of sorted) {
     for (const group of table.groups) {
       for (const row of group.rows) {
-        if (!row.team.id || seen.has(row.team.id)) continue;
+        if (!hasTeamId(row.team.id) || seen.has(row.team.id)) continue;
         seen.add(row.team.id);
         teams.push({ i: row.team.id, n: row.team.name, l: table.leagueId });
       }

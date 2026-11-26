@@ -85,8 +85,10 @@ export function deriveShortName(name: string): string {
   return (w[0][0] + w[1].slice(0, 2)).slice(0, 3);
 }
 
-function teamRef(t: { id: number; name: string; logo: string }, code?: string | null): FbTeamRef {
-  return { id: String(t.id), name: t.name, shortName: code || deriveShortName(t.name), logo: t.logo };
+function teamRef(t: { id: number | null; name: string; logo: string | null }, code?: string | null): FbTeamRef {
+  // The provider occasionally omits a team's id and crest (standings rows):
+  // an empty id means "unknown team", never the string "null".
+  return { id: t.id ? String(t.id) : '', name: t.name, shortName: code || deriveShortName(t.name), logo: t.logo ?? '' };
 }
 
 function isoUtc(unixSec: number): string {

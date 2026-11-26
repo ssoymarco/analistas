@@ -12,6 +12,7 @@ import { useState, useEffect, useRef } from 'react';
 import { getLeagueConfig } from '../config/leagues';
 import { parseSeasonId } from '../services/football/catalog';
 import { getStandings } from '../services/football/leagueData';
+import { displayTeam } from '../services/football/base';
 import { currentSeasonLabels, getTeam, getTeamFixtures } from '../services/football/teams';
 import { localizeCityName } from '../utils/cityI18n';
 import { translateLeagueCountry } from '../utils/nationalTeams';
@@ -114,8 +115,8 @@ function toInfo(team: FbTeamDoc, leagueId: number, leagueName: string, seasonKey
   const national = !!team.national;
   return {
     id: Number(team.id) || 0,
-    name: team.name,
-    shortCode: team.shortName,
+    name: displayTeam(team.id, team.name).name,
+    shortCode: displayTeam(team.id, team.name, team.shortName).shortName,
     logo: team.logo,
     country: team.country ? translateLeagueCountry(team.country) : '',
     // National teams have no home ground or home city.

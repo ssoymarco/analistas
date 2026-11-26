@@ -18,10 +18,11 @@ import type {
   MatchPrediction, MatchStatus, MissingPlayer, PlayerRating, Team, TeamFormEntry,
 } from '../../data/types';
 import {
-  DEAD_STATE_ID, localDateOf, localTimeOf, shortNameFor, statusFromShort, stateLabelFromShort,
+  DEAD_STATE_ID, localDateOf, localTimeOf, displayTeam, shortNameFor, statusFromShort, stateLabelFromShort,
   utcStringOf,
 } from './base';
 import { parseRound } from './rounds';
+import { getFootballLeague } from '../../../functions/src/shared/football/leagues';
 
 export {
   DEAD_STATE_ID, deriveShortName, localDateOf, localDayRange, localTimeOf, shortNameFor,
@@ -31,11 +32,13 @@ export {
 // ── Teams ────────────────────────────────────────────────────────────────────
 
 export function teamFromFb(t: FbTeamRef): Team {
+  // Tables stored before the backend learned to repair them can hold a row
+  // whose team id is missing (the literal "null").
+  const id = /^\d+$/.test(String(t.id ?? '')) ? String(t.id) : '';
   return {
-    id: String(t.id),
-    name: t.name,
-    shortName: shortNameFor(t.name, t.shortName),
-    logo: t.logo || (t.id ? fbTeamLogo(t.id) : ''),
+    id,
+    ...displayTeam(id, t.name, t.shortName),
+    logo: t.logo || (id ? fbTeamLogo(id) : ''),
   };
 }
 
@@ -107,14 +110,16 @@ export function matchFromLite(
   const hasPens = typeof f.homePen === 'number' && typeof f.awayPen === 'number';
   return {
     id: f.id,
-    homeTeam: { id: f.homeId, name: f.homeName, shortName: shortNameFor(f.homeName), logo: fbTeamLogo(f.homeId) },
-    awayTeam: { id: f.awayId, name: f.awayName, shortName: shortNameFor(f.awayName), logo: fbTeamLogo(f.awayId) },
+    homeTeam: { id: f.homeId, ...displayTeam(f.homeId, f.homeName), logo: fbTeamLogo(f.homeId) },
+    awayTeam: { id: f.awayId, ...displayTeam(f.awayId, f.awayName), logo: fbTeamLogo(f.awayId) },
     homeScore: f.homeScore ?? 0,
     awayScore: f.awayScore ?? 0,
     status,
     time: timeDisplay(status, short, minute, f.timestamp),
     minute,
-    league: f.league ?? ctx.league ?? '',
+    // Same curated name the day list shows ("Champions League", not the
+    // provider's "UEFA Champions League").
+    league: (leagueId ? getFootballLeague(leagueId)?.name : undefined) ?? f.league ?? ctx.league ?? '',
     leagueLogo: ctx.leagueLogo,
     leagueId,
     date: localDateOf(f.timestamp),

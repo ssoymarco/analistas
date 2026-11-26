@@ -6,6 +6,7 @@
  */
 
 import type { MatchStatus } from '../../data/types';
+import { POPULAR_TEAMS } from './popular';
 
 // ── Status ───────────────────────────────────────────────────────────────────
 
@@ -104,6 +105,35 @@ const NATIONAL_TEAM_CODES: Record<string, string> = {
   'Qatar': 'QAT', 'Iraq': 'IRQ', 'United Arab Emirates': 'UAE', 'New Zealand': 'NZL',
   'Uzbekistan': 'UZB', 'Jordan': 'JOR', 'China': 'CHN',
 };
+
+// The data provider writes the big clubs its own way ("Club America",
+// "Guadalajara Chivas", "U.N.A.M. - Pumas", "Atletico Madrid"). For the clubs of
+// the curated list the app shows the name and code it has always used.
+const CURATED_CLUBS = new Map(POPULAR_TEAMS.map(t => [String(t.id), { name: t.name, shortName: t.shortName }]));
+// The rest of Liga MX — the app's home league — outside the popular picker.
+for (const [id, name, shortName] of [
+  ['2289', 'León', 'LEO'],
+  ['2280', 'Tijuana', 'TIJ'],
+  ['2290', 'Querétaro', 'QRO'],
+  ['2314', 'Atlético San Luis', 'ASL'],
+  ['2298', 'FC Juárez', 'JUA'],
+  ['2312', 'Atlante', 'ATE'],
+  ['2288', 'Necaxa', 'NEC'],
+  ['2291', 'Puebla', 'PUE'],
+] as const) {
+  if (!CURATED_CLUBS.has(id)) CURATED_CLUBS.set(id, { name, shortName });
+}
+
+/** Name and short code to display for a team. */
+export function displayTeam(
+  id: string | number | null | undefined,
+  name: string,
+  provided?: string | null,
+): { name: string; shortName: string } {
+  const curated = id != null ? CURATED_CLUBS.get(String(id)) : undefined;
+  if (curated) return curated;
+  return { name, shortName: shortNameFor(name, provided) };
+}
 
 /**
  * Short code to show for a team: the FIFA code for national teams, else the
