@@ -21,6 +21,14 @@ import { useThemeColors } from '../theme/useTheme';
 
 const DISMISSED_KEY = 'analistas_promo_banner_dismissed';
 
+/**
+ * The banner's text (i18n `promoBanner.*`) is about a moment in time — today
+ * the World Cup round of 32 of July 2026. While that text is out of date the
+ * banner stays hidden no matter what the remote switch says; set this back to
+ * true in the same update that ships new text.
+ */
+const COPY_IS_CURRENT = false;
+
 interface Props {
   /** Acción del CTA (p.ej. navegar a la búsqueda para seguir equipos). */
   onPress: () => void;
@@ -32,6 +40,7 @@ export const PromoBanner: React.FC<Props> = ({ onPress }) => {
   const [bannerId, setBannerId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!COPY_IS_CURRENT) return;
     let alive = true;
     (async () => {
       try {
