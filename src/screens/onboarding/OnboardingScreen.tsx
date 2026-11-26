@@ -1430,8 +1430,13 @@ const Screen6Feed: React.FC<{
   // onboarding (expo-localization sometimes resolves to UTC on first run).
   // The day alone is enough to give the user a sense of when the match is;
   // exact time lives in the main app where useUserCountry is fully resolved.
-  const matchDay  = nextMatch?.startingAtUtc
-    ? new Date(nextMatch.startingAtUtc).toLocaleDateString('es-MX', { weekday: 'long' })
+  // Kickoff as a real instant: `startingAtUtc` is a UTC wall-clock string, and
+  // parsing it as local time named the wrong weekday for evening matches.
+  const kickoffDate = nextMatch?.timestamp
+    ? new Date(nextMatch.timestamp * 1000)
+    : nextMatch?.startingAtUtc ? new Date(nextMatch.startingAtUtc.replace(' ', 'T') + 'Z') : null;
+  const matchDay  = kickoffDate
+    ? kickoffDate.toLocaleDateString('es-MX', { weekday: 'long' })
     : null;
 
   // Find user's team in standings (LeagueStanding.team.id is string, firstTeam.id is number)

@@ -25,6 +25,13 @@ Todo desde la raíz del repo; cada servicio en su propia terminal.
 anterior para ver la migración, o el estado guardado con `dumpls:` tras completar el onboarding).
 Las capturas quedan en `scripts/fb-tests/.build/shots`.
 
+## Contra producción (solo con permiso del dueño)
+
+`HARNESS_FIREBASE=production scripts/fb-tests/web/build.sh <carpeta>` empaqueta con el módulo real de
+Firebase: la app corre como un invitado más contra el proyecto real (crea un usuario anónimo, lee datos
+públicos y llama a `fbOnDemand`). No hacen falta emuladores ni el sustituto de la función. Con
+`PROFILE_DIR=<carpeta>` las ejecuciones comparten el mismo perfil de navegador (un solo invitado).
+
 ## Límites conocidos del arnés
 
 - La barra inferior queda parcialmente recortada en web: usar `click:x,y` sobre el icono.

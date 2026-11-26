@@ -30,6 +30,7 @@ import { useThemeColors } from '../theme/useTheme';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useTeamDetail } from '../hooks/useTeamDetail';
+import { localDateOf } from '../services/football/base';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import type { TeamDetailData, SquadPlayer, RecentMatch, FormEntry } from '../hooks/useTeamDetail';
 import type { LeagueStanding, Match } from '../data/types';
@@ -132,7 +133,9 @@ const ResumenTab: React.FC<{ data: TeamDetailData; teamId: number; onSeeFullTabl
   // and belongs in "Próximo Partido". Previously this used `m.date <= today`
   // which mis-classified today's upcoming fixtures (e.g. Mexico vs Ghana
   // playing today at 20:00 was shown as "Último Partido").
-  const today = new Date().toISOString().split('T')[0];
+  // The device's day, like the match dates (a UTC "today" is already tomorrow
+  // on a Mexican evening and hid tonight's match from "Próximo partido").
+  const today = localDateOf(Math.floor(Date.now() / 1000));
   const pastMatches = data.recentMatches.filter(m => m.isFinished);
   // The list is chronological (whole season): the last played match is its tail.
   const lastMatch   = pastMatches[pastMatches.length - 1] ?? null;
@@ -680,7 +683,7 @@ const PartidosTab: React.FC<{
   const textSec = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
   const cardBg  = c.surface;
   const border  = c.border;
-  const today   = new Date().toISOString().split('T')[0];
+  const today   = localDateOf(Math.floor(Date.now() / 1000));
 
   // data.recentMatches ya viene CRONOLÓGICO (pasados → temporada completa de
   // próximos, todas las competencias). Sin chips de filtro: cada fila muestra

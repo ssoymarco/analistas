@@ -922,7 +922,7 @@ export const FavoritosScreen: React.FC = () => {
       normalize(i.name).includes(q) ||
       normalize(i.subtitle).includes(q) ||
       (i.searchAliases?.some(a => normalize(a).includes(q)) ?? false)
-    ), debouncedQuery, i => i.name);
+    ), debouncedQuery, i => [i.name, ...(i.searchAliases ?? [])].join(' '));
   }, [config.searchItems, debouncedQuery]);
 
   // ── Navigation ──

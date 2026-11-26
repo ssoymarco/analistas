@@ -314,7 +314,9 @@ export const GlobalSearchScreen: React.FC = () => {
     const sections: { title: string; icon: string; data: SearchResult[] }[] = [];
     // Best name matches first inside each section.
     const ranked = (type: SearchResult['type']) =>
-      rankByQuery(results.filter(r => r.type === type), debouncedQuery, r => r.name);
+      // A club found by a nickname ("Chivas" → Guadalajara) ranks by that nickname.
+      rankByQuery(results.filter(r => r.type === type), debouncedQuery, r =>
+        r.type === 'team' ? [r.name, ...((r.data as SearchableTeam).searchTerms ?? [])].join(' ') : r.name);
     const teamResults = ranked('team');
     const playerResults = ranked('player');
     const leagueResults = ranked('league');

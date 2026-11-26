@@ -11,6 +11,7 @@ const NATIVE = [
   /^expo-media-library/, /^expo-tracking-transparency/,
 ];
 const FIREBASE = path.join(__dirname, 'src/services/firebase');
+const USE_PRODUCTION = process.env.HARNESS_FIREBASE === 'production';
 config.resolver.resolveRequest = (ctx, name, platform) => {
   if (platform === 'web') {
     if (/^react-native-view-shot/.test(name)) return { type: 'sourceFile', filePath: path.join(W, 'viewshot-stub.js') };
@@ -19,7 +20,9 @@ config.resolver.resolveRequest = (ctx, name, platform) => {
     if (/exports\/InteractionManager(\/index)?$/.test(name) && /react-native-web/.test(ctx.originModulePath)) {
       return { type: 'sourceFile', filePath: path.join(W, 'interaction-stub.js') };
     }
-    if (name.startsWith('.') && path.resolve(path.dirname(ctx.originModulePath), name) === FIREBASE) {
+    // HARNESS_FIREBASE=production keeps the app's real Firebase module (a guest
+    // session against the live project); the default points at the emulators.
+    if (!USE_PRODUCTION && name.startsWith('.') && path.resolve(path.dirname(ctx.originModulePath), name) === FIREBASE) {
       return { type: 'sourceFile', filePath: path.join(W, 'firebase-web.ts') };
     }
   }

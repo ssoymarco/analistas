@@ -15,11 +15,11 @@ import { useCupBracket } from '../../hooks/useCupBracket';
 import { useCupGroupStandings } from '../../hooks/useCupGroupStandings';
 import { CupBracketView } from '../../components/CupBracketView';
 import type { Match, MatchDetail, LeagueStanding, CupGroup } from '../../data/types';
-import type { CupRound, CupTie } from '../../services/football/rounds';
+import { parseRound, type CupRound, type CupTie } from '../../services/football/rounds';
 import { SkeletonLeagueDetail } from '../../components/Skeleton';
 import type { PartidosStackParamList } from '../../navigation/AppNavigator';
 import { getLeagueConfig, getLeagueConfigByName, getLeagueDisplayName, type LeagueZone } from '../../config/leagues';
-import { isCupLeague, peekCurrentSeasonId } from '../../services/football/catalog';
+import { isCupLeague, parseSeasonId, peekCurrentSeasonId, seasonLabel } from '../../services/football/catalog';
 import { translateNationalTeam } from '../../utils/nationalTeams';
 import { isImageUri } from '../../utils/imageUri';
 
@@ -337,6 +337,13 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
     (match.seasonId && match.seasonId > 0) ? match.seasonId
     : (leagueConfig ? peekCurrentSeasonId(leagueConfig.id) : null);
 
+  // "Temporada 2026/27" from the match's own season (the old guess — last
+  // year / this year — is wrong for half of every year).
+  const seasonKey = parseSeasonId(seasonId ?? undefined);
+  const seasonText = seasonKey
+    ? `Temporada ${seasonLabel(seasonKey.leagueId, seasonKey.season)}`
+    : `Temporada ${new Date().getFullYear() - 1}/${String(new Date().getFullYear()).slice(2)}`;
+
   // ── Standings (league competitions) ─────────────────────────────────────────
   const { standings, loading: standingsLoading, error: standingsError } = useStandings(seasonId);
 
@@ -435,12 +442,15 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
   const homeId = match.homeTeam.id;
   const awayId = match.awayTeam.id;
   const isLive = match.status === 'live';
+  // The table is projected only for matches that count for it: a playoff tie
+  // (Liguilla, MLS Cup…) of a league with a table must not move it.
+  const projecting = isLive && (!match.roundLabel || parseRound(match.roundLabel).kind === 'league');
 
   // ── Live projected standings ─────────────────────────────────────────────────
   // SportMonks standings update after FT. During a live match we project the
   // result by applying the current score delta to the two playing teams.
   const liveStandings = useMemo<LeagueStanding[]>(() => {
-    if (!isLive || standings.length === 0) return standings;
+    if (!projecting || standings.length === 0) return standings;
 
     const hs = match.homeScore ?? 0;
     const as_ = match.awayScore ?? 0;
@@ -481,7 +491,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
         b.goalsFor - a.goalsFor,
       )
       .map((r, idx) => ({ ...r, position: idx + 1 }));
-  }, [standings, isLive, match.homeScore, match.awayScore, homeId, awayId]);
+  }, [standings, projecting, match.homeScore, match.awayScore, homeId, awayId]);
 
   const handleShare = async () => {
     if (!ViewShot || !Sharing || !tableRef.current) return;
@@ -592,7 +602,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
 
   // ── Cup view (bracket ± group stage ± league-phase table) ───────────────────
   if (isCup) {
-    const seasonStr = `Temporada ${new Date().getFullYear() - 1}/${String(new Date().getFullYear()).slice(2)}`;
+    const seasonStr = seasonText;
     const hasGroups   = groupsResult.hasGroups && groupsResult.groups.length > 0;
     const hasCupTable = !standingsLoading && standings.length > 0;
 
@@ -709,7 +719,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
     );
   }
 
-  const seasonStr = `Temporada ${new Date().getFullYear() - 1}/${String(new Date().getFullYear()).slice(2)}`;
+  const seasonStr = seasonText;
 
   // Shared toggle for hasPlayoffs leagues (used in both views)
   const PlayoffsToggle = hasPlayoffs ? (
@@ -839,7 +849,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
       </TouchableOpacity>
 
       {/* Live projection banner */}
-      {isLive && (
+      {projecting && (
         <View style={tb.liveBanner}>
           <Text style={tb.liveBannerText}>⚡ Proyección en vivo · si el resultado se mantiene</Text>
         </View>
@@ -859,7 +869,7 @@ export const TablaTab: React.FC<TablaTabProps> = ({ match, onCupDetected }) => {
               isAway={row.team.id === awayId}
               totalTeams={liveStandings.length}
               zones={leagueZones}
-              isProjected={isLive && (row.team.id === homeId || row.team.id === awayId)}
+              isProjected={projecting && (row.team.id === homeId || row.team.id === awayId)}
             />
           </React.Fragment>
         ))}
