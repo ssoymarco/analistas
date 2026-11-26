@@ -6,7 +6,7 @@ async function open({ storage = {}, tz = 'America/Mexico_City' } = {}) {
   // Crests and photos come from the provider's CDN: go through the proxy when the environment has one.
   const proxy = process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY, bypass: '127.0.0.1,localhost' } } : {};
   const browser = await chromium.launch(proxy);
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, timezoneId: tz, locale: 'es-MX', hasTouch: true, isMobile: true });
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: Number(process.env.DSF) || 1, timezoneId: tz, locale: 'es-MX', hasTouch: true, isMobile: true });
   await ctx.addInitScript(s => { for (const [k, v] of Object.entries(s)) if (localStorage.getItem(k) === null) localStorage.setItem(k, v); }, storage);
   const page = await ctx.newPage();
   const errors = [];
