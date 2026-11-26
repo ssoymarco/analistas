@@ -128,6 +128,30 @@ export async function getAllSearchablePlayers(): Promise<SearchablePlayer[]> {
   return POPULAR_PLAYERS;
 }
 
+// ── Ranking ──────────────────────────────────────────────────────────────────
+
+/**
+ * Order search matches by how well the name fits the query: the exact name
+ * first ("leon" → León before Cultural Leonesa), then names where the query
+ * starts a word, then matches in the middle of a word. Inside each group the
+ * incoming order is kept — it carries popularity (bundled clubs first, then the
+ * curated leagues, then everything else).
+ */
+export function rankByQuery<T>(items: T[], rawQuery: string, nameOf: (item: T) => string): T[] {
+  const q = normalize(rawQuery).trim();
+  if (!q || items.length < 2) return items;
+  const group = (item: T): number => {
+    const n = normalize(nameOf(item));
+    if (n === q) return 0;
+    if (n.startsWith(q) || n.includes(` ${q}`)) return 1;
+    return 2;
+  };
+  return items
+    .map((item, i) => ({ item, g: group(item), i }))
+    .sort((a, b) => a.g - b.g || a.i - b.i)
+    .map(x => x.item);
+}
+
 // ── Remote search ────────────────────────────────────────────────────────────
 
 /** Minimum letters the provider's search accepts. */

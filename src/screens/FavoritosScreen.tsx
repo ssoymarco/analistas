@@ -30,6 +30,7 @@ import {
   getSearchablePlayers,
   getSearchableLeagues,
   searchRemote,
+  rankByQuery,
   type SearchableTeam,
   type SearchablePlayer,
   type SearchableLeague,
@@ -857,11 +858,11 @@ export const FavoritosScreen: React.FC = () => {
   const searchResults = useMemo(() => {
     if (!debouncedQuery.trim()) return null;
     const q = normalize(debouncedQuery);
-    return config.searchItems.filter(i =>
+    return rankByQuery(config.searchItems.filter(i =>
       normalize(i.name).includes(q) ||
       normalize(i.subtitle).includes(q) ||
       (i.searchAliases?.some(a => normalize(a).includes(q)) ?? false)
-    );
+    ), debouncedQuery, i => i.name);
   }, [config.searchItems, debouncedQuery]);
 
   // ── Navigation ──

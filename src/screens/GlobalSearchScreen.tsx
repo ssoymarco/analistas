@@ -16,7 +16,7 @@ import { useDarkMode } from '../contexts/DarkModeContext';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import {
   getSearchableTeams, getSearchablePlayers, getSearchableLeagues, getSearchableNationalTeams,
-  getAllSearchableTeams, getAllSearchableLeagues, searchRemote,
+  getAllSearchableTeams, getAllSearchableLeagues, searchRemote, rankByQuery,
   type SearchableTeam, type SearchablePlayer, type SearchableLeague,
 } from '../services/football/search';
 import { SearchIcon } from '../components/NavIcons';
@@ -312,14 +312,17 @@ export const GlobalSearchScreen: React.FC = () => {
   // ── Grouped results ───────────────────────────────────────────────────────
   const groupedResults = useMemo(() => {
     const sections: { title: string; icon: string; data: SearchResult[] }[] = [];
-    const teamResults = results.filter(r => r.type === 'team');
-    const playerResults = results.filter(r => r.type === 'player');
-    const leagueResults = results.filter(r => r.type === 'league');
+    // Best name matches first inside each section.
+    const ranked = (type: SearchResult['type']) =>
+      rankByQuery(results.filter(r => r.type === type), debouncedQuery, r => r.name);
+    const teamResults = ranked('team');
+    const playerResults = ranked('player');
+    const leagueResults = ranked('league');
     if (teamResults.length > 0)   sections.push({ title: t('search.sectionTeams'), icon: '🏟', data: teamResults });
     if (playerResults.length > 0) sections.push({ title: t('search.sectionPlayers'), icon: '⚽', data: playerResults });
     if (leagueResults.length > 0) sections.push({ title: t('search.sectionLeagues'), icon: '🏆', data: leagueResults });
     return sections;
-  }, [results, t]);
+  }, [results, debouncedQuery, t]);
 
   // ── Trending items ────────────────────────────────────────────────────────
   const trending = useMemo<SearchResult[]>(() => {

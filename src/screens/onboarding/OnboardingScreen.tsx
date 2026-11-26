@@ -42,7 +42,7 @@ import {
   getSearchableLeagues,
   getSearchablePlayers,
   getAllSearchableTeams,
-  searchRemote,
+  searchRemote, rankByQuery,
   type SearchableTeam, type SearchableLeague, type SearchablePlayer,
 } from '../../services/football/search';
 import {
@@ -845,8 +845,9 @@ const Screen3Teams: React.FC<{
   const filtered = useMemo(() => {
     if (query.trim()) {
       const q = normalize(query);
-      return allTeams.filter(t2 =>
-        normalize(t2.name).includes(q) || normalize(t2.shortName).includes(q),
+      return rankByQuery(
+        allTeams.filter(t2 => normalize(t2.name).includes(q) || normalize(t2.shortName).includes(q)),
+        query, t2 => t2.name,
       );
     }
     const curated = teams.slice(0, visibleCount);
@@ -1078,9 +1079,9 @@ const Screen4Players: React.FC<{
     if (query.trim()) {
       const q = normalize(query);
       const valid = dedupe(allPlayers);
-      return valid.filter(p =>
-        normalize(p.name).includes(q) ||
-        (p.teamName && normalize(p.teamName).includes(q)),
+      return rankByQuery(
+        valid.filter(p => normalize(p.name).includes(q) || (p.teamName && normalize(p.teamName).includes(q))),
+        query, p => p.name,
       );
     }
     // No query: curated suggestions + selected-but-not-in-curated picks.

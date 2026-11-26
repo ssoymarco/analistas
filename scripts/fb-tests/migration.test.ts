@@ -34,8 +34,23 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
     ['cache:matches:date:2026-11-20', '{"data":[]}'],
     ['analistas_notif_prefs', JSON.stringify({ estadioMode: true })],
   ]);
+  const legacyTeamsRaw = await AsyncStorage.getItem('analistas_team_favorites');
+
+  // Storage failing (full disk): nothing half-written, the session still gets
+  // the translated lists, and the next launch simply runs again.
+  const realMultiSet = AsyncStorage.multiSet;
+  (AsyncStorage as any).multiSet = async () => { throw new Error('SQLITE_FULL'); };
+  await Mig.ensureLocalMigration();
+  const inMemory = await Mig.readLocalFavorites();
+  check('storage failure: session served from memory', same(inMemory.teamIds, ['2287', '2278', '541']), JSON.stringify(inMemory.teamIds));
+  check('storage failure: nothing recorded', (await AsyncStorage.getItem(Mig.MIGRATION_KEY)) === null
+    && (await AsyncStorage.getItem(Mig.FAVORITES_KEYS.teams)) === null);
+  (AsyncStorage as any).multiSet = realMultiSet;
+  Mig.resetMigrationSessionForTests();
+
   await Mig.ensureLocalMigration();
   const lists = await Mig.readLocalFavorites();
+  check('legacy lists left untouched (an older build still finds its ids)', (await AsyncStorage.getItem('analistas_team_favorites')) === legacyTeamsRaw);
   check('teams → América 2287, Chivas 2278, Real Madrid 541 (unknown team dropped)', same(lists.teamIds, ['2287', '2278', '541']), JSON.stringify(lists.teamIds));
   check('leagues → Liga MX 262, Premier 39, Mundial 1', same(lists.leagueIds, ['262', '39', '1']), JSON.stringify(lists.leagueIds));
   check('players → Messi 154, Cristiano 874 (squad player pending)', same(lists.playerIds, ['154', '874']), JSON.stringify(lists.playerIds));
@@ -50,10 +65,27 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   const record = JSON.parse((await AsyncStorage.getItem(Mig.MIGRATION_KEY))!);
   check('migration recorded', record.teams === 3 && record.unmapped === 1 && record.pendingPlayers === 1, JSON.stringify(record));
 
-  // Idempotent: a second launch (and new-format ids already stored) changes nothing.
-  await AsyncStorage.setItem('analistas_team_favorites', JSON.stringify(['2287', '2278', '541', '33']));
+  check('migration recorded as complete', record.cleaned === true);
+
+  // Idempotent: later launches never translate again, whatever the lists hold.
+  // (2287 is América's new id AND a legacy id of another club — re-translating
+  // would silently swap teams.)
+  await AsyncStorage.setItem(Mig.FAVORITES_KEYS.teams, JSON.stringify(['2287', '2278', '541', '33']));
+  Mig.resetMigrationSessionForTests();
   await Mig.ensureLocalMigration();
-  check('second run does not re-translate', same((await Mig.readLocalFavorites()).teamIds, ['2287', '2278', '541', '33']));
+  check('second launch does not re-translate', same((await Mig.readLocalFavorites()).teamIds, ['2287', '2278', '541', '33']));
+
+  // Killed between storing the lists and dropping the stale caches: the next
+  // launch finishes the cleanup and leaves the lists alone.
+  await AsyncStorage.setItem(Mig.MIGRATION_KEY, JSON.stringify({ ...record, cleaned: false }));
+  await AsyncStorage.setItem('analistas_cache_league_meta_v1_1', '{"data":1}');
+  Mig.resetMigrationSessionForTests();
+  await Mig.ensureLocalMigration();
+  check('interrupted cleanup is finished on the next launch',
+    (await AsyncStorage.getItem('analistas_cache_league_meta_v1_1')) === null
+    && JSON.parse((await AsyncStorage.getItem(Mig.MIGRATION_KEY))!).cleaned === true
+    && same((await Mig.readLocalFavorites()).teamIds, ['2287', '2278', '541', '33']));
+  await AsyncStorage.setItem(Mig.FAVORITES_KEYS.teams, JSON.stringify(lists.teamIds));
 
   // ── 2. Players the device can't map: the backend matches by surname + birth date
   await adminDb.doc('players/777001').set({ id: 777001, raw: {
@@ -69,6 +101,16 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   // ── 3. Cloud favorites still in the legacy id space
   const remote = await Mig.migrateRemoteFavorites({ teamIds: ['2687', '18576'], leagueIds: ['743'], playerIds: ['184798', '777001', '555'], rivalTeamIds: ['2626'], matchIds: ['1'] });
   check('cloud favorites translated', same(remote, { matchIds: [], teamIds: ['2287', '16'], playerIds: ['154', '35930'], leagueIds: ['262'], rivalTeamIds: ['2295'] }), JSON.stringify(remote));
+
+  // Backend unreachable while translating cloud favorites: the players are
+  // queued for the next launch instead of being lost; signing out drops the queue.
+  setOnDemandTransport(async () => { throw new Error('offline'); });
+  const offline = await Mig.migrateRemoteFavorites({ teamIds: ['2687'], playerIds: ['184798', '888002'] });
+  check('cloud players queued when the backend is unreachable', same(offline.playerIds, ['154'])
+    && (await AsyncStorage.getItem(Mig.PENDING_PLAYERS_KEY)) === '["888002"]');
+  await Mig.clearPendingPlayers();
+  check('queue cleared on sign-out', (await AsyncStorage.getItem(Mig.PENDING_PLAYERS_KEY)) === null);
+  setOnDemandTransport(async req => server.toPlain(await server.handleOnDemand(req)));
 
   // ── 4. Push topics
   fcmCalls.length = 0;

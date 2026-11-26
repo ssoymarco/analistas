@@ -25,12 +25,13 @@ import {
 } from '../services/fcmTopics';
 import { useNotificationPrefs } from './NotificationPrefsContext';
 import {
-  FAVORITES_KEYS, migrateRemoteFavorites, readLegacyBackup, resolvePendingPlayers,
+  FAVORITES_KEYS, clearPendingPlayers, migrateRemoteFavorites, readLegacyBackup, readLocalFavorites,
+  resolvePendingPlayers,
 } from '../services/football/legacyMigration';
 import { SM_TO_AF_LEAGUE } from '../../functions/src/shared/football/leagues';
 
 // The ids stored under these keys are API-Sports ids. A device that still held
-// ids of the previous data provider was migrated in place before this provider
+// ids of the previous data provider had them carried over before this provider
 // mounted (see services/football/legacyMigration.ts and DataMigrationGate).
 const MATCH_STORAGE_KEY  = FAVORITES_KEYS.matches;
 const TEAM_STORAGE_KEY   = FAVORITES_KEYS.teams;
@@ -173,18 +174,16 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
   // ── Load from AsyncStorage on mount ─────────────────────────────────────────
   useEffect(() => {
-    Promise.all([
-      AsyncStorage.getItem(MATCH_STORAGE_KEY),
-      AsyncStorage.getItem(TEAM_STORAGE_KEY),
-      AsyncStorage.getItem(PLAYER_STORAGE_KEY),
-      AsyncStorage.getItem(LEAGUE_STORAGE_KEY),
-      AsyncStorage.getItem(RIVAL_STORAGE_KEY),
-    ]).then(([m, t, p, l, r]) => {
-      try { const v = JSON.parse(m ?? '[]'); if (Array.isArray(v)) setFavoriteIds(v); } catch {}
-      try { const v = JSON.parse(t ?? '[]'); if (Array.isArray(v)) setFollowedTeamIds(v); } catch {}
-      try { const v = JSON.parse(p ?? '[]'); if (Array.isArray(v)) setFollowedPlayerIds(v); } catch {}
-      try { const v = JSON.parse(l ?? '[]'); if (Array.isArray(v)) setFollowedLeagueIds(v); } catch {}
-      try { const v = JSON.parse(r ?? '[]'); if (Array.isArray(v)) setRivalTeamIds(v); } catch {}
+    // Through the migration module: it also serves the lists it translated
+    // but couldn't store (device storage failing).
+    readLocalFavorites().catch(() => null).then(lists => {
+      if (lists) {
+        setFavoriteIds(lists.matchIds);
+        setFollowedTeamIds(lists.teamIds);
+        setFollowedPlayerIds(lists.playerIds);
+        setFollowedLeagueIds(lists.leagueIds);
+        setRivalTeamIds(lists.rivalTeamIds);
+      }
 
       // Favorites are loaded. The unified reconcile effect below fires once prefs
       // are ALSO hydrated, so it always runs with the authoritative delay bucket
@@ -309,6 +308,9 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
             AsyncStorage.removeItem(PLAYER_STORAGE_KEY),
             AsyncStorage.removeItem(LEAGUE_STORAGE_KEY),
             AsyncStorage.removeItem(RIVAL_STORAGE_KEY),
+            // Player lookups queued for the outgoing account must not land on
+            // the next one.
+            clearPendingPlayers(),
           ]).catch(() => {});
           // Desuscribir los topics FCM del usuario saliente — sin esto el
           // device seguía recibiendo los pushes de la cuenta anterior

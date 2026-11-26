@@ -15,12 +15,15 @@
  *   • favorite / muted matches    → dropped (fixture ids can't be translated,
  *                                   and they only matter for a few days)
  *
- * Two id spaces must never mix, so the migration is recorded explicitly:
- *   - on the device, by MIGRATION_KEY in AsyncStorage (the favorites keys are
- *     rewritten in place; the old lists are kept under LEGACY_BACKUP_KEY);
- *   - in the cloud, by living in a different field: migrated favorites are
- *     stored in `users/{uid}.favoritesFb`, while `users/{uid}.favorites` keeps
- *     the legacy ids untouched for devices still running an old build.
+ * Two id spaces must never mix, so each lives in its own place — which ids a
+ * list holds never depends on a flag that could be lost or half-written:
+ *   - on the device, API-Sports ids live under FAVORITES_KEYS; the lists older
+ *     builds saved (LEGACY_FAVORITES_KEYS) are read once and never rewritten,
+ *     so an interrupted or failed migration can simply run again, and a build
+ *     rolled back to the previous provider still finds its own ids;
+ *   - in the cloud, migrated favorites are stored in `users/{uid}.favoritesFb`,
+ *     while `users/{uid}.favorites` keeps the legacy ids untouched for devices
+ *     still running an old build.
  *
  * Push topics follow the ids: FavoritesContext unsubscribes the legacy topics
  * (fcmTopics.unsubscribeLegacyTopics) and subscribes the `fb_*` ones.
@@ -35,7 +38,17 @@ import { callOnDemand } from './onDemand';
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 
+/** The followed lists, in API-Sports ids. */
 export const FAVORITES_KEYS = {
+  matches: 'analistas_fb_match_favorites',
+  teams:   'analistas_fb_team_favorites',
+  players: 'analistas_fb_player_favorites',
+  leagues: 'analistas_fb_league_favorites',
+  rivals:  'analistas_fb_rival_teams',
+} as const;
+
+/** The lists builds on the previous provider saved (legacy ids). Read-only here. */
+export const LEGACY_FAVORITES_KEYS = {
   matches: 'analistas_match_favorites',
   teams:   'analistas_team_favorites',
   players: 'analistas_player_favorites',
@@ -43,7 +56,7 @@ export const FAVORITES_KEYS = {
   rivals:  'analistas_rival_teams',
 } as const;
 
-/** Set once the device's saved ids are API-Sports ids. */
+/** Set once the legacy lists have been carried over to FAVORITES_KEYS. */
 export const MIGRATION_KEY = 'analistas_fb_migration_v1';
 /** The pre-migration lists (legacy ids) — needed to unsubscribe old push topics and to retry players. */
 export const LEGACY_BACKUP_KEY = 'analistas_legacy_favorites_v1';
@@ -169,13 +182,15 @@ function parseList(raw: string | null): string[] {
   }
 }
 
-export async function readLocalFavorites(): Promise<FavoriteLists> {
+type KeySet = Record<'matches' | 'teams' | 'players' | 'leagues' | 'rivals', string>;
+
+async function readLists(keys: KeySet): Promise<FavoriteLists> {
   const [m, t, p, l, r] = await Promise.all([
-    AsyncStorage.getItem(FAVORITES_KEYS.matches),
-    AsyncStorage.getItem(FAVORITES_KEYS.teams),
-    AsyncStorage.getItem(FAVORITES_KEYS.players),
-    AsyncStorage.getItem(FAVORITES_KEYS.leagues),
-    AsyncStorage.getItem(FAVORITES_KEYS.rivals),
+    AsyncStorage.getItem(keys.matches),
+    AsyncStorage.getItem(keys.teams),
+    AsyncStorage.getItem(keys.players),
+    AsyncStorage.getItem(keys.leagues),
+    AsyncStorage.getItem(keys.rivals),
   ]);
   return {
     matchIds: parseList(m), teamIds: parseList(t), playerIds: parseList(p),
@@ -183,14 +198,32 @@ export async function readLocalFavorites(): Promise<FavoriteLists> {
   };
 }
 
-export async function writeLocalFavorites(lists: FavoriteLists): Promise<void> {
-  await AsyncStorage.multiSet([
+const isEmpty = (lists: FavoriteLists) => Object.values(lists).every(list => list.length === 0);
+
+/**
+ * Lists the migration translated but couldn't store (device storage full or
+ * failing). They serve this session; the next launch tries again.
+ */
+let unsavedLists: FavoriteLists | null = null;
+
+/** The followed lists (API-Sports ids). */
+export async function readLocalFavorites(): Promise<FavoriteLists> {
+  const stored = await readLists(FAVORITES_KEYS);
+  return unsavedLists && isEmpty(stored) ? unsavedLists : stored;
+}
+
+function listPairs(lists: FavoriteLists): Array<[string, string]> {
+  return [
     [FAVORITES_KEYS.matches, JSON.stringify(lists.matchIds)],
     [FAVORITES_KEYS.teams,   JSON.stringify(lists.teamIds)],
     [FAVORITES_KEYS.players, JSON.stringify(lists.playerIds)],
     [FAVORITES_KEYS.leagues, JSON.stringify(lists.leagueIds)],
     [FAVORITES_KEYS.rivals,  JSON.stringify(lists.rivalTeamIds)],
-  ]);
+  ];
+}
+
+export async function writeLocalFavorites(lists: FavoriteLists): Promise<void> {
+  await AsyncStorage.multiSet(listPairs(lists));
 }
 
 export interface MigrationRecord {
@@ -199,55 +232,101 @@ export interface MigrationRecord {
   teams: number; leagues: number; players: number; rivals: number;
   unmapped: number;
   pendingPlayers: number;
+  /** False until the caches built from legacy data were dropped. */
+  cleaned?: boolean;
 }
 
 let migrationPromise: Promise<void> | null = null;
 
 /**
  * Run the device migration if it hasn't run yet. Fast (AsyncStorage only — no
- * network) and idempotent; resolves when the favorites keys hold API-Sports
- * ids. The app waits for this before mounting anything that reads them.
+ * network); resolves when FAVORITES_KEYS hold the user's lists in API-Sports
+ * ids. The app waits for this before mounting anything that reads them. It
+ * never rejects: if the device can't store the result, the translated lists
+ * serve this session from memory and the next launch tries again.
  */
 export function ensureLocalMigration(): Promise<void> {
   if (!migrationPromise) migrationPromise = runLocalMigration().catch(() => { migrationPromise = null; });
   return migrationPromise;
 }
 
+/** Tests only: forget this session's run, as a fresh launch would. */
+export function resetMigrationSessionForTests(): void {
+  migrationPromise = null;
+  unsavedLists = null;
+}
+
+/** Per-match state and caches built from legacy data (also present on a device
+ *  that never followed anything). */
+async function dropStaleData(cachesOnly = false): Promise<void> {
+  const keys = await AsyncStorage.getAllKeys();
+  const stale = keys.filter(k => (!cachesOnly && STALE_KEYS.includes(k)) || STALE_PREFIXES.some(p => k.startsWith(p)));
+  if (stale.length) await AsyncStorage.multiRemove(stale);
+}
+
 async function runLocalMigration(): Promise<void> {
-  if (await AsyncStorage.getItem(MIGRATION_KEY)) return;
+  const done = await AsyncStorage.getItem(MIGRATION_KEY);
+  if (done) {
+    // Interrupted between the lists and the cleanup: finish the cleanup.
+    let record: MigrationRecord | null = null;
+    try { record = JSON.parse(done) as MigrationRecord; } catch { /* unreadable → treat as complete */ }
+    if (record && record.cleaned === false) {
+      await dropStaleData().catch(() => {});
+      await AsyncStorage.setItem(MIGRATION_KEY, JSON.stringify({ ...record, cleaned: true })).catch(() => {});
+    }
+    return;
+  }
 
-  const legacy = await readLocalFavorites();
-  const hadData = Object.values(legacy).some(list => list.length > 0);
-  let record: MigrationRecord = { at: Date.now(), teams: 0, leagues: 0, players: 0, rivals: 0, unmapped: 0, pendingPlayers: 0 };
+  const legacy = await readLists(LEGACY_FAVORITES_KEYS);
+  let record: MigrationRecord = {
+    at: Date.now(), teams: 0, leagues: 0, players: 0, rivals: 0, unmapped: 0, pendingPlayers: 0, cleaned: false,
+  };
+  const pairs: Array<[string, string]> = [];
 
-  if (hadData) {
+  if (!isEmpty(legacy)) {
     const t = translateLegacyFavorites(legacy);
-    // Order matters for crash safety: keep the originals first, flip the flag last.
+    // Anything already saved in the new keys (an earlier attempt that could
+    // not record itself) is kept: both sides are API-Sports ids.
+    const current = await readLists(FAVORITES_KEYS);
+    const lists: FavoriteLists = {
+      matchIds:     dedupe([...current.matchIds, ...t.lists.matchIds]),
+      teamIds:      dedupe([...current.teamIds, ...t.lists.teamIds]),
+      playerIds:    dedupe([...current.playerIds, ...t.lists.playerIds]),
+      leagueIds:    dedupe([...current.leagueIds, ...t.lists.leagueIds]),
+      rivalTeamIds: dedupe([...current.rivalTeamIds, ...t.lists.rivalTeamIds]),
+    };
     // Muted matches ride along: their legacy mute topics must be left too.
     const mutedMatchIds = parseList(await AsyncStorage.getItem('analistas_muted_matches'));
-    await AsyncStorage.setItem(LEGACY_BACKUP_KEY, JSON.stringify({ ...legacy, mutedMatchIds }));
-    if (t.pendingPlayerIds.length) await AsyncStorage.setItem(PENDING_PLAYERS_KEY, JSON.stringify(t.pendingPlayerIds));
-    await writeLocalFavorites(t.lists);
+    pairs.push(...listPairs(lists));
+    pairs.push([LEGACY_BACKUP_KEY, JSON.stringify({ ...legacy, mutedMatchIds })]);
+    if (t.pendingPlayerIds.length) pairs.push([PENDING_PLAYERS_KEY, JSON.stringify(t.pendingPlayerIds)]);
     record = {
-      at: Date.now(),
-      teams: t.lists.teamIds.length,
-      leagues: t.lists.leagueIds.length,
-      players: t.lists.playerIds.length,
-      rivals: t.lists.rivalTeamIds.length,
+      ...record,
+      teams: lists.teamIds.length,
+      leagues: lists.leagueIds.length,
+      players: lists.playerIds.length,
+      rivals: lists.rivalTeamIds.length,
       unmapped: t.unmapped.teams.length + t.unmapped.leagues.length + t.unmapped.rivals.length,
       pendingPlayers: t.pendingPlayerIds.length,
     };
+    unsavedLists = lists;
   }
+  pairs.push([MIGRATION_KEY, JSON.stringify(record)]);
 
-  // Per-match state and caches built from legacy data (also present on a
-  // device that never followed anything).
+  // One write: the lists and the record land together or not at all, so a
+  // crash can't leave translated lists that look untranslated (or the reverse).
   try {
-    const keys = await AsyncStorage.getAllKeys();
-    const stale = keys.filter(k => STALE_KEYS.includes(k) || STALE_PREFIXES.some(p => k.startsWith(p)));
-    if (stale.length) await AsyncStorage.multiRemove(stale);
-  } catch { /* stale caches expire on their own */ }
+    await AsyncStorage.multiSet(pairs);
+  } catch {
+    // Storage full is the usual reason — the legacy caches are the bulk of it.
+    // (Only the caches: the per-match state is still needed if this fails too.)
+    await dropStaleData(true).catch(() => {});
+    await AsyncStorage.multiSet(pairs);     // still failing → rejects; lists stay in memory
+  }
+  unsavedLists = null;
 
-  await AsyncStorage.setItem(MIGRATION_KEY, JSON.stringify(record));
+  await dropStaleData().catch(() => {});
+  await AsyncStorage.setItem(MIGRATION_KEY, JSON.stringify({ ...record, cleaned: true })).catch(() => {});
 }
 
 /** The pre-migration lists (legacy ids) plus the matches that were muted, or null when this device had none. */
@@ -290,6 +369,20 @@ export async function migrateRemoteFavorites(legacy: Partial<FavoriteLists>): Pr
   try {
     const resolved = await resolveLegacyPlayers(t.pendingPlayerIds);
     extra = Object.values(resolved).filter((v): v is string => !!v);
-  } catch { /* players the backend couldn't translate are left out */ }
+  } catch {
+    // Backend unreachable: queue them — `resolvePendingPlayers` retries on the
+    // next launch and the recovered players join the followed list then.
+    await queuePendingPlayers(t.pendingPlayerIds).catch(() => {});
+  }
   return { ...t.lists, playerIds: dedupe([...t.lists.playerIds, ...extra]) };
+}
+
+async function queuePendingPlayers(legacyIds: string[]): Promise<void> {
+  const pending = parseList(await AsyncStorage.getItem(PENDING_PLAYERS_KEY));
+  await AsyncStorage.setItem(PENDING_PLAYERS_KEY, JSON.stringify(dedupe([...pending, ...legacyIds])));
+}
+
+/** Forget queued player lookups — they belong to the account that signed out. */
+export async function clearPendingPlayers(): Promise<void> {
+  await AsyncStorage.removeItem(PENDING_PLAYERS_KEY);
 }
