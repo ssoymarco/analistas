@@ -50,6 +50,8 @@ export interface FbChange {
   awayScore: number;
   league: string;
   leagueId: string;
+  /** The league's country as the provider names it ("World" for national-team and international cups). */
+  leagueCountry?: string;
   popularity: number;
   /** Side that caused the event (goal/card/sub) or that the news is about (rival, cancellations). */
   side?: 'home' | 'away';
@@ -213,6 +215,7 @@ export function detectChanges(fixtures: FixtureWithEvents[], prev: Snapshot, now
       awayScore: row.awayScore,
       league: row.league,
       leagueId: row.leagueId,
+      leagueCountry: row.leagueCountry,
       popularity: row.popularity,
       minute: row.minute,
       homePenScore: row.homePenScore,
@@ -382,6 +385,7 @@ export interface UpcomingMatch {
   awayTeam: FbTeamRef;
   league: string;
   leagueId: string;
+  leagueCountry?: string;
   popularity: number;
 }
 
@@ -405,7 +409,8 @@ export function detectReminders(upcoming: UpcomingMatch[], snap: Snapshot, nowSe
     e.f.rem = true;
     out.push({
       type: 'matchReminder', matchId: m.id, homeTeam: m.homeTeam, awayTeam: m.awayTeam,
-      homeScore: 0, awayScore: 0, league: m.league, leagueId: m.leagueId, popularity: m.popularity,
+      homeScore: 0, awayScore: 0, league: m.league, leagueId: m.leagueId,
+      leagueCountry: m.leagueCountry, popularity: m.popularity,
     });
   }
   return out;

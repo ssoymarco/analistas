@@ -140,6 +140,7 @@ function detectChanges(fixtures, prev, nowSec) {
             awayScore: row.awayScore,
             league: row.league,
             leagueId: row.leagueId,
+            leagueCountry: row.leagueCountry,
             popularity: row.popularity,
             minute: row.minute,
             homePenScore: row.homePenScore,
@@ -324,7 +325,8 @@ function detectReminders(upcoming, snap, nowSec) {
         e.f.rem = true;
         out.push({
             type: 'matchReminder', matchId: m.id, homeTeam: m.homeTeam, awayTeam: m.awayTeam,
-            homeScore: 0, awayScore: 0, league: m.league, leagueId: m.leagueId, popularity: m.popularity,
+            homeScore: 0, awayScore: 0, league: m.league, leagueId: m.leagueId,
+            leagueCountry: m.leagueCountry, popularity: m.popularity,
         });
     }
     return out;

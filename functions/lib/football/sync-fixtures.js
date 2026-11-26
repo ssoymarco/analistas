@@ -170,7 +170,7 @@ async function syncFootballFixtures(explicitDates, nowMs = Date.now()) {
                 delayChanges.push({
                     type: 'kickoffDelayed', matchId: id, homeTeam: doc.homeTeam, awayTeam: doc.awayTeam,
                     homeScore: 0, awayScore: 0, league: doc.league, leagueId: doc.leagueId,
-                    popularity: doc.popularity, delay,
+                    leagueCountry: doc.leagueCountry, popularity: doc.popularity, delay,
                 });
             }
             if (prev?.hash === hash)

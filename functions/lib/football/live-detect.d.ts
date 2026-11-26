@@ -37,6 +37,8 @@ export interface FbChange {
     awayScore: number;
     league: string;
     leagueId: string;
+    /** The league's country as the provider names it ("World" for national-team and international cups). */
+    leagueCountry?: string;
     popularity: number;
     /** Side that caused the event (goal/card/sub) or that the news is about (rival, cancellations). */
     side?: 'home' | 'away';
@@ -138,6 +140,7 @@ export interface UpcomingMatch {
     awayTeam: FbTeamRef;
     league: string;
     leagueId: string;
+    leagueCountry?: string;
     popularity: number;
 }
 export declare function emptyEntry(ts: number, pp: number): SnapEntry;

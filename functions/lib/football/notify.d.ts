@@ -53,6 +53,12 @@ interface Route {
     };
 }
 export declare function route(c: FbChange): Route;
+/**
+ * `route` plus the senior national team of each youth side in it (`senior`:
+ * youth team id → senior team id), so whoever follows Mexico also hears about
+ * Mexico U17. "Rival" news stays with the team that was marked as a rival.
+ */
+export declare function routeWithFamily(c: FbChange, senior: Record<string, string>): Route;
 /** Legacy (Sportmonks-era) topic for a new-format team topic, or null when unmappable. */
 export declare function legacyTopicFor(fbTopic: string): string | null;
 /** `(a || b) && !mute` — FCM allows at most 5 topics per condition. */

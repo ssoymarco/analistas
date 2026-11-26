@@ -159,7 +159,8 @@ async function loadUpcomingDocs(nowSec, windowSec) {
 function toUpcoming(d) {
     return {
         id: String(d.id), timestamp: d.timestamp, homeTeam: d.homeTeam, awayTeam: d.awayTeam,
-        league: d.league, leagueId: String(d.leagueId), popularity: d.popularity ?? 0,
+        league: d.league, leagueId: String(d.leagueId), leagueCountry: d.leagueCountry,
+        popularity: d.popularity ?? 0,
     };
 }
 async function loadPrevPressure(ids) {
@@ -408,7 +409,7 @@ async function enrichment(store, nowSec, changes, lineupPushes) {
                 changes.push({
                     type: 'lineups', matchId: id, homeTeam: row.homeTeam, awayTeam: row.awayTeam,
                     homeScore: row.homeScore, awayScore: row.awayScore, league: row.league,
-                    leagueId: row.leagueId, popularity: row.popularity,
+                    leagueId: row.leagueId, leagueCountry: row.leagueCountry, popularity: row.popularity,
                 });
                 lineupPushes.push({ f, row });
             }

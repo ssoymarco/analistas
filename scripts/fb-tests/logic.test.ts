@@ -122,6 +122,7 @@ const check = (name: string, ok: boolean, detail = '') => { if (!ok) failures++;
 
   // ── push routing (server): who hears about what
   // eslint-disable-next-line @typescript-eslint/no-var-requires
+  process.env.ESTADIO_DELAY_ENABLED = 'false';   // no Cloud Tasks from the test process
   const notify = require('../../functions/lib/football/notify.js');
   const ch = (type: string, side?: 'home' | 'away') => ({ type, side, matchId: '77', homeTeam: { id: '2282', name: 'Monterrey' }, awayTeam: { id: '2287', name: 'Club America' }, homeScore: 0, awayScore: 0, league: 'Liga MX', leagueId: '262', popularity: 100 });
   const teamsOf = (type: string, side?: 'home' | 'away') => { const r = notify.route(ch(type, side)); return (r.bucketed ?? r.immediate).teams.join(','); };
@@ -139,6 +140,51 @@ const check = (name: string, ok: boolean, detail = '') => { if (!ok) failures++;
   const rivalCond: string = notify.immediateCondition(ch('rivalRedCard', 'home'), ['fb_team_2282_rival_red_card']);
   check('push: rival red card skips devices that already get the red card through the other team', rivalCond.includes("!('fb_team_2287_cards_d0' in topics)") && rivalCond.includes("!('fb_mute_77' in topics)") && (rivalCond.match(/in topics/g) ?? []).length === 5, rivalCond);
   check('push: other pushes keep the plain condition', notify.immediateCondition(ch('redCard', 'home'), ['a', 'b']) === notify.conditionFor(['a', 'b'], '77'));
+
+  // ── youth national teams count as the senior team (Mexico U17 → Mexico)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const family = require('../../functions/lib/football/team-family.js');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { quotaState } = require('../../functions/lib/football/apisports.js');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const adminInit = require('../../functions/lib/admin-init.js');
+  check('family: youth names are recognised', family.youthOf('Mexico U17')?.base === 'Mexico' && family.youthOf('Mexico U17')?.age === 17 && family.youthOf('South Korea U-20')?.base === 'South Korea' && family.youthOf('Mexico') === null && family.youthOf('Mexico W') === null && family.youthOf('Schalke 04') === null);
+  await adminInit.db.doc('fb_meta/nationalIds').delete();
+  family.resetTeamFamilyForTests();
+  const u17 = [{ id: '21213', name: 'Venezuela U17' }, { id: '25551', name: 'Mexico U17' }];
+  const callsA = quotaState.callsThisInstance;
+  const seniorOf = await family.seniorTeamIds([...u17, { id: '16', name: 'Mexico' }, { id: '9999', name: 'Real Madrid U19' }]);
+  const callsB = quotaState.callsThisInstance;
+  check('family: Mexico U17 and Venezuela U17 resolve to their senior teams', seniorOf['25551'] === '16' && seniorOf['21213'] === '2379', JSON.stringify(seniorOf));
+  check('family: a club academy and a senior team resolve to nothing', !('9999' in seniorOf) && !('16' in seniorOf) && callsB - callsA === 3, `${callsB - callsA} calls`);
+  family.resetTeamFamilyForTests();
+  const again = await family.seniorTeamIds([...u17, { id: '9999', name: 'Real Madrid U19' }]);
+  check('family: answers are remembered (no more provider calls, also for "not a national team")', again['25551'] === '16' && !('9999' in again) && quotaState.callsThisInstance === callsB, `${quotaState.callsThisInstance - callsB} calls`);
+
+  const u17ch = (type: string, side?: 'home' | 'away', country = 'World') => ({ type, side, matchId: '1546210', homeTeam: u17[0], awayTeam: u17[1], homeScore: 0, awayScore: 1, league: 'World Cup - U17', leagueId: '587', leagueCountry: country, popularity: 0, minute: 30, scorerName: 'L. Ortiz' });
+  const widened = notify.routeWithFamily(u17ch('goal', 'away'), seniorOf);
+  check('family: a Mexico U17 goal also goes to followers of Mexico', widened.bucketed.teams.join(',') === '21213,2379,25551,16', widened.bucketed.teams.join(','));
+  check('family: "rival" news is not widened', notify.routeWithFamily(u17ch('rivalLoss', 'away'), seniorOf).immediate.teams.join(',') === '25551');
+  check('family: youth teams get their Spanish name', notify.loc('Mexico U17') === 'México Sub-17' && notify.loc('Venezuela U17') === 'Venezuela Sub-17' && notify.loc('Mexico') === 'México' && notify.loc('Club America') === 'Club America', `${notify.loc('Mexico U17')} / ${notify.loc('Venezuela U17')}`);
+
+  // Whole dispatch with a recording messenger (nothing leaves this process).
+  const sent: any[] = [];
+  const realMessaging = Object.getOwnPropertyDescriptor(adminInit.admin, 'messaging');
+  Object.defineProperty(adminInit.admin, 'messaging', { configurable: true, value: () => ({ send: async (m: any) => { sent.push(m); return 'ok'; } }) });
+  try {
+    await notify.dispatchFootballChanges([u17ch('goal', 'away')]);
+    const live = sent.find(m => typeof m.condition === 'string' && m.condition.includes('fb_team_25551_goals_d0'));
+    check('family: one push covers both U17 sides, both senior teams and the mute guard (FCM allows five topics)',
+      !!live && live.condition.includes("'fb_team_16_goals_d0' in topics") && live.condition.includes("'fb_team_2379_goals_d0' in topics") && live.condition.includes("!('fb_mute_1546210' in topics)") && (live.condition.match(/in topics/g) ?? []).length === 5,
+      live?.condition ?? `sent ${sent.length}`);
+    check('family: the push is written with the Spanish youth names', !!live && `${live.notification.title} ${live.notification.body}`.includes('México Sub-17'), live ? `${live.notification.title} · ${live.notification.body}` : '');
+    sent.length = 0;
+    await notify.dispatchFootballChanges([u17ch('goal', 'away', 'Mexico')]);
+    const plain = sent.find(m => typeof m.condition === 'string' && m.condition.includes('fb_team_25551_goals_d0'));
+    check('family: outside national-team competitions nothing is widened', !!plain && !plain.condition.includes('fb_team_16_'), plain?.condition ?? '');
+  } finally {
+    if (realMessaging) Object.defineProperty(adminInit.admin, 'messaging', realMessaging); else delete adminInit.admin.messaging;
+  }
 
   // ── share links and dates
   check('share: a league with a page on the site links to it', leagueShareUrl(262) === `${SITE_URL}/league/liga-mx` && leagueShareUrl('39') === `${SITE_URL}/league/premier-league`);

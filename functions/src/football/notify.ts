@@ -35,6 +35,7 @@ import type { DelayedPushPayload } from '../deliver-delayed-push';
 import { FbTopics, type FbDelayBucket } from '../shared/football/model';
 import { legacyTeamIdFor } from '../shared/football/legacy';
 import type { FbChange } from './live-detect';
+import { NATIONAL_TEAMS_COUNTRY, seniorTeamIds, youthOf } from './team-family';
 
 const ESTADIO_DELAY_ENABLED = process.env.ESTADIO_DELAY_ENABLED !== 'false';
 const LEGACY_DUAL_SEND = process.env.FB_LEGACY_DUAL_SEND !== 'false';
@@ -61,7 +62,12 @@ const TEAMS_ES: Record<string, string> = {
   'USA': 'Estados Unidos', 'United States': 'Estados Unidos', 'Wales': 'Gales', 'Zimbabwe': 'Zimbabue',
   'Northern Ireland': 'Irlanda del Norte', 'Haiti': 'Haití', 'Uzbekistan': 'Uzbekistán',
 };
-export const loc = (name: string): string => TEAMS_ES[name] ?? name;
+export const loc = (name: string): string => {
+  if (TEAMS_ES[name]) return TEAMS_ES[name];
+  // Youth national teams: "Mexico U17" → "México Sub-17".
+  const youth = youthOf(name);
+  return youth ? `${TEAMS_ES[youth.base] ?? youth.base} Sub-${youth.age}` : name;
+};
 
 /** Friendlies are one match in a push → singular "Amistoso". */
 export function displayLeague(name: string | null | undefined): string {
@@ -194,6 +200,21 @@ export function route(c: FbChange): Route {
     case 'rivalPenMiss':     return { immediate: { topic: FbTopics.rivalPenMiss, teams: [s] } };
     default:                 return {};
   }
+}
+
+/**
+ * `route` plus the senior national team of each youth side in it (`senior`:
+ * youth team id → senior team id), so whoever follows Mexico also hears about
+ * Mexico U17. "Rival" news stays with the team that was marked as a rival.
+ */
+export function routeWithFamily(c: FbChange, senior: Record<string, string>): Route {
+  const r = route(c);
+  if (c.type.startsWith('rival')) return r;
+  const widen = (teams: string[]) => [...new Set(teams.flatMap(t => (senior[t] ? [t, senior[t]] : [t])))];
+  return {
+    ...(r.bucketed ? { bucketed: { ...r.bucketed, teams: widen(r.bucketed.teams) } } : {}),
+    ...(r.immediate ? { immediate: { ...r.immediate, teams: widen(r.immediate.teams) } } : {}),
+  };
 }
 
 /** Legacy (Sportmonks-era) topic for a new-format team topic, or null when unmappable. */
@@ -346,13 +367,28 @@ export async function dispatchFootballChanges(changes: FbChange[]): Promise<void
   const sends: Array<Promise<void>> = [];
   const queue = ESTADIO_DELAY_ENABLED ? getFunctions().taskQueue('deliverDelayedPush') : null;
 
+  // Followers of a senior national team also hear about its youth sides
+  // (Mexico → Mexico U17…): each youth team brings its senior team's topics.
+  // Only in national-team competitions (the provider files them under
+  // "World"), so club academies ("Real Madrid U19") cost no lookups.
+  const seen = new Map<string, { id: string; name: string }>();
+  for (const c of changes) {
+    if (c.leagueCountry !== NATIONAL_TEAMS_COUNTRY) continue;
+    seen.set(c.homeTeam.id, c.homeTeam);
+    seen.set(c.awayTeam.id, c.awayTeam);
+  }
+  const senior = seen.size
+    ? await seniorTeamIds([...seen.values()]).catch(() => ({} as Record<string, string>))
+    : {};
+
   for (const c of changes) {
     const copy = buildCopy(c);
     const data = payloadFor(c);
     const dedupId = dedupFor(c);
-    const r = route(c);
+    const r = routeWithFamily(c, senior);
 
-    // Immediate (d0 / plain) topics.
+    // Immediate (d0 / plain) topics. At most two teams and their two senior
+    // sides: four topics plus the mute guard is exactly FCM's limit of five.
     const immediate = [...new Set(r.bucketed
       ? r.bucketed.teams.map(t => r.bucketed!.topic(t, 'd0'))
       : (r.immediate?.teams.map(t => r.immediate!.topic(t)) ?? []))];
