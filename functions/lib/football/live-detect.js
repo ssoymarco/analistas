@@ -109,6 +109,12 @@ function snapEntryFor(f, prev) {
         e.rp = [...prev.rp];
     if (prev?.rd)
         e.rd = [...prev.rd];
+    if (prev?.gt)
+        e.gt = prev.gt;
+    if (prev?.rt)
+        e.rt = [...prev.rt];
+    if (prev?.rx)
+        e.rx = [...prev.rx];
     if (prev?.ft)
         e.ft = prev.ft;
     if (prev?.se)
@@ -187,10 +193,14 @@ function detectChanges(fixtures, prev, nowSec) {
                 playerId: kind !== 'own' ? (g?.player?.id ?? undefined) : undefined,
                 minute: minuteOf(g, row.minute),
             });
+            cur.gt = nowSec;
         }
         if (curTotal < prevTotal) {
             const side = cur.hs < p.hs ? 'home' : 'away';
-            push({ ...base, type: 'goalCancelled', side, varConfirmed: hasRecentVarEvent(ev, row.minute) });
+            push({
+                ...base, type: 'goalCancelled', side, varConfirmed: hasRecentVarEvent(ev, row.minute),
+                eventAt: p.gt, revokedAt: nowSec,
+            });
         }
         // ── Phase transitions (latched so status flaps can't re-fire) ───────────
         if (p.st === '1H' && cur.st === 'HT' && !cur.f.ht) {
@@ -241,6 +251,8 @@ function detectChanges(fixtures, prev, nowSec) {
             continue;
         const rp = cur.rp ?? [p.rh, p.ra];
         const rd = cur.rd ?? [0, 0];
+        const rt = cur.rt ?? [0, 0];
+        const rx = cur.rx ?? [0, 0];
         for (const side of ['home', 'away']) {
             const i = side === 'home' ? 0 : 1;
             const teamId = side === 'home' ? homeId : awayId;
@@ -259,19 +271,28 @@ function detectChanges(fixtures, prev, nowSec) {
                 push({ ...c, type: 'rivalRedCard', playerId: undefined });
                 rp[i] = red[1];
                 rd[i] = 0;
+                rt[i] = nowSec;
+                rx[i] = 0;
             }
             // Red card revoked: the count must stay below what we notified for
             // RED_CANCEL_CONFIRM_POLLS consecutive polls.
             const count = side === 'home' ? cur.rh : cur.ra;
             if (count >= rp[i]) {
                 rd[i] = 0;
+                rx[i] = 0;
             }
             else {
                 rd[i] += 1;
+                if (rd[i] === 1)
+                    rx[i] = nowSec;
                 if (rd[i] >= exports.RED_CANCEL_CONFIRM_POLLS) {
-                    push({ ...base, type: 'redCardCancelled', side });
+                    push({
+                        ...base, type: 'redCardCancelled', side,
+                        eventAt: rt[i] || undefined, revokedAt: rx[i] || nowSec,
+                    });
                     rp[i] = count;
                     rd[i] = 0;
+                    rx[i] = 0;
                 }
             }
             const yel = side === 'home' ? [p.yh, cur.yh] : [p.ya, cur.ya];
@@ -301,6 +322,14 @@ function detectChanges(fixtures, prev, nowSec) {
             cur.rd = rd;
         else
             delete cur.rd;
+        if (rt[0] || rt[1])
+            cur.rt = rt;
+        else
+            delete cur.rt;
+        if (rx[0] || rx[1])
+            cur.rx = rx;
+        else
+            delete cur.rx;
     }
     return { changes, next };
 }

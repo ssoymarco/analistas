@@ -22,6 +22,15 @@
  *   Cloud Tasks silently drops a second enqueue with the same name while the
  *   first is still pending — no double delivery.
  *
+ * Correcciones (gol anulado, roja revocada):
+ *   También pasan por aquí, pero solo para los buckets que ya habían recibido
+ *   el evento (lo decide quien encola — delayedBucketsFor en football/notify.ts).
+ *   Llegan con el mismo retraso del bucket y sin guard: no hay nada que revocar.
+ *
+ * Builds anteriores al cambio de proveedor:
+ *   Sus copias retrasadas son tareas aparte, dirigidas a los topics
+ *   `team_{idViejo}_*_d{N}` y con `data.legacy = '1'` (sin matchId).
+ *
  * Kill switch (server-side):
  *   Set ESTADIO_DELAY_ENABLED=false in Cloud Functions env to stop enqueuing
  *   new tasks (no redeploy needed; this handler just never gets called).
@@ -44,7 +53,7 @@ export interface DelayedPushPayload {
   body:       string;
   data:       Record<string, string>;
   dedupId:    string;               // same apns-collapse-id / android tag as _d0
-  changeType: string;               // 'goal' | 'halftime' | 'matchEnd' | 'redCard'
+  changeType: string;               // 'goal' | 'halftime' | 'matchEnd' | 'redCard' | 'goalCancelled' …
   matchId:    string;
   homeScore:  number;               // score AT THE TIME OF THE EVENT
   awayScore:  number;
@@ -69,91 +78,98 @@ export const deliverDelayedPush = onTaskDispatched(
     memory:       '256MiB',
     timeoutSeconds: 30,
   },
-  async (req) => {
-    const p = req.data as DelayedPushPayload;
-
-    // ── VAR guard (goles Y rojas) ────────────────────────────────────────────
-    // Si el evento fue revocado entre el encolado y la entrega, se descarta el
-    // push: quien está en un bucket retrasado todavía no sabe nada, así que lo
-    // correcto es callar, no corregir algo que nunca vio.
-    //
-    // Las ROJAS no estaban cubiertas (el guard era `changeType === 'goal'`).
-    // Resultado real: en Atlante vs América (24 jul 2026) la roja a Rodolfo
-    // Cota se revocó, y un usuario en `_d10` la habría recibido diez minutos
-    // después, ya revocada, sin nada que lo detuviera. Requiere que mappers.ts
-    // escriba homeRedCards/awayRedCards en el doc — antes no existían.
-    if (p.changeType === 'goal' || p.changeType === 'redCard') {
-      try {
-        const snap = await db.doc(`${p.matchCollection ?? 'matches'}/${p.matchId}`).get();
-        if (snap.exists) {
-          const curr = snap.data() as {
-            homeScore?: number; awayScore?: number;
-            homeRedCards?: number; awayRedCards?: number;
-          };
-          const isGoal    = p.changeType === 'goal';
-          const currTotal = isGoal
-            ? (curr.homeScore ?? 0) + (curr.awayScore ?? 0)
-            : (curr.homeRedCards ?? 0) + (curr.awayRedCards ?? 0);
-          const taskTotal = isGoal
-            ? p.homeScore + p.awayScore
-            : (p.homeRedCards ?? 0) + (p.awayRedCards ?? 0);
-          // Rojas: si la tarea no trae el conteo (encolada por una versión
-          // anterior del código), no hay contra qué comparar → entregar.
-          const comparable = isGoal || p.homeRedCards != null;
-          if (comparable && currTotal < taskTotal) {
-            logger.info('🚫 VAR guard: delayed push suppressed', {
-              matchId: p.matchId, topic: p.topic,
-              changeType: p.changeType, taskTotal, currTotal,
-            });
-            return; // drop — el evento fue revocado
-          }
-        }
-      } catch (varErr) {
-        // Firestore read failed → deliver anyway (availability > correctness here)
-        logger.warn('VAR guard read failed — delivering notification', {
-          matchId: p.matchId, err: String(varErr),
-        });
-      }
-    }
-
-    // ── FCM send ─────────────────────────────────────────────────────────────
-    const target = p.condition ? { condition: p.condition } : { topic: p.topic! };
-    try {
-      await admin.messaging().send({
-        ...target,
-        notification: { title: p.title, body: p.body },
-        data: p.data,
-        // Reports de Firebase (Messaging → Reports): los avisos retrasados por
-        // Modo Estadio se distinguen de los inmediatos ("goal" vs "goal-estadio").
-        fcmOptions: { analyticsLabel: `${String(p.changeType || 'other').replace(/[^a-zA-Z0-9_.~%-]/g, '').slice(0, 36) || 'other'}-estadio` },
-        android: {
-          priority: 'high',
-          collapseKey: p.dedupId,
-          notification: {
-            channelId: 'analistas-live',
-            sound:     'default',
-            tag:       p.dedupId,
-          },
-        },
-        apns: {
-          headers:  { 'apns-collapse-id': p.dedupId },
-          payload:  { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } },
-        },
-      });
-      logger.info(`⏰ Delayed push delivered → ${p.topic}`, {
-        matchId: p.matchId, changeType: p.changeType,
-      });
-    } catch (err: unknown) {
-      const code = (err as { code?: string }).code;
-      // "No subscribers on this topic" → topic just has no receivers for this bucket
-      if (
-        code === 'messaging/invalid-argument' ||
-        code === 'messaging/registration-token-not-registered'
-      ) {
-        return; // silent skip — no subscribers on this bucket
-      }
-      // Any other error → rethrow so Cloud Tasks retries (up to maxAttempts)
-      throw err;
-    }
-  },
+  async (req) => { await handleDelayedPush(req.data as DelayedPushPayload); },
 );
+
+/** Etiqueta para los Reports de Firebase: "goal-estadio", "legacy-goal-estadio"… */
+export function delayedAnalyticsLabel(p: Pick<DelayedPushPayload, 'changeType' | 'data'>): string {
+  const kind = String(p.changeType || 'other').replace(/[^a-zA-Z0-9_.~%-]/g, '').slice(0, 30) || 'other';
+  return `${p.data?.legacy === '1' ? 'legacy-' : ''}${kind}-estadio`;
+}
+
+/** Cuerpo del handler, separado del wrapper de Cloud Tasks para poder probarlo. */
+export async function handleDelayedPush(p: DelayedPushPayload): Promise<void> {
+  // ── VAR guard (goles Y rojas) ────────────────────────────────────────────
+  // Si el evento fue revocado entre el encolado y la entrega, se descarta el
+  // push: quien está en un bucket retrasado todavía no sabe nada, así que lo
+  // correcto es callar, no corregir algo que nunca vio.
+  //
+  // Las ROJAS no estaban cubiertas (el guard era `changeType === 'goal'`).
+  // Resultado real: en Atlante vs América (24 jul 2026) la roja a Rodolfo
+  // Cota se revocó, y un usuario en `_d10` la habría recibido diez minutos
+  // después, ya revocada, sin nada que lo detuviera. Requiere que mappers.ts
+  // escriba homeRedCards/awayRedCards en el doc — antes no existían.
+  if (p.changeType === 'goal' || p.changeType === 'redCard') {
+    try {
+      const snap = await db.doc(`${p.matchCollection ?? 'matches'}/${p.matchId}`).get();
+      if (snap.exists) {
+        const curr = snap.data() as {
+          homeScore?: number; awayScore?: number;
+          homeRedCards?: number; awayRedCards?: number;
+        };
+        const isGoal    = p.changeType === 'goal';
+        const currTotal = isGoal
+          ? (curr.homeScore ?? 0) + (curr.awayScore ?? 0)
+          : (curr.homeRedCards ?? 0) + (curr.awayRedCards ?? 0);
+        const taskTotal = isGoal
+          ? p.homeScore + p.awayScore
+          : (p.homeRedCards ?? 0) + (p.awayRedCards ?? 0);
+        // Rojas: si la tarea no trae el conteo (encolada por una versión
+        // anterior del código), no hay contra qué comparar → entregar.
+        const comparable = isGoal || p.homeRedCards != null;
+        if (comparable && currTotal < taskTotal) {
+          logger.info('🚫 VAR guard: delayed push suppressed', {
+            matchId: p.matchId, target: p.condition ?? p.topic,
+            changeType: p.changeType, taskTotal, currTotal,
+          });
+          return; // drop — el evento fue revocado
+        }
+      }
+    } catch (varErr) {
+      // Firestore read failed → deliver anyway (availability > correctness here)
+      logger.warn('VAR guard read failed — delivering notification', {
+        matchId: p.matchId, err: String(varErr),
+      });
+    }
+  }
+
+  // ── FCM send ─────────────────────────────────────────────────────────────
+  const target = p.condition ? { condition: p.condition } : { topic: p.topic! };
+  try {
+    await admin.messaging().send({
+      ...target,
+      notification: { title: p.title, body: p.body },
+      data: p.data,
+      // Reports de Firebase (Messaging → Reports): los avisos retrasados por
+      // Modo Estadio se distinguen de los inmediatos ("goal" vs "goal-estadio").
+      fcmOptions: { analyticsLabel: delayedAnalyticsLabel(p) },
+      android: {
+        priority: 'high',
+        collapseKey: p.dedupId,
+        notification: {
+          channelId: 'analistas-live',
+          sound:     'default',
+          tag:       p.dedupId,
+        },
+      },
+      apns: {
+        headers:  { 'apns-collapse-id': p.dedupId },
+        payload:  { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } },
+      },
+    });
+    logger.info(`⏰ Delayed push delivered → ${p.condition ?? p.topic}`, {
+      matchId: p.matchId, changeType: p.changeType,
+    });
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code;
+    // "No subscribers on this topic" → topic just has no receivers for this bucket
+    if (
+      code === 'messaging/invalid-argument' ||
+      code === 'messaging/registration-token-not-registered'
+    ) {
+      return; // silent skip — no subscribers on this bucket
+    }
+    // Any other error → rethrow so Cloud Tasks retries (up to maxAttempts)
+    throw err;
+  }
+}

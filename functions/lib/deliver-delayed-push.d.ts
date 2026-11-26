@@ -22,6 +22,15 @@
  *   Cloud Tasks silently drops a second enqueue with the same name while the
  *   first is still pending — no double delivery.
  *
+ * Correcciones (gol anulado, roja revocada):
+ *   También pasan por aquí, pero solo para los buckets que ya habían recibido
+ *   el evento (lo decide quien encola — delayedBucketsFor en football/notify.ts).
+ *   Llegan con el mismo retraso del bucket y sin guard: no hay nada que revocar.
+ *
+ * Builds anteriores al cambio de proveedor:
+ *   Sus copias retrasadas son tareas aparte, dirigidas a los topics
+ *   `team_{idViejo}_*_d{N}` y con `data.legacy = '1'` (sin matchId).
+ *
  * Kill switch (server-side):
  *   Set ESTADIO_DELAY_ENABLED=false in Cloud Functions env to stop enqueuing
  *   new tasks (no redeploy needed; this handler just never gets called).
@@ -51,3 +60,7 @@ export interface DelayedPushPayload {
     awayRedCards?: number;
 }
 export declare const deliverDelayedPush: import("firebase-functions/v2/tasks").TaskQueueFunction<any>;
+/** Etiqueta para los Reports de Firebase: "goal-estadio", "legacy-goal-estadio"… */
+export declare function delayedAnalyticsLabel(p: Pick<DelayedPushPayload, 'changeType' | 'data'>): string;
+/** Cuerpo del handler, separado del wrapper de Cloud Tasks para poder probarlo. */
+export declare function handleDelayedPush(p: DelayedPushPayload): Promise<void>;

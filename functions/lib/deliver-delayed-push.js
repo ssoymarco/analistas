@@ -23,6 +23,15 @@
  *   Cloud Tasks silently drops a second enqueue with the same name while the
  *   first is still pending — no double delivery.
  *
+ * Correcciones (gol anulado, roja revocada):
+ *   También pasan por aquí, pero solo para los buckets que ya habían recibido
+ *   el evento (lo decide quien encola — delayedBucketsFor en football/notify.ts).
+ *   Llegan con el mismo retraso del bucket y sin guard: no hay nada que revocar.
+ *
+ * Builds anteriores al cambio de proveedor:
+ *   Sus copias retrasadas son tareas aparte, dirigidas a los topics
+ *   `team_{idViejo}_*_d{N}` y con `data.legacy = '1'` (sin matchId).
+ *
  * Kill switch (server-side):
  *   Set ESTADIO_DELAY_ENABLED=false in Cloud Functions env to stop enqueuing
  *   new tasks (no redeploy needed; this handler just never gets called).
@@ -62,6 +71,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deliverDelayedPush = void 0;
+exports.delayedAnalyticsLabel = delayedAnalyticsLabel;
+exports.handleDelayedPush = handleDelayedPush;
 const tasks_1 = require("firebase-functions/v2/tasks");
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
@@ -72,8 +83,14 @@ exports.deliverDelayedPush = (0, tasks_1.onTaskDispatched)({
     region: 'us-central1',
     memory: '256MiB',
     timeoutSeconds: 30,
-}, async (req) => {
-    const p = req.data;
+}, async (req) => { await handleDelayedPush(req.data); });
+/** Etiqueta para los Reports de Firebase: "goal-estadio", "legacy-goal-estadio"… */
+function delayedAnalyticsLabel(p) {
+    const kind = String(p.changeType || 'other').replace(/[^a-zA-Z0-9_.~%-]/g, '').slice(0, 30) || 'other';
+    return `${p.data?.legacy === '1' ? 'legacy-' : ''}${kind}-estadio`;
+}
+/** Cuerpo del handler, separado del wrapper de Cloud Tasks para poder probarlo. */
+async function handleDelayedPush(p) {
     // ── VAR guard (goles Y rojas) ────────────────────────────────────────────
     // Si el evento fue revocado entre el encolado y la entrega, se descarta el
     // push: quien está en un bucket retrasado todavía no sabe nada, así que lo
@@ -101,7 +118,7 @@ exports.deliverDelayedPush = (0, tasks_1.onTaskDispatched)({
                 const comparable = isGoal || p.homeRedCards != null;
                 if (comparable && currTotal < taskTotal) {
                     logger.info('🚫 VAR guard: delayed push suppressed', {
-                        matchId: p.matchId, topic: p.topic,
+                        matchId: p.matchId, target: p.condition ?? p.topic,
                         changeType: p.changeType, taskTotal, currTotal,
                     });
                     return; // drop — el evento fue revocado
@@ -124,7 +141,7 @@ exports.deliverDelayedPush = (0, tasks_1.onTaskDispatched)({
             data: p.data,
             // Reports de Firebase (Messaging → Reports): los avisos retrasados por
             // Modo Estadio se distinguen de los inmediatos ("goal" vs "goal-estadio").
-            fcmOptions: { analyticsLabel: `${String(p.changeType || 'other').replace(/[^a-zA-Z0-9_.~%-]/g, '').slice(0, 36) || 'other'}-estadio` },
+            fcmOptions: { analyticsLabel: delayedAnalyticsLabel(p) },
             android: {
                 priority: 'high',
                 collapseKey: p.dedupId,
@@ -139,7 +156,7 @@ exports.deliverDelayedPush = (0, tasks_1.onTaskDispatched)({
                 payload: { aps: { sound: 'default', badge: 0, category: 'MATCH_EVENT' } },
             },
         });
-        logger.info(`⏰ Delayed push delivered → ${p.topic}`, {
+        logger.info(`⏰ Delayed push delivered → ${p.condition ?? p.topic}`, {
             matchId: p.matchId, changeType: p.changeType,
         });
     }
@@ -153,5 +170,5 @@ exports.deliverDelayedPush = (0, tasks_1.onTaskDispatched)({
         // Any other error → rethrow so Cloud Tasks retries (up to maxAttempts)
         throw err;
     }
-});
+}
 //# sourceMappingURL=deliver-delayed-push.js.map

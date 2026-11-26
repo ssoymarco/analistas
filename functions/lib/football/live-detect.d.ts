@@ -60,6 +60,12 @@ export interface FbChange {
     varConfirmed?: boolean;
     /** kickoffDelayed: human delay ("1 h 30 min") or 'postponed'. */
     delay?: string;
+    /** Corrections (goalCancelled / redCardCancelled): unix seconds when the
+     *  event being corrected was announced. Unknown when it predates the snapshot. */
+    eventAt?: number;
+    /** Corrections: unix seconds when the feed stopped showing that event (from
+     *  then on the VAR guard drops its delayed copies). */
+    revokedAt?: number;
 }
 /** Compact per-match state persisted between polls (fb_meta/liveSnapshot). */
 export interface SnapEntry {
@@ -84,6 +90,12 @@ export interface SnapEntry {
     rp?: [number, number];
     /** Consecutive polls the red-card count has stayed below the watermark. */
     rd?: [number, number];
+    /** Unix seconds when the last goal was announced (see FbChange.eventAt). */
+    gt?: number;
+    /** Per side: unix seconds when the last red card was announced. */
+    rt?: [number, number];
+    /** Per side: unix seconds when the red-card count first fell below the watermark. */
+    rx?: [number, number];
     /** Unix seconds when we saw the match finish (settle passes). */
     ft?: number;
     /** Post-final settle passes already done. */

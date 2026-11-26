@@ -8,6 +8,10 @@
  *
  *  - Modo Estadio: retrasable events go to <base>_d0 now and to _d2/_d5/_d10
  *    through the `deliverDelayedPush` task queue (VAR guard for goals AND reds).
+ *    Every task is awaited and retried: the snapshot latch is already saved
+ *    when we dispatch, so a lost enqueue would be a push lost for good.
+ *    A correction (disallowed goal, revoked red) follows a delayed bucket only
+ *    when that bucket had already received the event it corrects.
  *  - Modo Rival: immediate, single team topic.
  *  - "Silenciar este partido": every condition carries
  *    `&& !('fb_mute_{matchId}' in topics)` so muted devices are excluded in FCM
@@ -23,7 +27,9 @@
  *
  * LEGACY DUAL-SEND (transition window): users still on a Sportmonks-era build
  * are subscribed to `team_{sportmonksId}_*` topics. Immediate pushes are also
- * sent to the legacy topic of every team we can map back (legacy.ts). The
+ * sent to the legacy topic of every team we can map back (legacy.ts), and the
+ * delayed copies to its `_d2/_d5/_d10` twins — an old build with Modo Estadio
+ * on is subscribed only to those, and would otherwise hear nothing live. The
  * payload omits `matchId` so tapping opens the app (and its update prompt)
  * instead of a match screen the old build can no longer load. Disable with
  * FB_LEGACY_DUAL_SEND=false once adoption of the new build is high.
@@ -62,12 +68,14 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.loc = void 0;
+exports.DELAY_MINUTES = exports.loc = void 0;
 exports.displayLeague = displayLeague;
 exports.buildCopy = buildCopy;
 exports.route = route;
 exports.routeWithFamily = routeWithFamily;
 exports.legacyTopicFor = legacyTopicFor;
+exports.delayedBucketsFor = delayedBucketsFor;
+exports.enqueueDelayed = enqueueDelayed;
 exports.conditionFor = conditionFor;
 exports.analyticsLabel = analyticsLabel;
 exports.sendFcm = sendFcm;
@@ -168,10 +176,11 @@ function route(c) {
     const s = c.side === 'home' ? h : a;
     switch (c.type) {
         case 'goal': return { bucketed: { topic: model_1.FbTopics.goals, teams: [h, a], delayed: true } };
-        // Corrections only reach _d0: delayed buckets never saw the event (the
-        // VAR guard in deliverDelayedPush drops their copy).
-        case 'goalCancelled': return { bucketed: { topic: model_1.FbTopics.goals, teams: [h, a], delayed: false } };
-        case 'redCardCancelled': return { bucketed: { topic: model_1.FbTopics.cards, teams: [h, a], delayed: false } };
+        // Corrections always reach _d0. A delayed bucket gets one only if it had
+        // already been told about the event; otherwise the VAR guard in
+        // deliverDelayedPush drops its copy and there is nothing to take back.
+        case 'goalCancelled': return { bucketed: { topic: model_1.FbTopics.goals, teams: [h, a], delayed: false, correction: true } };
+        case 'redCardCancelled': return { bucketed: { topic: model_1.FbTopics.cards, teams: [h, a], delayed: false, correction: true } };
         case 'halftime':
         case 'secondHalfStart':
         case 'matchEnd':
@@ -222,6 +231,66 @@ function legacyTopicFor(fbTopic) {
         return null;
     const smId = (0, legacy_1.legacyTeamIdFor)(m[1]);
     return smId ? `team_${smId}_${m[2]}` : null;
+}
+// ── Modo Estadio: delayed buckets ────────────────────────────────────────────
+exports.DELAY_MINUTES = [2, 5, 10];
+/**
+ * Slack when deciding whether a bucket had already been told about an event
+ * that is now being corrected. The delayed copy fires N minutes after its
+ * enqueue, a few seconds off our poll clock either way. Erring towards sending:
+ * a "gol anulado" for a goal that bucket never got is odd, a goal that is never
+ * taken back is wrong.
+ */
+const CORRECTION_MARGIN_SEC = 15;
+/**
+ * Delay buckets a change goes to, besides the immediate one.
+ *
+ *  - retrasable events: all of them;
+ *  - corrections: the buckets whose copy of the corrected event had already
+ *    gone out when the feed took it back (`revokedAt - eventAt` ≥ the bucket's
+ *    delay). The others never showed it — the VAR guard dropped their copy.
+ *    When we don't know when the event was announced, every bucket is corrected.
+ */
+function delayedBucketsFor(c, r = route(c)) {
+    if (!r.bucketed)
+        return [];
+    if (r.bucketed.delayed)
+        return [...exports.DELAY_MINUTES];
+    if (!r.bucketed.correction)
+        return [];
+    if (c.eventAt == null)
+        return [...exports.DELAY_MINUTES];
+    const shownFor = (c.revokedAt ?? Math.floor(Date.now() / 1000)) - c.eventAt;
+    return exports.DELAY_MINUTES.filter(m => shownFor >= m * 60 - CORRECTION_MARGIN_SEC);
+}
+const ENQUEUE_RETRY_WAITS_MS = [300, 1200];
+/**
+ * Enqueue one delayed push, waiting for Cloud Tasks to accept it. Retries
+ * transient failures; "already exists" means an earlier attempt got through.
+ * Never throws — a task that still can't be queued is logged as an error.
+ */
+async function enqueueDelayed(queue, payload, opts, waitsMs = ENQUEUE_RETRY_WAITS_MS) {
+    for (let attempt = 0;; attempt++) {
+        try {
+            await queue.enqueue(payload, opts);
+            return true;
+        }
+        catch (err) {
+            const msg = `${err.code ?? ''} ${String(err)}`;
+            if (/already[\s_-]?exists/i.test(msg))
+                return true;
+            if (attempt >= waitsMs.length) {
+                logger.error(`Modo Estadio: delayed push lost, Cloud Tasks refused it ${attempt + 1} times: ${opts.id}`, {
+                    err: msg, matchId: payload.matchId, changeType: payload.changeType,
+                });
+                return false;
+            }
+            await new Promise(r => setTimeout(r, waitsMs[attempt]));
+        }
+    }
+}
+function taskIdFor(raw) {
+    return raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 499);
 }
 // ── FCM helpers ──────────────────────────────────────────────────────────────
 /** `(a || b) && !mute` — FCM allows at most 5 topics per condition. */
@@ -353,11 +422,13 @@ function immediateCondition(c, topics) {
     return `'${topics[0]}' in topics${exclusions} && !('${model_1.FbTopics.mute(c.matchId)}' in topics)`;
 }
 // ── Dispatch ─────────────────────────────────────────────────────────────────
-async function dispatchFootballChanges(changes) {
+async function dispatchFootballChanges(changes, deps = {}) {
     if (!changes.length)
         return;
     const sends = [];
-    const queue = ESTADIO_DELAY_ENABLED ? (0, functions_1.getFunctions)().taskQueue('deliverDelayedPush') : null;
+    const queue = deps.queue !== undefined
+        ? deps.queue
+        : (ESTADIO_DELAY_ENABLED ? (0, functions_1.getFunctions)().taskQueue('deliverDelayedPush') : null);
     // Followers of a senior national team also hear about its youth sides
     // (Mexico → Mexico U17…): each youth team brings its senior team's topics.
     // Only in national-team competitions (the provider files them under
@@ -390,25 +461,30 @@ async function dispatchFootballChanges(changes) {
         const pp = playerPush(c);
         if (pp)
             sends.push(pp);
-        // Modo Estadio delayed buckets.
-        if (queue && r.bucketed?.delayed) {
-            for (const delayMin of [2, 5, 10]) {
+        // Modo Estadio delayed buckets. Awaited with the rest of the sends: a task
+        // still in flight when the function returns may never reach Cloud Tasks.
+        if (queue && r.bucketed) {
+            for (const delayMin of delayedBucketsFor(c, r)) {
                 const bucket = `d${delayMin}`;
                 const topics = [...new Set(r.bucketed.teams.map(t => r.bucketed.topic(t, bucket)))];
-                const payload = {
-                    condition: conditionFor(topics, c.matchId),
-                    title: copy.title, body: copy.body, data, dedupId,
+                const guard = {
                     changeType: c.type, matchId: c.matchId,
                     homeScore: c.homeScore, awayScore: c.awayScore,
                     matchCollection: 'fb_matches',
                     ...(c.type === 'redCard' ? { homeRedCards: c.homeRedCards, awayRedCards: c.awayRedCards } : {}),
                 };
-                const taskId = `fb_${dedupId}_${r.bucketed.teams.join('_')}_d${delayMin}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 499);
-                queue.enqueue(payload, { scheduleDelaySeconds: delayMin * 60, id: taskId }).catch((err) => {
-                    const msg = String(err);
-                    if (!/already ?exists/i.test(msg))
-                        logger.warn(`Cloud Task enqueue failed: ${taskId}`, { err: msg });
-                });
+                const opts = { scheduleDelaySeconds: delayMin * 60 };
+                const baseId = `fb_${dedupId}_${r.bucketed.teams.join('_')}`;
+                sends.push(enqueueDelayed(queue, { condition: conditionFor(topics, c.matchId), title: copy.title, body: copy.body, data, dedupId, ...guard }, { ...opts, id: taskIdFor(`${baseId}_d${delayMin}`) }));
+                // Old builds with Modo Estadio on sit in `team_{oldId}_*_d{N}` only.
+                // Their copy is a task of its own, so a retry never repeats the other.
+                if (LEGACY_DUAL_SEND) {
+                    const legacy = [...new Set(topics.map(legacyTopicFor).filter((t) => !!t))];
+                    if (legacy.length) {
+                        sends.push(enqueueDelayed(queue, { condition: conditionFor(legacy), title: copy.title, body: copy.body,
+                            data: legacyPayloadFor(c), dedupId: `l${dedupId}`.slice(0, 64), ...guard }, { ...opts, id: taskIdFor(`fbl_${dedupId}_${r.bucketed.teams.join('_')}_d${delayMin}`) }));
+                    }
+                }
             }
         }
         // Legacy dual-send (immediate only; old builds' per-match mute ids are

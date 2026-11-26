@@ -73,6 +73,12 @@ export interface FbChange {
   varConfirmed?: boolean;
   /** kickoffDelayed: human delay ("1 h 30 min") or 'postponed'. */
   delay?: string;
+  /** Corrections (goalCancelled / redCardCancelled): unix seconds when the
+   *  event being corrected was announced. Unknown when it predates the snapshot. */
+  eventAt?: number;
+  /** Corrections: unix seconds when the feed stopped showing that event (from
+   *  then on the VAR guard drops its delayed copies). */
+  revokedAt?: number;
 }
 
 /** Compact per-match state persisted between polls (fb_meta/liveSnapshot). */
@@ -93,6 +99,12 @@ export interface SnapEntry {
   rp?: [number, number];
   /** Consecutive polls the red-card count has stayed below the watermark. */
   rd?: [number, number];
+  /** Unix seconds when the last goal was announced (see FbChange.eventAt). */
+  gt?: number;
+  /** Per side: unix seconds when the last red card was announced. */
+  rt?: [number, number];
+  /** Per side: unix seconds when the red-card count first fell below the watermark. */
+  rx?: [number, number];
   /** Unix seconds when we saw the match finish (settle passes). */
   ft?: number;
   /** Post-final settle passes already done. */
@@ -180,6 +192,9 @@ export function snapEntryFor(f: FixtureWithEvents, prev?: SnapEntry): SnapEntry 
   if (prev?.lc) e.lc = prev.lc;
   if (prev?.rp) e.rp = [...prev.rp] as [number, number];
   if (prev?.rd) e.rd = [...prev.rd] as [number, number];
+  if (prev?.gt) e.gt = prev.gt;
+  if (prev?.rt) e.rt = [...prev.rt] as [number, number];
+  if (prev?.rx) e.rx = [...prev.rx] as [number, number];
   if (prev?.ft) e.ft = prev.ft;
   if (prev?.se) e.se = prev.se;
   return e;
@@ -265,10 +280,14 @@ export function detectChanges(fixtures: FixtureWithEvents[], prev: Snapshot, now
         playerId: kind !== 'own' ? (g?.player?.id ?? undefined) : undefined,
         minute: minuteOf(g, row.minute),
       });
+      cur.gt = nowSec;
     }
     if (curTotal < prevTotal) {
       const side: 'home' | 'away' = cur.hs < p.hs ? 'home' : 'away';
-      push({ ...base, type: 'goalCancelled', side, varConfirmed: hasRecentVarEvent(ev, row.minute) });
+      push({
+        ...base, type: 'goalCancelled', side, varConfirmed: hasRecentVarEvent(ev, row.minute),
+        eventAt: p.gt, revokedAt: nowSec,
+      });
     }
 
     // ── Phase transitions (latched so status flaps can't re-fire) ───────────
@@ -315,6 +334,8 @@ export function detectChanges(fixtures: FixtureWithEvents[], prev: Snapshot, now
     if (!Array.isArray(ev)) continue;
     const rp: [number, number] = cur.rp ?? [p.rh, p.ra];
     const rd: [number, number] = cur.rd ?? [0, 0];
+    const rt: [number, number] = cur.rt ?? [0, 0];
+    const rx: [number, number] = cur.rx ?? [0, 0];
     for (const side of ['home', 'away'] as const) {
       const i = side === 'home' ? 0 : 1;
       const teamId = side === 'home' ? homeId : awayId;
@@ -334,6 +355,8 @@ export function detectChanges(fixtures: FixtureWithEvents[], prev: Snapshot, now
         push({ ...c, type: 'rivalRedCard', playerId: undefined });
         rp[i] = red[1];
         rd[i] = 0;
+        rt[i] = nowSec;
+        rx[i] = 0;
       }
 
       // Red card revoked: the count must stay below what we notified for
@@ -341,12 +364,18 @@ export function detectChanges(fixtures: FixtureWithEvents[], prev: Snapshot, now
       const count = side === 'home' ? cur.rh : cur.ra;
       if (count >= rp[i]) {
         rd[i] = 0;
+        rx[i] = 0;
       } else {
         rd[i] += 1;
+        if (rd[i] === 1) rx[i] = nowSec;
         if (rd[i] >= RED_CANCEL_CONFIRM_POLLS) {
-          push({ ...base, type: 'redCardCancelled', side });
+          push({
+            ...base, type: 'redCardCancelled', side,
+            eventAt: rt[i] || undefined, revokedAt: rx[i] || nowSec,
+          });
           rp[i] = count;
           rd[i] = 0;
+          rx[i] = 0;
         }
       }
 
@@ -374,6 +403,8 @@ export function detectChanges(fixtures: FixtureWithEvents[], prev: Snapshot, now
     }
     cur.rp = rp;
     if (rd[0] || rd[1]) cur.rd = rd; else delete cur.rd;
+    if (rt[0] || rt[1]) cur.rt = rt; else delete cur.rt;
+    if (rx[0] || rx[1]) cur.rx = rx; else delete cur.rx;
   }
 
   return { changes, next };

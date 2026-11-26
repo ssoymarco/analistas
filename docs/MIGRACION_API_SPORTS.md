@@ -101,6 +101,21 @@ equipo del jugador, y amarillas/cambios viajaban dentro de `cards`/`live` (llega
 estuviera apagado). El aviso de Modo Rival por roja se omite para quien ya recibe la roja normal por
 seguir al otro equipo.
 
+**Modo Estadio — copias retrasadas** (`dispatchFootballChanges` + `deliverDelayedPush`; parche de servidor
+del 26-nov-2026, sin cambios en la app):
+- Cada copia retrasada se encola **esperando** a Cloud Tasks y con dos reintentos (`enqueueDelayed`); antes
+  salía sin esperar y un fallo era un aviso perdido. Si aun así falla queda un error en los logs:
+  `Modo Estadio: delayed push lost`.
+- **Builds anteriores con Modo Estadio prendido**: solo están suscritas a `team_{idSportmonks}_*_d2/_d5/_d10`,
+  y el dual-send cubría nada más los topics inmediatos → no recibían goles, rojas, medio tiempo ni final.
+  Ahora cada copia retrasada tiene su gemela para esos topics (tarea aparte, id `fbl_…`, `data.legacy = '1'`,
+  etiqueta `legacy-goal-estadio`). Se apaga junto con `FB_LEGACY_DUAL_SEND=false`.
+- **Gol anulado / roja revocada**: la corrección ya no va solo a `_d0`. Sigue a cada bucket que **ya había
+  recibido** el evento (`delayedBucketsFor`: tiempo entre el anuncio y la anulación ≥ retraso del bucket,
+  con 15 s de margen) y llega con ese mismo retraso. Los buckets que aún no lo recibían siguen igual: el
+  guard de VAR descarta su copia y no hay nada que corregir. El detector guarda en el snapshot cuándo
+  anunció el último gol (`gt`) y cada roja (`rt`), y cuándo dejó de verla (`rx`).
+
 **Nombres en los textos del servidor** (`football/names.ts`): selecciones en español (`loc`), menores como
 "México Sub-17" y los clubes curados con el nombre de la app ("América", no "Club America") gracias a
 `shared/football/clubNames.ts` (misma tabla que `popular.ts` + `base.ts`; una prueba vigila que no se
@@ -298,6 +313,9 @@ node lib/scripts/fb-emulator.js verify    # comprobaciones de fbOnDemand, caché
 # 3) Capa de datos de la app (Node + emulador + el código real de la función)
 cd ../scripts/fb-tests && npm install && npm test
 ```
+
+Sin emulador (FCM, Cloud Tasks y Firestore simulados en memoria): las reglas de las copias retrasadas de
+Modo Estadio — `cd functions && npm run build && node ../scripts/fb-tests/estadio-push.check.js`.
 
 **Interfaz sin teléfono**: `scripts/fb-tests/web/README.md` — empaqueta la app para web con los módulos
 nativos sustituidos y la abre en Chromium contra los emuladores (así se encontraron, entre otros, la fila

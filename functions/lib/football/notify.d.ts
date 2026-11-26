@@ -7,6 +7,10 @@
  *
  *  - Modo Estadio: retrasable events go to <base>_d0 now and to _d2/_d5/_d10
  *    through the `deliverDelayedPush` task queue (VAR guard for goals AND reds).
+ *    Every task is awaited and retried: the snapshot latch is already saved
+ *    when we dispatch, so a lost enqueue would be a push lost for good.
+ *    A correction (disallowed goal, revoked red) follows a delayed bucket only
+ *    when that bucket had already received the event it corrects.
  *  - Modo Rival: immediate, single team topic.
  *  - "Silenciar este partido": every condition carries
  *    `&& !('fb_mute_{matchId}' in topics)` so muted devices are excluded in FCM
@@ -22,11 +26,14 @@
  *
  * LEGACY DUAL-SEND (transition window): users still on a Sportmonks-era build
  * are subscribed to `team_{sportmonksId}_*` topics. Immediate pushes are also
- * sent to the legacy topic of every team we can map back (legacy.ts). The
+ * sent to the legacy topic of every team we can map back (legacy.ts), and the
+ * delayed copies to its `_d2/_d5/_d10` twins — an old build with Modo Estadio
+ * on is subscribed only to those, and would otherwise hear nothing live. The
  * payload omits `matchId` so tapping opens the app (and its update prompt)
  * instead of a match screen the old build can no longer load. Disable with
  * FB_LEGACY_DUAL_SEND=false once adoption of the new build is high.
  */
+import type { DelayedPushPayload } from '../deliver-delayed-push';
 import { type FbDelayBucket } from '../shared/football/model';
 import type { FbChange } from './live-detect';
 import { loc } from './names';
@@ -41,11 +48,17 @@ export declare function buildCopy(c: FbChange): Copy;
 type BucketedTopic = (teamId: string, b: FbDelayBucket) => string;
 type PlainTopic = (teamId: string) => string;
 interface Route {
-    /** Delay-bucketed topic family + the team ids it applies to. */
+    /**
+     * Delay-bucketed topic family + the team ids it applies to. `delayed`: the
+     * event also goes to the Modo Estadio buckets. `correction`: it takes back an
+     * earlier event, so it only follows the buckets that already got that event
+     * (see `delayedBucketsFor`).
+     */
     bucketed?: {
         topic: BucketedTopic;
         teams: string[];
         delayed: boolean;
+        correction?: boolean;
     };
     /** Immediate-only topic family + team ids. */
     immediate?: {
@@ -62,6 +75,34 @@ export declare function route(c: FbChange): Route;
 export declare function routeWithFamily(c: FbChange, senior: Record<string, string>): Route;
 /** Legacy (Sportmonks-era) topic for a new-format team topic, or null when unmappable. */
 export declare function legacyTopicFor(fbTopic: string): string | null;
+export declare const DELAY_MINUTES: readonly [2, 5, 10];
+export type DelayMinutes = typeof DELAY_MINUTES[number];
+/**
+ * Delay buckets a change goes to, besides the immediate one.
+ *
+ *  - retrasable events: all of them;
+ *  - corrections: the buckets whose copy of the corrected event had already
+ *    gone out when the feed took it back (`revokedAt - eventAt` ≥ the bucket's
+ *    delay). The others never showed it — the VAR guard dropped their copy.
+ *    When we don't know when the event was announced, every bucket is corrected.
+ */
+export declare function delayedBucketsFor(c: FbChange, r?: Route): DelayMinutes[];
+/** The slice of the task queue this module uses (lets tests record enqueues). */
+export interface DelayQueue {
+    enqueue(payload: DelayedPushPayload, opts: {
+        scheduleDelaySeconds: number;
+        id: string;
+    }): Promise<void>;
+}
+/**
+ * Enqueue one delayed push, waiting for Cloud Tasks to accept it. Retries
+ * transient failures; "already exists" means an earlier attempt got through.
+ * Never throws — a task that still can't be queued is logged as an error.
+ */
+export declare function enqueueDelayed(queue: DelayQueue, payload: DelayedPushPayload, opts: {
+    scheduleDelaySeconds: number;
+    id: string;
+}, waitsMs?: readonly number[]): Promise<boolean>;
 /** `(a || b) && !mute` — FCM allows at most 5 topics per condition. */
 export declare function conditionFor(topics: string[], muteMatchId?: string): string;
 /**
@@ -105,4 +146,6 @@ export declare function dispatchPlayerLineups(match: {
  * delay buckets (10-minute Modo Estadio users may still see both).
  */
 export declare function immediateCondition(c: FbChange, topics: string[]): string;
-export declare function dispatchFootballChanges(changes: FbChange[]): Promise<void>;
+export declare function dispatchFootballChanges(changes: FbChange[], deps?: {
+    queue?: DelayQueue | null;
+}): Promise<void>;
