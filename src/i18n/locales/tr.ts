@@ -824,6 +824,7 @@ const tr: TranslationKeys = {
   // ── Statistics tab ─────────────────────────────────────────────────────────
   stats: {
     pressureIndex: 'Baskı endeksi',
+    pressureShare: 'Maç geneli üstünlük',
     corners: 'Kornerler',
     fouls: 'Fauller',
     saves: 'Kurtarışlar',

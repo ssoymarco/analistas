@@ -39,6 +39,7 @@ exports.mapEvents = mapEvents;
 exports.statValues = statValues;
 exports.mapStatistics = mapStatistics;
 exports.computePressureShare = computePressureShare;
+exports.pressureCounts = pressureCounts;
 exports.nextPressure = nextPressure;
 exports.mapFixtureToDetail = mapFixtureToDetail;
 exports.mapStandings = mapStandings;
@@ -769,6 +770,21 @@ function computePressureShare(f) {
     const home = Math.round((h / total) * 100);
     return { home, away: 100 - home };
 }
+const PRESSURE_COUNT_TYPES = [
+    ['sog', 'Shots on Goal'], ['sib', 'Shots insidebox'], ['sh', 'Total Shots'],
+    ['ck', 'Corner Kicks'], ['xg', 'expected_goals'], ['pa', 'Passes accurate'],
+];
+/** Cumulative attacking counts per side (see FbPressureCounts). */
+function pressureCounts(f) {
+    const v = statValues(f.statistics, f.teams.home.id);
+    const out = {};
+    for (const [key, type] of PRESSURE_COUNT_TYPES) {
+        const x = v.get(type);
+        if (x)
+            out[key] = [Math.round(x.home * 100) / 100, Math.round(x.away * 100) / 100];
+    }
+    return out;
+}
 function nextPressure(prev, f) {
     const share = computePressureShare(f);
     if (!share)
@@ -776,10 +792,11 @@ function nextPressure(prev, f) {
     const minute = f.fixture.status.elapsed ?? 0;
     const series = [...(prev?.series ?? [])];
     const last = series[series.length - 1];
+    const point = { minute, ...share, c: pressureCounts(f) };
     if (!last || last.minute !== minute)
-        series.push({ minute, ...share });
+        series.push(point);
     else
-        series[series.length - 1] = { minute, ...share };
+        series[series.length - 1] = point;
     // Keep it bounded (one point per minute max, ~130 points for 120' + stoppage).
     while (series.length > 140)
         series.shift();

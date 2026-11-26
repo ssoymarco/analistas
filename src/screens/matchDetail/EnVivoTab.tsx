@@ -5,7 +5,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Dimensions, Modal, Pressable, Animated, Easing,
+  ScrollView, Dimensions, Modal, Pressable, Animated, Easing, PixelRatio,
 } from 'react-native';
 import { Image } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -23,6 +23,7 @@ import type {
   MatchVenue, MatchReferee, RefereeStats,
 } from '../../data/types';
 import { isImageUri } from '../../utils/imageUri';
+import { buildMomentum, momentumSvg, svgDataUri } from './momentum';
 import {
   MATCH_PHASES, maxRegulationMinute,
   runningScoreAt, cumulativeScoreAtMinute,
@@ -1830,14 +1831,17 @@ const mi = StyleSheet.create({
   chevron: { fontSize: 22, fontWeight: '300', lineHeight: 26 },
 });
 
-// ── Pressure Index Area Chart ────────────────────────────────────────────────
+// ── Pressure Index (momentum chart) ──────────────────────────────────────────
 //
-// Smooth dual-area chart with Catmull-Rom upsampling + Gaussian blur.
-// Event markers (goals ⚽, red cards 🟥) shown above/below the chart.
+// Real momentum from the server's live snapshots (see ./momentum.ts), drawn as
+// a vector SVG through expo-image so it stays sharp; per-minute bars made of
+// Views are the fallback if the SVG can't be loaded. Team crests sit on the
+// left (home above the baseline, away below); goals and red cards above/below.
 
 const CHART_H    = 120;
 const MARKER_H   = 22;   // height of goal/card marker rows
 const Y_AXIS_W   = 28;
+const CREST      = 20;   // team crest size in the left gutter
 const CHART_PAD_R = 14;
 // Left origin of the plot area (minute 0) inside the card, measured from the
 // card content edge: chartWrap.paddingLeft (4) + yAxis width. The X-axis labels
@@ -1846,119 +1850,6 @@ const CHART_PAD_R = 14;
 const X_AXIS_INSET = Y_AXIS_W + 4;
 const PI_HOME    = '#ef4444';
 const PI_AWAY    = '#10b981';
-
-// ── Smooth-curve math ─────────────────────────────────────────────────────────
-
-function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
-  return 0.5 * (
-    (2 * p1) +
-    (-p0 + p2) * t +
-    (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
-    (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t
-  );
-}
-
-/** Upsample a data array to `targetCount` points using Catmull-Rom spline. */
-function upsampleCurve(data: number[], targetCount: number): number[] {
-  const n = data.length;
-  if (n < 2) return data;
-  const out: number[] = [];
-  for (let i = 0; i < targetCount; i++) {
-    const t   = (i / (targetCount - 1)) * (n - 1);
-    const idx = Math.floor(t);
-    const f   = t - idx;
-    const p0  = data[Math.max(0, idx - 1)];
-    const p1  = data[idx];
-    const p2  = data[Math.min(n - 1, idx + 1)];
-    const p3  = data[Math.min(n - 1, idx + 2)];
-    out.push(Math.max(5, Math.min(95, catmullRom(p0, p1, p2, p3, f))));
-  }
-  return out;
-}
-
-/** Gaussian smoothing (radius = half-window size). */
-function gaussianSmooth(data: number[], radius: number): number[] {
-  const sigma = radius / 2.0;
-  const kernel: number[] = [];
-  let ksum = 0;
-  for (let i = -radius; i <= radius; i++) {
-    const w = Math.exp(-(i * i) / (2 * sigma * sigma));
-    kernel.push(w);
-    ksum += w;
-  }
-  return data.map((_, i) =>
-    kernel.reduce((acc, w, j) => {
-      const idx = Math.max(0, Math.min(data.length - 1, i + j - radius));
-      return acc + (w / ksum) * data[idx];
-    }, 0),
-  );
-}
-
-// ── Raw pressure curve (per-minute) ──────────────────────────────────────────
-
-function buildPressureCurve(
-  events: MatchEvent[],
-  homePressure: number,
-  matchMinutes: number,
-  totalMin: number = 90,
-): number[] {
-  // The X-axis of the chart always shows 0–`totalMin` so the labels and the
-  // half-time marker stay anchored. The CURVE itself, however, must only
-  // contain real data up to the current match minute — otherwise a match at
-  // minute 4 would render a noisy "history" through to minute 90 that the
-  // user reads as if it actually happened (reported on AC Milan 1-0 Cagliari
-  // at 4:48' on 2026-05-24). For finished matches we still extend to the
-  // full `totalMin` (90 for regulation, 120 for ET matches) so the full-
-  // match shape renders.
-  const total      = totalMin;
-  const elapsed    = Math.max(0, Math.min(matchMinutes, total)); // 0..total cap
-  const points     = new Array<number>(total + 1).fill(50);
-  const impulse    = new Array<number>(total + 1).fill(0);
-
-  // Only ingest events that have actually happened — defensively skip any
-  // event minute beyond the current elapsed time (SportMonks occasionally
-  // backfills events with the next-period minute number while the period is
-  // still going).
-  for (const ev of events) {
-    if (ev.minute > elapsed) continue;
-    const min    = Math.min(ev.minute, elapsed);
-    const isHome = ev.team === 'home';
-    if (ev.type === 'goal' || ev.type === 'penalty-goal' || ev.type === 'own-goal') {
-      impulse[min] += isHome ? 26 : -26;
-    } else if (ev.type === 'yellow' || ev.type === 'second-yellow') {
-      impulse[min] += isHome ? -6 : 6;
-    } else if (ev.type === 'red') {
-      impulse[min] += isHome ? -20 : 20;
-    }
-  }
-
-  // Walk momentum + bias + jitter ONLY through the elapsed window.
-  // Beyond `elapsed` we keep the neutral 50 fill — the chart will visually
-  // show an empty flat line for time the match hasn't reached yet.
-  //
-  // Dynamics tuned (2026-07) for a bolder, FotMob-style shape: momentum decays
-  // more slowly (0.94) so swings persist and stack; the sine "flow" blend is
-  // dialed WAY down (was 40% → 22%) so the curve is driven by real momentum
-  // rather than a cosmetic wave that flattens everything toward 50.
-  let momentum = 0;
-  const bias   = homePressure - 50;
-  for (let i = 0; i <= elapsed; i++) {
-    momentum  = momentum * 0.94 + impulse[i];
-    points[i] = 50 + momentum;
-  }
-  for (let i = 0; i <= elapsed; i++) {
-    // Normalize t against the elapsed window so the flow shape feels
-    // proportional to how much of the match has played out so far. Guard
-    // against divide-by-zero when elapsed is 0.
-    const t     = elapsed > 0 ? i / elapsed : 0;
-    const blend = 50 + bias * (0.5 + 0.5 * Math.sin(t * Math.PI * 3 + bias * 0.05));
-    points[i]   = points[i] * 0.78 + blend * 0.22;
-    points[i]  += Math.sin(i * 0.31) * 5 + Math.cos(i * 0.68) * 3.5;
-    points[i]   = Math.max(3, Math.min(97, points[i]));
-  }
-
-  return points;
-}
 
 // ── Event marker helpers ──────────────────────────────────────────────────────
 
@@ -1996,9 +1887,33 @@ function extractMarkers(
   return out;
 }
 
-// ── PressureSection component ─────────────────────────────────────────────────
+/** Team crest in the chart's left gutter (image URL or emoji fallback). */
+const PressureCrest: React.FC<{ logo: string; style: { top: number } }> = ({ logo, style }) => (
+  <View style={[pi.crest, style]}>
+    {isImageUri(logo) ? (
+      <Image source={{ uri: logo }} style={{ width: CREST, height: CREST }} contentFit="contain" />
+    ) : (
+      <Text style={{ fontSize: 14 }}>{logo}</Text>
+    )}
+  </View>
+);
 
-const UPSAMPLE_POINTS = 640; // upsampled resolution → smooth bezier-like curve
+/** Goal (⚽ in a ring, red ring for an own goal) or red card, centered on its minute. */
+const PressureMarkerIcon: React.FC<{ marker: PressureMarker; left: number; top: number }> = ({ marker, left, top }) => {
+  const c = useThemeColors();
+  if (marker.icon === '🟥') return <View style={[pi.redCard, { left: left - 4, top: top + 2 }]} />;
+  return (
+    <View style={[pi.marker, {
+      left: left - 8, top,
+      backgroundColor: c.card,
+      borderColor: marker.isOwnGoal ? '#ef4444' : c.border,
+    }]}>
+      <Text style={{ fontSize: 9, lineHeight: 12 }}>⚽</Text>
+    </View>
+  );
+};
+
+// ── PressureSection component ─────────────────────────────────────────────────
 
 const PressureSection: React.FC<{
   pressure: PressureIndex;
@@ -2062,42 +1977,26 @@ const PressureSection: React.FC<{
       ? Math.min(liveMinute, totalMin)
       : 0;
 
-  const rawCurve = React.useMemo(
-    () => buildPressureCurve(events, pressure.home, matchMinutes, totalMin),
-    [events, pressure.home, matchMinutes, totalMin],
+  // Momentum per minute from the server snapshots. Null when the match was
+  // never sampled live (no honest curve to draw — the chart is hidden then).
+  const momentum = React.useMemo(
+    () => buildMomentum(pressure.series, totalMin),
+    [pressure.series, totalMin],
   );
-
-  // Catmull-Rom upsample → Gaussian smooth → final smooth wave
-  const smoothCurve = React.useMemo(() => {
-    const up = upsampleCurve(rawCurve, UPSAMPLE_POINTS);
-    // Lighter blur (radius 3, was 6) keeps the spikes sharp instead of melting
-    // them into gentle hills, then a gain expansion pushes the peaks toward the
-    // top/bottom of the chart so the swings read like FotMob's rather than
-    // hugging the 50 midline.
-    // The jagged "pixelated" outline is HIGH-frequency noise (per-minute jitter
-    // + upsampling steps); the bold swings the user liked are LOW-frequency
-    // (minute-scale momentum). A wider Gaussian (radius 9) erases the jaggies
-    // while the big mountains survive, and a slightly higher gain recovers the
-    // peak height that the extra blur shaves off.
-    const sm   = gaussianSmooth(up, 9);
-    const GAIN = 1.65;
-    // Soft saturation instead of a hard clamp. A hard Math.min/max let very
-    // one-sided spells (e.g. a dominant team) pile many points onto the exact
-    // ceiling/floor → a flat, "cut-off" plateau at the chart edge. tanh
-    // asymptotically approaches 50±HALF without ever flatlining, so tall peaks
-    // stay tall but round off gracefully near the top/bottom. HALF = 46 leaves
-    // a ~4px breathing gap inside the chart's 0/100 bounds.
-    const HALF = 46;
-    return sm.map(v => 50 + HALF * Math.tanh(((v - 50) * GAIN) / HALF));
-  }, [rawCurve]);
-
-  // `totalMin` declared above (~line 1741) — drives both buildPressureCurve
-  // and the x-axis labels. rawCurve.length === totalMin + 1 by construction.
-  const numBars     = smoothCurve.length;
+  // While live, cut the curve at the current minute so a late sample can't
+  // draw "ahead" of the clock.
+  const curve = React.useMemo(() => {
+    if (!momentum) return null;
+    if (match.status !== 'live' || matchMinutes <= 0 || momentum.lastMinute <= matchMinutes) return momentum;
+    const values = momentum.values.slice(0, matchMinutes + 1);
+    return { ...momentum, values, lastMinute: matchMinutes };
+  }, [momentum, match.status, matchMinutes]);
+  const showChart = curve !== null || match.status === 'live';
 
   // Measure actual chart pixel width via onLayout
   const [chartW, setChartW] = React.useState(SCREEN_WIDTH - Y_AXIS_W - CHART_PAD_R - 34);
-  const barW = chartW / numBars;
+  // If the platform can't load the SVG, draw per-minute bars instead.
+  const [svgFailed, setSvgFailed] = React.useState(false);
 
   // Event markers
   const homeMarkers = React.useMemo(
@@ -2109,8 +2008,23 @@ const PressureSection: React.FC<{
     [events, totalMin],
   );
 
+  const chartUri = React.useMemo(() => {
+    const goalsOf = (ms: typeof homeMarkers) => ms.filter(m => m.icon === '⚽').map(m => m.minute);
+    return svgDataUri(momentumSvg(curve, {
+      width: Math.max(10, chartW),
+      height: CHART_H,
+      totalMin,
+      homeColor,
+      awayColor,
+      inkColor: isDark ? '#ffffff' : '#000000',
+      guides: totalMin === 120 ? [45, 90] : [45],
+      homeGoals: goalsOf(homeMarkers),
+      awayGoals: goalsOf(awayMarkers),
+      pixelRatio: PixelRatio.get(),
+    }));
+  }, [curve, chartW, totalMin, homeColor, awayColor, isDark, homeMarkers, awayMarkers]);
+
   const borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)';
-  const gridColor   = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
 
   // ── Live playhead ──────────────────────────────────────────────────────────
   // The pressure chart used to have no "you are here" indicator during live
@@ -2174,198 +2088,161 @@ const PressureSection: React.FC<{
       {/* ── Header ── */}
       <View style={pi.header}>
         <Text style={[pi.title, { color: c.textTertiary }]} numberOfLines={1}>{t('stats.pressureIndex')}</Text>
-        <View style={{ flex: 1, minWidth: 8 }} />
-        <View style={pi.legend}>
-          <View style={[pi.legendDot, { backgroundColor: homeColor }]} />
-          <Text style={[pi.legendLabel, { color: c.textTertiary }]} numberOfLines={1}>
-            {translateNationalTeam(match.homeTeam.name)}
-          </Text>
-          <View style={[pi.legendDot, { backgroundColor: awayColor, marginLeft: 8 }]} />
-          <Text style={[pi.legendLabel, { color: c.textTertiary }]} numberOfLines={1}>
-            {translateNationalTeam(match.awayTeam.name)}
-          </Text>
-        </View>
       </View>
 
-      {/* ── Chart body ── */}
-      <View style={[pi.chartWrap, { borderTopColor: borderColor }]}>
-        {/* Y-axis */}
-        <View style={[pi.yAxis, { height: MARKER_H + CHART_H + MARKER_H }]}>
-          <Text style={[pi.yLabel, { color: c.textTertiary, marginTop: MARKER_H }]}>100</Text>
-          <Text style={[pi.yLabel, { color: c.textTertiary }]}>50</Text>
-          <Text style={[pi.yLabel, { color: c.textTertiary, marginBottom: MARKER_H }]}>0</Text>
-        </View>
-
-        <View style={{ flex: 1 }}>
-          {/* ── Home event markers (above chart) ── */}
-          <View
-            style={{ height: MARKER_H, position: 'relative', overflow: 'hidden', paddingRight: CHART_PAD_R }}
-            onLayout={e => setChartW(e.nativeEvent.layout.width - CHART_PAD_R)}
-          >
-            {homeMarkers.map((m, idx) => {
-              const x = (m.minute / totalMin) * chartW - 8;
-              return (
-                <View key={idx} style={{ position: 'absolute', left: x, top: 2, width: 16, alignItems: 'center' }}>
-                  <Text style={{ fontSize: 11, lineHeight: 14 }}>{m.icon}</Text>
-                  {m.isOwnGoal && (
-                    <Text style={{ fontSize: 6, color: c.textTertiary, lineHeight: 8 }}>pp</Text>
-                  )}
-                </View>
-              );
-            })}
-          </View>
-
-          {/* ── Area chart ── */}
-          <View
-            style={{ height: CHART_H, overflow: 'hidden', position: 'relative', paddingRight: CHART_PAD_R }}
-          >
-            {/* Background grid */}
-            <View style={[pi.gridLine, { top: 0, borderBottomColor: gridColor }]} />
-            <View style={[pi.gridLine, { top: CHART_H / 2, borderBottomColor: gridColor }]} />
-            <View style={[pi.gridLine, { top: CHART_H - 1, borderBottomColor: gridColor }]} />
-            {/* Half-time dotted line */}
-            <View style={[pi.htLine, {
-              left: (45 / totalMin) * chartW,
-              borderColor: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)',
-            }]} />
-            {/* Full-time dotted line — only when the chart extends into ET,
-                so the user can read where regulation ended (90') vs. where
-                extra time began. For 0-90 charts this is the right edge of
-                the chart, where a dashed line would be invisible. */}
-            {totalMin === 120 && (
-              <View style={[pi.htLine, {
-                left: (90 / totalMin) * chartW,
-                borderColor: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)',
-              }]} />
-            )}
-
-            {/* Live playhead — only when the match is actually live. */}
-            {playheadMin !== null && (
-              <>
-                {/* Vertical line at the current minute */}
-                <View style={{
-                  position: 'absolute',
-                  left: (playheadMin / totalMin) * chartW,
-                  top: 0,
-                  bottom: 0,
-                  width: 1.5,
-                  backgroundColor: c.accent,
-                  opacity: 0.55,
-                }} />
-                {/* Pulsing dot anchored to the top of the line. Pokes a few
-                    pixels above the chart container so it sits between the
-                    chart and the row of home event markers above, drawing
-                    the eye without overlapping the curve. */}
-                <Animated.View style={{
-                  position: 'absolute',
-                  left: (playheadMin / totalMin) * chartW - 5,
-                  top: -3,
-                  width: 10,
-                  height: 10,
-                  borderRadius: 5,
-                  backgroundColor: c.accent,
-                  opacity: pulseAnim,
-                }} />
-              </>
-            )}
-
-            {/* Red-card vertical lines */}
-            {[...homeMarkers, ...awayMarkers]
-              .filter(m => m.icon === '🟥')
-              .map((m, idx) => (
-                <View key={idx} style={{
-                  position: 'absolute',
-                  left: (m.minute / totalMin) * chartW,
-                  top: 0,
-                  bottom: 0,
-                  width: 1.5,
-                  backgroundColor: '#ef4444',
-                  opacity: 0.4,
-                }} />
-              ))}
-
-            {/* Smooth fill bars — upsampled to 300 points */}
-            {smoothCurve.map((val, i) => {
-              const dev   = val - 50;
-              const barH  = Math.abs(dev) * (CHART_H / 100);
-              const isHome = dev > 0;
-              if (barH < 0.3) return null;
-              return (
-                <View
-                  key={i}
-                  style={{
-                    position: 'absolute',
-                    left: i * barW,
-                    // Fractional width (not ceil'd to whole px) lets iOS
-                    // anti-alias each column edge, softening the stair-step
-                    // outline. +0.6 overlap still closes any sub-pixel gap.
-                    width: barW + 0.6,
-                    height: barH,
-                    top: isHome ? CHART_H / 2 - barH : CHART_H / 2,
-                    backgroundColor: isHome ? homeColor : awayColor,
-                    // Full opacity: the old 0.55 made every 0.5px column overlap
-                    // blend darker at its neighbour → the "striped / pixelated"
-                    // moiré the user reported. Solid fill = clean FotMob look.
-                    opacity: 1,
-                  }}
-                />
-              );
-            })}
-          </View>
-
-          {/* ── Away event markers (below chart) ── */}
-          <View style={{ height: MARKER_H, position: 'relative', overflow: 'hidden', paddingRight: CHART_PAD_R }}>
-            {awayMarkers.map((m, idx) => {
-              const x = (m.minute / totalMin) * chartW - 8;
-              return (
-                <View key={idx} style={{ position: 'absolute', left: x, top: 4, width: 16, alignItems: 'center' }}>
-                  <Text style={{ fontSize: 11, lineHeight: 14 }}>{m.icon}</Text>
-                  {m.isOwnGoal && (
-                    <Text style={{ fontSize: 6, color: c.textTertiary, lineHeight: 8 }}>pp</Text>
-                  )}
-                </View>
-              );
-            })}
-          </View>
-        </View>
-      </View>
-
-      {/* ── X-axis labels ── */}
-      {/* Each label is positioned ABSOLUTELY at its exact minute fraction of the
-          chart — the same coordinate system the halftime dashed line uses
-          (left = minute/totalMin · chartW). Flexbox space-between anchored
-          labels by their edges, so variable-width labels ("MT" vs "0'") drifted
-          off their tick — notably "MT" no longer sitting on the halftime line.
-          Absolute positioning fixes both regulation and ET (where 0/MT/TC/AET
-          are NOT evenly spaced). First label is left-aligned, last is
-          right-aligned, the rest are centered on their tick. */}
-      <View style={pi.xAxis}>
-        {(totalMin === 120
-          ? [{ m: 0, l: "0'" }, { m: 45, l: t('stats.axisHT') }, { m: 90, l: "90'" }, { m: 120, l: "120'" }]
-          : [{ m: 0, l: "0'" }, { m: 15, l: "15'" }, { m: 30, l: "30'" }, { m: 45, l: t('stats.axisHT') },
-             { m: 60, l: "60'" }, { m: 75, l: "75'" }, { m: 90, l: "90'" }]
-        ).map((a, i, arr) => {
-          const pos     = X_AXIS_INSET + (a.m / totalMin) * chartW;
-          const isFirst = i === 0;
-          const isLast  = i === arr.length - 1;
-          const HALF_W  = 22;
-          const boxStyle = isFirst
-            ? { left: pos, alignItems: 'flex-start' as const }
-            : isLast
-              ? { left: pos - HALF_W * 2, width: HALF_W * 2, alignItems: 'flex-end' as const }
-              : { left: pos - HALF_W, width: HALF_W * 2, alignItems: 'center' as const };
-          return (
-            <View key={a.l} style={[{ position: 'absolute', top: 6 }, boxStyle]}>
-              <Text style={[pi.xLabel, { color: c.textTertiary }]}>{a.l}</Text>
+      {showChart && (
+        <>
+          {/* ── Chart body ── */}
+          <View style={[pi.chartWrap, { borderTopColor: borderColor }]}>
+            {/* Crests: home above the baseline, away below (replaces the 0/50/100 axis). */}
+            <View style={{ width: Y_AXIS_W, height: MARKER_H + CHART_H + MARKER_H }}>
+              <PressureCrest logo={match.homeTeam.logo} style={{ top: MARKER_H + CHART_H / 4 - CREST / 2 }} />
+              <PressureCrest logo={match.awayTeam.logo} style={{ top: MARKER_H + (CHART_H * 3) / 4 - CREST / 2 }} />
             </View>
-          );
-        })}
-      </View>
+
+            <View style={{ flex: 1 }}>
+              {/* ── Home event markers (above chart) ── */}
+              <View
+                style={{ height: MARKER_H, position: 'relative', paddingRight: CHART_PAD_R }}
+                onLayout={e => setChartW(e.nativeEvent.layout.width - CHART_PAD_R)}
+              >
+                {homeMarkers.map((m, idx) => (
+                  <PressureMarkerIcon key={idx} marker={m} left={(Math.min(m.minute, totalMin) / totalMin) * chartW} top={2} />
+                ))}
+              </View>
+
+              {/* ── Momentum chart ── */}
+              <View style={{ height: CHART_H, position: 'relative', paddingRight: CHART_PAD_R }}>
+                {!svgFailed ? (
+                  <Image
+                    source={{ uri: chartUri }}
+                    style={{ position: 'absolute', left: 0, top: 0, width: chartW, height: CHART_H }}
+                    contentFit="fill"
+                    cachePolicy="memory"
+                    transition={0}
+                    onError={() => setSvgFailed(true)}
+                    accessibilityIgnoresInvertColors
+                  />
+                ) : (
+                  <>
+                    <View style={{
+                      position: 'absolute', left: 0, width: chartW, top: CHART_H / 2,
+                      height: StyleSheet.hairlineWidth * 2,
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.22)',
+                    }} />
+                    <View style={[pi.htLine, {
+                      left: (45 / totalMin) * chartW,
+                      borderColor: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)',
+                    }]} />
+                    {curve?.values.map((v, m) => {
+                      if (m === 0) return null;
+                      const slot = chartW / totalMin;
+                      const w = Math.max(1, slot - (slot > 3 ? 1 : 0));
+                      const h = Math.abs(v) * (CHART_H / 2 - 3);
+                      if (h < 0.5) return null;
+                      return (
+                        <View
+                          key={m}
+                          style={{
+                            position: 'absolute',
+                            left: (m - 0.5) * slot - w / 2,
+                            width: w,
+                            height: h,
+                            top: v > 0 ? CHART_H / 2 - h : CHART_H / 2,
+                            borderRadius: Math.min(1.5, w / 2),
+                            backgroundColor: v > 0 ? homeColor : awayColor,
+                          }}
+                        />
+                      );
+                    })}
+                  </>
+                )}
+
+                {/* Red-card vertical lines */}
+                {[...homeMarkers, ...awayMarkers]
+                  .filter(m => m.icon === '🟥')
+                  .map((m, idx) => (
+                    <View key={idx} style={{
+                      position: 'absolute',
+                      left: (Math.min(m.minute, totalMin) / totalMin) * chartW,
+                      top: 0,
+                      bottom: 0,
+                      width: 1.5,
+                      backgroundColor: '#ef4444',
+                      opacity: 0.35,
+                    }} />
+                  ))}
+
+                {/* Live playhead: line at the current minute + pulsing dot on the baseline. */}
+                {playheadMin !== null && (
+                  <>
+                    <View style={{
+                      position: 'absolute',
+                      left: (playheadMin / totalMin) * chartW - 0.75,
+                      top: 0,
+                      bottom: 0,
+                      width: 1.5,
+                      backgroundColor: c.accent,
+                      opacity: 0.6,
+                    }} />
+                    <Animated.View style={{
+                      position: 'absolute',
+                      left: (playheadMin / totalMin) * chartW - 5,
+                      top: CHART_H / 2 - 5,
+                      width: 10,
+                      height: 10,
+                      borderRadius: 5,
+                      backgroundColor: c.accent,
+                      opacity: pulseAnim,
+                    }} />
+                  </>
+                )}
+              </View>
+
+              {/* ── Away event markers (below chart) ── */}
+              <View style={{ height: MARKER_H, position: 'relative', paddingRight: CHART_PAD_R }}>
+                {awayMarkers.map((m, idx) => (
+                  <PressureMarkerIcon key={idx} marker={m} left={(Math.min(m.minute, totalMin) / totalMin) * chartW} top={4} />
+                ))}
+              </View>
+            </View>
+          </View>
+
+          {/* ── X-axis labels ── */}
+          {/* Each label is positioned ABSOLUTELY at its exact minute fraction of the
+              chart — the same coordinate system as the curve and the half-time
+              guide (X_AXIS_INSET + minute/totalMin · chartW). First label is
+              left-aligned, last is right-aligned, the rest are centered. */}
+          <View style={pi.xAxis}>
+            {(totalMin === 120
+              ? [{ m: 0, l: "0'" }, { m: 45, l: t('stats.axisHT') }, { m: 90, l: "90'" }, { m: 120, l: "120'" }]
+              : [{ m: 0, l: "0'" }, { m: 15, l: "15'" }, { m: 30, l: "30'" }, { m: 45, l: t('stats.axisHT') },
+                 { m: 60, l: "60'" }, { m: 75, l: "75'" }, { m: 90, l: "90'" }]
+            ).map((a, i, arr) => {
+              const pos     = X_AXIS_INSET + (a.m / totalMin) * chartW;
+              const isFirst = i === 0;
+              const isLast  = i === arr.length - 1;
+              const HALF_W  = 22;
+              const boxStyle = isFirst
+                ? { left: pos, alignItems: 'flex-start' as const }
+                : isLast
+                  ? { left: pos - HALF_W * 2, width: HALF_W * 2, alignItems: 'flex-end' as const }
+                  : { left: pos - HALF_W, width: HALF_W * 2, alignItems: 'center' as const };
+              return (
+                <View key={a.l} style={[{ position: 'absolute', top: 4 }, boxStyle]}>
+                  <Text style={[pi.xLabel, { color: c.textTertiary }]}>{a.l}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </>
+      )}
 
       {/* ── Summary bar ── */}
       <View style={[pi.summary, { borderTopColor: borderColor }]}>
         <Text style={[pi.summaryValue, { color: homeColor }]}>{pressure.home}%</Text>
         <View style={pi.summaryBarWrap}>
+          <Text style={[pi.summaryCaption, { color: c.textTertiary }]} numberOfLines={1}>{t('stats.pressureShare')}</Text>
           <View style={[pi.summaryBarBg, { backgroundColor: c.surface }]}>
             <View style={[pi.summaryBarHome, { width: `${pressure.home}%`, backgroundColor: homeColor }]} />
           </View>
@@ -2412,11 +2289,10 @@ const pi = StyleSheet.create({
   legendDot:   { width: 8, height: 8, borderRadius: 4 },
   legendLabel: { fontSize: 10, fontWeight: '500', marginLeft: 4 },
 
-  chartWrap: { flexDirection: 'row', paddingLeft: 4, borderTopWidth: 1 },
-  yAxis:     { width: Y_AXIS_W, justifyContent: 'space-between', paddingVertical: 2 },
-  yLabel:    { fontSize: 8, fontWeight: '500', textAlign: 'right', paddingRight: 4 },
-
-  gridLine: { position: 'absolute', left: 0, right: 0, borderBottomWidth: StyleSheet.hairlineWidth },
+  chartWrap: { flexDirection: 'row', paddingLeft: 4, paddingTop: 4, borderTopWidth: 1 },
+  crest:     { position: 'absolute', left: 4, width: CREST, height: CREST, alignItems: 'center', justifyContent: 'center' },
+  marker:    { position: 'absolute', width: 16, height: 16, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  redCard:   { position: 'absolute', width: 8, height: 11, borderRadius: 1.5, backgroundColor: '#ef4444' },
   htLine:   {
     position: 'absolute', top: 0, bottom: 0,
     width: 1,
@@ -2433,12 +2309,13 @@ const pi = StyleSheet.create({
   // Relative container spanning the full card width; labels inside are absolute
   // (positioned per-minute via X_AXIS_INSET + fraction·chartW). Fixed height
   // since absolute children don't contribute to layout.
-  xAxis:  { position: 'relative', height: 22 },
-  xLabel: { fontSize: 8, fontWeight: '500' },
+  xAxis:  { position: 'relative', height: 20 },
+  xLabel: { fontSize: 9, fontWeight: '600' },
 
   summary:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, gap: 10, borderTopWidth: 1 },
   summaryValue:   { fontSize: 15, fontWeight: '800', width: 42 },
   summaryBarWrap: { flex: 1 },
+  summaryCaption: { fontSize: 10, fontWeight: '600', textAlign: 'center', marginBottom: 5 },
   summaryBarBg:   { height: 6, borderRadius: 3, overflow: 'hidden' },
   summaryBarHome: { height: 6, backgroundColor: PI_HOME, borderRadius: 3 },
 

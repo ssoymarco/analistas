@@ -362,7 +362,11 @@ export function detailFromFb(
     homeForm: preview && preview.form.home.length ? formFromFb(preview.form.home) : undefined,
     awayForm: preview && preview.form.away.length ? formFromFb(preview.form.away) : undefined,
     pressureIndex: pressure
-      ? { home: pressure.home, away: pressure.away, homeAttacks: 0, awayAttacks: 0, homeDangerousAttacks: 0, awayDangerousAttacks: 0 }
+      ? {
+          home: pressure.home, away: pressure.away,
+          homeAttacks: 0, awayAttacks: 0, homeDangerousAttacks: 0, awayDangerousAttacks: 0,
+          series: Array.isArray(pressure.series) ? pressure.series : [],
+        }
       : undefined,
     aggregateScore: preview ? aggregateFromH2H(match, preview.h2h) : undefined,
   };

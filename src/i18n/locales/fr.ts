@@ -827,6 +827,7 @@ const fr: TranslationKeys = {
   // ── Statistics tab ─────────────────────────────────────────────────────────
   stats: {
     pressureIndex: 'Indice de pression',
+    pressureShare: 'Domination sur le match',
     corners: 'Corners',
     fouls: 'Fautes',
     saves: 'Arrêts',

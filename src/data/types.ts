@@ -449,6 +449,21 @@ export interface PressureIndex {
   awayAttacks: number;
   homeDangerousAttacks: number;
   awayDangerousAttacks: number;
+  /**
+   * Snapshots of the match taken by the server during play (one per stats
+   * refresh, every 2-4 min for live matches). Drives the momentum curve;
+   * absent or short when the match was never followed live.
+   */
+  series?: PressureSample[];
+}
+
+export interface PressureSample {
+  minute: number;
+  /** Cumulative dominance share 0-100 at this minute. */
+  home: number;
+  away: number;
+  /** Cumulative attacking counts [home, away] (sog, sib, sh, ck, xg, pa). */
+  c?: Partial<Record<'sog' | 'sib' | 'sh' | 'ck' | 'xg' | 'pa', [number, number]>>;
 }
 
 export interface MatchDetail {

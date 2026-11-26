@@ -926,6 +926,7 @@ const es = {
   // ── Statistics tab ─────────────────────────────────────────────────────────
   stats: {
     pressureIndex: 'Índice de presión',
+    pressureShare: 'Dominio en el partido',
     corners: 'Saques de esquina',
     fouls: 'Faltas',
     saves: 'Salvadas de portero',

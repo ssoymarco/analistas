@@ -14,7 +14,7 @@
  *   - positions: Spanish labels + POR/DEF/MED/DEL short codes.
  *   - statistics: same Spanish categories/labels the app showed before.
  */
-import type { FbEvent, FbLiveClock, FbMatchDetailDoc, FbMatchDoc, FbMatchStatus, FbPressure, FbStatCategory, FbStandingsDoc, FbTopPlayer } from '../shared/football/model';
+import type { FbEvent, FbLiveClock, FbMatchDetailDoc, FbMatchDoc, FbMatchStatus, FbPressure, FbPressureCounts, FbStatCategory, FbStandingsDoc, FbTopPlayer } from '../shared/football/model';
 import type { AfEvent, AfFixtureCore, AfFixtureFull, AfStandingsResponse, AfTeamStatistics, AfTopPlayerEntry } from './apisports-types';
 export declare function mapStatus(short: string): FbMatchStatus;
 export declare function isLiveShort(short: string): boolean;
@@ -107,6 +107,8 @@ export declare function computePressureShare(f: AfFixtureFull): {
     home: number;
     away: number;
 } | null;
+/** Cumulative attacking counts per side (see FbPressureCounts). */
+export declare function pressureCounts(f: AfFixtureFull): FbPressureCounts;
 export declare function nextPressure(prev: FbPressure | null | undefined, f: AfFixtureFull): FbPressure | null;
 export declare function mapFixtureToDetail(f: AfFixtureFull, prevPressure?: FbPressure | null): FbMatchDetailDoc;
 export declare function mapStandings(r: AfStandingsResponse): FbStandingsDoc;

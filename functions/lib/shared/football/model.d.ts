@@ -198,11 +198,23 @@ export interface FbPlayerRating {
 export interface FbPressure {
     home: number;
     away: number;
-    series: Array<{
-        minute: number;
-        home: number;
-        away: number;
-    }>;
+    series: FbPressurePoint[];
+}
+/**
+ * Cumulative attacking counts per side at one point of the match, as
+ * [home, away]. The app derives the per-minute momentum curve from the
+ * differences between consecutive points, so it needs the raw totals, not
+ * just the share. Keys: sog = shots on goal, sib = shots inside the box,
+ * sh = total shots, ck = corners, xg = expected goals, pa = accurate passes.
+ * Missing on points written before 27-nov-2026 (the app then falls back to
+ * an approximation from the share).
+ */
+export type FbPressureCounts = Partial<Record<'sog' | 'sib' | 'sh' | 'ck' | 'xg' | 'pa', [number, number]>>;
+export interface FbPressurePoint {
+    minute: number;
+    home: number;
+    away: number;
+    c?: FbPressureCounts;
 }
 export interface FbMatchDetailDoc {
     matchId: string;

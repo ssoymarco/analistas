@@ -17,7 +17,7 @@
 
 import type {
   FbEvent, FbEventType, FbLineup, FbLineupPlayer, FbLiveClock, FbMatchDetailDoc,
-  FbMatchDoc, FbMatchStatus, FbPlayerRating, FbPressure, FbStatCategory, FbStatRow,
+  FbMatchDoc, FbMatchStatus, FbPlayerRating, FbPressure, FbPressureCounts, FbPressurePoint, FbStatCategory, FbStatRow,
   FbStandingsDoc, FbTeamRef, FbTopPlayer,
 } from '../shared/football/model';
 import {
@@ -737,6 +737,22 @@ export function computePressureShare(f: AfFixtureFull): { home: number; away: nu
   return { home, away: 100 - home };
 }
 
+const PRESSURE_COUNT_TYPES: Array<[keyof FbPressureCounts, string]> = [
+  ['sog', 'Shots on Goal'], ['sib', 'Shots insidebox'], ['sh', 'Total Shots'],
+  ['ck', 'Corner Kicks'], ['xg', 'expected_goals'], ['pa', 'Passes accurate'],
+];
+
+/** Cumulative attacking counts per side (see FbPressureCounts). */
+export function pressureCounts(f: AfFixtureFull): FbPressureCounts {
+  const v = statValues(f.statistics, f.teams.home.id);
+  const out: FbPressureCounts = {};
+  for (const [key, type] of PRESSURE_COUNT_TYPES) {
+    const x = v.get(type);
+    if (x) out[key] = [Math.round(x.home * 100) / 100, Math.round(x.away * 100) / 100];
+  }
+  return out;
+}
+
 export function nextPressure(
   prev: FbPressure | null | undefined,
   f: AfFixtureFull,
@@ -746,8 +762,9 @@ export function nextPressure(
   const minute = f.fixture.status.elapsed ?? 0;
   const series = [...(prev?.series ?? [])];
   const last = series[series.length - 1];
-  if (!last || last.minute !== minute) series.push({ minute, ...share });
-  else series[series.length - 1] = { minute, ...share };
+  const point: FbPressurePoint = { minute, ...share, c: pressureCounts(f) };
+  if (!last || last.minute !== minute) series.push(point);
+  else series[series.length - 1] = point;
   // Keep it bounded (one point per minute max, ~130 points for 120' + stoppage).
   while (series.length > 140) series.shift();
   return { home: share.home, away: share.away, series };
