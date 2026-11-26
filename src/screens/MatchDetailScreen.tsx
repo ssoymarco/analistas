@@ -51,6 +51,7 @@ import { MatchNotificationsSheet } from '../components/MatchNotificationsSheet';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatMatchTime } from '../utils/formatMatchTime';
 import { isImageUri } from '../utils/imageUri';
+import { DOWNLOAD_URL } from '../config/site';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'MatchDetail'>;
 type Tab  = 'previa' | 'alineacion' | 'estadisticas' | 'tabla' | 'noticias';
@@ -473,7 +474,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     const league = isFriendliesLeague(displayMatch.league)
       ? t('league.friendly')
       : getLeagueDisplayName(displayMatch.leagueId ?? match.leagueId, displayMatch.league || match.league);
-    const url = 'https://get.analistasapp.com';
+    const url = DOWNLOAD_URL;
     const message = isLive
       ? t('matchShare.live', { score: `${home} ${displayMatch.homeScore}-${displayMatch.awayScore} ${away}`, league, url })
       : isFinished

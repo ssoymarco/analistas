@@ -129,6 +129,11 @@ Convenciones:
   El calendario junta todas las etiquetas de temporada que el equipo está jugando (un club mexicano juega
   Liga MX "2026" y Concachampions "2027" en la misma primavera).
 - Tablas de torneos partidos (Apertura/Clausura): se muestra la mitad que se está jugando.
+- **Enlaces al sitio**: todos salen de `src/config/site.ts` (dominio, página de descarga y página de cada
+  liga). Una liga con página en el sitio comparte `/league/{slug}`; el resto, `/ligas`. Ojo: al 26-nov-2026
+  `www.analistasapp.com` respondía error 522 de Cloudflare y `analistasapp.com` (sin www) sí cargaba, por
+  eso `SITE_HOST` va sin www; cambiarlo ahí cuando www sirva el sitio.
+- Fechas de listas (H2H): `formatShortDate` → "25 jul 2026" con los meses del idioma de la app.
 - Días fuera de la ventana sincronizada (antes de ayer, después de +14) se piden al abrirlos (`kind: day`).
 - `src/config/leagues.ts` es solo una vista del catálogo compartido (`shared/football/leagues.ts`).
 - **Lista del día en dos niveles**: ligas curadas (popularidad ≥ 5) en tiempo real al abrir; el resto se

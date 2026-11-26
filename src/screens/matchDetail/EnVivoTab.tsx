@@ -36,6 +36,7 @@ import { BETTING_CONTENT_ENABLED, ADMOB_ENABLED } from '../../config/features';
 import MediumRectangleBannerAd from '../../components/MediumRectangleBannerAd';
 import { LiveActivityButton } from '../../components/LiveActivityButton';
 import { useLiveTick, computeLiveMinuteSeconds } from '../../hooks/useLiveTick';
+import { formatShortDate } from '../../utils/formatMatchTime';
 import { useUserCountry } from '../../hooks/useUserCountry';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -1218,6 +1219,8 @@ const od = StyleSheet.create({
 // ── H2H section ──────────────────────────────────────────────────────────────
 const H2HSection: React.FC<{ h2h: MatchDetail['h2h']; match: Match }> = ({ h2h, match }) => {
   const c = useThemeColors();
+  const { t } = useTranslation();
+  const monthsAbbr = t('dates.monthsAbbr', { returnObjects: true }) as string[];
   const [showAll, setShowAll] = useState(false);
 
   if (!h2h.results || h2h.results.length === 0) return null;
@@ -1278,7 +1281,7 @@ const H2HSection: React.FC<{ h2h: MatchDetail['h2h']; match: Match }> = ({ h2h, 
         const awayShort = h2h.awayTeam || match.awayTeam.shortName;
         return (
           <View key={i} style={[h2.resultRow, { borderTopColor: c.border }]}>
-            <Text style={[h2.date, { color: c.textTertiary }]}>{r.date}</Text>
+            <Text style={[h2.date, { color: c.textTertiary }]}>{formatShortDate(r.date, monthsAbbr)}</Text>
             <View style={h2.scoreCenter}>
               <Text style={[h2.shortName, { color: c.textPrimary }]}>{homeShort}</Text>
               <Text style={[h2.scoreVal, { color: c.accent }]}>{r.homeScore}</Text>

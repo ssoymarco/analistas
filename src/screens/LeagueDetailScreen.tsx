@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Dimensions,
   PanResponder,
+  Share,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
@@ -54,6 +55,7 @@ import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatUtcTime } from '../utils/formatMatchTime';
 import { translateNationalTeam, translateLeagueCountry } from '../utils/nationalTeams';
 import { isImageUri } from '../utils/imageUri';
+import { leagueShareUrl } from '../config/site';
 
 type Props = NativeStackScreenProps<PartidosStackParamList, 'LeagueDetail'>;
 type Tab = 'clasificacion' | 'grupos' | 'partidos' | 'goleadores' | 'asistencias' | 'equipos';
@@ -1569,17 +1571,13 @@ export const LeagueDetailScreen: React.FC<Props> = ({ route }) => {
   const teamsCount = data?.standings.length || data?.teams.length || 0;
 
   // ── Share ──
-  let Sharing: any = null;
-  try { Sharing = require('expo-sharing'); } catch {}
+  // The system share sheet with the league's page on the site. (This used to
+  // hand an https link to expo-sharing, which only accepts local files — the
+  // call threw and the button did nothing.)
   const handleShare = async () => {
-    if (!Sharing) return;
     try {
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(`https://analistas.app`, {
-          dialogTitle: `${displayName} — Analistas`,
-        });
-      }
-    } catch {}
+      await Share.share({ message: `${displayName} — Analistas ⚽\n${leagueShareUrl(leagueId)}` });
+    } catch { /* sheet dismissed */ }
   };
 
   // ── Bracket tap → navigate to MatchDetail ──

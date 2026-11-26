@@ -17,6 +17,7 @@ import MediumRectangleBannerAd from '../../components/MediumRectangleBannerAd';
 import { LiveActivityButton } from '../../components/LiveActivityButton';
 import { BETTING_CONTENT_ENABLED, ADMOB_ENABLED } from '../../config/features';
 import { getDisplayVenueName, getDisplayVenueCity } from '../../config/worldCupVenues';
+import { formatShortDate } from '../../utils/formatMatchTime';
 
 // ── Traduce condiciones meteorológicas de la API (siempre en inglés) ──────────
 function translateWeatherDesc(desc: string, t: (key: string) => string): string {
@@ -266,7 +267,7 @@ function H2HCard({
             ]}
           >
             <Text style={[styles.h2hMatchDate, { color: c.textTertiary }]} numberOfLines={1}>
-              {r.date}
+              {formatShortDate(r.date, t('dates.monthsAbbr', { returnObjects: true }) as string[])}
             </Text>
             <View style={styles.h2hScoreWrap}>
               <Text

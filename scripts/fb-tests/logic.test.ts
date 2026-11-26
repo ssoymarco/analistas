@@ -9,6 +9,8 @@ import { getDisplayVenueCity, getDisplayVenueName } from '../../src/config/world
 import { buildBracket, parseRound, stageNameOf, translateRoundName } from '../../src/services/football/rounds';
 import { aggregateFromH2H, detailFromFb, h2hFromFb, matchFromFb, matchFromLite, standingsFromFb } from '../../src/services/football/mappers';
 import { shortNameFor } from '../../src/services/football/base';
+import { leagueShareUrl, SITE_URL } from '../../src/config/site';
+import { formatShortDate } from '../../src/utils/formatMatchTime';
 import { matchDetailNeedsFetch } from '../../functions/src/shared/football/freshness';
 import { teamColor, teamFlagEmoji } from '../../src/utils/teamColors';
 import { deadStateLabelKey } from '../../src/utils/deadState';
@@ -116,6 +118,12 @@ const check = (name: string, ok: boolean, detail = '') => { if (!ok) failures++;
   const g = (id: string, ts: number, hId: string, aId: string, hs: number, as: number) => ({ id, timestamp: ts, statusShort: 'FT', round: 'Round One', homeId: hId, homeName: 'T' + hId, awayId: aId, awayName: 'T' + aId, homeScore: hs, awayScore: as });
   const series = buildBracket([g('1', 1000, '10', '20', 5, 0), g('2', 2000, '20', '10', 1, 0), g('3', 3000, '10', '20', 0, 1), g('4', 4000, '20', '30', 1, 0)] as any, { leagueId: 253 });
   check('bracket: best-of-three goes to the team with two wins', series[0]?.ties[0]?.winner?.id === '20', JSON.stringify(series[0]?.ties.map(t => [t.homeTeam.id, t.awayTeam.id, t.winner?.id, t.legs.length])));
+
+  // ── share links and dates
+  check('share: a league with a page on the site links to it', leagueShareUrl(262) === `${SITE_URL}/league/liga-mx` && leagueShareUrl('39') === `${SITE_URL}/league/premier-league`);
+  check('share: other leagues link to the leagues list', leagueShareUrl(253) === `${SITE_URL}/ligas` && leagueShareUrl(undefined) === `${SITE_URL}/ligas`);
+  const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  check('dates: head-to-head rows read "25 jul 2026"', formatShortDate('2026-07-25', meses) === '25 jul 2026' && formatShortDate('2025-12-03', meses) === '3 dic 2025' && formatShortDate('', meses) === '' && formatShortDate('ayer', meses) === 'ayer');
 
   // ── search ordering
   const ranked = Search.rankByQuery(['Cultural Leonesa', 'Sierra Leone', 'León', 'Leones Negros', 'Napoleon FC'], 'leon', x => x);

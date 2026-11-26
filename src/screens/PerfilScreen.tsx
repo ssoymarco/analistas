@@ -34,6 +34,7 @@ import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { PREMIUM_ENABLED, BETTING_CONTENT_ENABLED, REDEEM_CODE_ENABLED } from '../config/features';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import Constants from 'expo-constants';
+import { SITE_HOST, SITE_URL } from '../config/site';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getInitials(name: string) {
@@ -547,7 +548,7 @@ export const PerfilScreen: React.FC = () => {
   }, [upgrading, t]);
 
   const handleShare = useCallback(async () => {
-    try { await Share.share({ message: 'Descarga Analistas, la mejor app para seguir el fútbol en tiempo real ⚽\nhttps://analistas.app' }); } catch {}
+    try { await Share.share({ message: `Descarga Analistas, la mejor app para seguir el fútbol en tiempo real ⚽\n${SITE_URL}` }); } catch {}
   }, []);
 
   // ── Contact ───────────────────────────────────────────────────────────────
@@ -1079,9 +1080,9 @@ export const PerfilScreen: React.FC = () => {
               </TouchableOpacity>
             ))}
           </View>
-          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }} onPress={() => Linking.openURL('https://analistas.app')} activeOpacity={0.7}>
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }} onPress={() => Linking.openURL(SITE_URL)} activeOpacity={0.7}>
             <Text style={{ fontSize: 16 }}>🌐</Text>
-            <Text style={{ fontSize: 14, color: c.textPrimary, fontWeight: '500' }}>analistas.app</Text>
+            <Text style={{ fontSize: 14, color: c.textPrimary, fontWeight: '500' }}>{SITE_HOST}</Text>
             <Text style={{ marginLeft: 'auto', fontSize: 12, color: c.textTertiary }}>↗</Text>
           </TouchableOpacity>
           <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border }} onPress={() => Linking.openURL('mailto:hola@analistas.app')} activeOpacity={0.7}>

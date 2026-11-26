@@ -71,3 +71,16 @@ export function detectDeviceTimeFormat(): TimeFormat {
     return '24h';
   }
 }
+
+/**
+ * A calendar date for lists: "2026-07-25" → "25 jul 2026". `monthsAbbr` is the
+ * app language's `dates.monthsAbbr`. Anything that isn't a YYYY-MM-DD date is
+ * returned unchanged.
+ */
+export function formatShortDate(dateStr: string, monthsAbbr: string[]): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr ?? '');
+  if (!m) return dateStr ?? '';
+  const month = monthsAbbr[Number(m[2]) - 1];
+  if (!month) return dateStr;
+  return `${Number(m[3])} ${month.toLowerCase()} ${m[1]}`;
+}
