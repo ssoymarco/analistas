@@ -236,6 +236,10 @@ export function buildActivityState(match: Match): MatchActivityState {
     kickoffAt: phase === 'pre' ? kickoffUnixSeconds(match) : undefined,
     penHome: typeof match.homePenScore === 'number' ? match.homePenScore : undefined,
     penAway: typeof match.awayPenScore === 'number' ? match.awayPenScore : undefined,
+    // Última jugada clave — la escribe el servidor en el doc del partido
+    // (espejo de buildStateFromMatchDoc). Sin esto, cada actualización local
+    // con el app abierta borraba la línea que el push acababa de pintar.
+    lastEventText: phase !== 'pre' && match.lastEvent ? match.lastEvent : undefined,
   };
 }
 

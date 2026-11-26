@@ -85,6 +85,7 @@ export function matchFromFb(d: FbMatchDoc): Match {
     awayScoreHT: d.awayScoreHT ?? undefined,
     homePenScore: hasPens ? d.homePenScore! : undefined,
     awayPenScore: hasPens ? d.awayPenScore! : undefined,
+    lastEvent: d.lastEvent || undefined,
     homeRedCards: d.homeRedCards || undefined,
     awayRedCards: d.awayRedCards || undefined,
     stateLabel: live || status === 'interrupted' ? stateLabelFromShort(short) : undefined,

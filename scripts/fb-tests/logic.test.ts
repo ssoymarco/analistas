@@ -8,7 +8,7 @@ import * as Leagues from '../../src/config/leagues';
 import { getDisplayVenueCity, getDisplayVenueName } from '../../src/config/worldCupVenues';
 import { buildBracket, parseRound, stageNameOf, translateRoundName } from '../../src/services/football/rounds';
 import { aggregateFromH2H, detailFromFb, h2hFromFb, matchFromFb, matchFromLite, standingsFromFb } from '../../src/services/football/mappers';
-import { shortNameFor } from '../../src/services/football/base';
+import { displayTeam, shortNameFor } from '../../src/services/football/base';
 import * as Families from '../../src/services/football/teamFamilies';
 import { readDoc } from '../../src/services/football/onDemand';
 import { translateNationalTeam } from '../../src/utils/nationalTeams';
@@ -143,6 +143,29 @@ const check = (name: string, ok: boolean, detail = '') => { if (!ok) failures++;
   const rivalCond: string = notify.immediateCondition(ch('rivalRedCard', 'home'), ['fb_team_2282_rival_red_card']);
   check('push: rival red card skips devices that already get the red card through the other team', rivalCond.includes("!('fb_team_2287_cards_d0' in topics)") && rivalCond.includes("!('fb_mute_77' in topics)") && (rivalCond.match(/in topics/g) ?? []).length === 5, rivalCond);
   check('push: other pushes keep the plain condition', notify.immediateCondition(ch('redCard', 'home'), ['a', 'b']) === notify.conditionFor(['a', 'b'], '77'));
+
+  // ── the line under the score in the Live Activity (server) + club names in pushes
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const mapping = require('../../functions/lib/football/mapping.js');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const la = require('../../functions/lib/football/live-activities.js');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const clubs = require('../../functions/lib/shared/football/clubNames.js');
+  const mtyAme = { home: { id: 2282, name: 'Monterrey' }, away: { id: 2287, name: 'Club America' } };
+  const ev = (elapsed: number, teamId: number, type: string, detail: string, player: string | null, extra: number | null = null, comments: string | null = null) => ({ time: { elapsed, extra }, team: { id: teamId, name: '', logo: '' }, player: { id: 1, name: player }, assist: { id: null, name: null }, type, detail, comments });
+  const red = ev(11, 2282, 'Card', 'Red Card', 'L. Romo');
+  const line = (events: any[]) => mapping.lastEventLine({ teams: mtyAme, events });
+  check('live activity line: nothing to say without key events', line([]) === null && line([ev(44, 2287, 'Card', 'Yellow Card', 'X'), ev(60, 2282, 'subst', 'Substitution 1', 'Y')]) === null);
+  check('live activity line: a red card names the player and the team', line([ev(10, 2282, 'Var', 'Card upgrade', 'L. Romo'), red, ev(44, 2287, 'Card', 'Yellow Card', 'X')]) === "🟥 11' L. Romo (Monterrey)", String(line([red])));
+  check('live activity line: a goal uses the app\'s club name and keeps who is a player down', line([red, ev(52, 2287, 'Goal', 'Normal Goal', 'H. Martín')]) === "⚽ 52' H. Martín (América) · 🟥 Monterrey", String(line([red, ev(52, 2287, 'Goal', 'Normal Goal', 'H. Martín')])));
+  check('live activity line: penalties, own goals, stoppage time and VAR', line([ev(45, 2287, 'Goal', 'Penalty', 'H. Martín', 3)]) === "⚽ 45+3' H. Martín, de penal (América)" && line([ev(70, 2282, 'Goal', 'Missed Penalty', 'S. Canales')]) === "❌ 70' Penal fallado · S. Canales (Monterrey)" && line([ev(30, 2282, 'Goal', 'Own Goal', 'K. Álvarez')]) === "⚽ 30' Autogol de K. Álvarez" && line([ev(52, 2287, 'Goal', 'Normal Goal', 'A'), ev(53, 2287, 'Var', 'Goal Disallowed - offside', 'A')]) === "🚫 53' Gol anulado (América)");
+  check('live activity line: the latest by match time wins, shootout kicks are ignored', line([ev(80, 2287, 'Goal', 'Normal Goal', 'B'), ev(52, 2282, 'Goal', 'Normal Goal', 'A'), ev(120, 2282, 'Goal', 'Penalty', 'C', null, 'Penalty Shootout')]) === "⚽ 80' B (América)");
+  const laRow = (over: Record<string, unknown>) => ({ homeScore: 0, awayScore: 0, statusShort: '2H', liveClock: { periodStartedAt: 1000, periodMinuteOffset: 45 }, timestamp: 1, homeTeam: { shortName: 'MNT' }, awayTeam: { shortName: 'AME' }, ...over });
+  const withLine = la.buildStateFromMatchDoc(laRow({ lastEvent: "🟥 11' L. Romo (Monterrey)" }));
+  check('live activity: the state carries the line while playing, never before kickoff', withLine.lastEventText === "🟥 11' L. Romo (Monterrey)" && la.buildStateFromMatchDoc(laRow({})).lastEventText === undefined && la.buildStateFromMatchDoc(laRow({ statusShort: 'NS', lastEvent: 'x' })).lastEventText === undefined);
+  check('push: curated clubs are named as in the app', notify.buildCopy(ch('halftime')).body === 'Monterrey 0-0 América' && notify.buildCopy({ ...ch('goal', 'away'), awayScore: 1, scorerName: 'H. Martín', minute: 52 }).title === '⚽ ¡GOL de América!', `${notify.buildCopy(ch('halftime')).body} / ${notify.buildCopy({ ...ch('goal', 'away'), awayScore: 1 }).title}`);
+  const drift = Object.entries(clubs.CLUB_NAMES as Record<string, [string, string]>).filter(([id, [name, code]]) => { const d = displayTeam(id, 'x'); return d.name !== name || d.shortName !== code; }).map(([id]) => id);
+  check('club names: the server table matches the app\'s', drift.length === 0 && Object.keys(clubs.CLUB_NAMES).length >= 59, drift.join(','));
 
   // ── youth national teams count as the senior team (Mexico U17 → Mexico)
   // eslint-disable-next-line @typescript-eslint/no-var-requires

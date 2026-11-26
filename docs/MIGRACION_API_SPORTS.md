@@ -101,6 +101,20 @@ equipo del jugador, y amarillas/cambios viajaban dentro de `cards`/`live` (llega
 estuviera apagado). El aviso de Modo Rival por roja se omite para quien ya recibe la roja normal por
 seguir al otro equipo.
 
+**Nombres en los textos del servidor** (`football/names.ts`): selecciones en español (`loc`), menores como
+"México Sub-17" y los clubes curados con el nombre de la app ("América", no "Club America") gracias a
+`shared/football/clubNames.ts` (misma tabla que `popular.ts` + `base.ts`; una prueba vigila que no se
+separen). Lo usan los avisos y la línea de la Live Activity.
+
+**Live Activity — última jugada**: el poller escribe en `fb_matches/{id}.lastEvent` la última jugada clave
+en una línea (`lastEventLine` en `mapping.ts`: gol con goleador, roja, penal fallado, gol anulado por VAR;
+añade "· 🟥 Equipo" si alguien juega con uno menos). Viaja como `lastEventText`, campo que el widget pinta
+bajo el marcador desde su primera versión y que nadie llenaba — no requiere build nueva. La app la copia en
+sus actualizaciones locales (`buildActivityState`) para no borrarla al abrirse. Los avisos (vibración) de la
+Live Activity solo salen en cambios reales de fase o marcador; una jugada nueva actualiza en silencio.
+Pendiente de una build nueva: rediseño del widget (expulsados junto al escudo, goleadores por lado, franja
+de estadísticas, ronda) — los structs Swift están horneados en el binario.
+
 **Selecciones menores = selección mayor** (regla del dueño, 25-nov-2026): quien sigue a México recibe
 también los avisos de México Sub-17, Sub-20… y ve esos partidos en "Mis equipos". El proveedor no
 relaciona esos equipos, así que la relación sale del **nombre** (`shared/football/youth.ts`:

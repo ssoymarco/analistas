@@ -29,7 +29,8 @@
  */
 import { type FbDelayBucket } from '../shared/football/model';
 import type { FbChange } from './live-detect';
-export declare const loc: (name: string) => string;
+import { loc } from './names';
+export { loc };
 /** Friendlies are one match in a push → singular "Amistoso". */
 export declare function displayLeague(name: string | null | undefined): string;
 export interface Copy {
@@ -99,4 +100,3 @@ export declare function dispatchPlayerLineups(match: {
  */
 export declare function immediateCondition(c: FbChange, topics: string[]): string;
 export declare function dispatchFootballChanges(changes: FbChange[]): Promise<void>;
-export {};

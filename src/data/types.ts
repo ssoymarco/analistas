@@ -49,6 +49,8 @@ export interface Match {
    *  (including normal FT, AET-only, scheduled, etc.). */
   homePenScore?: number;
   awayPenScore?: number;
+  /** Última jugada clave en una línea ("⚽ 36' Berterame (Monterrey)") — la escribe el servidor. */
+  lastEvent?: string;
   homeRedCards?: number;  // number of players sent off (red/second-yellow)
   awayRedCards?: number;
   stateLabel?: string;    // "1T" | "HT" | "2T" | "ET" | "ETB" | "PEN" | "SUSP" | "INT" — live state

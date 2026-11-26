@@ -27,6 +27,7 @@ import type {
   AfEvent, AfFixtureCore, AfFixtureFull, AfLineup, AfPlayerMatchStats,
   AfStandingsResponse, AfTeamStatistics, AfTopPlayerEntry,
 } from './apisports-types';
+import { teamLabel } from './names';
 
 // ── Status ───────────────────────────────────────────────────────────────────
 
@@ -124,6 +125,68 @@ export function isMissedPenaltyEvent(e: AfEvent): boolean {
 
 export function isScoredGoalEvent(e: AfEvent): boolean {
   return e.type === 'Goal' && !/missed/i.test(e.detail) && !isShootoutEvent(e);
+}
+
+/** VAR took a goal off the board. */
+export function isGoalRuledOutEvent(e: AfEvent): boolean {
+  return e.type === 'Var' && /goal (cancelled|disallowed)/i.test(e.detail);
+}
+
+const eventOrder = (e: AfEvent) => (e.time.elapsed ?? 0) * 100 + (e.time.extra ?? 0);
+const eventMinute = (e: AfEvent) =>
+  (e.time.elapsed != null ? `${e.time.elapsed}${e.time.extra ? `+${e.time.extra}` : ''}' ` : '');
+
+/** Longest line the Live Activity shows whole (one line of small type). */
+const EVENT_LINE_MAX = 46;
+
+/**
+ * The latest event that changes how the match reads — goal, red card, missed
+ * penalty, goal ruled out — as one short line in Spanish. When a team is a
+ * player down and the line is about something else, it says so at the end
+ * ("· 🟥 Monterrey"). Null when nothing of the kind has happened.
+ */
+export function lastEventLine(f: { teams: AfFixtureCore['teams']; events?: AfEvent[] }): string | null {
+  const events = (f.events ?? []).filter(e => !isShootoutEvent(e));
+  const key = events
+    .filter(e => isScoredGoalEvent(e) || isMissedPenaltyEvent(e) || isRedCardEvent(e) || isGoalRuledOutEvent(e))
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => eventOrder(a.e) - eventOrder(b.e) || a.i - b.i)
+    .map(x => x.e);
+  const last = key[key.length - 1];
+  if (!last) return null;
+
+  const home = teamLabel(f.teams.home);
+  const away = teamLabel(f.teams.away);
+  const team = last.team?.id === f.teams.home.id ? home : away;
+  const who = (last.player?.name ?? '').trim();
+  const at = eventMinute(last);
+
+  let line: string;
+  if (isRedCardEvent(last)) {
+    line = `🟥 ${at}${who ? `${who} (${team})` : team}`;
+  } else if (isGoalRuledOutEvent(last)) {
+    line = `🚫 ${at}Gol anulado (${team})`;
+  } else if (isMissedPenaltyEvent(last)) {
+    line = `❌ ${at}Penal fallado${who ? ` · ${who}` : ''} (${team})`;
+  } else if (/own goal/i.test(last.detail)) {
+    // The provider is not consistent about which side an own goal is filed
+    // under, so the line names the player only.
+    line = `⚽ ${at}Autogol${who ? ` de ${who}` : ''}`;
+  } else {
+    const pen = /penalty/i.test(last.detail) ? ', de penal' : '';
+    line = `⚽ ${at}${who ? `${who}${pen} (${team})` : `Gol de ${team}`}`;
+  }
+
+  // Who is a player down, unless the line is that red card itself.
+  if (!isRedCardEvent(last)) {
+    const down = [
+      countBy(events, f.teams.home.id, isRedCardEvent) > 0 ? home : '',
+      countBy(events, f.teams.away.id, isRedCardEvent) > 0 ? away : '',
+    ].filter(Boolean);
+    const suffix = down.length ? ` · 🟥 ${down.join(', ')}` : '';
+    if (suffix && line.length + suffix.length <= EVENT_LINE_MAX) line += suffix;
+  }
+  return line;
 }
 
 export function countBy(events: AfEvent[] | undefined, teamId: number, pred: (e: AfEvent) => boolean): number {
@@ -226,6 +289,7 @@ export function mapFixtureToMatch(f: AfFixtureCore & { events?: AfEvent[] }, opt
     awayPenScore: score.penalty.away,
     homeRedCards: countBy(f.events, homeId, isRedCardEvent),
     awayRedCards: countBy(f.events, awayId, isRedCardEvent),
+    lastEvent: lastEventLine(f),
 
     status,
     statusShort: short,
@@ -249,7 +313,7 @@ export function mapFixtureToMatch(f: AfFixtureCore & { events?: AfEvent[] }, opt
 /** Strip red-card counts from a write when the source had no events. */
 export function omitRedCardsWhenUnknown(doc: FbMatchDoc, hadEvents: boolean): Partial<FbMatchDoc> {
   if (hadEvents) return doc;
-  const { homeRedCards: _h, awayRedCards: _a, ...rest } = doc;
+  const { homeRedCards: _h, awayRedCards: _a, lastEvent: _e, ...rest } = doc;
   return rest;
 }
 
@@ -262,7 +326,7 @@ export function matchFingerprint(d: Partial<FbMatchDoc>): string {
     d.statusShort, d.homeScore, d.awayScore, d.homeScoreHT, d.awayScoreHT,
     d.homePenScore, d.awayPenScore, d.minute, d.extraMinute, d.timestamp,
     d.homeTeam?.id, d.awayTeam?.id, d.homeTeam?.name, d.awayTeam?.name,
-    d.homeRedCards, d.awayRedCards, d.venueName, d.referee, d.round, d.league,
+    d.homeRedCards, d.awayRedCards, d.lastEvent, d.venueName, d.referee, d.round, d.league,
     d.liveClock?.periodStartedAt, d.liveClock?.periodMinuteOffset,
   ].map(v => (v === undefined ? '~' : String(v))).join('|');
 }

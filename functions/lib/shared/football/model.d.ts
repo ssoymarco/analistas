@@ -66,6 +66,13 @@ export interface FbMatchDoc {
     awayPenScore: number | null;
     homeRedCards: number;
     awayRedCards: number;
+    /**
+     * The latest event that changes how the match reads (goal, red card, missed
+     * penalty, goal ruled out) as one short Spanish line — "⚽ 36' Berterame
+     * (Monterrey)". Null when there is none yet. Written only by the live
+     * poller (the source with events); the Live Activity shows it.
+     */
+    lastEvent?: string | null;
     status: FbMatchStatus;
     statusShort: FbStatusShort | string;
     /** Short live label for chips: '1T' | 'HT' | '2T' | 'ET' | 'PEN' (null otherwise). */

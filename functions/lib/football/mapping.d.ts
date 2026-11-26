@@ -28,6 +28,18 @@ export declare function isRedCardEvent(e: AfEvent): boolean;
 export declare function isYellowCardEvent(e: AfEvent): boolean;
 export declare function isMissedPenaltyEvent(e: AfEvent): boolean;
 export declare function isScoredGoalEvent(e: AfEvent): boolean;
+/** VAR took a goal off the board. */
+export declare function isGoalRuledOutEvent(e: AfEvent): boolean;
+/**
+ * The latest event that changes how the match reads — goal, red card, missed
+ * penalty, goal ruled out — as one short line in Spanish. When a team is a
+ * player down and the line is about something else, it says so at the end
+ * ("· 🟥 Monterrey"). Null when nothing of the kind has happened.
+ */
+export declare function lastEventLine(f: {
+    teams: AfFixtureCore['teams'];
+    events?: AfEvent[];
+}): string | null;
 export declare function countBy(events: AfEvent[] | undefined, teamId: number, pred: (e: AfEvent) => boolean): number;
 /**
  * Anchor for client-side minute extrapolation. Uses the API's period start

@@ -78,50 +78,19 @@ const logger = __importStar(require("firebase-functions/logger"));
 const admin_init_1 = require("../admin-init");
 const model_1 = require("../shared/football/model");
 const legacy_1 = require("../shared/football/legacy");
+const names_1 = require("./names");
+Object.defineProperty(exports, "loc", { enumerable: true, get: function () { return names_1.loc; } });
 const team_family_1 = require("./team-family");
 const ESTADIO_DELAY_ENABLED = process.env.ESTADIO_DELAY_ENABLED !== 'false';
 const LEGACY_DUAL_SEND = process.env.FB_LEGACY_DUAL_SEND !== 'false';
-// ── Spanish names for national teams (clubs pass through unchanged) ─────────
-const TEAMS_ES = {
-    'Afghanistan': 'Afganistán', 'Algeria': 'Argelia', 'Armenia': 'Armenia',
-    'Azerbaijan': 'Azerbaiyán', 'Bahrain': 'Baréin', 'Belgium': 'Bélgica',
-    'Bosnia & Herzegovina': 'Bosnia y Herzegovina', 'Bosnia and Herzegovina': 'Bosnia y Herzegovina',
-    'Brazil': 'Brasil', 'Cameroon': 'Camerún', 'Canada': 'Canadá', 'Cape Verde Islands': 'Cabo Verde',
-    'China': 'China', 'Congo DR': 'Congo RD', 'Croatia': 'Croacia', 'Curacao': 'Curazao', 'Curaçao': 'Curazao',
-    'Czech Republic': 'República Checa', 'Czechia': 'República Checa', 'Denmark': 'Dinamarca',
-    'Egypt': 'Egipto', 'England': 'Inglaterra', 'Finland': 'Finlandia', 'France': 'Francia',
-    'Germany': 'Alemania', 'Greece': 'Grecia', 'Hungary': 'Hungría', 'Iran': 'Irán', 'Iraq': 'Irak',
-    'Ireland': 'Irlanda', 'Rep. Of Ireland': 'Irlanda', 'Italy': 'Italia', 'Ivory Coast': 'Costa de Marfil',
-    'Japan': 'Japón', 'Jordan': 'Jordania', 'Kenya': 'Kenia', 'North Korea': 'Corea del Norte',
-    'South Korea': 'Corea del Sur', 'Mali': 'Malí', 'Mexico': 'México', 'Morocco': 'Marruecos',
-    'Netherlands': 'Países Bajos', 'New Zealand': 'Nueva Zelanda', 'Norway': 'Noruega', 'Oman': 'Omán',
-    'Panama': 'Panamá', 'Peru': 'Perú', 'Poland': 'Polonia', 'Qatar': 'Catar', 'Romania': 'Rumanía',
-    'Russia': 'Rusia', 'Saudi Arabia': 'Arabia Saudita', 'Scotland': 'Escocia', 'Slovakia': 'Eslovaquia',
-    'Slovenia': 'Eslovenia', 'South Africa': 'Sudáfrica', 'Spain': 'España', 'Sweden': 'Suecia',
-    'Switzerland': 'Suiza', 'Thailand': 'Tailandia', 'Tunisia': 'Túnez', 'Turkey': 'Turquía',
-    'Türkiye': 'Turquía', 'Ukraine': 'Ucrania', 'United Arab Emirates': 'Emiratos Árabes',
-    'USA': 'Estados Unidos', 'United States': 'Estados Unidos', 'Wales': 'Gales', 'Zimbabwe': 'Zimbabue',
-    'Northern Ireland': 'Irlanda del Norte', 'Haiti': 'Haití', 'Uzbekistan': 'Uzbekistán',
-};
-const loc = (name) => {
-    if (TEAMS_ES[name])
-        return TEAMS_ES[name];
-    // Youth national teams: "Mexico U17" → "México Sub-17".
-    const youth = (0, team_family_1.youthOf)(name);
-    if (!youth)
-        return name;
-    const senior = (0, team_family_1.seniorNameOf)(youth.base);
-    return `${TEAMS_ES[youth.base] ?? TEAMS_ES[senior] ?? senior} Sub-${youth.age}`;
-};
-exports.loc = loc;
 /** Friendlies are one match in a push → singular "Amistoso". */
 function displayLeague(name) {
     if (!name)
         return '';
     return /friendl|amistoso/i.test(name) ? 'Amistoso' : name;
 }
-const H = (c) => (0, exports.loc)(c.homeTeam.name);
-const A = (c) => (0, exports.loc)(c.awayTeam.name);
+const H = (c) => (0, names_1.teamLabel)(c.homeTeam);
+const A = (c) => (0, names_1.teamLabel)(c.awayTeam);
 const L = (c) => displayLeague(c.league);
 const scoreLine = (c) => `${H(c)} ${c.homeScore}-${c.awayScore} ${A(c)}`;
 const sideName = (c) => (c.side === 'home' ? H(c) : A(c));
@@ -350,7 +319,7 @@ async function dispatchPlayerLineups(match, starters) {
         const own = s.teamId === match.homeTeam.id ? match.homeTeam : match.awayTeam;
         const rival = s.teamId === match.homeTeam.id ? match.awayTeam : match.homeTeam;
         const pid = String(s.playerId);
-        return sendFcm({ condition: `'${model_1.FbTopics.playerLineups(pid)}' in topics && !('${model_1.FbTopics.lineups(s.teamId)}' in topics)` }, { title: `📋 ${s.name} es titular`, body: `${(0, exports.loc)(own.name)} vs ${(0, exports.loc)(rival.name)} · ${displayLeague(match.league)}` }, { sport: 'football', v: '2', type: 'playerLineup', matchId: match.matchId, playerId: pid }, `fb${match.matchId}_lineup_p${pid}`.slice(0, 64));
+        return sendFcm({ condition: `'${model_1.FbTopics.playerLineups(pid)}' in topics && !('${model_1.FbTopics.lineups(s.teamId)}' in topics)` }, { title: `📋 ${s.name} es titular`, body: `${(0, names_1.teamLabel)(own)} vs ${(0, names_1.teamLabel)(rival)} · ${displayLeague(match.league)}` }, { sport: 'football', v: '2', type: 'playerLineup', matchId: match.matchId, playerId: pid }, `fb${match.matchId}_lineup_p${pid}`.slice(0, 64));
     }));
 }
 /**

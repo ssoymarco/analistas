@@ -122,6 +122,10 @@ function buildStateFromMatchDoc(m) {
         kickoffAt: phase === 'pre' ? kickoffUnixSeconds(m) : undefined,
         penHome: typeof m.homePenScore === 'number' ? m.homePenScore : undefined,
         penAway: typeof m.awayPenScore === 'number' ? m.awayPenScore : undefined,
+        // Última jugada clave ("⚽ 36' Berterame (Monterrey)") — el widget la pinta
+        // bajo el marcador desde su primera versión, pero nadie la llenaba. La
+        // calcula el poller (mapping.lastEventLine) y vive en el doc del partido.
+        lastEventText: phase !== 'pre' && m.lastEvent ? m.lastEvent : undefined,
     };
 }
 /** Clave de deduplicación: si no cambió, no se envía nada. */
@@ -129,7 +133,7 @@ function stateKey(s) {
     return JSON.stringify([
         s.homeScore, s.awayScore, s.phase, s.periodStartedAt ?? 0,
         s.periodMinuteOffset ?? 0, s.kickoffAt ?? 0, s.penHome ?? -1, s.penAway ?? -1,
-        s.minute ?? -1,
+        s.minute ?? -1, s.lastEventText ?? '',
     ]);
 }
 // ── Alert (vibración/pantalla) por transición ─────────────────────────────────
@@ -157,6 +161,11 @@ function alertForTransition(prevKey, s, m) {
     if (s.homeScore < prev[0] || s.awayScore < prev[1]) {
         return { title: 'Gol anulado', body: score }; // VAR / corrección de SM
     }
+    // Solo un CAMBIO de fase avisa. Un push dentro de la misma fase (nueva
+    // última jugada, re-ancla del reloj, minuto estático) actualiza en silencio;
+    // antes cualquier push durante el 2T volvía a vibrar "¡Arranca el 2do tiempo!".
+    if (prev[2] === s.phase)
+        return null;
     switch (s.phase) {
         case 'HT': return { title: 'Medio tiempo', body: score };
         case '2H': return { title: '¡Arranca el 2do tiempo!', body: score };
@@ -168,7 +177,6 @@ function alertForTransition(prevKey, s, m) {
                 ? ` (${s.penHome}-${s.penAway} pen)` : '';
             return { title: 'Final del partido', body: score + pens };
         }
-        // Cambio de anchor sin cambio de fase/marcador (raro): sin alert.
         default: return null;
     }
 }
