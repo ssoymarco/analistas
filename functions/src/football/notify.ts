@@ -160,7 +160,7 @@ interface Route {
   immediate?: { topic: PlainTopic; teams: string[] };
 }
 
-function route(c: FbChange): Route {
+export function route(c: FbChange): Route {
   const h = c.homeTeam.id;
   const a = c.awayTeam.id;
   const s = c.side === 'home' ? h : a;
@@ -176,7 +176,10 @@ function route(c: FbChange): Route {
     case 'extraTimeStart':
     case 'penaltiesStart':
     case 'matchSuspended':   return { bucketed: { topic: FbTopics.live, teams: [h, a], delayed: true } };
-    case 'redCard':
+    // A sending-off changes the match for both sides: followers of either team
+    // get it (owner's rule since 25-nov-2026; it used to reach only the
+    // followers of the player's team).
+    case 'redCard':          return { bucketed: { topic: FbTopics.cards, teams: [h, a], delayed: true } };
     case 'yellowCard':       return { bucketed: { topic: FbTopics.cards, teams: [s], delayed: true } };
     case 'substitution':     return { bucketed: { topic: FbTopics.live, teams: [s], delayed: true } };
     case 'matchStart':
@@ -315,6 +318,23 @@ export async function dispatchPlayerLineups(
   }));
 }
 
+/**
+ * FCM condition of the immediate push of a change.
+ *
+ * Modo Rival's red card ("your rival is a man down") is skipped for devices
+ * that follow the OTHER team of the match with cards on: they already get the
+ * regular red-card push for this same sending-off. FCM allows five topics per
+ * condition: the rival topic, the mute guard and three of the other team's
+ * delay buckets (10-minute Modo Estadio users may still see both).
+ */
+export function immediateCondition(c: FbChange, topics: string[]): string {
+  if (c.type !== 'rivalRedCard' || !c.side || topics.length !== 1) return conditionFor(topics, c.matchId);
+  const other = c.side === 'home' ? c.awayTeam.id : c.homeTeam.id;
+  const exclusions = (['d0', 'd2', 'd5'] as FbDelayBucket[])
+    .map(b => ` && !('${FbTopics.cards(other, b)}' in topics)`).join('');
+  return `'${topics[0]}' in topics${exclusions} && !('${FbTopics.mute(c.matchId)}' in topics)`;
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 export async function dispatchFootballChanges(changes: FbChange[]): Promise<void> {
@@ -335,7 +355,7 @@ export async function dispatchFootballChanges(changes: FbChange[]): Promise<void
     if (!immediate.length) continue;
 
     // One condition → a user following both teams gets exactly one push.
-    sends.push(sendFcm({ condition: conditionFor(immediate, c.matchId) }, copy, data, dedupId));
+    sends.push(sendFcm({ condition: immediateCondition(c, immediate) }, copy, data, dedupId));
 
     // Followed player (goals, reds).
     const pp = playerPush(c);

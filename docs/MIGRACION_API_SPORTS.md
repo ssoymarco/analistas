@@ -91,6 +91,12 @@ Lectura pública, escritura solo servidor; formas en `functions/src/shared/footb
 `fb_mute_{matchId}`. El servidor sigue mandando los avisos inmediatos a los topics viejos
 `team_{idSportmonks}_*` (dual-send, sin matchId) para builds viejas; se apaga con `FB_LEGACY_DUAL_SEND=false`.
 
+**Quién recibe qué** (`route` en `notify.ts`): goles, fases del partido y **tarjetas rojas** llegan a
+quien sigue a cualquiera de los dos equipos (regla del dueño desde el 25-nov-2026; antes la roja solo
+avisaba a los seguidores del equipo del expulsado). Amarillas y cambios siguen yendo solo al equipo del
+jugador. El aviso de Modo Rival por roja se omite para quien ya recibe la roja normal por seguir al otro
+equipo.
+
 **IDs viejos → nuevos**: `shared/football/legacy.ts` + `legacyTeamMap.json` (2,413 de 2,478 equipos),
 `SM_TO_AF_LEAGUE` en `leagues.ts`, `legacyPlayerMap.json` (55 jugadores populares) y el `kind`
 `legacyPlayers` para el resto.

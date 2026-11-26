@@ -119,6 +119,18 @@ const check = (name: string, ok: boolean, detail = '') => { if (!ok) failures++;
   const series = buildBracket([g('1', 1000, '10', '20', 5, 0), g('2', 2000, '20', '10', 1, 0), g('3', 3000, '10', '20', 0, 1), g('4', 4000, '20', '30', 1, 0)] as any, { leagueId: 253 });
   check('bracket: best-of-three goes to the team with two wins', series[0]?.ties[0]?.winner?.id === '20', JSON.stringify(series[0]?.ties.map(t => [t.homeTeam.id, t.awayTeam.id, t.winner?.id, t.legs.length])));
 
+  // ── push routing (server): who hears about what
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const notify = require('../../functions/lib/football/notify.js');
+  const ch = (type: string, side?: 'home' | 'away') => ({ type, side, matchId: '77', homeTeam: { id: '2282', name: 'Monterrey' }, awayTeam: { id: '2287', name: 'Club America' }, homeScore: 0, awayScore: 0, league: 'Liga MX', leagueId: '262', popularity: 100 });
+  const teamsOf = (type: string, side?: 'home' | 'away') => { const r = notify.route(ch(type, side)); return (r.bucketed ?? r.immediate).teams.join(','); };
+  check('push: a red card reaches followers of both teams', teamsOf('redCard', 'home') === '2282,2287' && teamsOf('redCard', 'away') === '2282,2287');
+  check('push: goals and match phases reach both teams', teamsOf('goal', 'home') === '2282,2287' && teamsOf('matchEnd') === '2282,2287');
+  check('push: yellow cards and substitutions stay with the player\'s team', teamsOf('yellowCard', 'home') === '2282' && teamsOf('substitution', 'away') === '2287');
+  const rivalCond: string = notify.immediateCondition(ch('rivalRedCard', 'home'), ['fb_team_2282_rival_red_card']);
+  check('push: rival red card skips devices that already get the red card through the other team', rivalCond.includes("!('fb_team_2287_cards_d0' in topics)") && rivalCond.includes("!('fb_mute_77' in topics)") && (rivalCond.match(/in topics/g) ?? []).length === 5, rivalCond);
+  check('push: other pushes keep the plain condition', notify.immediateCondition(ch('redCard', 'home'), ['a', 'b']) === notify.conditionFor(['a', 'b'], '77'));
+
   // ── share links and dates
   check('share: a league with a page on the site links to it', leagueShareUrl(262) === `${SITE_URL}/league/liga-mx` && leagueShareUrl('39') === `${SITE_URL}/league/premier-league`);
   check('share: other leagues link to the leagues list', leagueShareUrl(253) === `${SITE_URL}/ligas` && leagueShareUrl(undefined) === `${SITE_URL}/ligas`);

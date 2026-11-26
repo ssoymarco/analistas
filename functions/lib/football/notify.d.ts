@@ -27,6 +27,7 @@
  * instead of a match screen the old build can no longer load. Disable with
  * FB_LEGACY_DUAL_SEND=false once adoption of the new build is high.
  */
+import { type FbDelayBucket } from '../shared/football/model';
 import type { FbChange } from './live-detect';
 export declare const loc: (name: string) => string;
 /** Friendlies are one match in a push → singular "Amistoso". */
@@ -36,6 +37,22 @@ export interface Copy {
     body: string;
 }
 export declare function buildCopy(c: FbChange): Copy;
+type BucketedTopic = (teamId: string, b: FbDelayBucket) => string;
+type PlainTopic = (teamId: string) => string;
+interface Route {
+    /** Delay-bucketed topic family + the team ids it applies to. */
+    bucketed?: {
+        topic: BucketedTopic;
+        teams: string[];
+        delayed: boolean;
+    };
+    /** Immediate-only topic family + team ids. */
+    immediate?: {
+        topic: PlainTopic;
+        teams: string[];
+    };
+}
+export declare function route(c: FbChange): Route;
 /** Legacy (Sportmonks-era) topic for a new-format team topic, or null when unmappable. */
 export declare function legacyTopicFor(fbTopic: string): string | null;
 /** `(a || b) && !mute` — FCM allows at most 5 topics per condition. */
@@ -65,4 +82,15 @@ export declare function dispatchPlayerLineups(match: {
     name: string;
     teamId: string;
 }>): Promise<void>;
+/**
+ * FCM condition of the immediate push of a change.
+ *
+ * Modo Rival's red card ("your rival is a man down") is skipped for devices
+ * that follow the OTHER team of the match with cards on: they already get the
+ * regular red-card push for this same sending-off. FCM allows five topics per
+ * condition: the rival topic, the mute guard and three of the other team's
+ * delay buckets (10-minute Modo Estadio users may still see both).
+ */
+export declare function immediateCondition(c: FbChange, topics: string[]): string;
 export declare function dispatchFootballChanges(changes: FbChange[]): Promise<void>;
+export {};

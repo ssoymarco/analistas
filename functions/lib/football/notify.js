@@ -65,10 +65,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.loc = void 0;
 exports.displayLeague = displayLeague;
 exports.buildCopy = buildCopy;
+exports.route = route;
 exports.legacyTopicFor = legacyTopicFor;
 exports.conditionFor = conditionFor;
 exports.sendFcm = sendFcm;
 exports.dispatchPlayerLineups = dispatchPlayerLineups;
+exports.immediateCondition = immediateCondition;
 exports.dispatchFootballChanges = dispatchFootballChanges;
 const functions_1 = require("firebase-admin/functions");
 const logger = __importStar(require("firebase-functions/logger"));
@@ -195,7 +197,10 @@ function route(c) {
         case 'extraTimeStart':
         case 'penaltiesStart':
         case 'matchSuspended': return { bucketed: { topic: model_1.FbTopics.live, teams: [h, a], delayed: true } };
-        case 'redCard':
+        // A sending-off changes the match for both sides: followers of either team
+        // get it (owner's rule since 25-nov-2026; it used to reach only the
+        // followers of the player's team).
+        case 'redCard': return { bucketed: { topic: model_1.FbTopics.cards, teams: [h, a], delayed: true } };
         case 'yellowCard': return { bucketed: { topic: model_1.FbTopics.cards, teams: [s], delayed: true } };
         case 'substitution': return { bucketed: { topic: model_1.FbTopics.live, teams: [s], delayed: true } };
         case 'matchStart':
@@ -317,6 +322,23 @@ async function dispatchPlayerLineups(match, starters) {
         return sendFcm({ condition: `'${model_1.FbTopics.playerLineups(pid)}' in topics && !('${model_1.FbTopics.lineups(s.teamId)}' in topics)` }, { title: `📋 ${s.name} es titular`, body: `${(0, exports.loc)(own.name)} vs ${(0, exports.loc)(rival.name)} · ${displayLeague(match.league)}` }, { sport: 'football', v: '2', type: 'playerLineup', matchId: match.matchId, playerId: pid }, `fb${match.matchId}_lineup_p${pid}`.slice(0, 64));
     }));
 }
+/**
+ * FCM condition of the immediate push of a change.
+ *
+ * Modo Rival's red card ("your rival is a man down") is skipped for devices
+ * that follow the OTHER team of the match with cards on: they already get the
+ * regular red-card push for this same sending-off. FCM allows five topics per
+ * condition: the rival topic, the mute guard and three of the other team's
+ * delay buckets (10-minute Modo Estadio users may still see both).
+ */
+function immediateCondition(c, topics) {
+    if (c.type !== 'rivalRedCard' || !c.side || topics.length !== 1)
+        return conditionFor(topics, c.matchId);
+    const other = c.side === 'home' ? c.awayTeam.id : c.homeTeam.id;
+    const exclusions = ['d0', 'd2', 'd5']
+        .map(b => ` && !('${model_1.FbTopics.cards(other, b)}' in topics)`).join('');
+    return `'${topics[0]}' in topics${exclusions} && !('${model_1.FbTopics.mute(c.matchId)}' in topics)`;
+}
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 async function dispatchFootballChanges(changes) {
     if (!changes.length)
@@ -335,7 +357,7 @@ async function dispatchFootballChanges(changes) {
         if (!immediate.length)
             continue;
         // One condition → a user following both teams gets exactly one push.
-        sends.push(sendFcm({ condition: conditionFor(immediate, c.matchId) }, copy, data, dedupId));
+        sends.push(sendFcm({ condition: immediateCondition(c, immediate) }, copy, data, dedupId));
         // Followed player (goals, reds).
         const pp = playerPush(c);
         if (pp)
