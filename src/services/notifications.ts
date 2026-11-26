@@ -15,6 +15,9 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import i18n from '../i18n';
+import {
+  ESTADIO_ACTION_OFF, ESTADIO_ACTION_ON, ESTADIO_ACTION_SPOILED, ESTADIO_PUSH_CATEGORY,
+} from '../../functions/src/shared/football/estadio';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -108,15 +111,30 @@ function configureNotificationHandler(): void {
 // aplica el mute REAL de la Fase 2 (topic mute_{matchId}) SIN abrir la app.
 // Android ignora las categorías (los banners del OS no aceptan botones) —
 // llegará con el binario 1.4.0 vía notifee si se decide.
+//
+// 🏟️ Modo Estadio por partido (services/estadio.ts) añade botones:
+//   • MATCH_EVENT (los avisos normales de un partido, el de inicio incluido):
+//     "Activar Modo Estadio" → los avisos de ese partido pasan a llegar tarde.
+//   • MATCH_ESTADIO (los avisos que ya llegan con retraso): "Me spoileó"
+//     (más retraso) y "Apagar Modo Estadio".
+// Ninguno abre la app; el servidor confirma con otra notificación.
 async function registerNotificationCategories(): Promise<void> {
   if (Platform.OS !== 'ios') return;
+  const quiet = { opensAppToForeground: false };
+  const mute = {
+    identifier: 'MUTE_MATCH',
+    buttonTitle: `🔕 ${i18n.t('notifications.matchSheet.muteTitle')}`,
+    options: quiet,
+  };
   try {
     await Notifications.setNotificationCategoryAsync('MATCH_EVENT', [
-      {
-        identifier: 'MUTE_MATCH',
-        buttonTitle: `🔕 ${i18n.t('notifications.matchSheet.muteTitle')}`,
-        options: { opensAppToForeground: false },
-      },
+      { identifier: ESTADIO_ACTION_ON, buttonTitle: i18n.t('estadioMode.actionOn'), options: quiet },
+      mute,
+    ]);
+    await Notifications.setNotificationCategoryAsync(ESTADIO_PUSH_CATEGORY, [
+      { identifier: ESTADIO_ACTION_SPOILED, buttonTitle: i18n.t('estadioMode.actionSpoiled'), options: quiet },
+      { identifier: ESTADIO_ACTION_OFF, buttonTitle: i18n.t('estadioMode.actionOff'), options: quiet },
+      mute,
     ]);
   } catch {
     // Best-effort: sin categoría, la notificación se comporta como siempre.
@@ -275,4 +293,42 @@ export async function cancelAllNotificationsForMatch(matchId: string): Promise<v
   } catch {
     // Silent failure — notification cancellation is best-effort.
   }
+}
+
+// ── Botones de Modo Estadio en las notificaciones ────────────────────────────
+
+const ESTADIO_ACTIONS: Record<string, 'on' | 'spoiled' | 'off'> = {
+  [ESTADIO_ACTION_ON]: 'on',
+  [ESTADIO_ACTION_SPOILED]: 'spoiled',
+  [ESTADIO_ACTION_OFF]: 'off',
+};
+
+/**
+ * Atiende un botón de Modo Estadio de una notificación. Devuelve true si la
+ * respuesta era uno de esos botones (quien llama no debe abrir el partido).
+ *
+ * El éxito lo confirma el servidor con otra notificación; si la petición
+ * falla no hay pantalla donde decirlo, así que se avisa con una local.
+ */
+export function handleEstadioNotificationResponse(response: Notifications.NotificationResponse): boolean {
+  const action = ESTADIO_ACTIONS[response.actionIdentifier];
+  if (!action) return false;
+  const request = response.notification.request;
+  const data = request.content.data as Record<string, unknown> | null;
+  // Imported here: this module is loaded before the rest of the app boots.
+  import('./estadio')
+    .then(m => m.handleEstadioAction(action, data, request.identifier))
+    .then(ok => {
+      if (ok !== false) return undefined;
+      return Notifications.scheduleNotificationAsync({
+        content: {
+          title: i18n.t('estadioMode.actionFailedTitle'),
+          body: i18n.t('estadioMode.actionFailedBody'),
+          data: (data ?? {}) as Record<string, unknown>,
+        },
+        trigger: null,
+      });
+    })
+    .catch(() => {});
+  return true;
 }

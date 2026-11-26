@@ -129,12 +129,6 @@ type OnboardingState = {
   playerIds: number[];
   leagueIds: number[];
   notifications: Record<NotifKey, boolean>;
-  /**
-   * 🏟️ Modo Estadio: when ON, the app delays match notifications by N minutes
-   * to avoid spoiling live action while the user is at the stadium watching
-   * the match in person. Hooks into NotificationPrefsContext.estadioMode.
-   */
-  stadiumMode: boolean;
   name: string;
   authMethod: AuthMethod | null;
 };
@@ -1722,13 +1716,11 @@ const NOTIF_ROWS: NotifRowItem[] = [
 const Screen7Notifs: React.FC<{
   notifs: Record<NotifKey, boolean>;
   onToggle: (key: NotifKey) => void;
-  stadiumMode: boolean;
-  onToggleStadiumMode: () => void;
   fanLevel: FanLevel | null;
   onNext: () => void;
   onBack: () => void;
   onSkip: () => void;
-}> = ({ notifs, onToggle, stadiumMode, onToggleStadiumMode, fanLevel, onNext, onBack, onSkip }) => {
+}> = ({ notifs, onToggle, fanLevel, onNext, onBack, onSkip }) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const th = useOBTheme();
@@ -1766,13 +1758,13 @@ const Screen7Notifs: React.FC<{
             </View>
           ))}
 
-          {/* ── Modo Estadio (special "pro feature" — gold accent) ──────── */}
+          {/* ── Modo Estadio (gold accent). Presentation only: the mode is
+              turned on per match, from the match itself or from its kickoff
+              notification — there is nothing to switch on here. ──────── */}
           <View style={[
             s7.row,
             s7.stadiumRow,
-            stadiumMode
-              ? { backgroundColor: th.GOLD_DIM, borderColor: GOLD }
-              : { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#332E1F' : '#FCE9A1' },
+            { backgroundColor: th.SURFACE, borderColor: th.isDark ? '#332E1F' : '#FCE9A1' },
           ]}>
             <View style={[s7.iconBox, { backgroundColor: th.isDark ? '#332E1F' : '#FCE9A1' }]}>
               <Text style={{ fontSize: 22 }}>🏟️</Text>
@@ -1788,11 +1780,10 @@ const Screen7Notifs: React.FC<{
               </View>
               <Text style={[s7.rowSub, { color: th.TEXT_DIM }]}>
                 {t('onboarding.stadiumModeSub', {
-                  defaultValue: 'Cuando vayas al estadio, retrasa las notificaciones para no spoilearte la jugada.',
+                  defaultValue: 'Cuando veas un partido en la tele, actívalo desde el partido o desde el aviso de inicio: tus avisos llegan unos minutos después.',
                 })}
               </Text>
             </View>
-            <CustomToggle value={stadiumMode} onToggle={onToggleStadiumMode} />
           </View>
         </View>
       </ScrollView>
@@ -2111,11 +2102,6 @@ const Screen9Personalizing: React.FC<{
           togglePref(prefKey as Parameters<typeof togglePref>[0]);
         }
       });
-
-      // Apply Modo Estadio (maps to prefs.estadioMode in NotificationPrefsContext)
-      if (state.stadiumMode !== prefs.estadioMode) {
-        togglePref('estadioMode');
-      }
 
       // Auth
       if (state.authMethod) {
@@ -2474,7 +2460,6 @@ export function OnboardingScreen() {
     playerIds: [],
     leagueIds: [],
     notifications: DEFAULT_NOTIFS_BY_LEVEL.fan,
-    stadiumMode: false,
     name: '',
     authMethod: null,
   });
@@ -2587,10 +2572,6 @@ export function OnboardingScreen() {
       ...prev,
       notifications: { ...prev.notifications, [key]: !prev.notifications[key] },
     }));
-  }, []);
-
-  const toggleStadiumMode = useCallback(() => {
-    setObState(prev => ({ ...prev, stadiumMode: !prev.stadiumMode }));
   }, []);
 
   // Fan level selection updates notification defaults
@@ -2740,8 +2721,6 @@ export function OnboardingScreen() {
         <Screen7Notifs
           notifs={obState.notifications}
           onToggle={toggleNotif}
-          stadiumMode={obState.stadiumMode}
-          onToggleStadiumMode={toggleStadiumMode}
           fanLevel={obState.fanLevel}
           onNext={goNextFromNotifs}
           onBack={goBack}

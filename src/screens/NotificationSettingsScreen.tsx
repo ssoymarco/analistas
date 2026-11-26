@@ -23,10 +23,6 @@ import { radius } from '../theme/tokens';
 // ── Pill picker options ────────────────────────────────────────────────────
 /** Minutes-before-kickoff offered by the pre-match reminder picker. */
 const MATCH_REMINDER_OPTIONS = [5, 15, 30] as const;
-/** Delay options for Modo Estadio. SOLO valores con bucket real en el servidor
- *  (d2/d5/d10) — la opción "1 min" suscribía al bucket fantasma d1 que el
- *  servidor jamás publica y silenciaba TODO (auditoría 10 jul 2026). */
-const ESTADIO_DELAY_OPTIONS  = [2, 5, 10] as const;
 
 // ── Row primitives ─────────────────────────────────────────────────────────
 
@@ -113,7 +109,7 @@ export const NotificationSettingsScreen: React.FC = () => {
   const c = useThemeColors();
   const { isDark } = useDarkMode();
   const navigation = useNavigation();
-  const { prefs, togglePref, updatePrefs, setEstadioDelay, setMatchReminderMinutes } = useNotificationPrefs();
+  const { prefs, togglePref, updatePrefs, setMatchReminderMinutes } = useNotificationPrefs();
 
   const handleClose = useCallback(() => { haptics.light(); navigation.goBack(); }, [navigation]);
 
@@ -212,30 +208,8 @@ export const NotificationSettingsScreen: React.FC = () => {
           <ToggleRow icon="📋" label={t('notifications.lineups')} description={t('notifications.lineupsDescription')} value={prefs.lineups} onValueChange={toggle('lineups')} c={c} isLast />
         </View>
 
-        {/* Estadio mode */}
-        <SectionHeader label={t('notifications.sectionEstadio')} />
-        <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <ToggleRow
-            icon="🏟️"
-            label={t('notifications.estadioMode')}
-            description={t('notifications.estadioDescription')}
-            value={prefs.estadioMode}
-            onValueChange={toggle('estadioMode')}
-            c={c}
-            isLast
-          />
-        </View>
-
-        {/* Delay selector — only shown when estadio mode is on */}
-        {prefs.estadioMode && (
-          <DelayPicker
-            label={t('notifications.estadioDelayLabel')}
-            options={ESTADIO_DELAY_OPTIONS}
-            value={prefs.estadioDelay}
-            onChange={setEstadioDelay}
-            c={c}
-          />
-        )}
+        {/* Modo Estadio ya no vive aquí: se activa en cada partido (🏟️ en la
+            pantalla del partido, o manteniendo presionado un aviso). */}
 
         {/* Modo Rival */}
         {MODO_RIVAL_ENABLED && (

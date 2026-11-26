@@ -23,7 +23,7 @@ import { SubscriptionProvider } from './src/contexts/SubscriptionContext';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import UpdateModal from './src/components/UpdateModal';
 import { useVersionCheck } from './src/hooks/useVersionCheck';
-import { initialize } from './src/services/notifications';
+import { handleEstadioNotificationResponse, initialize } from './src/services/notifications';
 import { initializeFCM, initializeFCMAtStartup, attachFCMHandlers } from './src/services/fcmInit';
 import { navigateToMatch, buildMatchStubFromPayload } from './src/utils/navigationRef';
 import { requestMatchMuteFromNotification } from './src/contexts/NotificationPrefsContext';
@@ -126,6 +126,9 @@ function App() {
           if (matchId) requestMatchMuteFromNotification(matchId);
           return;
         }
+        // Botones de Modo Estadio ("Activar", "Me spoileó", "Apagar"): tampoco
+        // abren el partido.
+        if (handleEstadioNotificationResponse(response)) return;
         const match = buildMatchStubFromPayload(data);
         if (match) navigateToMatch(match);
       },

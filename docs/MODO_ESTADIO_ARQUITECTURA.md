@@ -1,4 +1,11 @@
-# Modo Estadio — Arquitectura definitiva (anti-spoiler de notificaciones)
+# Modo Estadio — Arquitectura v1 (topics por retraso, modo global)
+
+> **Sustituida el 26-nov-2026 por Modo Estadio por partido (v2)** — ver la sección del mismo nombre en
+> `docs/MIGRACION_API_SPORTS.md` y `functions/src/football/estadio.ts`. Lo de abajo describe el diseño
+> anterior, que el servidor sigue atendiendo para las builds viejas (topics `_d2/_d5/_d10`). Sus
+> problemas en uso real: el cambio de topics se hacía desde el teléfono (cientos de llamadas que se
+> cortaban al bloquearlo), cambiar a medio partido repetía o perdía avisos, y rival, jugadores seguidos
+> y correcciones de VAR no respetaban el retraso.
 
 > Resultado de un panel de 12 agentes (recon externo + 4 arquitectos + crítica
 > adversaria + síntesis unánime). Plan para el **próximo build** (después de que

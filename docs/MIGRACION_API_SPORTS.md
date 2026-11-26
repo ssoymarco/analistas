@@ -116,6 +116,35 @@ del 26-nov-2026, sin cambios en la app):
   guard de VAR descarta su copia y no hay nada que corregir. El detector guarda en el snapshot cuándo
   anunció el último gol (`gt`) y cada roja (`rt`), y cuándo dejó de verla (`rx`).
 
+**Modo Estadio por partido (v2)** — sustituye al interruptor global. Diseño aprobado por el dueño sobre
+maqueta (26-nov-2026): https://claude.ai/artifact/KY8qJMc9ppr9poZfBcV1qL
+- **Qué ve el usuario**: el 🏟️ de un partido abre una hoja con dos opciones — *Cable o antena · 3 minutos*,
+  *Streaming · 5 minutos* — y "Activar en este partido". Solo ese partido se retrasa; se apaga solo al
+  terminar. En iPhone, al mantener presionado un aviso del partido: "Activar Modo Estadio"; en un aviso ya
+  retrasado: "Me spoileó · sumar 3 minutos" (tope 10) y "Apagar Modo Estadio". El servidor confirma con
+  otra notificación. Ya no hay interruptor en Perfil ni en Ajustes; el onboarding solo lo presenta.
+- **Cómo funciona** (`functions/src/football/estadio.ts`, contrato en `shared/football/estadio.ts`): la app
+  hace UNA llamada a la callable `fbEstadio` (`src/services/estadio.ts`). El servidor suscribe el token a
+  `fb_mute_{partido}` (todos los envíos normales ya lo excluyen) y a `fb_hold_{partido}` (lo excluyen los
+  avisos de jugador seguido, que ignoran el mute a propósito), y guarda la sesión en `fb_estadio`
+  (solo servidor). En cada tanda de cambios, `dispatchEstadioSessions` entrega a las sesiones del partido
+  **por token**, con su retraso, por la misma cola `deliverDelayedPush` (guard de VAR incluido).
+- **Reglas**: se retrasa lo detectado después de activar (lo anterior ya llegó por topics → ni repite ni
+  pierde); también rival y jugadores seguidos; inicio/alineaciones/recordatorio nunca se retrasan;
+  "Silenciar este partido" manda sobre el modo (la sesión se cierra y el dispositivo queda mudo); al
+  apagar, lo que ya estaba en cola llega igual; al final del partido la sesión caduca (retraso + 2 min)
+  y `sweepEstadioSessions` (1×/min, en el poller) saca al dispositivo de los dos topics. Tope: 4 h tras
+  el inicio. Con `ESTADIO_DELAY_ENABLED=false` las sesiones reciben al momento.
+- **Lo que quiere cada dispositivo** lo manda la app al activar: sus interruptores (con los ajustes de
+  "Notificaciones de este partido"), sus rivales en ese partido y sus jugadores seguidos.
+- **Live Activities**: sin cambios, no se retrasan (decisión del dueño: quien usa una no usa la otra).
+- **Builds anteriores**: siguen con el modo global y los topics `_d2/_d5/_d10`, que el servidor sigue
+  atendiendo. La build nueva vive siempre en `_d0`; `prefs.estadioMode/estadioDelay` se conservan en la
+  nube tal cual (un dispositivo viejo de la misma cuenta los lee) pero ya no hacen nada aquí.
+- **Desplegar**: `firebase deploy --only functions:fbEstadio,functions:fbPollLive,functions:fbSyncFixtures,functions:deliverDelayedPush`
+  (sin reglas ni índices nuevos) y después la app por OTA. Android: la hoja llega por OTA; los botones en
+  los avisos necesitan build (los avisos del sistema no aceptan botones).
+
 **Nombres en los textos del servidor** (`football/names.ts`): selecciones en español (`loc`), menores como
 "México Sub-17" y los clubes curados con el nombre de la app ("América", no "Club America") gracias a
 `shared/football/clubNames.ts` (misma tabla que `popular.ts` + `base.ts`; una prueba vigila que no se
@@ -314,8 +343,9 @@ node lib/scripts/fb-emulator.js verify    # comprobaciones de fbOnDemand, caché
 cd ../scripts/fb-tests && npm install && npm test
 ```
 
-Sin emulador (FCM, Cloud Tasks y Firestore simulados en memoria): las reglas de las copias retrasadas de
-Modo Estadio — `cd functions && npm run build && node ../scripts/fb-tests/estadio-push.check.js`.
+Sin emulador (FCM, Cloud Tasks y Firestore simulados en memoria), Modo Estadio:
+- servidor (copias retrasadas, sesiones por partido, callable): `cd functions && npm run build && node ../scripts/fb-tests/estadio-push.check.js`
+- app (qué pide al servidor, qué recuerda, botones de los avisos): `cd scripts/fb-tests && npm install && node estadio-app.check.js`
 
 **Interfaz sin teléfono**: `scripts/fb-tests/web/README.md` — empaqueta la app para web con los módulos
 nativos sustituidos y la abre en Chromium contra los emuladores (así se encontraron, entre otros, la fila

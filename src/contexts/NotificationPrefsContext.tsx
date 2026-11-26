@@ -5,7 +5,12 @@ import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { captureFirestoreRejection } from '../services/sentry';
 import { cancelAllNotificationsForMatch, PUSH_TOKEN_KEY } from '../services/notifications';
-import { subscribeMatchMute, unsubscribeMatchMute } from '../services/fcmTopics';
+import { forgetMatchMuteRecord, subscribeMatchMute, unsubscribeMatchMute } from '../services/fcmTopics';
+import {
+  ESTADIO_DEFAULT_DELAY, forgetEstadio, getLastEstadioDelay, readEstadioSessions, startEstadio,
+  stopEstadio, stopEstadioBecauseMuted, subscribeEstadio,
+  type EstadioMatchRef, type EstadioSessions,
+} from '../services/estadio';
 
 export interface NotificationPrefs {
   /** Master kill-switch. When `false`, no notification is dispatched
@@ -26,9 +31,11 @@ export interface NotificationPrefs {
   redCards: boolean;
   substitutions: boolean;
   var: boolean;
-  /** 🏟️ Modo Estadio: retrasa notificaciones de eventos en vivo */
+  /** Modo Estadio GLOBAL de las builds anteriores (topics por retraso). Esta
+   *  build ya no lo usa — el modo es por partido, ver services/estadio.ts —
+   *  pero los campos se conservan tal cual: viajan en la nube y un dispositivo
+   *  con build vieja de la misma cuenta todavía los lee. */
   estadioMode: boolean;
-  /** Delay in minutes when Modo Estadio is active (1 | 2 | 5 | 10) */
   estadioDelay: number;
   // ── 😈 Modo Rival — which "bad news" about rival teams to receive ──────────
   /** Rival lost a match (covers normal losses AND goleadas). */
@@ -41,8 +48,8 @@ export interface NotificationPrefs {
 
 /** Subset of NotificationPrefs that the user can override on a per-match
  *  basis from the bell in MatchDetailScreen. Excludes things that don't
- *  make sense per-match (notificationsEnabled is global, estadioMode has
- *  its own per-match API, reminder/estadio delays are minute values). */
+ *  make sense per-match (notificationsEnabled is global, Modo Estadio has
+ *  its own per-match API, the reminder lead time is a minute value). */
 export type MatchEventPrefKey =
   | 'matchReminder' | 'goals' | 'matchStart' | 'halftime' | 'matchEnd'
   | 'lineups' | 'yellowCards' | 'redCards' | 'substitutions' | 'var';
@@ -65,7 +72,7 @@ export type MatchEventOverrides = Record<string /* matchId */, Partial<Record<Ma
 //
 // Modo Estadio defaults off; delay default = 2 min (the second of the four
 // presets shown in the UI: 1 / 2 / 5 / 10).
-const DEFAULT_PREFS: NotificationPrefs = {
+export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   notificationsEnabled: true,
   matchReminder: false,
   matchReminderMinutes: 15,
@@ -79,6 +86,7 @@ const DEFAULT_PREFS: NotificationPrefs = {
   rivalRedCard: true,
   rivalPenMiss: true,
 };
+const DEFAULT_PREFS = DEFAULT_NOTIFICATION_PREFS;
 
 interface NotificationPrefsContextType {
   prefs: NotificationPrefs;
@@ -98,14 +106,19 @@ interface NotificationPrefsContextType {
   mutedMatchIds: Set<string>;
   toggleMatchMute: (matchId: string) => void;
   isMatchMuted: (matchId: string) => boolean;
-  /** Per-match Modo Estadio — overrides global setting for a specific match */
-  estadioMatchIds: Set<string>;
-  toggleMatchEstadio: (matchId: string) => void;
+  /** 🏟️ Modo Estadio, por partido: los avisos de ESE partido llegan unos
+   *  minutos después (lo entrega el servidor; ver services/estadio.ts). */
+  estadioSessions: EstadioSessions;
   isMatchEstadio: (matchId: string) => boolean;
-  /** Per-match delay in minutes. Falls back to prefs.estadioDelay if not set. */
-  estadioMatchDelays: Record<string, number>;
-  setMatchEstadioDelay: (matchId: string, minutes: number) => void;
+  /** Minutos de retraso del partido si el modo está activo; si no, la opción
+   *  que el usuario eligió la última vez. */
   getMatchEstadioDelay: (matchId: string) => number;
+  /** Activa el modo (o cambia su retraso). Resuelve cuando el servidor lo
+   *  confirmó; rechaza con EstadioError si no se pudo. */
+  startMatchEstadio: (match: EstadioMatchRef, delayMin: number) => Promise<void>;
+  stopMatchEstadio: (matchId: string) => Promise<void>;
+  /** El partido terminó: deja de mostrarse activo (el servidor lo cierra solo). */
+  endMatchEstadioLocally: (matchId: string) => void;
   /** Per-match event overrides — let the user customize a single match
    *  without affecting their global preferences. Missing keys fall back to
    *  the global pref. */
@@ -151,6 +164,8 @@ export function requestMatchMuteFromNotification(matchId: string): void {
     })
     .catch(() => {});
   subscribeMatchMute(matchId).catch(() => {});
+  // Silenciar manda: si el partido tenía Modo Estadio, se apaga y queda mudo.
+  stopEstadioBecauseMuted(matchId).catch(() => {});
 }
 
 const NotificationPrefsContext = createContext<NotificationPrefsContextType>({
@@ -163,12 +178,12 @@ const NotificationPrefsContext = createContext<NotificationPrefsContextType>({
   mutedMatchIds: new Set(),
   toggleMatchMute: () => {},
   isMatchMuted: () => false,
-  estadioMatchIds: new Set(),
-  toggleMatchEstadio: () => {},
+  estadioSessions: {},
   isMatchEstadio: () => false,
-  estadioMatchDelays: {},
-  setMatchEstadioDelay: () => {},
-  getMatchEstadioDelay: () => 2,
+  getMatchEstadioDelay: () => ESTADIO_DEFAULT_DELAY,
+  startMatchEstadio: async () => {},
+  stopMatchEstadio: async () => {},
+  endMatchEstadioLocally: () => {},
   matchEventOverrides: {},
   setMatchEventOverride: () => {},
   clearMatchEventOverride: () => {},
@@ -187,15 +202,13 @@ const NotificationPrefsContext = createContext<NotificationPrefsContextType>({
 export const PREFS_KEY     = 'analistas_notif_prefs';
 export const MUTED_KEY     = 'analistas_muted_matches';
 export const OVERRIDES_KEY = 'analistas_match_event_overrides';
-const ESTADIO_KEY        = 'analistas_estadio_matches';
-const ESTADIO_DELAYS_KEY = 'analistas_estadio_delays';
 const PERM_KEY           = 'analistas_notif_permission';
 
 export function NotificationPrefsProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefs] = useState<NotificationPrefs>(DEFAULT_PREFS);
   const [mutedMatchIds, setMutedMatchIds] = useState<Set<string>>(new Set());
-  const [estadioMatchIds, setEstadioMatchIds] = useState<Set<string>>(new Set());
-  const [estadioMatchDelays, setEstadioMatchDelays] = useState<Record<string, number>>({});
+  const [estadioSessions, setEstadioSessions] = useState<EstadioSessions>({});
+  const [estadioLastDelay, setEstadioLastDelay] = useState<number>(ESTADIO_DEFAULT_DELAY);
   const [matchEventOverrides, setMatchEventOverrides] = useState<MatchEventOverrides>({});
   const [pushToken, setPushTokenState] = useState<string | null>(null);
   const [permissionStatus, setPermissionStatusState] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
@@ -276,8 +289,8 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
   }, []);
 
   useEffect(() => {
-    AsyncStorage.multiGet([PREFS_KEY, MUTED_KEY, ESTADIO_KEY, ESTADIO_DELAYS_KEY, OVERRIDES_KEY, PUSH_TOKEN_KEY, PERM_KEY]).then(
-      ([[, rawPrefs], [, rawMuted], [, rawEstadio], [, rawDelays], [, rawOverrides], [, savedToken], [, savedPerm]]) => {
+    AsyncStorage.multiGet([PREFS_KEY, MUTED_KEY, OVERRIDES_KEY, PUSH_TOKEN_KEY, PERM_KEY]).then(
+      ([[, rawPrefs], [, rawMuted], [, rawOverrides], [, savedToken], [, savedPerm]]) => {
         if (rawPrefs) {
           try {
             const parsed = { ...DEFAULT_PREFS, ...JSON.parse(rawPrefs) } as NotificationPrefs;
@@ -294,12 +307,6 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
         }
         if (rawMuted) {
           try { setMutedMatchIds(new Set(JSON.parse(rawMuted))); } catch {}
-        }
-        if (rawEstadio) {
-          try { setEstadioMatchIds(new Set(JSON.parse(rawEstadio))); } catch {}
-        }
-        if (rawDelays) {
-          try { setEstadioMatchDelays(JSON.parse(rawDelays)); } catch {}
         }
         if (rawOverrides) {
           try { setMatchEventOverrides(JSON.parse(rawOverrides)); } catch {}
@@ -411,6 +418,9 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
         next.add(matchId);
         // Cancel any scheduled local notifications for this match
         cancelAllNotificationsForMatch(matchId).catch(() => {});
+        // Silenciar manda sobre Modo Estadio: la sesión del partido se apaga
+        // y el dispositivo se queda fuera de sus avisos.
+        stopEstadioBecauseMuted(matchId).catch(() => {});
         // Fase 2: suscribirse al topic mute_{matchId} — el servidor agrega
         // "&& !('mute_X' in topics)" a cada envío del partido, así el
         // silencio funciona TAMBIÉN con la app cerrada (antes el mute era
@@ -440,40 +450,57 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
       });
       subscribeMatchMute(matchId).catch(() => {});
       cancelAllNotificationsForMatch(matchId).catch(() => {});
+      stopEstadioBecauseMuted(matchId).catch(() => {});
     };
     return () => { externalMuteHandler = null; };
   }, []);
 
-  const toggleMatchEstadio = useCallback((matchId: string) => {
-    setEstadioMatchIds(prev => {
-      const next = new Set(prev);
-      if (next.has(matchId)) {
-        next.delete(matchId);
-      } else {
-        next.add(matchId);
-      }
-      AsyncStorage.setItem(ESTADIO_KEY, JSON.stringify([...next]));
-      return next;
+  // ── 🏟️ Modo Estadio por partido ─────────────────────────────────────────
+  // El estado vive en services/estadio.ts (también lo cambian los botones de
+  // las notificaciones, con la app en segundo plano); aquí solo se refleja.
+  useEffect(() => {
+    let alive = true;
+    readEstadioSessions().then(s => { if (alive) setEstadioSessions(s); });
+    getLastEstadioDelay().then(d => { if (alive) setEstadioLastDelay(d); });
+    const unsub = subscribeEstadio(s => {
+      setEstadioSessions({ ...s });
+      getLastEstadioDelay().then(setEstadioLastDelay);
     });
+    return () => { alive = false; unsub(); };
   }, []);
 
   const isMatchEstadio = useCallback(
-    (matchId: string) => estadioMatchIds.has(matchId),
-    [estadioMatchIds],
+    (matchId: string) => matchId in estadioSessions,
+    [estadioSessions],
   );
 
-  const setMatchEstadioDelay = useCallback((matchId: string, minutes: number) => {
-    setEstadioMatchDelays(prev => {
-      const next = { ...prev, [matchId]: minutes };
-      AsyncStorage.setItem(ESTADIO_DELAYS_KEY, JSON.stringify(next));
+  const getMatchEstadioDelay = useCallback(
+    (matchId: string) => estadioSessions[matchId]?.delayMin ?? estadioLastDelay,
+    [estadioSessions, estadioLastDelay],
+  );
+
+  const startMatchEstadio = useCallback(async (match: EstadioMatchRef, delayMin: number) => {
+    await startEstadio(match, delayMin);
+    // Activar el modo en un partido silenciado lo des-silencia: el servidor
+    // ahora administra su topic de mute, y el registro local no debe decir
+    // que sigue suscrito por decisión del usuario.
+    setMutedMatchIds(prev => {
+      if (!prev.has(match.id)) return prev;
+      const next = new Set(prev);
+      next.delete(match.id);
+      AsyncStorage.setItem(MUTED_KEY, JSON.stringify([...next])).catch(() => {});
+      forgetMatchMuteRecord(match.id).catch(() => {});
       return next;
     });
   }, []);
 
-  const getMatchEstadioDelay = useCallback(
-    (matchId: string) => estadioMatchDelays[matchId] ?? prefs.estadioDelay,
-    [estadioMatchDelays, prefs.estadioDelay],
-  );
+  const stopMatchEstadio = useCallback(async (matchId: string) => {
+    await stopEstadio(matchId);
+  }, []);
+
+  const endMatchEstadioLocally = useCallback((matchId: string) => {
+    forgetEstadio(matchId).catch(() => {});
+  }, []);
 
   // ── Per-match event overrides ───────────────────────────────────────────
   const persistOverrides = useCallback((next: MatchEventOverrides) => {
@@ -566,8 +593,8 @@ export function NotificationPrefsProvider({ children }: { children: ReactNode })
       value={{
         prefs, isHydrated, togglePref, updatePrefs, setEstadioDelay, setMatchReminderMinutes,
         mutedMatchIds, toggleMatchMute, isMatchMuted,
-        estadioMatchIds, toggleMatchEstadio, isMatchEstadio,
-        estadioMatchDelays, setMatchEstadioDelay, getMatchEstadioDelay,
+        estadioSessions, isMatchEstadio, getMatchEstadioDelay,
+        startMatchEstadio, stopMatchEstadio, endMatchEstadioLocally,
         matchEventOverrides,
         setMatchEventOverride, clearMatchEventOverride, clearAllMatchEventOverrides,
         getEffectiveMatchEventPref, hasMatchCustomization,

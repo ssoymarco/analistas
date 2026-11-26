@@ -10,9 +10,6 @@ import {
   Animated,
   Dimensions,
   ScrollView,
-  Switch,
-  Modal,
-  Pressable,
   PanResponder,
   Share,
 } from 'react-native';
@@ -48,6 +45,7 @@ import { NoticiasTab }      from './matchDetail/NoticiasTab';
 import { EstadisticasTab }  from './matchDetail/EstadisticasTab';
 import { BackArrow, ShareIcon } from '../components/NavIcons';
 import { MatchNotificationsSheet } from '../components/MatchNotificationsSheet';
+import { EstadioSheet } from '../components/EstadioSheet';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { formatMatchTime } from '../utils/formatMatchTime';
 import { isImageUri } from '../utils/imageUri';
@@ -273,21 +271,26 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const isScheduled = rawIsScheduled && !startedRef.current;
   const { incrementMatchesViewed } = useUserStats();
   const {
-    prefs,
-    togglePref, setEstadioDelay,
     isMatchMuted, hasMatchCustomization,
+    isMatchEstadio, getMatchEstadioDelay, endMatchEstadioLocally,
   } = useNotificationPrefs();
   // Per-match notifications bottom sheet (opened from the bell in the header).
   const [notifSheetVisible, setNotifSheetVisible] = useState(false);
-  // Modo Estadio global mini-sheet (opened from 🏟️ in the header).
+  // Modo Estadio sheet for THIS match (opened from 🏟️ in the header).
   const [estadioSheetVisible, setEstadioSheetVisible] = useState(false);
   const matchMuted = isMatchMuted(match.id);
   // 'muted' wins; if not muted but the user has any override → 'custom';
   // otherwise plain default.
   const bellState: 'default' | 'custom' | 'muted' =
     matchMuted ? 'muted' : (hasMatchCustomization(match.id) ? 'custom' : 'default');
-  // Modo Estadio is now GLOBAL — the 🏟️ button reflects the global state.
-  const estadioGlobalActive = prefs.estadioMode;
+  // Modo Estadio belongs to this match: its notifications arrive late. The
+  // server ends it at full time; here it just stops showing as active.
+  const estadioSession = isMatchEstadio(match.id);
+  const estadioActive = estadioSession && !isFinished;
+  const estadioDelay = getMatchEstadioDelay(match.id);
+  useEffect(() => {
+    if (isFinished && estadioSession) endMatchEstadioLocally(match.id);
+  }, [isFinished, estadioSession, match.id, endMatchEstadioLocally]);
   const countdown = useCountdown(isScheduled ? match.startingAtUtc : undefined);
 
   // ── Centralized live clock ─────────────────────────────────────────────────
@@ -421,6 +424,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
   const toastOpacity = useRef(new Animated.Value(0)).current;
   const toastTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [toastActivating, setToastActivating] = useState(true);
+  const [toastDelay, setToastDelay] = useState(0);
 
   // ── Follow team toast ──────────────────────────────────────────────────────
   const followToastOpacity = useRef(new Animated.Value(0)).current;
@@ -453,8 +457,7 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     toastTimer.current = setTimeout(() => {}, 3600);
   }, [toastOpacity]);
 
-  // 🏟️ button: open the global Modo Estadio mini-sheet.
-  // The mini-sheet lets the user toggle global estadioMode + choose delay (2/5/10).
+  // 🏟️ button: open this match's Modo Estadio sheet.
   const handleOpenEstadioSheet = useCallback(() => {
     haptics.medium();
     setEstadioSheetVisible(true);
@@ -485,18 +488,12 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
     } catch { /* usuario canceló la hoja — no-op */ }
   }, [displayMatch, match.leagueId, match.league, isLive, isFinished, t]);
 
-  // Called from the mini-sheet toggle switch: toggle global Modo Estadio.
-  const handleToggleEstadioGlobal = useCallback(() => {
-    haptics.medium();
-    togglePref('estadioMode');
-    showEstadioToast(!prefs.estadioMode); // toast = NEW state
-  }, [togglePref, prefs.estadioMode, showEstadioToast]);
-
-  // Called from the mini-sheet delay selector.
-  const handleSetEstadioDelay = useCallback((minutes: number) => {
-    haptics.light();
-    setEstadioDelay(minutes);
-  }, [setEstadioDelay]);
+  // The sheet reports a confirmed change: close it and say so.
+  const handleEstadioChanged = useCallback((active: boolean, delayMin: number) => {
+    setEstadioSheetVisible(false);
+    setToastDelay(delayMin);
+    showEstadioToast(active);
+  }, [showEstadioToast]);
 
   // ── "Volver arriba" FAB ────────────────────────────────────────────────────
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -643,17 +640,17 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
           >
             <BellIcon size={18} state={bellState} />
           </TouchableOpacity>
-          {/* 🏟️ Modo Estadio — opens global mini-sheet. Active = estadioMode ON globally. */}
+          {/* 🏟️ Modo Estadio — opens this match's sheet. Lit = on for this match. */}
           <TouchableOpacity
             style={[
               scr.navBtn,
-              estadioGlobalActive && { backgroundColor: 'rgba(0,224,150,0.18)', borderWidth: 1, borderColor: 'rgba(0,224,150,0.35)' },
-              !estadioGlobalActive && { backgroundColor: hBtnBg },
+              estadioActive && { backgroundColor: 'rgba(0,224,150,0.18)', borderWidth: 1, borderColor: 'rgba(0,224,150,0.35)' },
+              !estadioActive && { backgroundColor: hBtnBg },
             ]}
             onPress={handleOpenEstadioSheet}
             activeOpacity={0.7}
           >
-            <Text style={{ fontSize: 15, opacity: estadioGlobalActive ? 1 : 0.5 }}>🏟️</Text>
+            <Text style={{ fontSize: 15, opacity: estadioActive ? 1 : 0.5 }}>🏟️</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[scr.navBtn, { backgroundColor: hBtnBg }]} activeOpacity={0.7} onPress={handleShare}>
             <ShareIcon color={hText} size={16} />
@@ -690,6 +687,19 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
                     : displayMatch.stateLabel === 'PEN'
                     ? `EN VIVO · ${t('matchStatus.penalties', { defaultValue: 'Penales' })}`
                     : `EN VIVO · ${liveClock ?? `${displayMatch.minute ?? displayMatch.time}'`}`}
+                </Text>
+              </View>
+            )}
+
+            {/* Modo Estadio on for this match */}
+            {estadioActive && (
+              <View style={{
+                paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12,
+                backgroundColor: 'rgba(0,224,150,0.12)',
+                borderWidth: 1, borderColor: isDark ? 'rgba(0,224,150,0.45)' : '#00B378',
+              }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#00E096' : '#046148' }}>
+                  {t('estadioMode.pill', { min: estadioDelay })}
                 </Text>
               </View>
             )}
@@ -1082,8 +1092,8 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
         <Text style={{ fontSize: 22 }}>🏟️</Text>
         <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', color: toastActivating ? '#00E096' : '#fff' }}>
           {toastActivating
-            ? t('estadioMode.toastActivated', { delay: prefs.estadioDelay })
-            : t('estadioMode.toastDeactivated')}
+            ? t('estadioMode.toastActivatedMatch', { min: toastDelay })
+            : t('estadioMode.toastDeactivatedMatch')}
         </Text>
       </Animated.View>
 
@@ -1128,85 +1138,15 @@ export const MatchDetailScreen: React.FC<Props> = ({ route }) => {
         matchLabel={`${translateNationalTeam(match.homeTeam.name)} · ${translateNationalTeam(match.awayTeam.name)}`}
       />
 
-      {/* ── Modo Estadio global mini-sheet ── */}
-      <Modal
+      {/* ── Modo Estadio (this match) ── */}
+      <EstadioSheet
         visible={estadioSheetVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setEstadioSheetVisible(false)}
-      >
-        <Pressable
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }}
-          onPress={() => setEstadioSheetVisible(false)}
-        />
-        <View style={{
-          backgroundColor: c.card,
-          borderTopLeftRadius: 24, borderTopRightRadius: 24,
-          paddingHorizontal: 24, paddingTop: 16, paddingBottom: 36,
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-        }}>
-          {/* Handle */}
-          <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 20 }} />
-
-          {/* Title row */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={{ fontSize: 20 }}>🏟️</Text>
-              <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary }}>
-                {t('estadioMode.title')}
-              </Text>
-            </View>
-            <Switch
-              value={prefs.estadioMode}
-              onValueChange={handleToggleEstadioGlobal}
-              trackColor={{ false: c.border, true: 'rgba(0,224,150,0.5)' }}
-              thumbColor={prefs.estadioMode ? '#00E096' : c.textSecondary}
-            />
-          </View>
-
-          {/* Description */}
-          <Text style={{ fontSize: 13, color: c.textSecondary, marginBottom: 20, lineHeight: 18 }}>
-            {t('estadioMode.description')}
-          </Text>
-
-          {/* Delay selector — only shown when ON */}
-          {prefs.estadioMode && (
-            <>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: c.textSecondary, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10 }}>
-                {t('estadioMode.delay')}
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {[2, 5, 10].map(min => (
-                  <TouchableOpacity
-                    key={min}
-                    onPress={() => handleSetEstadioDelay(min)}
-                    style={{
-                      flex: 1, alignItems: 'center', paddingVertical: 12,
-                      borderRadius: 14,
-                      backgroundColor: prefs.estadioDelay === min ? '#00E096' : c.surface,
-                      borderWidth: 1,
-                      borderColor: prefs.estadioDelay === min ? '#00E096' : c.border,
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={{
-                      fontSize: 15, fontWeight: '700',
-                      color: prefs.estadioDelay === min ? '#000' : c.textPrimary,
-                    }}>
-                      {t('estadioMode.delayMinutes', { count: min })}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </>
-          )}
-
-          {/* Global note */}
-          <Text style={{ fontSize: 11, color: c.textSecondary, marginTop: 16, opacity: 0.7, textAlign: 'center' }}>
-            {t('estadioMode.globalNote')}
-          </Text>
-        </View>
-      </Modal>
+        onClose={() => setEstadioSheetVisible(false)}
+        match={{ id: match.id, homeTeamId: displayMatch.homeTeam.id || match.homeTeam.id, awayTeamId: displayMatch.awayTeam.id || match.awayTeam.id }}
+        matchLabel={`${translateNationalTeam(match.homeTeam.name)} vs ${translateNationalTeam(match.awayTeam.name)}`}
+        finished={isFinished}
+        onChanged={handleEstadioChanged}
+      />
       {ADMOB_ENABLED && <AdMobBanner key={`${bannerKey}_${activeTab}`} />}
     </SafeAreaView>
   );

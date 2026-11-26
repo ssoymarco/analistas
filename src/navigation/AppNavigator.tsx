@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import * as Notifications from 'expo-notifications';
 import { navigationRef, navigateToMatch, buildMatchStubFromPayload, flushPendingMatchNavigation } from '../utils/navigationRef';
 import { requestMatchMuteFromNotification } from '../contexts/NotificationPrefsContext';
+import { handleEstadioNotificationResponse } from '../services/notifications';
 import { logScreenView } from '../services/analytics';
 import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -494,6 +495,9 @@ export const AppNavigator: React.FC = () => {
         if (matchId) requestMatchMuteFromNotification(matchId);
         return;
       }
+      // Botones de Modo Estadio: mismo hueco (app muerta al tocar el botón).
+      // Cada toque se atiende una sola vez aunque llegue por las dos vías.
+      if (handleEstadioNotificationResponse(response)) return;
       const match = buildMatchStubFromPayload(data);
       if (match) navigateToMatch(match);
     }).catch(() => {});

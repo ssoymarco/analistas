@@ -18,7 +18,6 @@ import {
   unsubscribeLegacyTopics,
   rivalEventsFromPrefs,
   teamEventsFromPrefs,
-  bucketForDelay,
   type DelayBucket,
   type RivalEvent,
   type TeamEventClass,
@@ -115,12 +114,11 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   // Modo Estadio prefs — FavoritesProvider is nested INSIDE NotificationPrefsProvider
   // (see App.tsx), so this hook call is always valid.
   const { prefs, isHydrated, mutedMatchIds } = useNotificationPrefs();
-  // bucketForDelay garantiza un bucket que el servidor SÍ publica (d2/d5/d10).
-  // El viejo `d${prefs.estadioDelay}` fabricaba 'd1' cuando la UI ofrecía
-  // "1 min" — un topic fantasma que silenciaba todo (auditoría 10 jul 2026).
-  const delayBucket: DelayBucket = prefs.estadioMode
-    ? bucketForDelay(prefs.estadioDelay)
-    : 'd0';
+  // Modo Estadio ya no mueve los topics: es por partido y lo entrega el
+  // servidor (services/estadio.ts). Esta build vive SIEMPRE en el bucket
+  // inmediato; quien traía el modo global prendido de una build anterior
+  // vuelve a `d0` en el primer reconcile (el sweep lo saca de d2/d5/d10).
+  const delayBucket: DelayBucket = 'd0';
   // Keep a ref so async callbacks can read the current bucket without stale closures
   const delayBucketRef = useRef<DelayBucket>(delayBucket);
   useEffect(() => { delayBucketRef.current = delayBucket; }, [delayBucket]);

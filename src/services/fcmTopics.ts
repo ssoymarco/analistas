@@ -439,6 +439,16 @@ export async function unsubscribeMatchMute(matchId: string): Promise<void> {
   }
 }
 
+/**
+ * Borra del registro local el mute de un partido SIN tocar FCM. Lo usa Modo
+ * Estadio por partido: ahí el servidor administra ese topic, y si el registro
+ * siguiera diciendo "suscrito", un mute posterior del usuario no haría nada.
+ */
+export async function forgetMatchMuteRecord(matchId: string): Promise<void> {
+  const subscribed = await readSubscribedTopics();
+  if (subscribed.delete(TopicNames.matchMute(matchId))) await writeSubscribedTopics(subscribed);
+}
+
 // ── Modo Rival ──────────────────────────────────────────────────────────────
 
 /** Subscribe to a rival team's "bad news" topics. `events` defaults to all

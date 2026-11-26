@@ -27,7 +27,6 @@ import { SectionHeader } from '../components/SectionHeader';
 import { PrivacyPolicyBody } from '../components/PrivacyPolicyBody';
 import { TermsOfServiceBody } from '../components/TermsOfServiceBody';
 import { scheduleLocalNotification } from '../services/notifications';
-import { useNotificationPrefs } from '../contexts/NotificationPrefsContext';
 import { useTranslation } from 'react-i18next';
 import i18n, { LANGUAGE_STORAGE_KEY } from '../i18n';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
@@ -168,96 +167,6 @@ function CenterModal({ visible, onClose, c, children }: {
         </TouchableOpacity>
       </TouchableOpacity>
     </Modal>
-  );
-}
-
-// ── Modo Estadio Card ────────────────────────────────────────────────────────
-// Solo retrasos con bucket real en el servidor (d2/d5/d10) — "1 min" suscribía
-// al bucket fantasma d1 y silenciaba TODO (auditoría 10 jul 2026).
-const ESTADIO_DELAYS = [2, 5, 10] as const;
-
-function ModoEstadioCard({ c, isDark }: { c: ColorPalette; isDark: boolean }) {
-  const { t } = useTranslation();
-  const { prefs, togglePref, setEstadioDelay } = useNotificationPrefs();
-  const { estadioMode, estadioDelay } = prefs;
-
-  const accentGreen = '#00E096';
-  const activeGreenBg = 'rgba(0,224,150,0.12)';
-  const activeBorder = 'rgba(0,224,150,0.3)';
-
-  return (
-    <View style={{ marginHorizontal: 16, marginTop: 20, borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: estadioMode ? activeBorder : c.border, backgroundColor: c.card }}>
-      {/* Header strip */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12, gap: 10 }}>
-        <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: estadioMode ? activeGreenBg : (isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)'), alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ fontSize: 20 }}>🏟️</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={{ fontSize: 15, fontWeight: '700', color: c.textPrimary }}>{t('estadioMode.title')}</Text>
-            <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: 'rgba(0,224,150,0.18)', borderWidth: 1, borderColor: 'rgba(0,224,150,0.3)' }}>
-              <Text style={{ fontSize: 9, fontWeight: '800', color: accentGreen, letterSpacing: 0.8 }}>{t('estadioMode.badge')}</Text>
-            </View>
-          </View>
-          <Text style={{ fontSize: 11, color: estadioMode ? accentGreen : c.textTertiary, marginTop: 1, fontWeight: estadioMode ? '600' : '400' }}>
-            {estadioMode ? t('estadioMode.enabled') : t('estadioMode.subtitle')}
-          </Text>
-        </View>
-        <CustomToggle
-          value={estadioMode}
-          onToggle={() => { haptics.medium(); togglePref('estadioMode'); }}
-          activeColor={accentGreen}
-          icon="🏟️"
-        />
-      </View>
-
-      {/* Description */}
-      <View style={{ paddingHorizontal: 16, paddingBottom: estadioMode ? 0 : 14 }}>
-        <Text style={{ fontSize: 12, color: c.textTertiary, lineHeight: 17 }}>
-          {t('estadioMode.description')}
-        </Text>
-      </View>
-
-      {/* Delay selector — visible only when mode is active */}
-      {estadioMode && (
-        <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 14 }}>
-          <View style={{ height: 1, backgroundColor: c.border, marginBottom: 14 }} />
-          <Text style={{ fontSize: 11, fontWeight: '600', color: c.textTertiary, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 }}>
-            {t('estadioMode.delay')}
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {ESTADIO_DELAYS.map(mins => {
-              const active = estadioDelay === mins;
-              return (
-                <TouchableOpacity
-                  key={mins}
-                  style={{
-                    flex: 1, paddingVertical: 9, borderRadius: 12, alignItems: 'center',
-                    backgroundColor: active ? accentGreen : (isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)'),
-                    borderWidth: 1,
-                    borderColor: active ? accentGreen : c.border,
-                  }}
-                  onPress={() => { haptics.selection(); setEstadioDelay(mins); }}
-                  activeOpacity={0.75}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: active ? '#000' : c.textSecondary }}>
-                    {t('estadioMode.delayMinutes', { count: mins })}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {/* Pre-match note */}
-          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 12, padding: 10, borderRadius: 10, backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}>
-            <Text style={{ fontSize: 12 }}>💡</Text>
-            <Text style={{ fontSize: 11, color: c.textTertiary, lineHeight: 15, flex: 1 }}>
-              {t('estadioMode.preMatchNote')}
-            </Text>
-          </View>
-        </View>
-      )}
-    </View>
   );
 }
 
@@ -876,8 +785,6 @@ export const PerfilScreen: React.FC = () => {
           )}
           <MenuRow c={c} emoji="🗑️" label={t('profile.clearCache')} sublabel={t('profile.freeSpace')} iconBg="rgba(239,68,68,0.1)" isLast onPress={handleClearCache} />
         </View>
-
-        <ModoEstadioCard c={c} isDark={isDark} />
 
         {/* Solo cuando la tienda ENTREGA productos: un paywall con botón
             muerto (suscripciones sin aprobar en ASC) es lo que vieron los
