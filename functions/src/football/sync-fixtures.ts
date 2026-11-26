@@ -29,6 +29,7 @@ import type { AfFixtureCore } from './apisports-types';
 import type { FbChange } from './live-detect';
 import { isFinishedShort, isLiveShort, mapFixtureToMatch, omitRedCardsWhenUnknown } from './mapping';
 import { dispatchFootballChanges } from './notify';
+import { MAX_LOOKUPS_PER_SYNC, NATIONAL_TEAMS_COUNTRY, seniorTeamIds, youthOf } from './team-family';
 import {
   commitSets, loadDateFingerprints, matchWrite, rowHash, saveDateFingerprints,
   saveLiveGateDates, saveQuota, type GateEntry,
@@ -107,6 +108,8 @@ export async function syncFootballFixtures(explicitDates?: string[], nowMs = Dat
   let written = 0;
   const delayChanges: FbChange[] = [];
   const failed: string[] = [];
+  /** Youth national teams with fixtures in the window (to link to their senior team). */
+  const youthTeams = new Map<string, { id: string; name: string }>();
 
   for (const date of dates) {
     let list: AfFixtureCore[];
@@ -127,6 +130,9 @@ export async function syncFootballFixtures(explicitDates?: string[], nowMs = Dat
       const id = String(f.fixture.id);
       const short = f.fixture.status.short;
       const doc = mapFixtureToMatch(f, { nowSec });
+      if (f.league.country === NATIONAL_TEAMS_COUNTRY) {
+        for (const t of [doc.homeTeam, doc.awayTeam]) if (t.id && youthOf(t.name)) youthTeams.set(t.id, t);
+      }
       if (!isFinishedShort(short) && short !== 'CANC' && short !== 'PST') {
         gateEntries.push([f.fixture.timestamp, doc.popularity, f.fixture.id]);
       }
@@ -159,6 +165,12 @@ export async function syncFootballFixtures(explicitDates?: string[], nowMs = Dat
   const keep = [-1, 0, 1].map(o => dateUtc(o, nowMs));
   const gateUpdate = Object.fromEntries(Object.entries(gate).filter(([d]) => keep.includes(d)));
   if (Object.keys(gateUpdate).length) await saveLiveGateDates(gateUpdate, keep);
+
+  // Youth national teams → their senior team, for the app ("Mis equipos") and
+  // the notifications. Remembered: once a team is linked it costs no more calls.
+  if (youthTeams.size) {
+    await seniorTeamIds([...youthTeams.values()], nowMs, MAX_LOOKUPS_PER_SYNC).catch(() => {});
+  }
 
   if (quotaState.observedAt > 0 && Number.isFinite(quotaState.remainingDay)) {
     await saveQuota({ limitDay: quotaState.limitDay, remainingDay: quotaState.remainingDay, at: quotaState.observedAt })

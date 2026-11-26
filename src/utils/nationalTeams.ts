@@ -7,6 +7,7 @@
 // For unsupported locales we fall back to the SportMonks English name.
 
 import i18n from '../i18n';
+import { seniorNameOf, youthOf } from '../../functions/src/shared/football/youth';
 
 // ── Per-language dictionaries ─────────────────────────────────────────────────
 // key = SportMonks English name, value = localized name
@@ -165,8 +166,18 @@ const LANG_MAP: Record<string, Record<string, string>> = {
  */
 export function translateNationalTeam(name: string): string {
   const lang = (i18n.language || 'es').slice(0, 2);
-  return LANG_MAP[lang]?.[name] ?? name;
+  const known = LANG_MAP[lang]?.[name];
+  if (known) return known;
+  // Youth sides: "Mexico U17" → "México Sub-17" (also "Arsenal U21" → "Arsenal Sub-21").
+  const youth = youthOf(name);
+  if (!youth) return name;
+  const senior = seniorNameOf(youth.base);
+  const base = LANG_MAP[lang]?.[youth.base] ?? LANG_MAP[lang]?.[senior] ?? youth.base;
+  return `${base} ${YOUTH_LABEL[lang] ?? 'U'}${youth.age}`;
 }
+
+/** How each language writes the age group: "Sub-17" in Spanish and Portuguese, "U17" elsewhere. */
+const YOUTH_LABEL: Record<string, string> = { es: 'Sub-', pt: 'Sub-' };
 
 /** true si el nombre (inglés de SM) corresponde a una SELECCIÓN nacional.
  *  El diccionario TEAMS_ES (el más completo) funciona como lista blanca.

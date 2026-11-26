@@ -108,7 +108,10 @@ const loc = (name) => {
         return TEAMS_ES[name];
     // Youth national teams: "Mexico U17" → "México Sub-17".
     const youth = (0, team_family_1.youthOf)(name);
-    return youth ? `${TEAMS_ES[youth.base] ?? youth.base} Sub-${youth.age}` : name;
+    if (!youth)
+        return name;
+    const senior = (0, team_family_1.seniorNameOf)(youth.base);
+    return `${TEAMS_ES[youth.base] ?? TEAMS_ES[senior] ?? senior} Sub-${youth.age}`;
 };
 exports.loc = loc;
 /** Friendlies are one match in a push → singular "Amistoso". */

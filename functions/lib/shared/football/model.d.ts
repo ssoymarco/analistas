@@ -661,6 +661,15 @@ export interface FbSearchDoc extends FbCached {
     teams: FbSearchTeam[];
     players: FbSearchPlayer[];
 }
+/**
+ * `fb_meta/teamFamilies` — youth national teams and the senior team they
+ * belong to ("Mexico U17" → Mexico). Following the senior team includes them.
+ */
+export interface FbTeamFamiliesDoc {
+    /** Youth team id → senior national team id. */
+    seniorOf: Record<string, string>;
+    updatedAt?: number;
+}
 /** `fb_meta/teamIndex` — every team of the curated leagues, for instant local search. */
 export interface FbTeamIndexDoc {
     /** [teamId, name, leagueId] */

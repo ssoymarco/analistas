@@ -6,6 +6,7 @@
  */
 
 import type { MatchStatus } from '../../data/types';
+import { seniorNameOf, youthOf } from '../../../functions/src/shared/football/youth';
 import { POPULAR_TEAMS } from './popular';
 
 // ── Status ───────────────────────────────────────────────────────────────────
@@ -76,8 +77,8 @@ export function localDayRange(localDate: string): { start: number; end: number }
  * FIFA 3-letter codes of national teams, keyed by the English name the data
  * uses. The app keys national-team colors and flag emoji by this code
  * (utils/teamColors.ts), and the data only ships it for some endpoints — so
- * national teams get it from here. Exact-name match only: clubs, women's and
- * youth sides ("Mexico W", "Mexico U20") keep their derived short name.
+ * national teams get it from here, and so do their youth sides ("Mexico U17" →
+ * MEX). Clubs and women's teams ("Mexico W") keep their derived short name.
  */
 const NATIONAL_TEAM_CODES: Record<string, string> = {
   // UEFA
@@ -140,7 +141,11 @@ export function displayTeam(
  * code the data provides, else one derived from the name.
  */
 export function shortNameFor(name: string, provided?: string | null): string {
-  return NATIONAL_TEAM_CODES[name] ?? (provided || deriveShortName(name));
+  if (NATIONAL_TEAM_CODES[name]) return NATIONAL_TEAM_CODES[name];
+  // A youth national team carries its country's code (Mexico U17 → MEX, not "MU1").
+  const youth = youthOf(name);
+  const country = youth && (NATIONAL_TEAM_CODES[youth.base] ?? NATIONAL_TEAM_CODES[seniorNameOf(youth.base)]);
+  return country || provided || deriveShortName(name);
 }
 
 

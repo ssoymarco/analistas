@@ -27,6 +27,7 @@ import { LeagueSection } from '../components/LeagueSection';
 import { PromoBanner } from '../components/PromoBanner';
 import { CalendarPicker } from '../components/CalendarPicker';
 import { useFixtures } from '../hooks/useFixtures';
+import { useTeamsWithFamily } from '../hooks/useTeamsWithFamily';
 import type { LeagueWithMatches } from '../services/football/matches';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import { useFavorites } from '../contexts/FavoritesContext';
@@ -77,10 +78,12 @@ export const PartidosScreen: React.FC = () => {
 
   // ── Real data via hook ──────────────────────────────────────────────────────
   const { followedTeamIds, followedLeagueIds } = useFavorites();
+  // Following a national team includes its youth sides (Mexico → Mexico U17).
+  const myTeamIds = useTeamsWithFamily(followedTeamIds);
   const {
     matches: allMatches, leagues: allLeagues, loading, refreshing, refresh, isPolling,
     pendingOtherCount, loadAllLeagues,
-  } = useFixtures(selectedDate, followedTeamIds);
+  } = useFixtures(selectedDate, myTeamIds);
   const { country } = useUserCountry();
 
   // ── Live polling dot animation ─────────────────────────────────────────────
@@ -161,7 +164,7 @@ export const PartidosScreen: React.FC = () => {
     tier2Groups,
     tier3Groups,
   } = useMemo(() => {
-    const teamSet   = new Set(followedTeamIds);
+    const teamSet   = new Set(myTeamIds);
     const leagueSet = new Set(followedLeagueIds);
 
     // ── Fusionar los grupos de amistosos de SM en UNA sección "Amistosos" ────
@@ -281,7 +284,7 @@ export const PartidosScreen: React.FC = () => {
       tier2Groups:          tier2Groups.sort(compareLeagues),
       tier3Groups:          tier3Groups.sort(compareLeagues),
     };
-  }, [filteredLeagues, followedTeamIds, followedLeagueIds, country]);
+  }, [filteredLeagues, myTeamIds, followedLeagueIds, country]);
 
   // Does the user have at least some personalization set up?
   const hasPersonalization = followedTeamIds.length > 0 || followedLeagueIds.length > 0;

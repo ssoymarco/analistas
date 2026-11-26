@@ -35,7 +35,7 @@ import type { DelayedPushPayload } from '../deliver-delayed-push';
 import { FbTopics, type FbDelayBucket } from '../shared/football/model';
 import { legacyTeamIdFor } from '../shared/football/legacy';
 import type { FbChange } from './live-detect';
-import { NATIONAL_TEAMS_COUNTRY, seniorTeamIds, youthOf } from './team-family';
+import { NATIONAL_TEAMS_COUNTRY, seniorNameOf, seniorTeamIds, youthOf } from './team-family';
 
 const ESTADIO_DELAY_ENABLED = process.env.ESTADIO_DELAY_ENABLED !== 'false';
 const LEGACY_DUAL_SEND = process.env.FB_LEGACY_DUAL_SEND !== 'false';
@@ -66,7 +66,9 @@ export const loc = (name: string): string => {
   if (TEAMS_ES[name]) return TEAMS_ES[name];
   // Youth national teams: "Mexico U17" → "México Sub-17".
   const youth = youthOf(name);
-  return youth ? `${TEAMS_ES[youth.base] ?? youth.base} Sub-${youth.age}` : name;
+  if (!youth) return name;
+  const senior = seniorNameOf(youth.base);
+  return `${TEAMS_ES[youth.base] ?? TEAMS_ES[senior] ?? senior} Sub-${youth.age}`;
 };
 
 /** Friendlies are one match in a push → singular "Amistoso". */

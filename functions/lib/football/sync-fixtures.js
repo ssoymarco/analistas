@@ -65,6 +65,7 @@ const logger = __importStar(require("firebase-functions/logger"));
 const apisports_1 = require("./apisports");
 const mapping_1 = require("./mapping");
 const notify_1 = require("./notify");
+const team_family_1 = require("./team-family");
 const store_1 = require("./store");
 function dateUtc(offsetDays, nowMs) {
     const d = new Date(nowMs);
@@ -134,6 +135,8 @@ async function syncFootballFixtures(explicitDates, nowMs = Date.now()) {
     let written = 0;
     const delayChanges = [];
     const failed = [];
+    /** Youth national teams with fixtures in the window (to link to their senior team). */
+    const youthTeams = new Map();
     for (const date of dates) {
         let list;
         try {
@@ -153,6 +156,11 @@ async function syncFootballFixtures(explicitDates, nowMs = Date.now()) {
             const id = String(f.fixture.id);
             const short = f.fixture.status.short;
             const doc = (0, mapping_1.mapFixtureToMatch)(f, { nowSec });
+            if (f.league.country === team_family_1.NATIONAL_TEAMS_COUNTRY) {
+                for (const t of [doc.homeTeam, doc.awayTeam])
+                    if (t.id && (0, team_family_1.youthOf)(t.name))
+                        youthTeams.set(t.id, t);
+            }
             if (!(0, mapping_1.isFinishedShort)(short) && short !== 'CANC' && short !== 'PST') {
                 gateEntries.push([f.fixture.timestamp, doc.popularity, f.fixture.id]);
             }
@@ -188,6 +196,11 @@ async function syncFootballFixtures(explicitDates, nowMs = Date.now()) {
     const gateUpdate = Object.fromEntries(Object.entries(gate).filter(([d]) => keep.includes(d)));
     if (Object.keys(gateUpdate).length)
         await (0, store_1.saveLiveGateDates)(gateUpdate, keep);
+    // Youth national teams → their senior team, for the app ("Mis equipos") and
+    // the notifications. Remembered: once a team is linked it costs no more calls.
+    if (youthTeams.size) {
+        await (0, team_family_1.seniorTeamIds)([...youthTeams.values()], nowMs, team_family_1.MAX_LOOKUPS_PER_SYNC).catch(() => { });
+    }
     if (apisports_1.quotaState.observedAt > 0 && Number.isFinite(apisports_1.quotaState.remainingDay)) {
         await (0, store_1.saveQuota)({ limitDay: apisports_1.quotaState.limitDay, remainingDay: apisports_1.quotaState.remainingDay, at: apisports_1.quotaState.observedAt })
             .catch(() => { });

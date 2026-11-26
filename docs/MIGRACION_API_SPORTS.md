@@ -84,7 +84,8 @@ instantánea) y el catálogo lleva inicio/fin de temporada (`b`, `e`).
 
 Lectura pública, escritura solo servidor; formas en `functions/src/shared/football/model.ts`:
 `fb_matches`, `fb_match_details`, `fb_standings`, `fb_topscorers`, `fb_meta/leagueCatalog`,
-`fb_meta/teamIndex` y las de bajo demanda de la tabla anterior (`fb_legacy_players` es privada).
+`fb_meta/teamIndex`, `fb_meta/teamFamilies` y las de bajo demanda de la tabla anterior
+(`fb_legacy_players` es privada).
 
 **Topics FCM** (`FbTopics` en `model.ts`, el cliente usa ese mismo objeto): `fb_team_{id}_{goals|cards|live}_{d0|d2|d5|d10}`,
 `fb_team_{id}_{kickoff|lineups|reminders}`, `fb_team_{id}_rival_*`, `fb_player_{id}_{goals|cards|lineups}`,
@@ -99,6 +100,23 @@ alineaciones (`lineups`), recordatorio (`reminders`). Antes las tarjetas y los c
 equipo del jugador, y amarillas/cambios viajaban dentro de `cards`/`live` (llegaban aunque su interruptor
 estuviera apagado). El aviso de Modo Rival por roja se omite para quien ya recibe la roja normal por
 seguir al otro equipo.
+
+**Selecciones menores = selección mayor** (regla del dueño, 25-nov-2026): quien sigue a México recibe
+también los avisos de México Sub-17, Sub-20… y ve esos partidos en "Mis equipos". El proveedor no
+relaciona esos equipos, así que la relación sale del **nombre** (`shared/football/youth.ts`:
+"Mexico U17" → "Mexico", con una tabla corta para los países que cambian de nombre, p. ej.
+"Korea Republic U17" → "South Korea") y se confirma con `/teams?name=` (una llamada por país, guardada
+en `fb_meta/nationalIds`, privada). Solo se busca en competiciones de selecciones (país de la liga =
+"World"), así los filiales de clubes no gastan llamadas. `football/team-family.ts`:
+- `fbSyncFixtures` enlaza los equipos juveniles que ve en su ventana (máx. 10 búsquedas por corrida) y
+  publica `fb_meta/teamFamilies` (`seniorOf`: id juvenil → id de la mayor), que la app lee cada 12 h
+  (`services/football/teamFamilies.ts`, `hooks/useTeamsWithFamily.ts`).
+- `dispatchFootballChanges` suma los topics de la mayor a los del equipo juvenil (`routeWithFamily`):
+  dos juveniles + sus dos mayores + silencio = los 5 topics que admite una condición de FCM. Los avisos
+  de Modo Rival no se amplían.
+- Textos: "México Sub-17" en los avisos (`loc` en `notify.ts`) y en la app (`translateNationalTeam`:
+  "Sub-" en español y portugués, "U" en el resto); el código corto es el del país (MEX).
+No incluye selecciones femeniles ("Mexico W" es otro equipo para el proveedor).
 
 **IDs viejos → nuevos**: `shared/football/legacy.ts` + `legacyTeamMap.json` (2,413 de 2,478 equipos),
 `SM_TO_AF_LEAGUE` en `leagues.ts`, `legacyPlayerMap.json` (55 jugadores populares) y el `kind`
@@ -130,7 +148,8 @@ Convenciones:
 - `Match.startingAtUtc` conserva el formato `"YYYY-MM-DD HH:MM:SS"` (UTC); `Match.statusShort` trae el
   código de API-Sports y `Match.roundLabel` la ronda.
 - Aplazado / cancelado / abandonado se muestran con la etiqueta de `utils/deadState.ts` (vía `stateId`).
-- Selecciones: el código FIFA (colores y banderas) sale del nombre (`shortNameFor` en `base.ts`).
+- Selecciones: el código FIFA (colores y banderas) sale del nombre (`shortNameFor` en `base.ts`); las
+  menores llevan el de su país.
 - Nombres de clubes: API-Sports escribe "Club America", "Guadalajara Chivas", "U.N.A.M. - Pumas". Para los
   clubes de `popular.ts` y toda la Liga MX la app muestra su nombre de siempre (`displayTeam` en `base.ts`).
 - Ficha de equipo: un club siempre se muestra en **su liga** aunque se abra desde un partido de copa; la

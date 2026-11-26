@@ -210,12 +210,19 @@ service cloud.firestore {
 
     /// fb_meta/leagueCatalog — every API-Sports league with its current season.
     /// fb_meta/teamIndex — teams of the curated leagues (instant local search).
+    /// fb_meta/teamFamilies — see below.
     /// The rest of fb_meta (snapshot, gate, quota, leases) stays server-only.
     match /fb_meta/leagueCatalog {
       allow read: if true;
       allow write: if false;
     }
     match /fb_meta/teamIndex {
+      allow read: if true;
+      allow write: if false;
+    }
+    /// fb_meta/teamFamilies — youth national teams and their senior team
+    /// (following Mexico includes Mexico U17).
+    match /fb_meta/teamFamilies {
       allow read: if true;
       allow write: if false;
     }

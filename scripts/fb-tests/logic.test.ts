@@ -9,6 +9,9 @@ import { getDisplayVenueCity, getDisplayVenueName } from '../../src/config/world
 import { buildBracket, parseRound, stageNameOf, translateRoundName } from '../../src/services/football/rounds';
 import { aggregateFromH2H, detailFromFb, h2hFromFb, matchFromFb, matchFromLite, standingsFromFb } from '../../src/services/football/mappers';
 import { shortNameFor } from '../../src/services/football/base';
+import * as Families from '../../src/services/football/teamFamilies';
+import { readDoc } from '../../src/services/football/onDemand';
+import { translateNationalTeam } from '../../src/utils/nationalTeams';
 import { leagueShareUrl, SITE_URL } from '../../src/config/site';
 import { formatShortDate } from '../../src/utils/formatMatchTime';
 import { translateAbsenceReason } from '../../src/utils/absenceReasons';
@@ -89,7 +92,7 @@ const check = (name: string, ok: boolean, detail = '') => { if (!ok) failures++;
   check('status: break before extra time', matchFromFb(row({ status: 'live', statusShort: 'BT', minute: 90 })).stateLabel === 'ETB');
   check('status: suspended match is "interrupted"', matchFromFb(row({ status: 'interrupted', statusShort: 'SUSP' })).status === 'interrupted');
   const m = matchFromFb(row({}));
-  check('national teams carry FIFA codes (colors + flags)', m.homeTeam.shortName === 'MEX' && m.awayTeam.shortName === 'KOR' && !!teamColor(m.awayTeam.shortName) && teamFlagEmoji(m.awayTeam.shortName) === '🇰🇷' && shortNameFor('Mexico U20') !== 'MEX' && shortNameFor('Club America') === 'AME');
+  check('national teams carry FIFA codes (colors + flags)', m.homeTeam.shortName === 'MEX' && m.awayTeam.shortName === 'KOR' && !!teamColor(m.awayTeam.shortName) && teamFlagEmoji(m.awayTeam.shortName) === '🇰🇷' && shortNameFor('Mexico U20') === 'MEX' && shortNameFor('Korea Republic U17') === 'KOR' && shortNameFor('Mexico W') !== 'MEX' && shortNameFor('Arsenal U21', 'ARS') === 'ARS' && shortNameFor('Club America') === 'AME');
   check('startingAtUtc keeps the "YYYY-MM-DD HH:MM:SS" contract', m.startingAtUtc === '2026-11-28 21:00:00' && new Date(m.startingAtUtc!.replace(' ', 'T') + 'Z').getTime() / 1000 === 1795899600);
   const h2hRows = [{ matchId: '1', timestamp: 1795899600 - 3 * D, homeTeam: { id: '17', name: 'South Korea', shortName: '', logo: '' }, awayTeam: { id: '16', name: 'Mexico', shortName: '', logo: '' }, homeScore: 0, awayScore: 2, leagueId: '262', league: 'Liga MX', round: 'Apertura - Quarter-finals', venueName: null }];
   const h2h = h2hFromFb(h2hRows as any, '16');
@@ -166,6 +169,15 @@ const check = (name: string, ok: boolean, detail = '') => { if (!ok) failures++;
   check('family: a Mexico U17 goal also goes to followers of Mexico', widened.bucketed.teams.join(',') === '21213,2379,25551,16', widened.bucketed.teams.join(','));
   check('family: "rival" news is not widened', notify.routeWithFamily(u17ch('rivalLoss', 'away'), seniorOf).immediate.teams.join(',') === '25551');
   check('family: youth teams get their Spanish name', notify.loc('Mexico U17') === 'México Sub-17' && notify.loc('Venezuela U17') === 'Venezuela Sub-17' && notify.loc('Mexico') === 'México' && notify.loc('Club America') === 'Club America', `${notify.loc('Mexico U17')} / ${notify.loc('Venezuela U17')}`);
+
+  // The app's side: names, codes and the widened list of followed teams.
+  check('family: the app shows youth names in Spanish', translateNationalTeam('Mexico U17') === 'México Sub-17' && translateNationalTeam('Korea Republic U17') === 'Corea del Sur Sub-17' && translateNationalTeam('Arsenal U21') === 'Arsenal Sub-21' && translateNationalTeam('Mexico') === 'México' && translateNationalTeam('Schalke 04') === 'Schalke 04', `${translateNationalTeam('Mexico U17')} / ${translateNationalTeam('Korea Republic U17')}`);
+  check('family: following Mexico adds its youth teams, following a club adds nothing', Families.withYouthTeams(['2287', '16'], seniorOf).join(',') === '2287,16,25551' && Families.withYouthTeams(['2287'], seniorOf).length === 1 && Families.withYouthTeams(['16', '25551'], seniorOf).join(',') === '16,25551' && Families.withYouthTeams([], seniorOf).length === 0);
+  const appLinks = await Families.getTeamFamilies();
+  check('family: the app reads the published links', appLinks['25551'] === '16' && appLinks['21213'] === '2379', `${Object.keys(appLinks).length} links`);
+  let serverOnlyDenied = false;
+  try { await readDoc('fb_meta/nationalIds'); } catch { serverOnlyDenied = true; }
+  check('family: the lookup cache stays server-only', serverOnlyDenied);
 
   // Whole dispatch with a recording messenger (nothing leaves this process).
   const sent: any[] = [];

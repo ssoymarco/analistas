@@ -7,7 +7,12 @@
  * World Cup (owner's rule, 25-nov-2026). The data provider treats them as
  * unrelated teams, so the link is derived from the name ("Mexico U17" →
  * "Mexico") and confirmed against the provider's national teams — one call per
- * country, remembered in `fb_meta/nationalIds`.
+ * country, remembered in `fb_meta/nationalIds` (server-only).
+ *
+ * Every link found is also published in `fb_meta/teamFamilies` (youth team id →
+ * senior team id), which the app reads to show Mexico U17's matches among the
+ * matches of whoever follows Mexico. The fixture sync fills it days ahead; the
+ * notifications resolve whatever is still missing at send time.
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -43,28 +48,29 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NATIONAL_TEAMS_COUNTRY = void 0;
-exports.youthOf = youthOf;
+exports.MAX_LOOKUPS_PER_SYNC = exports.NATIONAL_TEAMS_COUNTRY = exports.youthOf = exports.seniorNameOf = void 0;
 exports.seniorTeamIds = seniorTeamIds;
 exports.resetTeamFamilyForTests = resetTeamFamilyForTests;
 const logger = __importStar(require("firebase-functions/logger"));
 const admin_init_1 = require("../admin-init");
 const apisports_1 = require("./apisports");
+const youth_1 = require("../shared/football/youth");
+Object.defineProperty(exports, "seniorNameOf", { enumerable: true, get: function () { return youth_1.seniorNameOf; } });
+Object.defineProperty(exports, "youthOf", { enumerable: true, get: function () { return youth_1.youthOf; } });
 const store_1 = require("./store");
 /** The provider's "country" for national-team and international competitions. */
 exports.NATIONAL_TEAMS_COUNTRY = 'World';
-const YOUTH_RE = /^(.+?)\s+U-?\s?(1[5-9]|2[0-3])$/i;
-/** "Mexico U17" → { base: "Mexico", age: 17 }; null for anything else. */
-function youthOf(name) {
-    const m = YOUTH_RE.exec((name ?? '').trim());
-    return m ? { base: m[1].trim(), age: Number(m[2]) } : null;
-}
 const DOC = `${store_1.COL.meta}/nationalIds`;
+/** Public: youth team id → senior team id (the app reads it). */
+const FAMILIES_DOC = `${store_1.COL.meta}/teamFamilies`;
 /** A name with no senior national team (a club in a youth cup) is asked again after this long. */
 const RETRY_MISSING_MS = 30 * 24 * 3600_000;
-/** New names looked up per batch of changes; the rest wait for the next one. */
+/** New names looked up per batch of notifications; the rest wait for the next one. */
 const MAX_LOOKUPS_PER_RUN = 6;
+/** New names looked up per fixture sync (every 5 min): a 48-team cup is linked in under half an hour. */
+exports.MAX_LOOKUPS_PER_SYNC = 10;
 let memo = null;
+let published = null;
 const key = (name) => name.trim().toLowerCase();
 async function load() {
     if (!memo) {
@@ -74,6 +80,23 @@ async function load() {
         memo.at ??= {};
     }
     return memo;
+}
+/** Adds the links the public doc doesn't have yet (one small merge write, or none). */
+async function publish(links, nowMs) {
+    if (!published) {
+        const snap = await admin_init_1.db.doc(FAMILIES_DOC).get();
+        published = { ...(snap.data()?.seniorOf ?? {}) };
+    }
+    const fresh = {};
+    for (const [youth, senior] of Object.entries(links)) {
+        if (published[youth] !== senior)
+            fresh[youth] = senior;
+    }
+    if (!Object.keys(fresh).length)
+        return;
+    const doc = { seniorOf: fresh, updatedAt: nowMs };
+    await admin_init_1.db.doc(FAMILIES_DOC).set(doc, { merge: true });
+    Object.assign(published, fresh);
 }
 /** What is already known about `name`: its id, null (no such national team) or undefined (never asked). */
 async function knownNationalId(name, nowMs) {
@@ -111,20 +134,21 @@ async function lookupNationalId(name, nowMs) {
  * A club's youth side ("Real Madrid U19") resolves to nothing, because its
  * base name is not a national team. Never throws.
  */
-async function seniorTeamIds(teams, nowMs = Date.now()) {
+async function seniorTeamIds(teams, nowMs = Date.now(), maxLookups = MAX_LOOKUPS_PER_RUN) {
     const out = {};
     let lookups = 0;
     for (const t of teams) {
-        const y = youthOf(t.name);
+        const y = (0, youth_1.youthOf)(t.name);
         if (!y || out[t.id])
             continue;
         try {
-            let senior = await knownNationalId(y.base, nowMs);
+            const name = (0, youth_1.seniorNameOf)(y.base);
+            let senior = await knownNationalId(name, nowMs);
             if (senior === undefined) {
-                if (lookups >= MAX_LOOKUPS_PER_RUN)
+                if (lookups >= maxLookups)
                     continue;
                 lookups++;
-                senior = await lookupNationalId(y.base, nowMs);
+                senior = await lookupNationalId(name, nowMs);
             }
             if (senior && senior !== t.id)
                 out[t.id] = senior;
@@ -133,8 +157,9 @@ async function seniorTeamIds(teams, nowMs = Date.now()) {
             logger.warn('team family: could not resolve', { team: t.name, err: String(err) });
         }
     }
+    await publish(out, nowMs).catch(err => logger.warn('team family: publish failed', { err: String(err) }));
     return out;
 }
 /** Test hook: forget what this instance has loaded. */
-function resetTeamFamilyForTests() { memo = null; }
+function resetTeamFamilyForTests() { memo = null; published = null; }
 //# sourceMappingURL=team-family.js.map
