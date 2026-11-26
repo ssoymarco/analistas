@@ -37,6 +37,17 @@ node -e '
   fs.writeFileSync("app.json", next);
 ' "$VERSION"
 
+# Ask the same tool EAS uses which installed version this update would reach,
+# and refuse to publish if it isn't the one requested.
+RESOLVED=$(npx expo-updates runtimeversion:resolve --platform "$PLATFORM" 2>/dev/null | node -e '
+  let s = ""; process.stdin.on("data", d => (s += d)).on("end", () => {
+    try { console.log(JSON.parse(s.match(/\{[\s\S]*\}/)[0]).runtimeVersion || ""); } catch { console.log(""); }
+  });')
+if [[ "$RESOLVED" != "$VERSION" ]]; then
+  echo "EAS publicaría para la versión \"$RESOLVED\", no para $VERSION. No se publicó nada." >&2
+  exit 1
+fi
+
 echo "→ Publicando para $PLATFORM, versión instalada $VERSION (rama production)"
 if [[ "${DRY_RUN:-}" == "1" ]]; then
   echo "DRY_RUN: expo.version = $(node -p 'require("./app.json").expo.version')"
