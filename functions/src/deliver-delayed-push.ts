@@ -46,6 +46,11 @@ import * as logger from 'firebase-functions/logger';
 export interface DelayedPushPayload {
   /** Single-team topic (e.g. "team_1234_goals_d5"). Mutually exclusive with condition. */
   topic?:     string;
+  /** Modo Estadio por partido: tokens de los dispositivos con sesión activa en
+   *  el partido (football/estadio.ts). Con tokens no se usa topic ni condition. */
+  tokens?:    string[];
+  /** Categoría de iOS (botones al mantener presionado). Default MATCH_EVENT. */
+  category?:  string;
   /** FCM topic condition for events that affect both teams — eliminates double delivery
    *  when a user follows both. e.g. "'team_A_goals_d5' in topics || 'team_B_goals_d5' in topics" */
   condition?: string;
@@ -133,6 +138,13 @@ export async function handleDelayedPush(p: DelayedPushPayload): Promise<void> {
     }
   }
 
+  // ── Sesiones por partido: entrega directa a cada dispositivo ─────────────
+  if (p.tokens?.length) {
+    await sendPushToTokens(p.tokens, { title: p.title, body: p.body }, p.data, p.dedupId,
+      delayedAnalyticsLabel(p), p.category);
+    return;
+  }
+
   // ── FCM send ─────────────────────────────────────────────────────────────
   const target = p.condition ? { condition: p.condition } : { topic: p.topic! };
   try {
@@ -172,4 +184,44 @@ export async function handleDelayedPush(p: DelayedPushPayload): Promise<void> {
     // Any other error → rethrow so Cloud Tasks retries (up to maxAttempts)
     throw err;
   }
+}
+
+/**
+ * Un mismo aviso a una lista de dispositivos (Modo Estadio por partido). Un
+ * token que falla no detiene a los demás ni provoca reintento: reintentar la
+ * tarea repetiría el aviso a quienes sí lo recibieron.
+ */
+export async function sendPushToTokens(
+  tokens: string[],
+  copy: { title: string; body: string },
+  data: Record<string, string>,
+  dedupId: string,
+  analyticsLabel: string,
+  category = 'MATCH_EVENT',
+): Promise<{ ok: number; failed: number }> {
+  let ok = 0;
+  let failed = 0;
+  for (let i = 0; i < tokens.length; i += 500) {
+    const res = await admin.messaging().sendEachForMulticast({
+      tokens: tokens.slice(i, i + 500),
+      notification: { title: copy.title, body: copy.body },
+      data,
+      fcmOptions: { analyticsLabel },
+      android: {
+        priority: 'high',
+        collapseKey: dedupId,
+        notification: { channelId: 'analistas-live', sound: 'default', tag: dedupId },
+      },
+      apns: {
+        headers: { 'apns-collapse-id': dedupId },
+        payload: { aps: { sound: 'default', badge: 0, category } },
+      },
+    });
+    ok += res.successCount;
+    failed += res.failureCount;
+  }
+  logger.info(`⏰ Push delivered to ${ok} device(s)${failed ? `, ${failed} failed` : ''}`, {
+    matchId: data.matchId, type: data.type,
+  });
+  return { ok, failed };
 }

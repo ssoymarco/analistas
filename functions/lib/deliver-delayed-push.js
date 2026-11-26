@@ -73,6 +73,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deliverDelayedPush = void 0;
 exports.delayedAnalyticsLabel = delayedAnalyticsLabel;
 exports.handleDelayedPush = handleDelayedPush;
+exports.sendPushToTokens = sendPushToTokens;
 const tasks_1 = require("firebase-functions/v2/tasks");
 const admin_init_1 = require("./admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
@@ -132,6 +133,11 @@ async function handleDelayedPush(p) {
             });
         }
     }
+    // ── Sesiones por partido: entrega directa a cada dispositivo ─────────────
+    if (p.tokens?.length) {
+        await sendPushToTokens(p.tokens, { title: p.title, body: p.body }, p.data, p.dedupId, delayedAnalyticsLabel(p), p.category);
+        return;
+    }
     // ── FCM send ─────────────────────────────────────────────────────────────
     const target = p.condition ? { condition: p.condition } : { topic: p.topic };
     try {
@@ -170,5 +176,37 @@ async function handleDelayedPush(p) {
         // Any other error → rethrow so Cloud Tasks retries (up to maxAttempts)
         throw err;
     }
+}
+/**
+ * Un mismo aviso a una lista de dispositivos (Modo Estadio por partido). Un
+ * token que falla no detiene a los demás ni provoca reintento: reintentar la
+ * tarea repetiría el aviso a quienes sí lo recibieron.
+ */
+async function sendPushToTokens(tokens, copy, data, dedupId, analyticsLabel, category = 'MATCH_EVENT') {
+    let ok = 0;
+    let failed = 0;
+    for (let i = 0; i < tokens.length; i += 500) {
+        const res = await admin_init_1.admin.messaging().sendEachForMulticast({
+            tokens: tokens.slice(i, i + 500),
+            notification: { title: copy.title, body: copy.body },
+            data,
+            fcmOptions: { analyticsLabel },
+            android: {
+                priority: 'high',
+                collapseKey: dedupId,
+                notification: { channelId: 'analistas-live', sound: 'default', tag: dedupId },
+            },
+            apns: {
+                headers: { 'apns-collapse-id': dedupId },
+                payload: { aps: { sound: 'default', badge: 0, category } },
+            },
+        });
+        ok += res.successCount;
+        failed += res.failureCount;
+    }
+    logger.info(`⏰ Push delivered to ${ok} device(s)${failed ? `, ${failed} failed` : ''}`, {
+        matchId: data.matchId, type: data.type,
+    });
+    return { ok, failed };
 }
 //# sourceMappingURL=deliver-delayed-push.js.map

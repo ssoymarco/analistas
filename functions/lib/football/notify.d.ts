@@ -20,6 +20,10 @@
  *  - Followed players: goals (never own goals) and red cards, immediate, to
  *    devices that follow the player but NOT that player's team (those already
  *    get the team push, which names the scorer).
+ *  - Modo Estadio per match (estadio.ts): a device with a session on a match
+ *    holds its mute topic, so none of the sends here reach it; the session
+ *    delivers them by token, late. Player pushes skip `mute`, so they exclude
+ *    the session's own `fb_hold_{matchId}` topic instead.
  *  - iOS category MATCH_EVENT → long-press action "Silenciar este partido".
  *  - dedupId includes the minute so two different same-type events at the same
  *    score don't replace each other in the notification center.
@@ -37,6 +41,7 @@ import type { DelayedPushPayload } from '../deliver-delayed-push';
 import { type FbDelayBucket } from '../shared/football/model';
 import type { FbChange } from './live-detect';
 import { loc } from './names';
+import { type EstadioSessionSource } from './estadio';
 export { loc };
 /** Friendlies are one match in a push → singular "Amistoso". */
 export declare function displayLeague(name: string | null | undefined): string;
@@ -103,6 +108,7 @@ export declare function enqueueDelayed(queue: DelayQueue, payload: DelayedPushPa
     scheduleDelaySeconds: number;
     id: string;
 }, waitsMs?: readonly number[]): Promise<boolean>;
+export declare function taskIdFor(raw: string): string;
 /** `(a || b) && !mute` — FCM allows at most 5 topics per condition. */
 export declare function conditionFor(topics: string[], muteMatchId?: string): string;
 /**
@@ -116,6 +122,20 @@ export declare function sendFcm(target: {
 } | {
     condition: string;
 }, copy: Copy, data: Record<string, string>, dedupId: string): Promise<void>;
+export declare function payloadFor(c: FbChange): Record<string, string>;
+export declare function dedupFor(c: FbChange): string;
+/**
+ * The push about a followed player (goal — never an own goal — or red card),
+ * or null when the change isn't one. Shared by the topic send below and by
+ * the per-match Modo Estadio sessions (estadio.ts).
+ */
+export declare function playerPushFor(c: FbChange): {
+    playerId: string;
+    kind: 'goal' | 'red';
+    copy: Copy;
+    data: Record<string, string>;
+    dedupId: string;
+} | null;
 /**
  * Starting XI confirmed → one push per starter to devices following that
  * player but not their team (team followers got the "Alineaciones" push).
@@ -148,4 +168,5 @@ export declare function dispatchPlayerLineups(match: {
 export declare function immediateCondition(c: FbChange, topics: string[]): string;
 export declare function dispatchFootballChanges(changes: FbChange[], deps?: {
     queue?: DelayQueue | null;
+    sessions?: EstadioSessionSource | null;
 }): Promise<void>;

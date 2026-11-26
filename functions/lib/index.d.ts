@@ -13,7 +13,7 @@
  * from Firebase.
  */
 import './admin-init';
-export { fbPollLive, fbSyncFixtures, fbSyncStandings, fbDailyLeagues, fbAdmin, fbOnDemand, } from './football/functions';
+export { fbPollLive, fbSyncFixtures, fbSyncStandings, fbDailyLeagues, fbAdmin, fbOnDemand, fbEstadio, } from './football/functions';
 export { onWallpaperEntryCreated } from './wallpaper-entries';
 export { deliverDelayedPush } from './deliver-delayed-push';
 export { reportFcmToken, sendTestPush } from './diagnostics';

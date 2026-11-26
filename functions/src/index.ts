@@ -19,7 +19,7 @@ import './admin-init';
 
 // ── Football (API-Sports) ───────────────────────────────────────────────────
 export {
-  fbPollLive, fbSyncFixtures, fbSyncStandings, fbDailyLeagues, fbAdmin, fbOnDemand,
+  fbPollLive, fbSyncFixtures, fbSyncStandings, fbDailyLeagues, fbAdmin, fbOnDemand, fbEstadio,
 } from './football/functions';
 
 // ── Wallpapers contest (Firestore trigger, provider-agnostic) ────────────────

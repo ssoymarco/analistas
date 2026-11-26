@@ -68,6 +68,7 @@ const logger = __importStar(require("firebase-functions/logger"));
 const admin_init_1 = require("../admin-init");
 const apisports_1 = require("./apisports");
 const live_detect_1 = require("./live-detect");
+const estadio_1 = require("./estadio");
 const live_activities_1 = require("./live-activities");
 const mapping_1 = require("./mapping");
 const notify_1 = require("./notify");
@@ -237,6 +238,7 @@ async function pollFootballLive() {
             logger.debug('fbPollLive: idle', { maxPop: cadence.maxPop, remaining });
             // Live Activities still need their orphan catch-up + TTL sweep.
             await (0, live_activities_1.sendLiveActivityUpdates)([], { deepPass: true });
+            await (0, estadio_1.sweepEstadioSessions)();
             return;
         }
         const intervalMs = Math.floor(60_000 / cadence.polls);
@@ -348,6 +350,9 @@ async function runPoll(store, nowSec, opts) {
     // Live Activities: every poll for the matches of this cycle; the deep pass
     // (orphan catch-up + TTL sweep) once per minute.
     await (0, live_activities_1.sendLiveActivityUpdates)([...docs, ...upcomingDocs], { deepPass: opts.firstOfMinute });
+    // Modo Estadio sessions whose match ended (or that ran out of time) → unmute + delete.
+    if (opts.firstOfMinute)
+        await (0, estadio_1.sweepEstadioSessions)(nowSec);
     const endedLeagues = [...new Set(changes
             .filter(c => c.type === 'matchEnd' && c.popularity >= PRIORITY_POPULARITY)
             .map(c => c.leagueId))];

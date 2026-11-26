@@ -10,15 +10,17 @@
  *   fbDailyLeagues    daily 04:17   league catalog + standings/top players sweep
  *   fbAdmin           callable      operator actions (gated by BACKFILL_TOKEN)
  *   fbOnDemand        callable      team / player / preview / calendars / search, cached in Firestore
+ *   fbEstadio         callable      Modo Estadio for one match: start / stop / add delay (see estadio.ts)
  *
  * Every function that talks to API-Sports binds the APISPORTS_KEY secret.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fbOnDemand = exports.fbAdmin = exports.fbDailyLeagues = exports.fbSyncStandings = exports.fbSyncFixtures = exports.fbPollLive = void 0;
+exports.fbEstadio = exports.fbOnDemand = exports.fbAdmin = exports.fbDailyLeagues = exports.fbSyncStandings = exports.fbSyncFixtures = exports.fbPollLive = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const https_1 = require("firebase-functions/v2/https");
 const diagnostics_1 = require("../diagnostics");
 const apisports_1 = require("./apisports");
+const estadio_1 = require("./estadio");
 const on_demand_1 = require("./on-demand");
 const poll_live_1 = require("./poll-live");
 const sync_fixtures_1 = require("./sync-fixtures");
@@ -118,4 +120,22 @@ exports.fbOnDemand = (0, https_1.onCall)({
     concurrency: 40,
     maxInstances: 10,
 }, async (req) => (0, on_demand_1.toPlain)(await (0, on_demand_1.handleOnDemand)(req.data)));
+/**
+ * Modo Estadio for one match: the device asks to get that match's pushes a few
+ * minutes late (`start`), to add delay (`bump`) or to go back to normal
+ * (`stop`). See estadio.ts.
+ *
+ * Public like fbOnDemand: guests use it too, and the notification buttons call
+ * it while the app is in the background, before any session is restored. The
+ * FCM token in the request is the credential — it only ever affects the device
+ * that owns it, and only for the match named.
+ */
+exports.fbEstadio = (0, https_1.onCall)({
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    region: REGION,
+    invoker: 'public',
+    concurrency: 40,
+    maxInstances: 10,
+}, async (req) => (0, estadio_1.handleEstadio)(req.data, req.auth?.uid ?? null));
 //# sourceMappingURL=functions.js.map

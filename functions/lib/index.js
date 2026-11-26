@@ -14,7 +14,7 @@
  * from Firebase.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendTestPush = exports.reportFcmToken = exports.deliverDelayedPush = exports.onWallpaperEntryCreated = exports.fbOnDemand = exports.fbAdmin = exports.fbDailyLeagues = exports.fbSyncStandings = exports.fbSyncFixtures = exports.fbPollLive = void 0;
+exports.sendTestPush = exports.reportFcmToken = exports.deliverDelayedPush = exports.onWallpaperEntryCreated = exports.fbEstadio = exports.fbOnDemand = exports.fbAdmin = exports.fbDailyLeagues = exports.fbSyncStandings = exports.fbSyncFixtures = exports.fbPollLive = void 0;
 // IMPORTANT: admin-init must be imported first — it calls admin.initializeApp()
 // before any other module touches admin.firestore().
 require("./admin-init");
@@ -26,6 +26,7 @@ Object.defineProperty(exports, "fbSyncStandings", { enumerable: true, get: funct
 Object.defineProperty(exports, "fbDailyLeagues", { enumerable: true, get: function () { return functions_1.fbDailyLeagues; } });
 Object.defineProperty(exports, "fbAdmin", { enumerable: true, get: function () { return functions_1.fbAdmin; } });
 Object.defineProperty(exports, "fbOnDemand", { enumerable: true, get: function () { return functions_1.fbOnDemand; } });
+Object.defineProperty(exports, "fbEstadio", { enumerable: true, get: function () { return functions_1.fbEstadio; } });
 // ── Wallpapers contest (Firestore trigger, provider-agnostic) ────────────────
 var wallpaper_entries_1 = require("./wallpaper-entries");
 Object.defineProperty(exports, "onWallpaperEntryCreated", { enumerable: true, get: function () { return wallpaper_entries_1.onWallpaperEntryCreated; } });

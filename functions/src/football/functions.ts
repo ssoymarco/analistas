@@ -9,6 +9,7 @@
  *   fbDailyLeagues    daily 04:17   league catalog + standings/top players sweep
  *   fbAdmin           callable      operator actions (gated by BACKFILL_TOKEN)
  *   fbOnDemand        callable      team / player / preview / calendars / search, cached in Firestore
+ *   fbEstadio         callable      Modo Estadio for one match: start / stop / add delay (see estadio.ts)
  *
  * Every function that talks to API-Sports binds the APISPORTS_KEY secret.
  */
@@ -17,6 +18,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { BACKFILL_TOKEN } from '../diagnostics';
 import { APISPORTS_KEY } from './apisports';
+import { handleEstadio } from './estadio';
 import { handleOnDemand, toPlain, type OnDemandRequest } from './on-demand';
 import { pollFootballLive } from './poll-live';
 import { syncFootballFixtures } from './sync-fixtures';
@@ -139,4 +141,26 @@ export const fbOnDemand = onCall(
     maxInstances: 10,
   },
   async (req) => toPlain(await handleOnDemand(req.data as OnDemandRequest)),
+);
+
+/**
+ * Modo Estadio for one match: the device asks to get that match's pushes a few
+ * minutes late (`start`), to add delay (`bump`) or to go back to normal
+ * (`stop`). See estadio.ts.
+ *
+ * Public like fbOnDemand: guests use it too, and the notification buttons call
+ * it while the app is in the background, before any session is restored. The
+ * FCM token in the request is the credential — it only ever affects the device
+ * that owns it, and only for the match named.
+ */
+export const fbEstadio = onCall(
+  {
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    region: REGION,
+    invoker: 'public',
+    concurrency: 40,
+    maxInstances: 10,
+  },
+  async (req) => handleEstadio(req.data, req.auth?.uid ?? null),
 );

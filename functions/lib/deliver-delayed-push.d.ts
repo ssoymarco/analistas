@@ -38,6 +38,11 @@
 export interface DelayedPushPayload {
     /** Single-team topic (e.g. "team_1234_goals_d5"). Mutually exclusive with condition. */
     topic?: string;
+    /** Modo Estadio por partido: tokens de los dispositivos con sesión activa en
+     *  el partido (football/estadio.ts). Con tokens no se usa topic ni condition. */
+    tokens?: string[];
+    /** Categoría de iOS (botones al mantener presionado). Default MATCH_EVENT. */
+    category?: string;
     /** FCM topic condition for events that affect both teams — eliminates double delivery
      *  when a user follows both. e.g. "'team_A_goals_d5' in topics || 'team_B_goals_d5' in topics" */
     condition?: string;
@@ -64,3 +69,15 @@ export declare const deliverDelayedPush: import("firebase-functions/v2/tasks").T
 export declare function delayedAnalyticsLabel(p: Pick<DelayedPushPayload, 'changeType' | 'data'>): string;
 /** Cuerpo del handler, separado del wrapper de Cloud Tasks para poder probarlo. */
 export declare function handleDelayedPush(p: DelayedPushPayload): Promise<void>;
+/**
+ * Un mismo aviso a una lista de dispositivos (Modo Estadio por partido). Un
+ * token que falla no detiene a los demás ni provoca reintento: reintentar la
+ * tarea repetiría el aviso a quienes sí lo recibieron.
+ */
+export declare function sendPushToTokens(tokens: string[], copy: {
+    title: string;
+    body: string;
+}, data: Record<string, string>, dedupId: string, analyticsLabel: string, category?: string): Promise<{
+    ok: number;
+    failed: number;
+}>;

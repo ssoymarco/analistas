@@ -20,6 +20,10 @@
  *  - Followed players: goals (never own goals) and red cards, immediate, to
  *    devices that follow the player but NOT that player's team (those already
  *    get the team push, which names the scorer).
+ *  - Modo Estadio per match (estadio.ts): a device with a session on a match
+ *    holds its mute topic, so none of the sends here reach it; the session
+ *    delivers them by token, late. Player pushes skip `mute`, so they exclude
+ *    the session's own `fb_hold_{matchId}` topic instead.
  *  - iOS category MATCH_EVENT → long-press action "Silenciar este partido".
  *  - dedupId includes the minute so two different same-type events at the same
  *    score don't replace each other in the notification center.
@@ -43,6 +47,7 @@ import { legacyTeamIdFor } from '../shared/football/legacy';
 import type { FbChange } from './live-detect';
 import { loc, teamLabel } from './names';
 import { NATIONAL_TEAMS_COUNTRY, seniorTeamIds } from './team-family';
+import { dispatchEstadioSessions, type EstadioSessionSource } from './estadio';
 
 export { loc };
 
@@ -281,7 +286,7 @@ export async function enqueueDelayed(
   }
 }
 
-function taskIdFor(raw: string): string {
+export function taskIdFor(raw: string): string {
   return raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 499);
 }
 
@@ -337,7 +342,7 @@ export async function sendFcm(
   }
 }
 
-function payloadFor(c: FbChange): Record<string, string> {
+export function payloadFor(c: FbChange): Record<string, string> {
   const d: Record<string, string> = {
     sport: 'football',
     v: '2',
@@ -365,32 +370,51 @@ function legacyPayloadFor(c: FbChange): Record<string, string> {
   return { ...rest, legacy: '1' };
 }
 
-function dedupFor(c: FbChange): string {
+export function dedupFor(c: FbChange): string {
   return `fb${c.matchId}_${c.type}_${c.homeScore}-${c.awayScore}_m${c.minute ?? ''}`.slice(0, 64);
 }
 
 // ── Followed players ─────────────────────────────────────────────────────────
 
-function playerPush(c: FbChange): Promise<void> | null {
+/**
+ * The push about a followed player (goal — never an own goal — or red card),
+ * or null when the change isn't one. Shared by the topic send below and by
+ * the per-match Modo Estadio sessions (estadio.ts).
+ */
+export function playerPushFor(c: FbChange): {
+  playerId: string; kind: 'goal' | 'red'; copy: Copy; data: Record<string, string>; dedupId: string;
+} | null {
   if (!c.playerId || !c.side) return null;
   const isGoal = c.type === 'goal' && c.goalKind !== 'own';
   const isRed = c.type === 'redCard';
   if (!isGoal && !isRed) return null;
-  const teamId = c.side === 'home' ? c.homeTeam.id : c.awayTeam.id;
   const pid = String(c.playerId);
-  const playerTopic = isGoal ? FbTopics.playerGoals(pid) : FbTopics.playerCards(pid);
-  const teamTopic = isGoal ? FbTopics.goals : FbTopics.cards;
-  // player AND NOT any of the 4 team buckets = exactly FCM's 5-topic limit.
-  const condition = `'${playerTopic}' in topics` +
-    (['d0', 'd2', 'd5', 'd10'] as FbDelayBucket[]).map(b => ` && !('${teamTopic(teamId, b)}' in topics)`).join('');
   const name = isGoal ? c.scorerName : c.playerName;
   const title = isGoal
     ? (c.goalKind === 'penalty' ? `⚽ ¡Gol de penal de ${name ?? 'tu jugador'}!` : `⚽ ¡Gol de ${name ?? 'tu jugador'}!`)
     : `🟥 Expulsado: ${name ?? 'tu jugador'}`;
   const body = `${scoreLine(c)}${c.minute != null ? ` · ${c.minute}'` : ''}`;
-  return sendFcm({ condition }, { title, body },
-    { ...payloadFor(c), type: isGoal ? 'playerGoal' : 'playerRedCard', playerId: pid },
-    `${dedupFor(c)}_p${pid}`.slice(0, 64));
+  return {
+    playerId: pid, kind: isGoal ? 'goal' : 'red', copy: { title, body },
+    data: { ...payloadFor(c), type: isGoal ? 'playerGoal' : 'playerRedCard', playerId: pid },
+    dedupId: `${dedupFor(c)}_p${pid}`.slice(0, 64),
+  };
+}
+
+function playerPush(c: FbChange): Promise<void> | null {
+  const p = playerPushFor(c);
+  if (!p || !c.side) return null;
+  const teamId = c.side === 'home' ? c.homeTeam.id : c.awayTeam.id;
+  const playerTopic = p.kind === 'goal' ? FbTopics.playerGoals(p.playerId) : FbTopics.playerCards(p.playerId);
+  const teamTopic = p.kind === 'goal' ? FbTopics.goals : FbTopics.cards;
+  // FCM allows five topics per condition: the player, the per-match Modo
+  // Estadio guard (the session delivers this push late, by token) and three of
+  // the team's delay buckets. The 10-minute bucket of the old global mode is
+  // the one left out: such a device may see the player push and the team one.
+  const condition = `'${playerTopic}' in topics` +
+    (['d0', 'd2', 'd5'] as FbDelayBucket[]).map(b => ` && !('${teamTopic(teamId, b)}' in topics)`).join('') +
+    ` && !('${FbTopics.hold(c.matchId)}' in topics)`;
+  return sendFcm({ condition }, p.copy, p.data, p.dedupId);
 }
 
 /**
@@ -435,7 +459,7 @@ export function immediateCondition(c: FbChange, topics: string[]): string {
 
 export async function dispatchFootballChanges(
   changes: FbChange[],
-  deps: { queue?: DelayQueue | null } = {},
+  deps: { queue?: DelayQueue | null; sessions?: EstadioSessionSource | null } = {},
 ): Promise<void> {
   if (!changes.length) return;
   const sends: Array<Promise<unknown>> = [];
@@ -519,6 +543,14 @@ export async function dispatchFootballChanges(
     }
 
     logger.info(`📣 ${c.type} — ${copy.title} · ${copy.body}`, { matchId: c.matchId, topics: immediate });
+  }
+
+  // Devices with Modo Estadio on for one of these matches left its topics
+  // (they hold the match's mute topic): the server delivers to them by token,
+  // late. A failure there must never cost the pushes above.
+  if (deps.sessions !== null) {
+    sends.push(dispatchEstadioSessions(changes, { queue, sessions: deps.sessions })
+      .catch(err => logger.error('Modo Estadio: session dispatch failed', { err: String(err) })));
   }
 
   await Promise.allSettled(sends);

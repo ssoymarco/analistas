@@ -298,6 +298,12 @@ export declare const FbTopics: {
     readonly playerLineups: (playerId: string) => string;
     /** "Silenciar este partido": devices subscribed here are excluded in FCM. */
     readonly mute: (matchId: string) => string;
+    /**
+     * Modo Estadio per match: devices with a session on the match (they also
+     * hold its mute topic). Only the followed-player pushes look at it — those
+     * ignore `mute` on purpose, and a session delivers them late by token.
+     */
+    readonly hold: (matchId: string) => string;
 };
 /** Cache envelope shared by every on-demand doc. Plain numbers (unix ms) so the
  *  client can check freshness without touching Firestore Timestamps. */

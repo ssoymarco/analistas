@@ -36,6 +36,7 @@ import type { AfFixtureFull } from './apisports-types';
 import {
   detectChanges, detectReminders, emptyEntry, type FbChange, type Snapshot, type UpcomingMatch,
 } from './live-detect';
+import { sweepEstadioSessions } from './estadio';
 import { sendLiveActivityUpdates } from './live-activities';
 import {
   compactLiveStats, isFinishedShort, isLiveShort, mapFixtureToDetail, mapFixtureToMatch,
@@ -210,6 +211,7 @@ export async function pollFootballLive(): Promise<void> {
       logger.debug('fbPollLive: idle', { maxPop: cadence.maxPop, remaining });
       // Live Activities still need their orphan catch-up + TTL sweep.
       await sendLiveActivityUpdates([], { deepPass: true });
+      await sweepEstadioSessions();
       return;
     }
 
@@ -333,6 +335,8 @@ async function runPoll(
   // Live Activities: every poll for the matches of this cycle; the deep pass
   // (orphan catch-up + TTL sweep) once per minute.
   await sendLiveActivityUpdates([...docs, ...upcomingDocs], { deepPass: opts.firstOfMinute });
+  // Modo Estadio sessions whose match ended (or that ran out of time) → unmute + delete.
+  if (opts.firstOfMinute) await sweepEstadioSessions(nowSec);
 
   const endedLeagues = [...new Set(changes
     .filter(c => c.type === 'matchEnd' && c.popularity >= PRIORITY_POPULARITY)

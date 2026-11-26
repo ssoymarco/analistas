@@ -9,6 +9,7 @@
  *   fbDailyLeagues    daily 04:17   league catalog + standings/top players sweep
  *   fbAdmin           callable      operator actions (gated by BACKFILL_TOKEN)
  *   fbOnDemand        callable      team / player / preview / calendars / search, cached in Firestore
+ *   fbEstadio         callable      Modo Estadio for one match: start / stop / add delay (see estadio.ts)
  *
  * Every function that talks to API-Sports binds the APISPORTS_KEY secret.
  */
@@ -55,3 +56,14 @@ export declare const fbOnDemand: import("firebase-functions/v2/https").CallableF
     kind: import("../shared/football/model").FbOnDemandKind;
     data: unknown;
 }>, unknown>;
+/**
+ * Modo Estadio for one match: the device asks to get that match's pushes a few
+ * minutes late (`start`), to add delay (`bump`) or to go back to normal
+ * (`stop`). See estadio.ts.
+ *
+ * Public like fbOnDemand: guests use it too, and the notification buttons call
+ * it while the app is in the background, before any session is restored. The
+ * FCM token in the request is the credential — it only ever affects the device
+ * that owns it, and only for the match named.
+ */
+export declare const fbEstadio: import("firebase-functions/v2/https").CallableFunction<any, Promise<import("../shared/football/estadio").EstadioResponse>, unknown>;

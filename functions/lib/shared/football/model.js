@@ -56,6 +56,12 @@ exports.FbTopics = {
     playerLineups: (playerId) => `fb_player_${playerId}_lineups`,
     /** "Silenciar este partido": devices subscribed here are excluded in FCM. */
     mute: (matchId) => `fb_mute_${matchId}`,
+    /**
+     * Modo Estadio per match: devices with a session on the match (they also
+     * hold its mute topic). Only the followed-player pushes look at it — those
+     * ignore `mute` on purpose, and a session delivers them late by token.
+     */
+    hold: (matchId) => `fb_hold_${matchId}`,
 };
 /** Team crest URL (API-Sports media CDN) — lets slim rows omit the logo. */
 function fbTeamLogo(teamId) {
