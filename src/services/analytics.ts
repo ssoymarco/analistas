@@ -32,6 +32,8 @@ export const ANALYTICS_EVENTS = {
   NEWS_READ: 'news_read',
   ONBOARDING_COMPLETE: 'onboarding_complete',
   SHARE: 'share_content',
+  /** A push notification was tapped (params: push_type, match_id). */
+  PUSH_OPEN: 'push_open',
 } as const;
 
 type EventName = (typeof ANALYTICS_EVENTS)[keyof typeof ANALYTICS_EVENTS];

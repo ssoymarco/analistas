@@ -69,6 +69,7 @@ exports.route = route;
 exports.routeWithFamily = routeWithFamily;
 exports.legacyTopicFor = legacyTopicFor;
 exports.conditionFor = conditionFor;
+exports.analyticsLabel = analyticsLabel;
 exports.sendFcm = sendFcm;
 exports.dispatchPlayerLineups = dispatchPlayerLineups;
 exports.immediateCondition = immediateCondition;
@@ -229,12 +230,24 @@ function conditionFor(topics, muteMatchId) {
     const grouped = topics.length > 1 ? `(${any})` : any;
     return muteMatchId ? `${grouped} && !('${model_1.FbTopics.mute(muteMatchId)}' in topics)` : grouped;
 }
+/**
+ * Label for Firebase's message reports: the kind of notification, with
+ * "legacy-" for the copies sent to builds from before the provider change.
+ * Firebase accepts [a-zA-Z0-9-_.~%], 50 characters, 100 distinct labels a day.
+ */
+function analyticsLabel(data) {
+    const kind = (data.type || 'other').replace(/[^a-zA-Z0-9_.~%-]/g, '').slice(0, 40) || 'other';
+    return data.legacy === '1' ? `legacy-${kind}` : kind;
+}
 async function sendFcm(target, copy, data, dedupId) {
     try {
         await admin_init_1.admin.messaging().send({
             ...target,
             notification: { title: copy.title, body: copy.body },
             data,
+            // Firebase console → Messaging → Reports can then split sends and opens
+            // by kind of notification ("goal", "halftime", "legacy-goal"…).
+            fcmOptions: { analyticsLabel: analyticsLabel(data) },
             android: {
                 priority: 'high',
                 collapseKey: dedupId,

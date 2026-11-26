@@ -64,6 +64,12 @@ export declare function routeWithFamily(c: FbChange, senior: Record<string, stri
 export declare function legacyTopicFor(fbTopic: string): string | null;
 /** `(a || b) && !mute` — FCM allows at most 5 topics per condition. */
 export declare function conditionFor(topics: string[], muteMatchId?: string): string;
+/**
+ * Label for Firebase's message reports: the kind of notification, with
+ * "legacy-" for the copies sent to builds from before the provider change.
+ * Firebase accepts [a-zA-Z0-9-_.~%], 50 characters, 100 distinct labels a day.
+ */
+export declare function analyticsLabel(data: Record<string, string>): string;
 export declare function sendFcm(target: {
     topic: string;
 } | {

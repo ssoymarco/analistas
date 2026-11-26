@@ -123,6 +123,9 @@ export const deliverDelayedPush = onTaskDispatched(
         ...target,
         notification: { title: p.title, body: p.body },
         data: p.data,
+        // Reports de Firebase (Messaging → Reports): los avisos retrasados por
+        // Modo Estadio se distinguen de los inmediatos ("goal" vs "goal-estadio").
+        fcmOptions: { analyticsLabel: `${String(p.changeType || 'other').replace(/[^a-zA-Z0-9_.~%-]/g, '').slice(0, 36) || 'other'}-estadio` },
         android: {
           priority: 'high',
           collapseKey: p.dedupId,

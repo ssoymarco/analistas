@@ -14,6 +14,7 @@
 import { createNavigationContainerRef } from '@react-navigation/native';
 import type { PartidosStackParamList } from '../navigation/AppNavigator';
 import type { Match } from '../data/types';
+import { ANALYTICS_EVENTS, logEvent } from '../services/analytics';
 
 export const navigationRef = createNavigationContainerRef<PartidosStackParamList>();
 
@@ -68,6 +69,20 @@ export function flushPendingMatchNavigation(): void {
  * hand us `Record<string, string>` — every value is a string, so numeric
  * fields are coerced here). Returns null when there's no usable matchId/type.
  */
+// Every tap on a notification goes through buildMatchStubFromPayload (three
+// delivery paths can report the same tap), so the "opened" event is counted
+// here, once per notification.
+let lastOpenKey = '';
+let lastOpenAtMs = 0;
+function trackPushOpen(type: string, matchId: string): void {
+  const key = `${type}:${matchId}`;
+  const now = Date.now();
+  if (key === lastOpenKey && now - lastOpenAtMs < DEDUP_WINDOW_MS) return;
+  lastOpenKey = key;
+  lastOpenAtMs = now;
+  logEvent(ANALYTICS_EVENTS.PUSH_OPEN, { push_type: type, match_id: matchId }).catch(() => {});
+}
+
 export function buildMatchStubFromPayload(
   data: Record<string, unknown> | null | undefined,
 ): Match | null {
@@ -76,6 +91,7 @@ export function buildMatchStubFromPayload(
   const matchId = data.matchId != null ? String(data.matchId) : '';
   const type    = typeof data.type === 'string' ? data.type : '';
   if (!matchId || !type) return null;
+  trackPushOpen(type, matchId);
 
   const toNum = (v: unknown): number => {
     const n = Number(v);

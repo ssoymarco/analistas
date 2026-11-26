@@ -210,6 +210,16 @@ export function conditionFor(topics: string[], muteMatchId?: string): string {
   return muteMatchId ? `${grouped} && !('${FbTopics.mute(muteMatchId)}' in topics)` : grouped;
 }
 
+/**
+ * Label for Firebase's message reports: the kind of notification, with
+ * "legacy-" for the copies sent to builds from before the provider change.
+ * Firebase accepts [a-zA-Z0-9-_.~%], 50 characters, 100 distinct labels a day.
+ */
+export function analyticsLabel(data: Record<string, string>): string {
+  const kind = (data.type || 'other').replace(/[^a-zA-Z0-9_.~%-]/g, '').slice(0, 40) || 'other';
+  return data.legacy === '1' ? `legacy-${kind}` : kind;
+}
+
 export async function sendFcm(
   target: { topic: string } | { condition: string },
   copy: Copy,
@@ -221,6 +231,9 @@ export async function sendFcm(
       ...target,
       notification: { title: copy.title, body: copy.body },
       data,
+      // Firebase console → Messaging → Reports can then split sends and opens
+      // by kind of notification ("goal", "halftime", "legacy-goal"…).
+      fcmOptions: { analyticsLabel: analyticsLabel(data) },
       android: {
         priority: 'high',
         collapseKey: dedupId,
