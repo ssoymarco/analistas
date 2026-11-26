@@ -41,6 +41,7 @@ import {
 import { fbPlayerPhoto, fbTeamLogo } from '../../functions/src/shared/football/model';
 import type { FavoritosStackParamList } from '../navigation/AppNavigator';
 import { normalize } from '../utils/normalize';
+import { translateLeagueCountry } from '../utils/nationalTeams';
 import { useTranslation } from 'react-i18next';
 import { isImageUri } from '../utils/imageUri';
 import { useUserCountry } from '../hooks/useUserCountry';
@@ -848,7 +849,7 @@ export const FavoritosScreen: React.FC = () => {
       .map(l => ({
         id: String(l.id),
         name: l.name,
-        subtitle: l.country || '',
+        subtitle: l.country ? translateLeagueCountry(l.country) : '',
         emoji: l.flag || '🏆',
         apiId: l.id,
         image: isImageUri(l.image) ? l.image : undefined,

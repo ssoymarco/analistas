@@ -484,7 +484,7 @@ export function topPlayerFromFb(p: FbTopPlayer): TopPlayerRow {
     playerName: p.name,
     playerImage: p.photo,
     teamId: p.teamId,
-    teamName: p.teamName,
+    teamName: displayTeam(p.teamId, p.teamName).name,
     teamLogo: p.teamLogo,
     goals: p.value,
     position: p.position,

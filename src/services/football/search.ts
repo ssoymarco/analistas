@@ -20,9 +20,10 @@ import {
   fbLeagueLogo, fbTeamLogo,
   type FbPlayerDoc, type FbSearchDoc, type FbTeamDoc, type FbTeamIndexDoc,
 } from '../../../functions/src/shared/football/model';
+import { translateLeagueCountry } from '../../utils/nationalTeams';
 import { normalize } from '../../utils/normalize';
 import { AppCache } from '../cache';
-import { deriveShortName } from './base';
+import { deriveShortName, displayTeam } from './base';
 import { ensureCatalog, getCatalogLeagues, peekCurrentSeasonId, peekLeagueLogo } from './catalog';
 import { callOnDemand, loadCached, readDoc } from './onDemand';
 import {
@@ -185,12 +186,16 @@ export function resolveFollowedTeams(ids: string[]): Promise<SearchableTeam[]> {
   return resolveFollowed<SearchableTeam>(ids, 'teams', async id => {
     const t = await docOrFetch<FbTeamDoc>(`fb_teams/${id}`, 'team', id);
     if (!t) return null;
+    const shown = displayTeam(t.id, t.name, t.shortName);
+    const leagueId = Number(t.primaryLeagueId) || 0;
     return {
       id: Number(t.id),
-      name: t.name,
-      shortName: t.shortName,
+      name: shown.name,
+      shortName: shown.shortName,
       logo: t.logo || fbTeamLogo(t.id),
-      leagueName: t.national ? NATIONAL_TEAM_LEAGUE_NAME : (t.primaryLeagueName ?? t.country ?? ''),
+      leagueName: t.national
+        ? NATIONAL_TEAM_LEAGUE_NAME
+        : (getFootballLeague(leagueId)?.name ?? t.primaryLeagueName ?? t.country ?? ''),
       leagueId: t.national ? 0 : (Number(t.primaryLeagueId) || 0),
     };
   });
@@ -205,10 +210,11 @@ export function resolveFollowedPlayers(ids: string[]): Promise<SearchablePlayer[
       id: Number(p.id),
       name: p.name,
       image: p.photo || undefined,
-      teamName: p.currentTeam?.name ?? p.nationality ?? undefined,
+      teamName: p.currentTeam ? displayTeam(p.currentTeam.id, p.currentTeam.name).name : undefined,
       teamLogo: p.currentTeam?.logo ?? undefined,
       teamId: p.currentTeam ? Number(p.currentTeam.id) || undefined : undefined,
-      position: p.position ?? undefined,
+      // Shown next to the club, like the bundled players ("Inter Miami · Argentina").
+      leagueName: p.nationality ? translateLeagueCountry(p.nationality) : undefined,
       jerseyNumber: p.number ?? undefined,
     };
   });
@@ -275,14 +281,14 @@ export async function searchRemote(rawQuery: string): Promise<RemoteSearchResult
       name: t.name,
       shortName: t.shortName,
       logo: t.logo,
-      leagueName: t.national ? NATIONAL_TEAM_LEAGUE_NAME : (t.country ?? ''),
+      leagueName: t.national ? NATIONAL_TEAM_LEAGUE_NAME : (t.country ? translateLeagueCountry(t.country) : ''),
       leagueId: 0,
     })),
     players: (data.players ?? []).map(p => ({
       id: Number(p.id),
       name: p.name,
       image: p.photo || undefined,
-      teamName: p.nationality ?? undefined,
+      teamName: p.nationality ? translateLeagueCountry(p.nationality) : undefined,
       position: p.position ?? undefined,
     })),
   };

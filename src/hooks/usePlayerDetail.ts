@@ -6,6 +6,7 @@
 // the career; later opens are a single document read.
 import { useState, useEffect, useRef } from 'react';
 import { seasonLabel } from '../services/football/catalog';
+import { displayTeam } from '../services/football/base';
 import { getPlayer } from '../services/football/teams';
 import {
   fbSeasonKey, type FbPlayerDoc, type FbPlayerSeasonStat,
@@ -318,7 +319,9 @@ function mapPlayer(
     seasonHistory: history,
     jerseyNumber: p.number ?? currentStats?.jerseyNumber ?? fallback.jerseyNumber ?? 0,
     teamId: Number(p.currentTeam?.id) || currentStats?.teamId || 0,
-    teamName: p.currentTeam?.name ?? currentStats?.teamName ?? fallback.teamName ?? '',
+    teamName: p.currentTeam
+      ? displayTeam(p.currentTeam.id, p.currentTeam.name).name
+      : currentStats?.teamName ?? fallback.teamName ?? '',
     teamLogo: p.currentTeam?.logo ?? currentStats?.teamLogo ?? fallback.teamLogo ?? '',
     leagueName: headline?.league ?? '',
     nationalTeamId: p.nationalTeam ? Number(p.nationalTeam.id) || undefined : undefined,
