@@ -40,6 +40,23 @@ export declare function lastEventLine(f: {
     teams: AfFixtureCore['teams'];
     events?: AfEvent[];
 }): string | null;
+/**
+ * Each side's key events in one line for the Live Activity: scorers with their
+ * minutes ("⚽ H. Martín 52', 78'"), then players sent off ("🟥 R. Chávez 11'").
+ * Own goals go to the side they count for — the provider is not consistent
+ * about which team it files them under, so the reading that adds up to the
+ * real score is the one used.
+ */
+export declare function sideEventLines(f: {
+    teams: AfFixtureCore['teams'];
+    goals?: AfFixtureCore['goals'];
+    events?: AfEvent[];
+}): {
+    homeEvents: string | null;
+    awayEvents: string | null;
+};
+/** [home possession %, shots on goal home, away, corners home, away] from a fixture with statistics; null without them. */
+export declare function compactLiveStats(f: AfFixtureFull): number[] | null;
 export declare function countBy(events: AfEvent[] | undefined, teamId: number, pred: (e: AfEvent) => boolean): number;
 /**
  * Anchor for client-side minute extrapolation. Uses the API's period start

@@ -40,17 +40,21 @@ import {
   updateMatchActivity,
   endMatchActivity,
   addPushTokenListener,
+  getLiveActivityContractVersion,
 } from '../../modules/expo-live-activity';
-import type {
-  LiveActivityPhase,
-  MatchActivityAttributes,
-  MatchActivityState,
+import {
+  LIVE_ACTIVITY_CONTRACT_V2,
+  type LiveActivityPhase,
+  type MatchActivityAttributes,
+  type MatchActivityState,
 } from '../data/liveActivityContract';
 import type { Match, Team } from '../data/types';
 import { getLeagueDisplayName } from '../config/leagues';
 import { resolveMatchColors, teamFlagEmoji } from '../utils/teamColors';
 import { translateTeamName, isNationalTeam } from '../utils/nationalTeams';
 import { isImageUri } from '../utils/imageUri';
+import { parseRound, translateRoundName } from '../services/football/rounds';
+import i18n from '../i18n';
 
 // ── Mapeos Match → contrato ───────────────────────────────────────────────────
 
@@ -167,8 +171,20 @@ export function buildActivityAttributes(match: Match): MatchActivityAttributes {
     matchId: String(match.id),
     home: teamToContract(match.homeTeam, home),
     away: teamToContract(match.awayTeam, away),
-    leagueName: getLeagueDisplayName(match.leagueId ?? '', match.league ?? ''),
+    leagueName: leagueLine(match),
   };
+}
+
+/** "Liga MX · Cuartos de Final" / "Liga MX · Jornada 12". El widget rediseñado
+ *  le da su renglón; el anterior solo tiene sitio para la liga. */
+function leagueLine(match: Match): string {
+  const league = getLeagueDisplayName(match.leagueId ?? '', match.league ?? '');
+  if (getLiveActivityContractVersion() < LIVE_ACTIVITY_CONTRACT_V2) return league;
+  const round = parseRound(match.roundLabel);
+  const text = round.kind === 'knockout' || round.kind === 'qualifying'
+    ? translateRoundName(round.base)
+    : round.number !== null ? `${i18n.t('matches.matchday')} ${round.number}` : '';
+  return text ? `${league} · ${text}` : league;
 }
 
 /** Kickoff en unix seconds desde startingAtUtc ("YYYY-MM-DD HH:MM:SS" UTC). */
@@ -240,6 +256,26 @@ export function buildActivityState(match: Match): MatchActivityState {
     // (espejo de buildStateFromMatchDoc). Sin esto, cada actualización local
     // con el app abierta borraba la línea que el push acababa de pintar.
     lastEventText: phase !== 'pre' && match.lastEvent ? match.lastEvent : undefined,
+    ...(phase !== 'pre' ? richState(match) : {}),
+  };
+}
+
+/** Campos del contrato v2 (espejo de buildStateFromMatchDoc del servidor). Un
+ *  widget anterior los ignora al decodificar. */
+function richState(match: Match): Partial<MatchActivityState> {
+  const ls = Array.isArray(match.liveStats) && match.liveStats.length >= 5 ? match.liveStats : null;
+  return {
+    homeRed: match.homeRedCards || undefined,
+    awayRed: match.awayRedCards || undefined,
+    homeEvents: match.homeEvents || undefined,
+    awayEvents: match.awayEvents || undefined,
+    possHome: ls ? ls[0] : undefined,
+    sotHome: ls ? ls[1] : undefined,
+    sotAway: ls ? ls[2] : undefined,
+    cornersHome: ls ? ls[3] : undefined,
+    cornersAway: ls ? ls[4] : undefined,
+    yellowHome: ls ? (match.homeYellowCards ?? 0) : undefined,
+    yellowAway: ls ? (match.awayYellowCards ?? 0) : undefined,
   };
 }
 
@@ -303,6 +339,15 @@ export function useLiveActivity(match: Match) {
     match.homePenScore,
     match.awayPenScore,
     match.liveClock?.periodStartedAt,
+    // Jugadas y estadísticas: el servidor las escribe en el doc del partido.
+    match.lastEvent,
+    match.homeEvents,
+    match.awayEvents,
+    match.homeRedCards,
+    match.awayRedCards,
+    match.homeYellowCards,
+    match.awayYellowCards,
+    match.liveStats?.join(','),
   ]);
 
   // Push token de la Activity → upsert del registro en Firestore. El token
@@ -347,6 +392,11 @@ export function useLiveActivity(match: Match) {
         userId: reg.uid,
         createdAt: serverTimestamp(),
         ended: false,
+        // Solo los binarios con el widget rediseñado lo declaran: el servidor
+        // les manda el estado completo (y sus pushes extra) solo a ellos.
+        ...(platform === 'ios' && getLiveActivityContractVersion() >= LIVE_ACTIVITY_CONTRACT_V2
+          ? { contractVersion: getLiveActivityContractVersion() }
+          : {}),
       });
     } catch {
       // Best-effort: sin registro remoto el marcador sigue vivo localmente

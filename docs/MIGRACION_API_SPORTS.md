@@ -112,8 +112,33 @@ añade "· 🟥 Equipo" si alguien juega con uno menos). Viaja como `lastEventTe
 bajo el marcador desde su primera versión y que nadie llenaba — no requiere build nueva. La app la copia en
 sus actualizaciones locales (`buildActivityState`) para no borrarla al abrirse. Los avisos (vibración) de la
 Live Activity solo salen en cambios reales de fase o marcador; una jugada nueva actualiza en silencio.
-Pendiente de una build nueva: rediseño del widget (expulsados junto al escudo, goleadores por lado, franja
-de estadísticas, ronda) — los structs Swift están horneados en el binario.
+
+**Live Activity — rediseño (contrato v2, build 1.5.0+)**. Aprobado por el dueño sobre maqueta (26-nov-2026):
+ronda junto a la liga, tarjeta roja colgada del escudo, jugadas por lado (goleadores con minuto, expulsados),
+franja de estadísticas (posesión, tiros a puerta, córners, amarillas) y fondo con los colores de los equipos.
+- **Contrato**: campos opcionales nuevos en `ContentState` (`homeRed/awayRed`, `homeEvents/awayEvents`,
+  `possHome`, `sotHome/sotAway`, `cornersHome/cornersAway`, `yellowHome/yellowAway`), espejados en
+  `src/data/liveActivityContract.ts`, `functions/src/live-activity-contract.ts`,
+  `targets/live-activity/index.swift` y `modules/expo-live-activity/ios/LiveActivityModule.swift`. Los
+  atributos fijos no cambian (la ronda viaja dentro de `leagueName`).
+- **Quién lo recibe**: el módulo nativo nuevo expone `getContractVersion()` = 2; el JS (que llega por OTA a
+  binarios viejos y nuevos) lo guarda en el registro (`liveActivities/{id}.contractVersion`, permitido en las
+  reglas) y el servidor solo arma el estado completo para esos dispositivos. Los widgets anteriores siguen
+  con marcador + fase + última jugada, sin pushes extra.
+- **De dónde sale**: el poller escribe en `fb_matches` `homeEvents/awayEvents` (`sideEventLines`), amarillas
+  por lado y `liveStats` (`compactLiveStats`, solo partidos con enriquecimiento; se conservan entre pasadas
+  en el snapshot, campo `ls`).
+- **Cupo de Apple**: los pushes que solo cambian estadísticas o amarillas van con `apns-priority: 5`
+  (`isContextOnlyChange`); marcador, fase, última jugada, rojas y jugadas por lado siguen en 10. La build
+  nueva declara `NSSupportsLiveActivitiesFrequentUpdates`.
+- **Sin compilar aquí**: el widget se comprueba en el Mac con
+  `xcrun --sdk iphoneos swiftc -typecheck -parse-as-library -target arm64-apple-ios16.2 targets/live-activity/index.swift`
+  antes de gastar una compilación en EAS.
+
+**Estadísticas de avisos**: cada aviso lleva `fcmOptions.analyticsLabel` con su tipo (`goal`, `halftime`,
+`legacy-goal`, `goal-estadio`…) → Firebase console → Messaging → Reports filtra envíos y aperturas por tipo
+(hasta 100 etiquetas distintas al día; los datos tardan hasta 24 h). La app registra además `push_open`
+(`push_type`, `match_id`) en Analytics al tocar un aviso (`utils/navigationRef.ts`).
 
 **Selecciones menores = selección mayor** (regla del dueño, 25-nov-2026): quien sigue a México recibe
 también los avisos de México Sub-17, Sub-20… y ve esos partidos en "Mis equipos". El proveedor no

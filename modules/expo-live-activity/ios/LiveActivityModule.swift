@@ -38,6 +38,21 @@ struct MatchActivityAttributes: ActivityAttributes {
     var penHome: Int?
     var penAway: Int?
     var lastEventText: String?
+    // ── Contrato v2 (widget rediseñado) — todos opcionales ──────────────────
+    /// Expulsados por lado.
+    var homeRed: Int?
+    var awayRed: Int?
+    /// Jugadas clave de cada lado ya redactadas ("⚽ H. Martín 52', 78'").
+    var homeEvents: String?
+    var awayEvents: String?
+    /// Franja de estadísticas (solo partidos con estadísticas en vivo).
+    var possHome: Int?
+    var sotHome: Int?
+    var sotAway: Int?
+    var cornersHome: Int?
+    var cornersAway: Int?
+    var yellowHome: Int?
+    var yellowAway: Int?
   }
 
   struct TeamInfo: Codable, Hashable {
@@ -97,6 +112,14 @@ public class LiveActivityModule: Module {
     Name("ExpoLiveActivity")
 
     Events("onActivityPushToken")
+
+    /// Versión del contrato de datos que entiende el widget de ESTE binario.
+    /// 2 = rediseño (expulsados, jugadas por lado, estadísticas). El JS (que
+    /// llega por OTA a binarios viejos y nuevos) la consulta antes de registrar
+    /// la Activity; los binarios anteriores no tienen esta función → 1.
+    Function("getContractVersion") { () -> Int in
+      return 2
+    }
 
     /// true solo en iOS 16.2+ (y por definición, solo cuando el binario trae
     /// este módulo — los runtimes viejos ni lo encuentran).

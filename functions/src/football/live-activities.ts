@@ -27,10 +27,11 @@
 import { admin, db } from '../admin-init';
 import * as logger from 'firebase-functions/logger';
 import type { FbMatchDoc } from '../shared/football/model';
-import type {
-  LiveActivityPhase,
-  LiveActivityRegistration,
-  MatchActivityState,
+import {
+  LIVE_ACTIVITY_CONTRACT_V2,
+  type LiveActivityPhase,
+  type LiveActivityRegistration,
+  type MatchActivityState,
 } from '../live-activity-contract';
 import { displayLeague } from './notify';
 import { COL } from './store';
@@ -74,7 +75,28 @@ function kickoffUnixSeconds(m: MatchDoc): number | undefined {
   return Number.isFinite(m.timestamp) ? m.timestamp : undefined;
 }
 
-export function buildStateFromMatchDoc(m: MatchDoc): MatchActivityState {
+export function buildStateFromMatchDoc(m: MatchDoc, contractVersion = 1): MatchActivityState {
+  const base = buildBaseState(m);
+  if (contractVersion < LIVE_ACTIVITY_CONTRACT_V2 || base.phase === 'pre') return base;
+  // Widget rediseñado: expulsados, jugadas por lado y franja de estadísticas.
+  const ls = Array.isArray(m.liveStats) && m.liveStats.length >= 5 ? m.liveStats : null;
+  return {
+    ...base,
+    homeRed: m.homeRedCards || undefined,
+    awayRed: m.awayRedCards || undefined,
+    homeEvents: m.homeEvents || undefined,
+    awayEvents: m.awayEvents || undefined,
+    possHome: ls ? ls[0] : undefined,
+    sotHome: ls ? ls[1] : undefined,
+    sotAway: ls ? ls[2] : undefined,
+    cornersHome: ls ? ls[3] : undefined,
+    cornersAway: ls ? ls[4] : undefined,
+    yellowHome: ls ? (m.homeYellowCards ?? 0) : undefined,
+    yellowAway: ls ? (m.awayYellowCards ?? 0) : undefined,
+  };
+}
+
+function buildBaseState(m: MatchDoc): MatchActivityState {
   const phase = phaseFromMatchDoc(m);
   // 'ETB' (descanso pre/entre prórroga) viaja como fase 'ET' para los widgets
   // ya instalados, pero JAMÁS con reloj ni minuto: el break no corre. Sin este
@@ -107,13 +129,41 @@ export function buildStateFromMatchDoc(m: MatchDoc): MatchActivityState {
   };
 }
 
-/** Clave de deduplicación: si no cambió, no se envía nada. */
-function stateKey(s: MatchActivityState): string {
+/** Elementos de la clave que describen marcador, fase, reloj y última jugada. */
+const CORE_KEY_LENGTH = 10;
+
+/** Clave de deduplicación: si no cambió, no se envía nada. Los primeros
+ *  CORE_KEY_LENGTH elementos son lo urgente; el resto (contrato v2) es
+ *  contexto que puede esperar. */
+export function stateKey(s: MatchActivityState): string {
   return JSON.stringify([
     s.homeScore, s.awayScore, s.phase, s.periodStartedAt ?? 0,
     s.periodMinuteOffset ?? 0, s.kickoffAt ?? 0, s.penHome ?? -1, s.penAway ?? -1,
     s.minute ?? -1, s.lastEventText ?? '',
+    s.homeRed ?? 0, s.awayRed ?? 0, s.homeEvents ?? '', s.awayEvents ?? '',
+    s.possHome ?? -1, s.sotHome ?? -1, s.sotAway ?? -1, s.cornersHome ?? -1, s.cornersAway ?? -1,
+    s.yellowHome ?? -1, s.yellowAway ?? -1,
   ]);
+}
+
+/** Hasta aquí la clave es urgente: lo esencial más expulsados y jugadas por lado. */
+const URGENT_KEY_LENGTH = CORE_KEY_LENGTH + 4;
+
+/**
+ * ¿El cambio respecto a lo último entregado es solo de contexto (estadísticas,
+ * amarillas)? Esos pushes van con prioridad baja: Apple limita cuántos updates
+ * de prioridad alta acepta por hora, y ese cupo es para goles y cambios de fase.
+ */
+export function isContextOnlyChange(prevKey: string | undefined, key: string): boolean {
+  try {
+    const prev = prevKey ? (JSON.parse(prevKey) as unknown[]) : null;
+    const cur = JSON.parse(key) as unknown[];
+    // Clave de un formato anterior (otra longitud) → se trata como urgente, una vez.
+    if (!Array.isArray(prev) || prev.length !== cur.length) return false;
+    return JSON.stringify(prev.slice(0, URGENT_KEY_LENGTH)) === JSON.stringify(cur.slice(0, URGENT_KEY_LENGTH));
+  } catch {
+    return false;
+  }
 }
 
 // ── Alert (vibración/pantalla) por transición ─────────────────────────────────
@@ -178,6 +228,7 @@ async function sendIos(
   state: MatchActivityState,
   isEnd: boolean,
   alert: { title: string; body: string } | null,
+  lowPriority = false,
 ): Promise<boolean> {
   if (!reg.fcmToken || !reg.activityPushToken) return false; // token aún no llega
   const nowSec = Math.floor(Date.now() / 1000);
@@ -201,7 +252,7 @@ async function sendIos(
       live_activity_token: reg.activityPushToken,
       headers: {
         'apns-push-type': 'liveactivity',
-        'apns-priority': '10',
+        'apns-priority': lowPriority && !isEnd && !alert ? '5' : '10',
       },
       payload: { aps },
     },
@@ -322,7 +373,7 @@ export async function sendLiveActivityUpdates(
         const match = byId.get(data.matchId);
         if (!match) return;
 
-        const state = buildStateFromMatchDoc(match);
+        const state = buildStateFromMatchDoc(match, data.contractVersion ?? 1);
         const key = stateKey(state);
 
         if (data.ended) {
@@ -351,7 +402,8 @@ export async function sendLiveActivityUpdates(
 
         const isEnd = state.phase === 'FT';
         const delivered = data.platform === 'ios'
-          ? await sendIos(data, state, isEnd, alertForTransition(data.lastState, state, match))
+          ? await sendIos(data, state, isEnd, alertForTransition(data.lastState, state, match),
+              isContextOnlyChange(data.lastState, key))
           : await sendAndroid(data, state, isEnd, match);
         // Sin token todavía → NO estampar lastState: el próximo poll reintenta
         // y entrega el estado vigente en cuanto el token llegue (catch-up).

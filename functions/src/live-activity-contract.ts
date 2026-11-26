@@ -46,7 +46,28 @@ export interface MatchActivityState {
   penHome?: number;
   penAway?: number;
   lastEventText?: string;
+  /** ── Contrato v2 (widget rediseñado, build 1.5.0+) — todos opcionales ──────
+   *  Los widgets viejos ignoran estas keys; el nuevo tolera su ausencia. */
+  /** Expulsados por lado (tarjeta roja junto al escudo). */
+  homeRed?: number;
+  awayRed?: number;
+  /** Jugadas clave de cada lado, ya redactadas: "⚽ H. Martín 52', 78'" /
+   *  "🟥 R. Chávez 11'" (hasta dos renglones separados por \n). */
+  homeEvents?: string;
+  awayEvents?: string;
+  /** Franja de estadísticas (solo partidos con estadísticas en vivo). */
+  possHome?: number;      // % de posesión del local (visitante = 100 − possHome)
+  sotHome?: number;       // tiros a puerta
+  sotAway?: number;
+  cornersHome?: number;
+  cornersAway?: number;
+  yellowHome?: number;
+  yellowAway?: number;
 }
+
+/** Versión del contrato que entiende el widget instalado (la reporta el módulo
+ *  nativo; los binarios anteriores al rediseño no la reportan → 1). */
+export const LIVE_ACTIVITY_CONTRACT_V2 = 2;
 
 /** Doc de la colección `liveActivities/{autoId}`. El backend consulta
  *  where('matchId','==',id) && where('ended','==',false) en cada ciclo de poll
@@ -59,4 +80,6 @@ export interface LiveActivityRegistration {
   userId: string;
   createdAt: FirebaseFirestore.Timestamp;
   ended?: boolean;
+  /** Contrato del widget de ese dispositivo (ausente = 1). */
+  contractVersion?: number;
 }

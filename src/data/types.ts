@@ -51,6 +51,13 @@ export interface Match {
   awayPenScore?: number;
   /** Última jugada clave en una línea ("⚽ 36' Berterame (Monterrey)") — la escribe el servidor. */
   lastEvent?: string;
+  /** Jugadas clave de cada lado en una línea ("⚽ H. Martín 52', 78'") — las escribe el servidor. */
+  homeEvents?: string;
+  awayEvents?: string;
+  homeYellowCards?: number;
+  awayYellowCards?: number;
+  /** [posesión local %, tiros a puerta local, visitante, córners local, visitante] — solo ligas principales. */
+  liveStats?: number[];
   homeRedCards?: number;  // number of players sent off (red/second-yellow)
   awayRedCards?: number;
   stateLabel?: string;    // "1T" | "HT" | "2T" | "ET" | "ETB" | "PEN" | "SUSP" | "INT" — live state

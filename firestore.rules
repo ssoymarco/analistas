@@ -310,7 +310,7 @@ service cloud.firestore {
           && request.resource.data.matchId is string
           && request.resource.data.keys().hasOnly([
                'fcmToken', 'activityPushToken', 'matchId', 'platform',
-               'userId', 'createdAt', 'ended', 'lastState'
+               'userId', 'createdAt', 'ended', 'lastState', 'contractVersion'
              ]);
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }

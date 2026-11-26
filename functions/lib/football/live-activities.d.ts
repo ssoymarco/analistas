@@ -24,9 +24,19 @@
  * los structs Swift — keys literales).
  */
 import type { FbMatchDoc } from '../shared/football/model';
-import type { MatchActivityState } from '../live-activity-contract';
+import { type MatchActivityState } from '../live-activity-contract';
 type MatchDoc = FbMatchDoc;
-export declare function buildStateFromMatchDoc(m: MatchDoc): MatchActivityState;
+export declare function buildStateFromMatchDoc(m: MatchDoc, contractVersion?: number): MatchActivityState;
+/** Clave de deduplicación: si no cambió, no se envía nada. Los primeros
+ *  CORE_KEY_LENGTH elementos son lo urgente; el resto (contrato v2) es
+ *  contexto que puede esperar. */
+export declare function stateKey(s: MatchActivityState): string;
+/**
+ * ¿El cambio respecto a lo último entregado es solo de contexto (estadísticas,
+ * amarillas)? Esos pushes van con prioridad baja: Apple limita cuántos updates
+ * de prioridad alta acepta por hora, y ese cupo es para goles y cambios de fase.
+ */
+export declare function isContextOnlyChange(prevKey: string | undefined, key: string): boolean;
 /**
  * Punto de entrada — llamado desde executeSinglePoll tras el batch write.
  * `matchDocs` = partidos del ciclo (live + próximos a empezar). NUNCA lanza.

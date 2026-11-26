@@ -28,6 +28,8 @@ exports.isMissedPenaltyEvent = isMissedPenaltyEvent;
 exports.isScoredGoalEvent = isScoredGoalEvent;
 exports.isGoalRuledOutEvent = isGoalRuledOutEvent;
 exports.lastEventLine = lastEventLine;
+exports.sideEventLines = sideEventLines;
+exports.compactLiveStats = compactLiveStats;
 exports.countBy = countBy;
 exports.liveClockFor = liveClockFor;
 exports.mapFixtureToMatch = mapFixtureToMatch;
@@ -187,6 +189,77 @@ function lastEventLine(f) {
     }
     return line;
 }
+/** "Henry Martín" → "H. Martín"; one-word and already-short names stay. */
+function shortPlayer(name) {
+    const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length < 2 || /^.\.$/.test(parts[0]))
+        return parts.join(' ');
+    return `${parts[0][0]}. ${parts.slice(1).join(' ')}`;
+}
+/** Longest per-side line the Live Activity fits in two short rows. */
+const SIDE_LINE_MAX = 44;
+/**
+ * Each side's key events in one line for the Live Activity: scorers with their
+ * minutes ("⚽ H. Martín 52', 78'"), then players sent off ("🟥 R. Chávez 11'").
+ * Own goals go to the side they count for — the provider is not consistent
+ * about which team it files them under, so the reading that adds up to the
+ * real score is the one used.
+ */
+function sideEventLines(f) {
+    const events = (f.events ?? [])
+        .filter(e => !isShootoutEvent(e))
+        .map((e, i) => ({ e, i }))
+        .sort((a, b) => eventOrder(a.e) - eventOrder(b.e) || a.i - b.i)
+        .map(x => x.e);
+    const homeId = f.teams.home.id;
+    const isOwn = (e) => /own goal/i.test(e.detail);
+    const goals = events.filter(isScoredGoalEvent);
+    // Own goals filed under the team that benefits (true) or under the player's team (false)?
+    const homeIfBenefits = goals.filter(e => e.team?.id === homeId).length;
+    const homeIfPlayers = goals.filter(e => (e.team?.id === homeId) !== isOwn(e)).length;
+    const ownFiledUnderBenefit = f.goals?.home == null || homeIfBenefits === f.goals.home || homeIfPlayers !== f.goals.home;
+    const goalIsHome = (e) => (isOwn(e) && !ownFiledUnderBenefit ? e.team?.id !== homeId : e.team?.id === homeId);
+    const lineFor = (home) => {
+        const scorers = new Map();
+        for (const e of goals) {
+            if (goalIsHome(e) !== home)
+                continue;
+            const tag = isOwn(e) ? ' (ag)' : /penalty/i.test(e.detail) ? ' (p)' : '';
+            const who = `${shortPlayer(e.player?.name) || 'Gol'}${isOwn(e) ? ' (ag)' : ''}`;
+            const at = `${eventMinute(e).trim()}${tag === ' (p)' ? ' (p)' : ''}`;
+            scorers.set(who, [...(scorers.get(who) ?? []), at]);
+        }
+        const parts = [];
+        if (scorers.size)
+            parts.push(`⚽ ${[...scorers].map(([who, at]) => `${who} ${at.join(', ')}`).join(' · ')}`);
+        const reds = events.filter(e => isRedCardEvent(e) && (e.team?.id === homeId) === home);
+        if (reds.length)
+            parts.push(`🟥 ${reds.map(e => `${shortPlayer(e.player?.name)} ${eventMinute(e).trim()}`.trim()).join(' · ')}`);
+        if (!parts.length)
+            return null;
+        const line = parts.join('\n');
+        return line.length > SIDE_LINE_MAX * 2 ? `${line.slice(0, SIDE_LINE_MAX * 2 - 1)}…` : line;
+    };
+    return { homeEvents: lineFor(true), awayEvents: lineFor(false) };
+}
+/** [home possession %, shots on goal home, away, corners home, away] from a fixture with statistics; null without them. */
+function compactLiveStats(f) {
+    const stats = f.statistics ?? [];
+    const of = (teamId, type) => {
+        const row = stats.find(s => s.team?.id === teamId)?.statistics.find(x => x.type === type);
+        if (!row || row.value == null)
+            return null;
+        const n = typeof row.value === 'number' ? row.value : parseFloat(String(row.value).replace('%', ''));
+        return Number.isFinite(n) ? Math.round(n) : null;
+    };
+    const h = f.teams.home.id;
+    const a = f.teams.away.id;
+    const poss = of(h, 'Ball Possession');
+    const vals = [poss, of(h, 'Shots on Goal'), of(a, 'Shots on Goal'), of(h, 'Corner Kicks'), of(a, 'Corner Kicks')];
+    if (poss == null || poss <= 0 || poss >= 100)
+        return null; // no real possession yet → nothing worth showing
+    return vals.map(v => v ?? 0);
+}
 function countBy(events, teamId, pred) {
     if (!events)
         return 0;
@@ -282,6 +355,9 @@ function mapFixtureToMatch(f, opts) {
         homeRedCards: countBy(f.events, homeId, isRedCardEvent),
         awayRedCards: countBy(f.events, awayId, isRedCardEvent),
         lastEvent: lastEventLine(f),
+        ...sideEventLines(f),
+        homeYellowCards: countBy(f.events, homeId, isYellowCardEvent),
+        awayYellowCards: countBy(f.events, awayId, isYellowCardEvent),
         status,
         statusShort: short,
         stateLabel: stateLabelFor(short),
@@ -302,7 +378,7 @@ function mapFixtureToMatch(f, opts) {
 function omitRedCardsWhenUnknown(doc, hadEvents) {
     if (hadEvents)
         return doc;
-    const { homeRedCards: _h, awayRedCards: _a, lastEvent: _e, ...rest } = doc;
+    const { homeRedCards: _h, awayRedCards: _a, lastEvent: _e, homeEvents: _he, awayEvents: _ae, homeYellowCards: _hy, awayYellowCards: _ay, ...rest } = doc;
     return rest;
 }
 /**
@@ -314,7 +390,9 @@ function matchFingerprint(d) {
         d.statusShort, d.homeScore, d.awayScore, d.homeScoreHT, d.awayScoreHT,
         d.homePenScore, d.awayPenScore, d.minute, d.extraMinute, d.timestamp,
         d.homeTeam?.id, d.awayTeam?.id, d.homeTeam?.name, d.awayTeam?.name,
-        d.homeRedCards, d.awayRedCards, d.lastEvent, d.venueName, d.referee, d.round, d.league,
+        d.homeRedCards, d.awayRedCards, d.lastEvent, d.homeEvents, d.awayEvents,
+        d.homeYellowCards, d.awayYellowCards, d.liveStats?.join(','),
+        d.venueName, d.referee, d.round, d.league,
         d.liveClock?.periodStartedAt, d.liveClock?.periodMinuteOffset,
     ].map(v => (v === undefined ? '~' : String(v))).join('|');
 }

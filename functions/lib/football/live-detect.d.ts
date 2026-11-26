@@ -92,6 +92,8 @@ export interface SnapEntry {
     g?: number;
     /** Last re-check of a missing match (unix seconds). */
     gc?: number;
+    /** Compact live stats from the last enrichment (see FbMatchDoc.liveStats). */
+    ls?: number[];
     /** One-time latches. */
     f: {
         start?: true;

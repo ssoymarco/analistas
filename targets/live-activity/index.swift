@@ -41,6 +41,23 @@ struct MatchActivityAttributes: ActivityAttributes {
     var penAway: Int?
     /// "⚽ Oyarzabal 36'" — ya localizado por el app al enviarlo.
     var lastEventText: String?
+    // ── Contrato v2 (rediseño, build 1.5.0) — todos opcionales: un servidor o
+    //    un JS que no los mande deja el widget en su forma básica. ───────────
+    /// Expulsados por lado → tarjeta roja junto al escudo.
+    var homeRed: Int?
+    var awayRed: Int?
+    /// Jugadas clave de cada lado ya redactadas por el servidor
+    /// ("⚽ H. Martín 52', 78'" / "🟥 R. Chávez 11'"; hasta dos renglones).
+    var homeEvents: String?
+    var awayEvents: String?
+    /// Franja de estadísticas (solo partidos con estadísticas en vivo).
+    var possHome: Int?
+    var sotHome: Int?
+    var sotAway: Int?
+    var cornersHome: Int?
+    var cornersAway: Int?
+    var yellowHome: Int?
+    var yellowAway: Int?
   }
 
   struct TeamInfo: Codable, Hashable {
@@ -72,6 +89,29 @@ extension Color {
       green: Double((value >> 8) & 0xff) / 255.0,
       blue: Double(value & 0xff) / 255.0
     )
+  }
+}
+
+extension Color {
+  /// Color del equipo, aclarado cuando es demasiado oscuro para distinguirse
+  /// sobre el fondo casi negro de la Activity (azul marino, negro, granate).
+  static func visibleTeamColor(hex: String) -> Color {
+    let cleaned = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+    var value: UInt64 = 0
+    guard Scanner(string: cleaned).scanHexInt64(&value), cleaned.count == 6 else {
+      return Color(white: 0.6)
+    }
+    var r = Double((value >> 16) & 0xff) / 255.0
+    var g = Double((value >> 8) & 0xff) / 255.0
+    var b = Double(value & 0xff) / 255.0
+    let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    if luminance < 0.28 {
+      let lift = 0.45
+      r += (1 - r) * lift
+      g += (1 - g) * lift
+      b += (1 - b) * lift
+    }
+    return Color(red: r, green: g, blue: b)
   }
 }
 
@@ -164,9 +204,33 @@ func compactCrestImage(matchId: String, side: String, pt: CGFloat) -> UIImage? {
   }
 }
 
+/// Tarjeta roja pegada al escudo: ese equipo juega con menos. Con dos o más
+/// expulsados muestra el número.
+struct RedCardBadge: View {
+  let count: Int
+
+  var body: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: 2.5)
+        .fill(Color(red: 1.0, green: 0.27, blue: 0.23))
+        .frame(width: 10, height: 14)
+        .overlay(
+          RoundedRectangle(cornerRadius: 2.5)
+            .stroke(Color.black.opacity(0.55), lineWidth: 1)
+        )
+      if count > 1 {
+        Text("\(count)")
+          .font(.system(size: 8, weight: .heavy))
+          .foregroundStyle(.white)
+      }
+    }
+  }
+}
+
 /// Columna de equipo. Prioridad visual: escudo real (App Group) → bandera
 /// emoji → punto del color del equipo. `fullName` (lock screen, hay espacio)
-/// muestra el nombre completo traducido; si no, el código corto.
+/// muestra el nombre completo traducido; si no, el código corto. `redCards`
+/// > 0 cuelga una tarjeta roja de la esquina del escudo.
 struct TeamBlock: View {
   let team: MatchActivityAttributes.TeamInfo
   let matchId: String
@@ -174,21 +238,33 @@ struct TeamBlock: View {
   let side: String
   var compact: Bool = false
   var fullName: Bool = false
+  var redCards: Int = 0
+
+  @ViewBuilder
+  private var crest: some View {
+    if let image = crestImage(matchId: matchId, side: side) {
+      Image(uiImage: image)
+        .resizable()
+        .scaledToFit()
+        .frame(width: compact ? 16 : 34, height: compact ? 16 : 34)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    } else if let flag = team.flagEmoji, !flag.isEmpty {
+      Text(flag).font(compact ? .body : .system(size: 32))
+    } else {
+      Circle()
+        .fill(Color(hex: team.colorHex))
+        .frame(width: compact ? 12 : 22, height: compact ? 12 : 22)
+    }
+  }
 
   var body: some View {
     VStack(spacing: compact ? 0 : 3) {
-      if let crest = crestImage(matchId: matchId, side: side) {
-        Image(uiImage: crest)
-          .resizable()
-          .scaledToFit()
-          .frame(width: compact ? 16 : 34, height: compact ? 16 : 34)
-          .clipShape(RoundedRectangle(cornerRadius: 4))
-      } else if let flag = team.flagEmoji, !flag.isEmpty {
-        Text(flag).font(compact ? .body : .system(size: 32))
-      } else {
-        Circle()
-          .fill(Color(hex: team.colorHex))
-          .frame(width: compact ? 12 : 22, height: compact ? 12 : 22)
+      ZStack(alignment: .topTrailing) {
+        crest
+        if redCards > 0 && !compact {
+          RedCardBadge(count: redCards)
+            .offset(x: 10, y: -3)
+        }
       }
       Text(fullName ? team.name : team.shortName)
         .font(compact ? .caption2 : .caption)
@@ -338,43 +414,201 @@ struct ScoreBlock: View {
   }
 }
 
+// ── Piezas del rediseño (contrato v2) ─────────────────────────────────────────
+
+/// Jugadas clave de cada equipo bajo su nombre: goleadores con minuto y
+/// expulsados. Si el servidor no las manda, cae a la línea única de "última
+/// jugada" (la que ya pintaba el widget anterior).
+struct SideEvents: View {
+  let state: MatchActivityAttributes.ContentState
+  /// Un renglón por lado (cuando la franja de estadísticas ocupa el alto).
+  var singleLine: Bool = false
+
+  private func text(_ raw: String?) -> String {
+    let value = raw ?? ""
+    return singleLine ? value.replacingOccurrences(of: "\n", with: "  ") : value
+  }
+
+  var body: some View {
+    let home = text(state.homeEvents)
+    let away = text(state.awayEvents)
+    if !home.isEmpty || !away.isEmpty {
+      HStack(alignment: .top, spacing: 10) {
+        Text(home)
+          .multilineTextAlignment(.leading)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        Text(away)
+          .multilineTextAlignment(.trailing)
+          .frame(maxWidth: .infinity, alignment: .trailing)
+      }
+      .font(.system(size: 10.5, weight: .semibold))
+      .foregroundStyle(.white.opacity(0.8))
+      .lineLimit(singleLine ? 1 : 2)
+      .minimumScaleFactor(0.85)
+    } else if let event = state.lastEventText, !event.isEmpty {
+      Text(event)
+        .font(.caption2)
+        .foregroundStyle(.white.opacity(0.65))
+        .lineLimit(1)
+        .frame(maxWidth: .infinity)
+    }
+  }
+}
+
+/// Un par "etiqueta local · visitante" de la franja de estadísticas.
+struct StatPair: View {
+  let label: String
+  let home: Int?
+  let away: Int?
+
+  var body: some View {
+    HStack(spacing: 4) {
+      Text(label)
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(.white.opacity(0.6))
+      Text("\(home ?? 0) · \(away ?? 0)")
+        .font(.system(size: 10, weight: .heavy).monospacedDigit())
+        .foregroundStyle(.white)
+    }
+    .lineLimit(1)
+  }
+}
+
+/// Franja inferior: barra de posesión con los colores de los equipos y tres
+/// pares de números (tiros a puerta, córners, amarillas). Solo se pinta
+/// cuando el servidor manda estadísticas (ligas principales).
+struct StatsStrip: View {
+  let state: MatchActivityAttributes.ContentState
+  let homeHex: String
+  let awayHex: String
+
+  var body: some View {
+    let poss = min(max(state.possHome ?? 50, 0), 100)
+    VStack(spacing: 5) {
+      HStack(spacing: 8) {
+        Text("\(poss)%")
+        GeometryReader { geo in
+          HStack(spacing: 2) {
+            Capsule()
+              .fill(Color.visibleTeamColor(hex: homeHex))
+              .frame(width: max(3, (geo.size.width - 2) * CGFloat(poss) / 100))
+            Capsule()
+              .fill(Color.visibleTeamColor(hex: awayHex))
+          }
+        }
+        .frame(height: 5)
+        Text("\(100 - poss)%")
+      }
+      .font(.system(size: 10.5, weight: .bold).monospacedDigit())
+      .foregroundStyle(.white.opacity(0.92))
+
+      HStack(spacing: 0) {
+        StatPair(label: "Tiros a puerta", home: state.sotHome, away: state.sotAway)
+        Spacer(minLength: 6)
+        StatPair(label: "Córners", home: state.cornersHome, away: state.cornersAway)
+        Spacer(minLength: 6)
+        HStack(spacing: 4) {
+          RoundedRectangle(cornerRadius: 1.5)
+            .fill(Color(red: 1.0, green: 0.84, blue: 0.04))
+            .frame(width: 7, height: 10)
+          Text("\(state.yellowHome ?? 0) · \(state.yellowAway ?? 0)")
+            .font(.system(size: 10, weight: .heavy).monospacedDigit())
+            .foregroundStyle(.white)
+        }
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.top, 7)
+    .padding(.bottom, 9)
+    .frame(maxWidth: .infinity)
+    .background(Color.black.opacity(0.22))
+  }
+}
+
+/// Fondo: un velo con el color de cada equipo en su lado, sobre el tinte oscuro.
+struct TeamGlow: View {
+  let homeHex: String
+  let awayHex: String
+
+  var body: some View {
+    LinearGradient(
+      stops: [
+        Gradient.Stop(color: Color.visibleTeamColor(hex: homeHex).opacity(0.42), location: 0),
+        Gradient.Stop(color: Color.clear, location: 0.42),
+        Gradient.Stop(color: Color.clear, location: 0.58),
+        Gradient.Stop(color: Color.visibleTeamColor(hex: awayHex).opacity(0.38), location: 1),
+      ],
+      startPoint: .leading,
+      endPoint: .trailing
+    )
+  }
+}
+
 // ── Lock screen / banner ──────────────────────────────────────────────────────
+//
+// Rediseño (nov 2026, aprobado por el dueño sobre maqueta):
+//   LIGA · RONDA                                   ● 57:12
+//   [escudo 🟥]            0 – 0                  [escudo]
+//    Monterrey                                     América
+//   🟥 R. Chávez 11'                    ⚽ H. Martín 52'
+//   ─────────────────────────────────────────────────────
+//   33% ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ 67%
+//   Tiros a puerta 0 · 5      Córners 1 · 10      🟨 0 · 2
+//
+// Alto máximo del sistema: 160 pt. Con la franja de estadísticas las jugadas
+// van a un renglón por lado (≈149 pt en total); sin ella, a dos (≈121 pt).
 
 struct LockScreenView: View {
   let context: ActivityViewContext<MatchActivityAttributes>
 
   var body: some View {
-    VStack(spacing: 6) {
-      Text(context.attributes.leagueName.uppercased())
-        .font(.system(size: 9, weight: .bold))
-        .tracking(1)
-        .foregroundStyle(.white.opacity(0.45))
+    let attrs = context.attributes
+    let state = context.state
+    let showStats = state.phase != "pre" && state.possHome != nil
 
-      HStack {
-        TeamBlock(team: context.attributes.home, matchId: context.attributes.matchId,
-                  side: "home", fullName: true)
-        Spacer()
-        VStack(spacing: 3) {
-          ScoreBlock(state: context.state)
-          PhaseTimeline(state: context.state)
-        }
-        Spacer()
-        TeamBlock(team: context.attributes.away, matchId: context.attributes.matchId,
-                  side: "away", fullName: true)
+    VStack(spacing: 0) {
+      HStack(alignment: .center, spacing: 8) {
+        Text(attrs.leagueName.uppercased())
+          .font(.system(size: 9.5, weight: .bold))
+          .tracking(0.8)
+          .foregroundStyle(.white.opacity(0.6))
+          .lineLimit(1)
+          .minimumScaleFactor(0.7)
+        Spacer(minLength: 6)
+        PhaseTimeline(state: state)
+      }
+      .padding(.horizontal, 16)
+      .padding(.top, 10)
+
+      HStack(alignment: .center) {
+        TeamBlock(team: attrs.home, matchId: attrs.matchId, side: "home",
+                  fullName: true, redCards: state.homeRed ?? 0)
+        Spacer(minLength: 4)
+        ScoreBlock(state: state)
+        Spacer(minLength: 4)
+        TeamBlock(team: attrs.away, matchId: attrs.matchId, side: "away",
+                  fullName: true, redCards: state.awayRed ?? 0)
       }
       .padding(.horizontal, 14)
+      .padding(.top, 4)
 
-      if let event = context.state.lastEventText, !event.isEmpty {
-        Text(event)
-          .font(.caption2)
-          .foregroundStyle(.white.opacity(0.65))
-          .lineLimit(1)
+      SideEvents(state: state, singleLine: showStats)
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+
+      if showStats {
+        StatsStrip(state: state, homeHex: attrs.home.colorHex, awayHex: attrs.away.colorHex)
+          .padding(.top, 7)
       }
     }
-    .padding(.vertical, 12)
+    .padding(.bottom, showStats ? 0 : 12)
+    .frame(maxWidth: .infinity)
+    .background {
+      TeamGlow(homeHex: attrs.home.colorHex, awayHex: attrs.away.colorHex)
+    }
     .activityBackgroundTint(Color(red: 0.05, green: 0.05, blue: 0.05).opacity(0.85))
     .activitySystemActionForegroundColor(.white)
-    .widgetURL(deepLinkURL(context.attributes, context.state))
+    .widgetURL(deepLinkURL(attrs, state))
   }
 }
 
@@ -435,12 +669,14 @@ func matchDynamicIsland(_ context: ActivityViewContext<MatchActivityAttributes>)
         DynamicIslandExpandedRegion(.leading) {
           // Alineado hacia el CENTRO (junto al marcador) — pegados a los
           // bordes se veían "muy separados" (feedback dueño).
-          TeamBlock(team: context.attributes.home, matchId: context.attributes.matchId, side: "home")
+          TeamBlock(team: context.attributes.home, matchId: context.attributes.matchId, side: "home",
+                    redCards: context.state.homeRed ?? 0)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
             .padding(.trailing, 6)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          TeamBlock(team: context.attributes.away, matchId: context.attributes.matchId, side: "away")
+          TeamBlock(team: context.attributes.away, matchId: context.attributes.matchId, side: "away",
+                    redCards: context.state.awayRed ?? 0)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .padding(.leading, 6)
         }
@@ -451,12 +687,9 @@ func matchDynamicIsland(_ context: ActivityViewContext<MatchActivityAttributes>)
           }
         }
         DynamicIslandExpandedRegion(.bottom) {
-          if let event = context.state.lastEventText, !event.isEmpty {
-            Text(event)
-              .font(.caption2)
-              .foregroundStyle(.white.opacity(0.65))
-              .lineLimit(1)
-          }
+          // Jugadas por lado (o la última jugada, si el servidor no las manda).
+          SideEvents(state: context.state, singleLine: true)
+            .padding(.horizontal, 6)
         }
       } compactLeading: {
         HStack(spacing: 4) {

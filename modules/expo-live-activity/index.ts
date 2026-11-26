@@ -31,6 +31,8 @@ interface NativeLiveActivityModule {
     finalStateJson: string | null,
     immediate: boolean,
   ): Promise<void>;
+  /** Versión del contrato de datos del widget instalado (binarios 1.5.0+). */
+  getContractVersion?: () => number;
   addListener(
     event: 'onActivityPushToken',
     listener: (e: PushTokenEvent) => void,
@@ -54,6 +56,21 @@ export function isLiveActivitySupported(): boolean {
     return !!native && native.isSupported();
   } catch {
     return false;
+  }
+}
+
+/**
+ * Versión del contrato que entiende el widget de ESTE binario: 2 desde el
+ * rediseño (expulsados, jugadas por lado, estadísticas); 1 en los binarios
+ * anteriores, que no la reportan. El JS llega por OTA a ambos, así que nada
+ * del contrato v2 se da por hecho sin preguntar aquí.
+ */
+export function getLiveActivityContractVersion(): number {
+  try {
+    const v = Number(native?.getContractVersion?.());
+    return Number.isFinite(v) && v >= 1 ? v : 1;
+  } catch {
+    return 1;
   }
 }
 

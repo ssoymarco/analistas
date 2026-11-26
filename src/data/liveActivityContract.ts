@@ -84,7 +84,28 @@ export interface MatchActivityState {
   penAway?: number;
   /** Última jugada relevante, ya localizada: "⚽ Oyarzabal 36'". Opcional. */
   lastEventText?: string;
+  /** ── Contrato v2 (widget rediseñado, build 1.5.0+) — todos opcionales ──────
+   *  Los widgets viejos ignoran estas keys; el nuevo tolera su ausencia. */
+  /** Expulsados por lado (tarjeta roja junto al escudo). */
+  homeRed?: number;
+  awayRed?: number;
+  /** Jugadas clave de cada lado, ya redactadas: "⚽ H. Martín 52', 78'" /
+   *  "🟥 R. Chávez 11'" (hasta dos renglones separados por \n). */
+  homeEvents?: string;
+  awayEvents?: string;
+  /** Franja de estadísticas (solo partidos con estadísticas en vivo). */
+  possHome?: number;      // % de posesión del local (visitante = 100 − possHome)
+  sotHome?: number;       // tiros a puerta
+  sotAway?: number;
+  cornersHome?: number;
+  cornersAway?: number;
+  yellowHome?: number;
+  yellowAway?: number;
 }
+
+/** Versión del contrato que entiende el widget instalado (la reporta el módulo
+ *  nativo; los binarios anteriores al rediseño no la reportan → 1). */
+export const LIVE_ACTIVITY_CONTRACT_V2 = 2;
 
 // ── Registro en Firestore ─────────────────────────────────────────────────────
 //
@@ -106,6 +127,9 @@ export interface LiveActivityRegistration {
   createdAt: unknown;
   /** Marcado true al enviar event:"end" — evita re-envíos. */
   ended?: boolean;
+  /** Contrato del widget de este dispositivo (ausente = 1). El backend solo
+   *  manda los campos v2 (y sus pushes extra) a quien puede pintarlos. */
+  contractVersion?: number;
 }
 
 // ── Payloads FCM (referencia backend — doc corto) ────────────────────────────

@@ -38,7 +38,7 @@ import {
 } from './live-detect';
 import { sendLiveActivityUpdates } from './live-activities';
 import {
-  isFinishedShort, isLiveShort, mapFixtureToDetail, mapFixtureToMatch,
+  compactLiveStats, isFinishedShort, isLiveShort, mapFixtureToDetail, mapFixtureToMatch,
 } from './mapping';
 import { dispatchFootballChanges, dispatchPlayerLineups } from './notify';
 import {
@@ -158,6 +158,9 @@ function mapRows(fixtures: AfFixtureFull[], store: StoredSnapshot, nowSec: numbe
     const entry = store.matches[id];
     const prevClock = entry?.lc ? { periodStartedAt: entry.lc[0], periodMinuteOffset: entry.lc[1] } : null;
     const doc = mapFixtureToMatch(f, { nowSec, prevClock });
+    // Stats come from the enrichment pass (every 2-4 min); the row keeps the
+    // last ones in between so the Live Activity state doesn't flicker.
+    if (entry?.ls) doc.liveStats = entry.ls;
     docs.push(doc);
     if (entry) {
       if (doc.liveClock) entry.lc = [doc.liveClock.periodStartedAt, doc.liveClock.periodMinuteOffset];
@@ -294,6 +297,11 @@ async function runPoll(
   if (opts.enrich) {
     const extra = await enrichment(store, nowSec, changes, lineupPushes);
     detailSources.push(...extra.details);
+    for (const f of extra.details) {
+      const entry = store.matches[String(f.fixture.id)];
+      const stats = compactLiveStats(f);
+      if (entry && stats) entry.ls = stats;   // written with the row on the next poll
+    }
     const settled = mapRows(extra.settled, store, nowSec);
     writes.push(...settled.writes);
   }

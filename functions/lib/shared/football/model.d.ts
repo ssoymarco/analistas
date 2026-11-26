@@ -73,6 +73,21 @@ export interface FbMatchDoc {
      * poller (the source with events); the Live Activity shows it.
      */
     lastEvent?: string | null;
+    /**
+     * Key events of each side in one short line, for the Live Activity:
+     * "⚽ H. Martín 52', 78'" / "🟥 R. Chávez 11'". Null when the side has none.
+     * Written only by the live poller, like `lastEvent`.
+     */
+    homeEvents?: string | null;
+    awayEvents?: string | null;
+    homeYellowCards?: number;
+    awayYellowCards?: number;
+    /**
+     * A few live numbers for the Live Activity, only for the matches the poller
+     * enriches (priority leagues, every 2-4 min):
+     * [home possession %, shots on goal home, away, corners home, away].
+     */
+    liveStats?: number[] | null;
     status: FbMatchStatus;
     statusShort: FbStatusShort | string;
     /** Short live label for chips: '1T' | 'HT' | '2T' | 'ET' | 'PEN' (null otherwise). */

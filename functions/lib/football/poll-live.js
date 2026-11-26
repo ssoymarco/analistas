@@ -180,6 +180,10 @@ function mapRows(fixtures, store, nowSec) {
         const entry = store.matches[id];
         const prevClock = entry?.lc ? { periodStartedAt: entry.lc[0], periodMinuteOffset: entry.lc[1] } : null;
         const doc = (0, mapping_1.mapFixtureToMatch)(f, { nowSec, prevClock });
+        // Stats come from the enrichment pass (every 2-4 min); the row keeps the
+        // last ones in between so the Live Activity state doesn't flicker.
+        if (entry?.ls)
+            doc.liveStats = entry.ls;
         docs.push(doc);
         if (entry) {
             if (doc.liveClock)
@@ -312,6 +316,12 @@ async function runPoll(store, nowSec, opts) {
     if (opts.enrich) {
         const extra = await enrichment(store, nowSec, changes, lineupPushes);
         detailSources.push(...extra.details);
+        for (const f of extra.details) {
+            const entry = store.matches[String(f.fixture.id)];
+            const stats = (0, mapping_1.compactLiveStats)(f);
+            if (entry && stats)
+                entry.ls = stats; // written with the row on the next poll
+        }
         const settled = mapRows(extra.settled, store, nowSec);
         writes.push(...settled.writes);
     }

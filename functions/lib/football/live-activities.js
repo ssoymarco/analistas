@@ -59,9 +59,12 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildStateFromMatchDoc = buildStateFromMatchDoc;
+exports.stateKey = stateKey;
+exports.isContextOnlyChange = isContextOnlyChange;
 exports.sendLiveActivityUpdates = sendLiveActivityUpdates;
 const admin_init_1 = require("../admin-init");
 const logger = __importStar(require("firebase-functions/logger"));
+const live_activity_contract_1 = require("../live-activity-contract");
 const notify_1 = require("./notify");
 const store_1 = require("./store");
 const COLLECTION = 'liveActivities';
@@ -96,7 +99,28 @@ function phaseFromMatchDoc(m) {
 function kickoffUnixSeconds(m) {
     return Number.isFinite(m.timestamp) ? m.timestamp : undefined;
 }
-function buildStateFromMatchDoc(m) {
+function buildStateFromMatchDoc(m, contractVersion = 1) {
+    const base = buildBaseState(m);
+    if (contractVersion < live_activity_contract_1.LIVE_ACTIVITY_CONTRACT_V2 || base.phase === 'pre')
+        return base;
+    // Widget rediseñado: expulsados, jugadas por lado y franja de estadísticas.
+    const ls = Array.isArray(m.liveStats) && m.liveStats.length >= 5 ? m.liveStats : null;
+    return {
+        ...base,
+        homeRed: m.homeRedCards || undefined,
+        awayRed: m.awayRedCards || undefined,
+        homeEvents: m.homeEvents || undefined,
+        awayEvents: m.awayEvents || undefined,
+        possHome: ls ? ls[0] : undefined,
+        sotHome: ls ? ls[1] : undefined,
+        sotAway: ls ? ls[2] : undefined,
+        cornersHome: ls ? ls[3] : undefined,
+        cornersAway: ls ? ls[4] : undefined,
+        yellowHome: ls ? (m.homeYellowCards ?? 0) : undefined,
+        yellowAway: ls ? (m.awayYellowCards ?? 0) : undefined,
+    };
+}
+function buildBaseState(m) {
     const phase = phaseFromMatchDoc(m);
     // 'ETB' (descanso pre/entre prórroga) viaja como fase 'ET' para los widgets
     // ya instalados, pero JAMÁS con reloj ni minuto: el break no corre. Sin este
@@ -128,13 +152,40 @@ function buildStateFromMatchDoc(m) {
         lastEventText: phase !== 'pre' && m.lastEvent ? m.lastEvent : undefined,
     };
 }
-/** Clave de deduplicación: si no cambió, no se envía nada. */
+/** Elementos de la clave que describen marcador, fase, reloj y última jugada. */
+const CORE_KEY_LENGTH = 10;
+/** Clave de deduplicación: si no cambió, no se envía nada. Los primeros
+ *  CORE_KEY_LENGTH elementos son lo urgente; el resto (contrato v2) es
+ *  contexto que puede esperar. */
 function stateKey(s) {
     return JSON.stringify([
         s.homeScore, s.awayScore, s.phase, s.periodStartedAt ?? 0,
         s.periodMinuteOffset ?? 0, s.kickoffAt ?? 0, s.penHome ?? -1, s.penAway ?? -1,
         s.minute ?? -1, s.lastEventText ?? '',
+        s.homeRed ?? 0, s.awayRed ?? 0, s.homeEvents ?? '', s.awayEvents ?? '',
+        s.possHome ?? -1, s.sotHome ?? -1, s.sotAway ?? -1, s.cornersHome ?? -1, s.cornersAway ?? -1,
+        s.yellowHome ?? -1, s.yellowAway ?? -1,
     ]);
+}
+/** Hasta aquí la clave es urgente: lo esencial más expulsados y jugadas por lado. */
+const URGENT_KEY_LENGTH = CORE_KEY_LENGTH + 4;
+/**
+ * ¿El cambio respecto a lo último entregado es solo de contexto (estadísticas,
+ * amarillas)? Esos pushes van con prioridad baja: Apple limita cuántos updates
+ * de prioridad alta acepta por hora, y ese cupo es para goles y cambios de fase.
+ */
+function isContextOnlyChange(prevKey, key) {
+    try {
+        const prev = prevKey ? JSON.parse(prevKey) : null;
+        const cur = JSON.parse(key);
+        // Clave de un formato anterior (otra longitud) → se trata como urgente, una vez.
+        if (!Array.isArray(prev) || prev.length !== cur.length)
+            return false;
+        return JSON.stringify(prev.slice(0, URGENT_KEY_LENGTH)) === JSON.stringify(cur.slice(0, URGENT_KEY_LENGTH));
+    }
+    catch {
+        return false;
+    }
 }
 // ── Alert (vibración/pantalla) por transición ─────────────────────────────────
 // Los push de TRANSICIÓN real llevan alert para que el iPhone vibre/encienda
@@ -183,7 +234,7 @@ function alertForTransition(prevKey, s, m) {
 /** @returns true solo si hubo entrega real a FCM (false = sin token aún —
  *  el caller NO debe estampar lastState, para que el próximo poll reintente
  *  y haga catch-up en cuanto el token llegue). */
-async function sendIos(reg, state, isEnd, alert) {
+async function sendIos(reg, state, isEnd, alert, lowPriority = false) {
     if (!reg.fcmToken || !reg.activityPushToken)
         return false; // token aún no llega
     const nowSec = Math.floor(Date.now() / 1000);
@@ -207,7 +258,7 @@ async function sendIos(reg, state, isEnd, alert) {
             live_activity_token: reg.activityPushToken,
             headers: {
                 'apns-push-type': 'liveactivity',
-                'apns-priority': '10',
+                'apns-priority': lowPriority && !isEnd && !alert ? '5' : '10',
             },
             payload: { aps },
         },
@@ -318,7 +369,7 @@ async function sendLiveActivityUpdates(matchDocs, opts) {
                 const match = byId.get(data.matchId);
                 if (!match)
                     return;
-                const state = buildStateFromMatchDoc(match);
+                const state = buildStateFromMatchDoc(match, data.contractVersion ?? 1);
                 const key = stateKey(state);
                 if (data.ended) {
                     // Flapping de SM (FT→live, visto en producción con syncFixtures):
@@ -345,7 +396,7 @@ async function sendLiveActivityUpdates(matchDocs, opts) {
                 }
                 const isEnd = state.phase === 'FT';
                 const delivered = data.platform === 'ios'
-                    ? await sendIos(data, state, isEnd, alertForTransition(data.lastState, state, match))
+                    ? await sendIos(data, state, isEnd, alertForTransition(data.lastState, state, match), isContextOnlyChange(data.lastState, key))
                     : await sendAndroid(data, state, isEnd, match);
                 // Sin token todavía → NO estampar lastState: el próximo poll reintenta
                 // y entrega el estado vigente en cuanto el token llegue (catch-up).

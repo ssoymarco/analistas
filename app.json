@@ -184,6 +184,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "FirebaseAutomaticScreenReportingEnabled": false,
         "NSSupportsLiveActivities": true,
+        "NSSupportsLiveActivitiesFrequentUpdates": true,
         "CFBundleURLTypes": [
           {
             "CFBundleURLSchemes": [

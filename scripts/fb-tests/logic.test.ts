@@ -163,6 +163,26 @@ const check = (name: string, ok: boolean, detail = '') => { if (!ok) failures++;
   const laRow = (over: Record<string, unknown>) => ({ homeScore: 0, awayScore: 0, statusShort: '2H', liveClock: { periodStartedAt: 1000, periodMinuteOffset: 45 }, timestamp: 1, homeTeam: { shortName: 'MNT' }, awayTeam: { shortName: 'AME' }, ...over });
   const withLine = la.buildStateFromMatchDoc(laRow({ lastEvent: "🟥 11' L. Romo (Monterrey)" }));
   check('live activity: the state carries the line while playing, never before kickoff', withLine.lastEventText === "🟥 11' L. Romo (Monterrey)" && la.buildStateFromMatchDoc(laRow({})).lastEventText === undefined && la.buildStateFromMatchDoc(laRow({ statusShort: 'NS', lastEvent: 'x' })).lastEventText === undefined);
+  // Redesigned widget (contract v2): per-side events, stats strip, who gets them.
+  const sides = (events: any[], goals?: { home: number; away: number }) => mapping.sideEventLines({ teams: mtyAme, goals, events });
+  const twoGoals = [red, ev(52, 2287, 'Goal', 'Normal Goal', 'Henry Martín'), ev(63, 2282, 'Goal', 'Penalty', 'Germán Berterame'), ev(78, 2287, 'Goal', 'Normal Goal', 'Henry Martín')];
+  check('live activity sides: scorers with minutes per team, then players sent off', sides(twoGoals).homeEvents === "⚽ G. Berterame 63' (p)\n🟥 L. Romo 11'" && sides(twoGoals).awayEvents === "⚽ H. Martín 52', 78'" && sides([]).homeEvents === null && sides([]).awayEvents === null, JSON.stringify(sides(twoGoals)));
+  const ownA = sides([ev(30, 2282, 'Goal', 'Own Goal', 'K. Álvarez')], { home: 1, away: 0 });
+  const ownB = sides([ev(30, 2282, 'Goal', 'Own Goal', 'K. Álvarez')], { home: 0, away: 1 });
+  check('live activity sides: an own goal goes to the side the real score says', ownA.homeEvents === "⚽ K. Álvarez (ag) 30'" && ownA.awayEvents === null && ownB.awayEvents === "⚽ K. Álvarez (ag) 30'" && ownB.homeEvents === null, JSON.stringify([ownA, ownB]));
+  const statRows = (h: Record<string, unknown>, a: Record<string, unknown>) => ({ teams: mtyAme, statistics: [{ team: { id: 2282 }, statistics: Object.entries(h).map(([type, value]) => ({ type, value })) }, { team: { id: 2287 }, statistics: Object.entries(a).map(([type, value]) => ({ type, value })) }] });
+  const cls = mapping.compactLiveStats(statRows({ 'Ball Possession': '33%', 'Shots on Goal': 0, 'Corner Kicks': 1 }, { 'Ball Possession': '67%', 'Shots on Goal': 5, 'Corner Kicks': 10 }));
+  check('live activity stats: possession, shots on goal and corners; nothing without real possession', JSON.stringify(cls) === '[33,0,5,1,10]' && mapping.compactLiveStats(statRows({ 'Ball Possession': null }, {})) === null && mapping.compactLiveStats({ teams: mtyAme }) === null, JSON.stringify(cls));
+  const rich = laRow({ lastEvent: 'x', homeEvents: "🟥 L. Romo 11'", awayEvents: null, homeRedCards: 1, awayRedCards: 0, homeYellowCards: 0, awayYellowCards: 2, liveStats: cls });
+  const v1 = la.buildStateFromMatchDoc(rich);
+  const v2 = la.buildStateFromMatchDoc(rich, 2);
+  check('live activity v2: only the redesigned widget gets the extra fields', v1.homeRed === undefined && v1.possHome === undefined && v1.homeEvents === undefined && v2.homeRed === 1 && v2.awayRed === undefined && v2.homeEvents === "🟥 L. Romo 11'" && v2.possHome === 33 && v2.sotAway === 5 && v2.cornersAway === 10 && v2.yellowAway === 2 && la.buildStateFromMatchDoc({ ...rich, statusShort: 'NS' }, 2).homeRed === undefined, JSON.stringify(v2));
+  const k0 = la.stateKey(v2);
+  const kStats = la.stateKey(la.buildStateFromMatchDoc({ ...rich, liveStats: [35, 1, 5, 1, 11] }, 2));
+  const kGoal = la.stateKey(la.buildStateFromMatchDoc({ ...rich, awayScore: 1 }, 2));
+  const kRed = la.stateKey(la.buildStateFromMatchDoc({ ...rich, awayRedCards: 1 }, 2));
+  check('live activity v2: stats-only updates go at low priority, goals and red cards never', la.isContextOnlyChange(k0, kStats) === true && la.isContextOnlyChange(k0, kGoal) === false && la.isContextOnlyChange(k0, kRed) === false && la.isContextOnlyChange(undefined, k0) === false && la.isContextOnlyChange('[0,0,"2H",1000,45,0,-1,-1,-1,""]', k0) === false && la.stateKey(v1) !== k0);
+
   check('push: curated clubs are named as in the app', notify.buildCopy(ch('halftime')).body === 'Monterrey 0-0 América' && notify.buildCopy({ ...ch('goal', 'away'), awayScore: 1, scorerName: 'H. Martín', minute: 52 }).title === '⚽ ¡GOL de América!', `${notify.buildCopy(ch('halftime')).body} / ${notify.buildCopy({ ...ch('goal', 'away'), awayScore: 1 }).title}`);
   const drift = Object.entries(clubs.CLUB_NAMES as Record<string, [string, string]>).filter(([id, [name, code]]) => { const d = displayTeam(id, 'x'); return d.name !== name || d.shortName !== code; }).map(([id]) => id);
   check('club names: the server table matches the app\'s', drift.length === 0 && Object.keys(clubs.CLUB_NAMES).length >= 59, drift.join(','));
