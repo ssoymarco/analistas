@@ -179,6 +179,21 @@ alineaciones probables, datos curiosos.
 
 Después: Fase 4 re-descarga histórica · Fase 5 sitio web con los mismos datos · Fase 6 otros deportes.
 
+## Publicar por OTA (EAS Update)
+
+Una actualización solo llega a las apps instaladas cuya versión coincide con `expo.version` de `app.json`
+al publicar (política `appVersion`). En las tiendas conviven varias versiones (iOS 1.4.0 / 1.3.0 / 1.2.3,
+Android 1.3.0 / 1.2.2…), así que cada cambio se publica una vez por plataforma y versión:
+
+```bash
+scripts/ota.sh ios 1.4.0 "mensaje"       # fija la versión, publica en la rama production y restaura app.json
+DRY_RUN=1 scripts/ota.sh android 1.2.2 "mensaje"   # solo muestra lo que haría
+```
+
+Todas esas versiones comparten Expo SDK 54 / RN 0.81; los módulos nativos añadidos después de la 1.2.2
+(notifee, media-library, compras, icono dinámico) se cargan con `require` protegido. No agregar imports
+estáticos de módulos nativos nuevos sin una build nueva.
+
 ## Particularidades de API-Sports
 
 - Los partidos terminados **desaparecen** de `live=all`; el poller los re-consulta por `ids`.
